@@ -309,20 +309,31 @@ def test_sarvam_llm_extra_body_merges_with_user_extra():
     assert built_params["extra_body"]["wiki_grounding"] is True
 
 
-def test_sarvam_llm_tool_choice_requires_non_empty_tools():
+@pytest.mark.asyncio
+async def test_sarvam_llm_tool_choice_requires_non_empty_tools():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(model="sarvam-105b"),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(
         messages=[{"role": "user", "content": "Hello"}],
-        tools=OPENAI_NOT_GIVEN,
         tool_choice="required",
     )
-    with pytest.raises(ValueError, match="requires non-empty `tools`"):
-        service.build_chat_completion_params(invocation)
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "requires non-empty `tools`" in pushed_errors[0]
 
 
 def test_sarvam_llm_tool_choice_with_tools_is_allowed():
@@ -358,14 +369,23 @@ def test_sarvam_llm_tool_choice_with_tools_is_allowed():
     assert built_params["tools"][0]["function"]["name"] == "lookup_weather"
 
 
-def test_sarvam_llm_rejects_image_input_on_non_vision_model():
+@pytest.mark.asyncio
+async def test_sarvam_llm_rejects_image_input_on_non_vision_model():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(model="sarvam-105b"),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(
         messages=[
             {
                 "role": "user",
@@ -381,11 +401,12 @@ def test_sarvam_llm_rejects_image_input_on_non_vision_model():
                 ],
             }
         ],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
     )
-    with pytest.raises(ValueError, match="does not support image input"):
-        service.build_chat_completion_params(invocation)
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support image input" in pushed_errors[0]
 
 
 def test_sarvam_llm_accepts_image_input_on_gemma4():
@@ -418,7 +439,8 @@ def test_sarvam_llm_accepts_image_input_on_gemma4():
     assert built_params["model"] == "gemma4"
 
 
-def test_sarvam_llm_conversations_rejects_reasoning_effort():
+@pytest.mark.asyncio
+async def test_sarvam_llm_conversations_rejects_reasoning_effort():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -427,17 +449,25 @@ def test_sarvam_llm_conversations_rejects_reasoning_effort():
                 reasoning_effort="high",
             ),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
-        messages=[{"role": "user", "content": "Hello"}],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
-    )
-    with pytest.raises(ValueError, match="does not support reasoning_effort"):
-        service.build_chat_completion_params(invocation)
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support reasoning_effort" in pushed_errors[0]
 
 
-def test_sarvam_llm_conversations_rejects_wiki_grounding():
+@pytest.mark.asyncio
+async def test_sarvam_llm_conversations_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -446,24 +476,40 @@ def test_sarvam_llm_conversations_rejects_wiki_grounding():
                 wiki_grounding=True,
             ),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
-        messages=[{"role": "user", "content": "Hello"}],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
-    )
-    with pytest.raises(ValueError, match="does not support wiki_grounding"):
-        service.build_chat_completion_params(invocation)
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support wiki_grounding" in pushed_errors[0]
 
 
-def test_sarvam_llm_conversations_rejects_image_input():
+@pytest.mark.asyncio
+async def test_sarvam_llm_conversations_rejects_image_input():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(model="sarvam-105b-conversations"),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(
         messages=[
             {
                 "role": "user",
@@ -479,11 +525,12 @@ def test_sarvam_llm_conversations_rejects_image_input():
                 ],
             }
         ],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
     )
-    with pytest.raises(ValueError, match="does not support image input"):
-        service.build_chat_completion_params(invocation)
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support image input" in pushed_errors[0]
 
 
 def test_sarvam_llm_conversations_supports_tool_calling():
@@ -535,7 +582,8 @@ def test_sarvam_llm_glm52_supports_reasoning_effort():
     assert built_params["reasoning_effort"] == "high"
 
 
-def test_sarvam_llm_glm52_rejects_wiki_grounding():
+@pytest.mark.asyncio
+async def test_sarvam_llm_glm52_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
@@ -544,24 +592,40 @@ def test_sarvam_llm_glm52_rejects_wiki_grounding():
                 wiki_grounding=True,
             ),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
-        messages=[{"role": "user", "content": "Hello"}],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
-    )
-    with pytest.raises(ValueError, match="does not support wiki_grounding"):
-        service.build_chat_completion_params(invocation)
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support wiki_grounding" in pushed_errors[0]
 
 
-def test_sarvam_llm_glm52_rejects_image_input():
+@pytest.mark.asyncio
+async def test_sarvam_llm_glm52_rejects_image_input():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(model="glm5.2"),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    context = LLMContext(
         messages=[
             {
                 "role": "user",
@@ -577,11 +641,12 @@ def test_sarvam_llm_glm52_rejects_image_input():
                 ],
             }
         ],
-        tools=OPENAI_NOT_GIVEN,
-        tool_choice=OPENAI_NOT_GIVEN,
     )
-    with pytest.raises(ValueError, match="does not support image input"):
-        service.build_chat_completion_params(invocation)
+    result = await service.get_chat_completions(context)
+
+    assert result is None
+    assert len(pushed_errors) == 1
+    assert "does not support image input" in pushed_errors[0]
 
 
 @pytest.mark.asyncio
@@ -609,14 +674,25 @@ async def test_sarvam_llm_update_settings_applies_runtime_sarvam_fields():
     assert built_params["reasoning_effort"] == "low"
 
 
-def test_sarvam_llm_vision_validation_skips_non_dict_messages():
+@pytest.mark.asyncio
+async def test_sarvam_llm_vision_validation_skips_non_dict_messages():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(model="sarvam-105b"),
         )
+        service._client = AsyncMock()
 
-    invocation = OpenAILLMInvocationParams(
+    pushed_errors = []
+
+    async def mock_push_error(error_msg, **kw):
+        pushed_errors.append(error_msg)
+
+    service.push_error = mock_push_error
+
+    # Non-dict entries should be skipped by vision validation, not cause an error
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
         messages=[
             "not a dict",
             None,
@@ -625,9 +701,11 @@ def test_sarvam_llm_vision_validation_skips_non_dict_messages():
         tools=OPENAI_NOT_GIVEN,
         tool_choice=OPENAI_NOT_GIVEN,
     )
-    # Should not raise — non-dict entries are skipped
-    built_params = service.build_chat_completion_params(invocation)
-    assert built_params["model"] == "sarvam-105b"
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    await service.get_chat_completions(LLMContext())
+
+    assert len(pushed_errors) == 0
 
 
 @pytest.mark.asyncio

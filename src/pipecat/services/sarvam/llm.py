@@ -14,6 +14,7 @@ from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
@@ -134,16 +135,64 @@ class SarvamLLMService(OpenAILLMService):
             **kwargs,
         )
 
+    async def get_chat_completions(self, context: LLMContext):
+        """Get streaming chat completions, pushing an error frame on misconfiguration.
+
+        Validates tool parameters, vision support, and capability support before
+        delegating to the base class. On validation failure, pushes an error
+        frame instead of raising, so an ``LLMSwitcher`` can fall back to
+        another service at runtime.
+        """
+        adapter = self.get_llm_adapter()
+        params_from_context = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=self._settings.system_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
+
+        error = self._validate_request(params_from_context)
+        if error:
+            await self.push_error(error)
+            return None
+
+        return await super().get_chat_completions(context)
+
+    async def run_inference(
+        self,
+        context: LLMContext,
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
+        """Run inference, pushing an error frame on misconfiguration.
+
+        Validates tool parameters, vision support, and capability support before
+        delegating to the base class. On validation failure, pushes an error
+        frame instead of raising, so an ``LLMSwitcher`` can fall back to
+        another service at runtime.
+        """
+        adapter = self.get_llm_adapter()
+        effective_instruction = system_instruction or self._settings.system_instruction
+        params_from_context = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
+
+        error = self._validate_request(params_from_context)
+        if error:
+            await self.push_error(error)
+            return None
+
+        return await super().run_inference(
+            context, max_tokens=max_tokens, system_instruction=system_instruction
+        )
+
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for Sarvam chat completion request.
 
         Starts from OpenAI-compatible defaults, then removes unsupported
         request fields and applies Sarvam-specific options.
         """
-        self._validate_tool_parameters(params_from_context)
-        self._validate_vision_support(params_from_context)
-        self._validate_capability_support()
-
         params = super().build_chat_completion_params(params_from_context)
         params.pop("stream_options", None)
         params.pop("max_completion_tokens", None)
@@ -173,12 +222,30 @@ class SarvamLLMService(OpenAILLMService):
 
         return params
 
+    def _validate_request(self, params_from_context: OpenAILLMInvocationParams) -> str | None:
+        """Run all pre-request validations, returning an error message or None.
+
+        Returns a human-readable error string when the current configuration
+        is incompatible with the selected model (e.g. image input on a
+        non-vision model, or ``reasoning_effort`` on a model that doesn't
+        support it). Returns ``None`` when the request is valid.
+        """
+        error = self._check_tool_parameters(params_from_context)
+        if error:
+            return error
+
+        error = self._check_vision_support(params_from_context)
+        if error:
+            return error
+
+        return self._check_capability_support()
+
     def _validate_model(self, model: str):
         if model not in self._SUPPORTED_MODELS:
             allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
             raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
 
-    def _validate_tool_parameters(self, params_from_context: OpenAILLMInvocationParams):
+    def _check_tool_parameters(self, params_from_context: OpenAILLMInvocationParams) -> str | None:
         tools = params_from_context.get("tools", OPENAI_NOT_GIVEN)
         tool_choice = params_from_context.get("tool_choice", OPENAI_NOT_GIVEN)
 
@@ -190,12 +257,13 @@ class SarvamLLMService(OpenAILLMService):
         has_tool_choice = openai_is_given(tool_choice) and tool_choice is not None
 
         if has_tool_choice and not has_tools:
-            raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
+            return "Sarvam requires non-empty `tools` when `tool_choice` is provided."
+        return None
 
-    def _validate_vision_support(self, params_from_context: OpenAILLMInvocationParams):
+    def _check_vision_support(self, params_from_context: OpenAILLMInvocationParams) -> str | None:
         model = self._settings.model
         if model in self._VISION_MODELS:
-            return
+            return None
 
         messages = params_from_context.get("messages", [])
         for message in messages:
@@ -205,15 +273,16 @@ class SarvamLLMService(OpenAILLMService):
             if isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "image_url":
-                        raise ValueError(
+                        return (
                             f"Model '{model}' does not support image input. "
                             f"Use a vision-capable model instead."
                         )
+        return None
 
-    def _validate_capability_support(self):
-        """Reject capabilities the current model does not support.
+    def _check_capability_support(self) -> str | None:
+        """Check whether configured capabilities are supported by the current model.
 
-        Raises ``ValueError`` when ``reasoning_effort`` or ``wiki_grounding``
+        Returns an error message when ``reasoning_effort`` or ``wiki_grounding``
         is configured for a model that doesn't support it, so the user gets a
         clear error instead of the setting being silently dropped.
         """
@@ -224,7 +293,7 @@ class SarvamLLMService(OpenAILLMService):
             and self._settings.reasoning_effort is not None
             and model not in self._REASONING_MODELS
         ):
-            raise ValueError(
+            return (
                 f"Model '{model}' does not support reasoning_effort. "
                 f"Use a reasoning-capable model instead."
             )
@@ -234,7 +303,9 @@ class SarvamLLMService(OpenAILLMService):
             and self._settings.wiki_grounding is not None
             and model not in self._WIKI_GROUNDING_MODELS
         ):
-            raise ValueError(
+            return (
                 f"Model '{model}' does not support wiki_grounding. "
                 f"Use a model that supports it instead."
             )
+
+        return None
