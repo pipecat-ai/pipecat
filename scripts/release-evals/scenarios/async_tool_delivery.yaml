@@ -1,16 +1,14 @@
-name: weather_function_call_async_audio
+name: async_tool_delivery
 
-# Audio modality, end to end: an async function call
-# (cancel_on_interruption=False) whose result arrives after the conversation has
-# moved on. The bot has to finish the turn it's on, then report the weather it
-# looked up earlier, unprompted.
+# Text: an async function call (cancel_on_interruption=False) whose result
+# arrives after the conversation has moved on. The bot has to finish the turn
+# it's on, then report the weather it looked up earlier, unprompted.
 
-user: !include user_audio.yaml
-
-judge: !include judge_audio.yaml
+judge: !include judge_text.yaml
 
 turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  # Match the bot's on-connect greeting first, so it isn't taken for a reply to
+  # the turn below.
   - expect:
       - event: response
         eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
@@ -21,7 +19,7 @@ turns:
         calls:
           - name: get_current_weather
 
-  # The delay lets a bot's "let me check on that" filler finish before the joke
+  # The delay leaves the bot room to get its function call out before the next
   # request arrives.
   - user: "Tell me a joke."
     send_after:

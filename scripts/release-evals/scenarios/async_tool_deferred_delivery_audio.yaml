@@ -1,4 +1,4 @@
-name: weather_function_call_async_deferred_audio
+name: async_tool_deferred_delivery_audio
 
 # Audio modality, end to end: an async function call
 # (cancel_on_interruption=False) whose result lands on a turn the bot is
