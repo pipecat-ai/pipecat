@@ -20,8 +20,11 @@ from starlette.testclient import WebSocketDisconnect
 from pipecat.runner.run import (
     _extract_ws_token,
     _generate_ws_token,
+    _livekit_credentials,
+    _mint_livekit_tokens,
     _print_startup_message,
     _setup_daily_routes,
+    _setup_livekit_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -30,6 +33,14 @@ from pipecat.runner.run import (
     _transport_routes_enabled,
     _verify_and_consume_ws_token,
 )
+
+try:
+    import jwt as _jwt  # noqa: F401
+    from livekit import api as _livekit_api  # noqa: F401
+
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
 
 
 class TestRunnerRun(unittest.TestCase):
@@ -49,6 +60,7 @@ class TestRunnerRun(unittest.TestCase):
         self.assertEqual(_transport_route_dependencies("plivo"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("exotel"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("vonage"), ())
+        self.assertEqual(_transport_route_dependencies("livekit"), ("livekit.api",))
 
     def test_transport_routes_enabled_maps_transports_to_dependency_checks(self):
         def module_available(module: str) -> bool:
@@ -271,6 +283,7 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
+                "livekit (install pipecat-ai[livekit]), "
                 "webrtc (install pipecat-ai[webrtc]), "
                 "moq (install pipecat-ai[moq])\n"
                 "   → Allowed origins: all (no restriction)\n"
@@ -292,7 +305,7 @@ class TestRunnerRun(unittest.TestCase):
                 "\n"
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
-                "   → Enabled transports: daily, webrtc, telephony, websocket, moq\n"
+                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
@@ -334,6 +347,75 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+class TestLiveKitRunnerRoutes(unittest.TestCase):
+    def test_setup_livekit_routes_skips_when_livekit_is_missing(self):
+        app = FastAPI()
+        args = argparse.Namespace(dialin=False)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
+            _setup_livekit_routes(app, args)
+
+        paths = {route.path for route in app.routes}
+        self.assertNotIn("/livekit", paths)
+
+    def test_setup_livekit_routes_registers_when_livekit_is_available(self):
+        app = FastAPI()
+        args = argparse.Namespace(dialin=False)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            _setup_livekit_routes(app, args)
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/livekit", paths)
+
+    def test_livekit_credentials_raises_when_unconfigured(self):
+        from fastapi import HTTPException
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(HTTPException) as ctx:
+                _livekit_credentials()
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_livekit_credentials_returns_configured_values(self):
+        env = {
+            "LIVEKIT_URL": "wss://test.livekit.cloud",
+            "LIVEKIT_API_KEY": "key",
+            "LIVEKIT_API_SECRET": "secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            url, api_key, api_secret = _livekit_credentials()
+        self.assertEqual((url, api_key, api_secret), (env["LIVEKIT_URL"], "key", "secret"))
+
+    @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+    def test_mint_livekit_tokens_suffixes_identity_with_session_id(self):
+        """Regression: fixed identities collide across concurrent sessions sharing
+        a room (e.g. a fixed LIVEKIT_ROOM_NAME), evicting the earlier participant.
+        """
+        import uuid
+
+        import jwt
+
+        agent_token_1, user_token_1 = _mint_livekit_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+        agent_token_2, user_token_2 = _mint_livekit_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+
+        def identity(token: str) -> str:
+            return jwt.decode(token, options={"verify_signature": False})["sub"]
+
+        identities = {
+            identity(agent_token_1),
+            identity(user_token_1),
+            identity(agent_token_2),
+            identity(user_token_2),
+        }
+        self.assertEqual(
+            len(identities), 4, "every session/role pair should have a unique identity"
+        )
 
 
 class TestWsAuthTokens(unittest.TestCase):

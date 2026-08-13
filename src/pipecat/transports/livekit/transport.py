@@ -1280,8 +1280,10 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""
         await self._call_event_handler("on_participant_connected", participant_id)
-        # Also call on_client_connected for compatibility with other transports
-        await self._call_event_handler("on_client_connected", participant_id)
+        # Also call on_client_connected for compatibility with other transports.
+        # Wrapped as a dict (matching Daily's Mapping[str, Any] shape) so
+        # drop-in bot templates reading client["id"] work across transports.
+        await self._call_event_handler("on_client_connected", {"id": participant_id})
         if self._input:
             await self._input.push_frame(ClientConnectedFrame())
 
@@ -1290,7 +1292,7 @@ class LiveKitTransport(BaseTransport):
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
         # Also call on_client_disconnected for compatibility with other transports
-        await self._call_event_handler("on_client_disconnected", participant_id)
+        await self._call_event_handler("on_client_disconnected", {"id": participant_id})
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         """Handle audio track subscribed events."""
@@ -1326,7 +1328,11 @@ class LiveKitTransport(BaseTransport):
         """Handle data received events."""
         try:
             message = json.loads(data.decode())
+            if not isinstance(message, dict):
+                logger.debug(f"{self} Ignoring non-object JSON data: {message!r}")
+                message = None
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            logger.debug(f"{self} Ignoring non-JSON data from {participant_id}: {e}")
             message = None
 
         if message is not None:

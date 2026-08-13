@@ -238,6 +238,7 @@ class LiveKitRunnerArguments(RunnerArguments):
 
     Parameters:
         room_name: LiveKit room name to join
+        url: LiveKit server URL to connect to
         token: Authentication token for the room
         body: Additional request data
     """
