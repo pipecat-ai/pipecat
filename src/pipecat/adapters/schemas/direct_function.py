@@ -290,7 +290,11 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
 
 
 def tool_options(
-    fn=None, *, cancel_on_interruption: bool = True, timeout_secs: float | None = None
+    fn=None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+    cancellable_by_llm: bool = False,
 ):
     """Configure a handler's call options.
 
@@ -320,6 +324,15 @@ def tool_options(
             interruption occurs. Defaults to True.
         timeout_secs: Optional per-tool timeout in seconds. A call that runs past
             it is cancelled. Defaults to None (uses the LLM service default).
+        cancellable_by_llm: Whether the LLM may cancel this call once it is running,
+            by calling the ``cancel_<name>`` tool advertised alongside it. Only
+            meaningful together with ``cancel_on_interruption=False``: a
+            synchronous call blocks the LLM until it returns, so there is no
+            moment at which it could ask for the call to stop. What decides it is
+            duration: the LLM reaches the cancel tool a few seconds in at best, so
+            work that finishes before then can't be stopped whatever it costs.
+            Every tool that opts in also adds a tool for the LLM to weigh.
+            Defaults to False.
 
     Returns:
         The decorated function, unchanged except for pipecat call-option metadata
@@ -330,6 +343,7 @@ def tool_options(
     def decorator(fn):
         fn._pipecat_cancel_on_interruption = cancel_on_interruption
         fn._pipecat_timeout_secs = timeout_secs
+        fn._pipecat_cancellable_by_llm = cancellable_by_llm
         return fn
 
     if fn is not None:
