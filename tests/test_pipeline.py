@@ -79,6 +79,42 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         )
         assert "foo" in received_down[-1].metadata
 
+    async def test_start_frame_still_carries_the_deprecated_configuration(self):
+        """The deprecated StartFrame fields carry the pipeline's configuration.
+
+        Processors read it from FrameProcessorSetup, but one that still reads a
+        StartFrame field gets the configured value, warned about rather than
+        quietly replaced by the field's default, until the fields are removed.
+        """
+        pipeline = Pipeline([IdentityFilter()])
+
+        (received_down, _) = await run_test(
+            pipeline,
+            frames_to_send=[],
+            expected_down_frames=[StartFrame],
+            ignore_start=False,
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=8000,
+                audio_out_sample_rate=48000,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                report_only_initial_ttfb=True,
+                send_initial_empty_metrics=False,
+            ),
+        )
+
+        start_frame = received_down[-1]
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(start_frame.audio_in_sample_rate, 8000)
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(start_frame.audio_out_sample_rate, 48000)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.enable_metrics)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.enable_usage_metrics)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.report_only_initial_ttfb)
+
     async def test_pipeline_setup_failures_are_reported(self):
         """A processor that fails to set up reports it as an error frame.
 
