@@ -36,6 +36,7 @@ from pipecat.services.heygen.api_liveavatar import (
 from pipecat.services.heygen.base_api import BaseAvatarApi, StandardSessionResponse
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 try:
     from livekit import rtc
@@ -196,6 +197,7 @@ class HeyGenClient:
         )
         logger.info("HeyGen session started")
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
         """Setup the client and initialize the conversation.
 
@@ -204,14 +206,6 @@ class HeyGenClient:
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._heyGen_session is not None:
-            logger.debug("HeyGen session already initialized")
-            return
-
-        if self._websocket:
-            logger.debug("HeyGen client already started")
-            return
-
         self._task_manager = setup.task_manager
         try:
             await self._initialize()
@@ -235,10 +229,15 @@ class HeyGenClient:
             self._call_event_callback(self._callbacks.on_connected)
         except Exception as e:
             logger.error(f"Failed to setup HeyGenClient: {e}")
-            await self.cleanup()
+            await self._teardown()
 
+    @releases("client")
     async def cleanup(self) -> None:
-        """Cleanup client resources."""
+        """Cleanup client resources once the last processor is done with them."""
+        await self._teardown()
+
+    async def _teardown(self) -> None:
+        """Close every connection and cancel every task, and can run again."""
         try:
             if self._keep_alive_task and self._task_manager:
                 await self._task_manager.cancel_task(self._keep_alive_task)
@@ -261,10 +260,11 @@ class HeyGenClient:
     async def stop(self) -> None:
         """Stop the client and terminate all connections.
 
-        Delegates to the idempotent :meth:`cleanup`.
+        Tears the connections down there and then, however many processors
+        still hold the client, since the session is ending for all of them.
         """
         logger.debug("HeyGenVideoService stopping")
-        await self.cleanup()
+        await self._teardown()
 
     # websocket connection methods
     async def _ws_connect(self):
