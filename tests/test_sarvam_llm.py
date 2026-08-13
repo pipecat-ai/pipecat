@@ -329,10 +329,10 @@ async def test_sarvam_llm_tool_choice_requires_non_empty_tools():
         messages=[{"role": "user", "content": "Hello"}],
         tool_choice="required",
     )
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "requires non-empty `tools`" in pushed_errors[0]
 
 
@@ -402,10 +402,10 @@ async def test_sarvam_llm_rejects_image_input_on_non_vision_model():
             }
         ],
     )
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support image input" in pushed_errors[0]
 
 
@@ -459,10 +459,10 @@ async def test_sarvam_llm_conversations_rejects_reasoning_effort():
     service.push_error = mock_push_error
 
     context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support reasoning_effort" in pushed_errors[0]
 
 
@@ -486,10 +486,10 @@ async def test_sarvam_llm_conversations_rejects_wiki_grounding():
     service.push_error = mock_push_error
 
     context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support wiki_grounding" in pushed_errors[0]
 
 
@@ -526,10 +526,10 @@ async def test_sarvam_llm_conversations_rejects_image_input():
             }
         ],
     )
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support image input" in pushed_errors[0]
 
 
@@ -602,10 +602,10 @@ async def test_sarvam_llm_glm52_rejects_wiki_grounding():
     service.push_error = mock_push_error
 
     context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support wiki_grounding" in pushed_errors[0]
 
 
@@ -642,10 +642,10 @@ async def test_sarvam_llm_glm52_rejects_image_input():
             }
         ],
     )
-    result = await service.get_chat_completions(context)
+    await service._process_context(context)
 
-    assert result is None
     assert len(pushed_errors) == 1
+    service._client.chat.completions.create.assert_not_called()
     assert "does not support image input" in pushed_errors[0]
 
 
@@ -703,9 +703,11 @@ async def test_sarvam_llm_vision_validation_skips_non_dict_messages():
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
 
-    await service.get_chat_completions(LLMContext())
+    with patch.object(OpenAILLMService, "_process_context", new=AsyncMock()) as base_process:
+        await service._process_context(LLMContext())
 
     assert len(pushed_errors) == 0
+    base_process.assert_awaited_once()
 
 
 @pytest.mark.asyncio

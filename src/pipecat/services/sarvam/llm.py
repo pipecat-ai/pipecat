@@ -135,27 +135,20 @@ class SarvamLLMService(OpenAILLMService):
             **kwargs,
         )
 
-    async def get_chat_completions(self, context: LLMContext):
-        """Get streaming chat completions, pushing an error frame on misconfiguration.
+    async def _process_context(self, context: LLMContext):
+        """Process a context, pushing an error frame on misconfiguration.
 
-        Validates tool parameters, vision support, and capability support before
-        delegating to the base class. On validation failure, pushes an error
-        frame instead of raising, so an ``LLMSwitcher`` can fall back to
-        another service at runtime.
+        Validates tool parameters, vision support, and capability support
+        before delegating to the base class. Validation failures are pushed as
+        non-fatal error frames rather than raised, so an ``LLMSwitcher`` can
+        fall back to another service at runtime.
         """
-        adapter = self.get_llm_adapter()
-        params_from_context = adapter.get_llm_invocation_params(
-            context,
-            system_instruction=assert_given(self._settings.system_instruction),
-            convert_developer_to_user=not self.supports_developer_role,
-        )
-
-        error = self._validate_request(params_from_context)
+        error = self._validate_request(self._invocation_params(context))
         if error:
             await self.push_error(error)
-            return None
+            return
 
-        return await super().get_chat_completions(context)
+        await super()._process_context(context)
 
     async def run_inference(
         self,
@@ -165,28 +158,41 @@ class SarvamLLMService(OpenAILLMService):
     ) -> str | None:
         """Run inference, pushing an error frame on misconfiguration.
 
-        Validates tool parameters, vision support, and capability support before
-        delegating to the base class. On validation failure, pushes an error
-        frame instead of raising, so an ``LLMSwitcher`` can fall back to
-        another service at runtime.
-        """
-        adapter = self.get_llm_adapter()
-        effective_instruction = system_instruction or assert_given(
-            self._settings.system_instruction
-        )
-        params_from_context = adapter.get_llm_invocation_params(
-            context,
-            system_instruction=effective_instruction,
-            convert_developer_to_user=not self.supports_developer_role,
-        )
+        Validates tool parameters, vision support, and capability support
+        before delegating to the base class. Validation failures are pushed as
+        non-fatal error frames rather than raised, so an ``LLMSwitcher`` can
+        fall back to another service at runtime.
 
-        error = self._validate_request(params_from_context)
+        Args:
+            context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate.
+            system_instruction: Optional system instruction for this inference.
+
+        Returns:
+            The LLM's response, or None if the request is invalid or produced
+            no response.
+        """
+        error = self._validate_request(
+            self._invocation_params(context, system_instruction=system_instruction)
+        )
         if error:
             await self.push_error(error)
             return None
 
         return await super().run_inference(
             context, max_tokens=max_tokens, system_instruction=system_instruction
+        )
+
+    def _invocation_params(
+        self, context: LLMContext, system_instruction: str | None = None
+    ) -> OpenAILLMInvocationParams:
+        """Derive the invocation params the request will be built from."""
+        adapter = self.get_llm_adapter()
+        return adapter.get_llm_invocation_params(
+            context,
+            system_instruction=system_instruction
+            or assert_given(self._settings.system_instruction),
+            convert_developer_to_user=not self.supports_developer_role,
         )
 
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
