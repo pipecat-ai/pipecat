@@ -118,8 +118,6 @@ class VADController(BaseObject):
         await super().setup(setup.task_manager)
         self._last_audio_time = time.monotonic()
         self._vad_analyzer.set_sample_rate(setup.audio_in_sample_rate)
-        if self._audio_idle_timeout > 0 and not self._audio_idle_task:
-            self._audio_idle_task = self.create_task(self._audio_idle_handler())
 
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
@@ -141,6 +139,9 @@ class VADController(BaseObject):
     async def _start(self, frame: StartFrame):
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
+
+        if self._audio_idle_timeout > 0 and not self._audio_idle_task:
+            self._audio_idle_task = self.create_task(self._audio_idle_handler())
 
     async def cleanup(self):
         """Clean up resources.

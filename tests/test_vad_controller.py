@@ -43,6 +43,9 @@ class MockVADAnalyzer(VADAnalyzer):
 
 
 class TestVADController(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+
     async def test_speech_started_event(self):
         """Test that on_speech_started event is triggered when speech begins."""
         analyzer = MockVADAnalyzer()
@@ -56,6 +59,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             speech_started = True
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.setup(frame_processor_setup(self.task_manager))
         await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -69,6 +73,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer.set_next_state(VADState.SPEAKING)
         await controller.process_frame(audio_frame)
         self.assertTrue(speech_started)
+        await controller.cleanup()
 
     async def test_speech_stopped_event(self):
         """Test that on_speech_stopped event is triggered when speech ends."""
@@ -83,6 +88,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             speech_stopped = True
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.setup(frame_processor_setup(self.task_manager))
         await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -96,6 +102,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer.set_next_state(VADState.QUIET)
         await controller.process_frame(audio_frame)
         self.assertTrue(speech_stopped)
+        await controller.cleanup()
 
     async def test_speech_activity_event(self):
         """Test that on_speech_activity event is triggered while speaking."""
@@ -110,6 +117,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             activity_count += 1
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.setup(frame_processor_setup(self.task_manager))
         await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -119,6 +127,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(audio_frame)
         await controller.process_frame(audio_frame)
         self.assertEqual(activity_count, 2)
+        await controller.cleanup()
 
     async def test_push_frame_event(self):
         """Test that push_frame emits on_push_frame event."""
@@ -173,6 +182,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             events_triggered.append("stopped")
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.setup(frame_processor_setup(self.task_manager))
         await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -186,6 +196,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer.set_next_state(VADState.STOPPING)
         await controller.process_frame(audio_frame)
         self.assertEqual(events_triggered, [])
+        await controller.cleanup()
 
     async def test_start_frame_broadcasts_vad_params(self):
         """Test that StartFrame triggers broadcast of SpeechControlParamsFrame with VAD params."""
@@ -199,6 +210,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             broadcast_calls.append((frame_cls, kwargs))
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.setup(frame_processor_setup(self.task_manager))
         await controller.process_frame(start_frame)
 
         # Should have broadcast SpeechControlParamsFrame with VAD params
@@ -206,6 +218,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(broadcast_calls[0][0], SpeechControlParamsFrame)
         self.assertIn("vad_params", broadcast_calls[0][1])
         self.assertIsInstance(broadcast_calls[0][1]["vad_params"], VADParams)
+        await controller.cleanup()
 
 
 AUDIO_IDLE_TIMEOUT = 0.1
@@ -228,8 +241,8 @@ class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
             speech_stopped = True
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
-        await controller.process_frame(start_frame)
         await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.process_frame(start_frame)
 
         # Enter SPEAKING state
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
@@ -256,8 +269,8 @@ class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
             speech_stopped = True
 
         start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
-        await controller.process_frame(start_frame)
         await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.process_frame(start_frame)
 
         # Stay in QUIET state, wait past idle timeout
         await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
