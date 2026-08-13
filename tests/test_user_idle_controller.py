@@ -134,6 +134,28 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_idle_after_interrupted_user_turn_stops(self):
+        """Test that idle fires after an interrupting user turn stops."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
     async def test_idle_cycle(self):
         """Test that idle fires, then can fire again after another bot speaking cycle."""
         controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
