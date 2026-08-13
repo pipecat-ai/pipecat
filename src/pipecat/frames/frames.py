@@ -1260,10 +1260,15 @@ class FunctionCallCancelFrame(SystemFrame):
     Parameters:
         function_name: Name of the function that was cancelled.
         tool_call_id: Unique identifier for the cancelled function call.
+        run_llm: Whether to run the LLM after this cancellation. Only a call
+            cancelled by its own timeout sets this: an interruption must not
+            trigger inference, and a cancellation the LLM asked for already
+            runs inference through the result of the tool that requested it.
     """
 
     function_name: str
     tool_call_id: str
+    run_llm: bool = False
 
 
 @dataclass

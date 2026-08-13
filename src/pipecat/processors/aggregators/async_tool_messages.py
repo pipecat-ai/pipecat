@@ -17,7 +17,8 @@ progresses:
   intermediate result is reported via
   ``result_callback(..., FunctionCallResultProperties(is_final=False))``.
 - A ``final`` message (``role="developer"``) is appended when the task
-  finishes.
+  finishes. A task that is cancelled instead of finishing settles the same
+  way, carrying a cancellation notice in place of a result.
 
 This module is the single source of truth for the on-the-wire payload shape:
 
@@ -76,6 +77,21 @@ _STARTED_DESCRIPTION = (
 _INTERMEDIATE_DESCRIPTION = (
     "This is a partial result and the task is still running. More may follow. Do not "
     "call this tool again and do not treat this as the final answer."
+)
+
+# Result shipped on the message that settles a cancelled task. It names the tool
+# call as the thing that was cancelled: a bare "CANCELLED" reads as a statement
+# about whatever the tool looks up, and a model relaying it will tell the user
+# their flight, order, or booking was cancelled.
+_CANCELLED_RESULT = "CANCELLED: this tool call was cancelled before it returned a result"
+
+# Description shipped on the message that settles a cancelled task.
+_CANCELLED_DESCRIPTION = (
+    "The asynchronous task associated with this tool_call_id was cancelled "
+    "before it produced a result, either because it ran past its deadline or "
+    "because cancellation was requested. No further results will arrive for "
+    "this tool_call_id. If the user is still waiting on it, tell them it did "
+    "not complete rather than leaving it unanswered."
 )
 
 # Standing guidance composed into the system instruction whenever an async tool is
@@ -249,6 +265,31 @@ def build_final_result_message(tool_call_id: str, result: str) -> LLMStandardMes
             status=_STATUS_FINISHED,
             description=_FINAL_DESCRIPTION,
             result=result,
+        )
+    )
+
+
+def build_cancelled_message(tool_call_id: str) -> LLMStandardMessage:
+    """Build a message settling a cancelled async-tool call in an LLM context.
+
+    Append the returned message to the LLM context when an async function call
+    is cancelled — by a timeout or at the model's request — instead of running
+    to completion. It settles the ``tool_call_id`` the same way a final result
+    does, carrying a cancellation notice in place of a result.
+
+    Args:
+        tool_call_id: The id of the tool invocation that was cancelled.
+
+    Returns:
+        A message ready to pass to ``LLMContext.add_message``.
+    """
+    return _payload_to_message(
+        AsyncToolMessagePayload(
+            kind="final",
+            tool_call_id=tool_call_id,
+            status=_STATUS_FINISHED,
+            description=_CANCELLED_DESCRIPTION,
+            result=_CANCELLED_RESULT,
         )
     )
 

@@ -240,24 +240,29 @@ suite:
   # Async function calling: the tool keeps running after the LLM's turn ends
   # (cancel_on_interruption=False). Its result lands ~20s later, by which point
   # the conversation has moved on — so the bot has to deliver the weather as an
-  # aside on a later turn.
+  # aside on a later turn. These bots also carry a share-price tool that hangs
+  # past its own timeout, for the function_call_timeout scenario.
   #
   - bot: function-calling/function-calling-anthropic-async.py
     scenarios:
       - weather_function_call_async_audio
       - weather_function_call_async_deferred_audio
+      - function_call_timeout
   - bot: function-calling/function-calling-google-async.py
     scenarios:
       - weather_function_call_async_audio
       - weather_function_call_async_deferred_audio
+      - function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
       - weather_function_call_async_audio
       - weather_function_call_async_deferred_audio
+      - function_call_timeout
   - bot: function-calling/function-calling-openai-responses-async.py
     scenarios:
       - weather_function_call_async_audio
       - weather_function_call_async_deferred_audio
+      - function_call_timeout
 
   #
   # Function calling with video: the bot calls a vision function that requests a

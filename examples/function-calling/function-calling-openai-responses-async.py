@@ -49,6 +49,22 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
+# A lookup that hangs: it sleeps far past the deadline it was registered with,
+# so the call is always cancelled before it can report anything. The result it
+# would eventually have returned is distinctive on purpose — if the bot ever
+# quotes a share price, a cancelled handler's result reached the conversation.
+@tool_options(cancel_on_interruption=False, timeout_secs=5)
+async def get_stock_price(params: FunctionCallParams, symbol: str):
+    """Get the current share price for a stock.
+
+    Args:
+        symbol: The ticker symbol, e.g. "NVDA".
+    """
+    await asyncio.sleep(20)
+    logger.debug("Returning get_stock_price result.")
+    await params.result_callback({"price": "184.20", "currency": "USD"})
+
+
 async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
     """Get a restaurant recommendation.
 
@@ -118,7 +134,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call.
-    context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
+    context = LLMContext(
+        tools=[get_current_weather, get_stock_price, get_restaurant_recommendation]
+    )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

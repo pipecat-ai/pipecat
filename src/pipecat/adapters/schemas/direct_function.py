@@ -318,8 +318,8 @@ def tool_options(
         fn: The function to decorate (when used without arguments).
         cancel_on_interruption: Whether to cancel this function call when an
             interruption occurs. Defaults to True.
-        timeout_secs: Optional per-tool timeout in seconds. Defaults to None (uses
-            the LLM service default).
+        timeout_secs: Optional per-tool timeout in seconds. A call that runs past
+            it is cancelled. Defaults to None (uses the LLM service default).
 
     Returns:
         The decorated function, unchanged except for pipecat call-option metadata

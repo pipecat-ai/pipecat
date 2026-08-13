@@ -204,6 +204,28 @@ class TestBuilders(unittest.TestCase):
         assert info.kind == "final"
         assert info.result == "COMPLETED"
 
+    def test_cancelled_message_shape(self):
+        msg = async_tool_messages.build_cancelled_message("call_5")
+        assert msg["role"] == "developer"
+        assert "tool_call_id" not in msg
+        payload = json.loads(msg["content"])
+        assert payload["type"] == "async_tool"
+        assert payload["status"] == "finished"
+        assert payload["tool_call_id"] == "call_5"
+        assert payload["result"].startswith("CANCELLED")
+        assert isinstance(payload["description"], str) and payload["description"]
+
+    def test_cancelled_round_trip(self):
+        # A cancelled call settles the tool_call_id the same way a result does,
+        # so it parses back as a final message.
+        msg = async_tool_messages.build_cancelled_message("call_x")
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        assert info.kind == "final"
+        assert info.tool_call_id == "call_x"
+        assert info.status == "finished"
+        assert info.result.startswith("CANCELLED")
+
     def test_started_round_trip(self):
         msg = async_tool_messages.build_started_message("call_x")
         info = async_tool_messages.parse_message(msg)
