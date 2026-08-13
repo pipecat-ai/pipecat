@@ -509,8 +509,8 @@ class MOQTransportClient:
     def connect(self):
         """Register a holder and start the MOQ session on the first call.
 
-        Called by both :meth:`MOQInputTransport.start` and
-        :meth:`MOQOutputTransport.start`, after ``setup()`` has wired in
+        Called by both :meth:`MOQInputTransport.setup` and
+        :meth:`MOQOutputTransport.setup`, after ``setup()`` has wired in
         the task manager. Only the first call actually dials/serves;
         later calls just record another holder, balanced against
         :meth:`stop`/:meth:`cancel` releasing it.
@@ -520,7 +520,7 @@ class MOQTransportClient:
             return
         assert self._task_manager is not None, (
             "MOQTransportClient.setup() must run before connect(); "
-            "input/output processors forward setup on the pipeline's first frame."
+            "input/output processors forward setup from their own setup()."
         )
         self._connection_task = self._task_manager.create_task(self._run(), "moq_run")
 
@@ -1225,6 +1225,7 @@ class MOQOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
         await self._client.setup(setup)
+        self._client.connect()
 
     async def start(self, frame: StartFrame):
         """Start the MOQ output transport.
@@ -1233,7 +1234,6 @@ class MOQOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._client.connect()
         # Open the publish_audio track now that we know the pipeline's
         # output sample rate. The producer side of the broadcast was
         # created in MOQTransportClient.__init__, so this call is
