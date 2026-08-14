@@ -42,10 +42,16 @@ class AudioBufferProcessor(FrameProcessor):
 
     - on_audio_data: Triggered when buffer_size is reached, providing merged audio
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-    - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
-    - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
+    - on_user_turn_audio_data: Triggered when the user stops speaking, providing that speech
+    - on_bot_turn_audio_data: Triggered when the bot stops speaking, providing that speech
     - on_recording_started: Triggered when recording starts (state transitions to active)
     - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
+
+    The turn audio events report one run of speech rather than a whole turn. They fire every
+    time a speaker stops, while a turn ends only once the other side takes over, so a single
+    turn can report several times; and on a barge-in the bot's final run is reported after the
+    next turn has already started. :class:`~pipecat.audio.turn_audio.TurnAudioCollector`
+    accounts for both when collecting this audio by turn.
 
     Audio handling:
 

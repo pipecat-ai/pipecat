@@ -41,6 +41,17 @@ class TurnTrackingObserver(BaseObserver):
 
       - The user starts speaking again
       - A timeout period elapses with no more bot speech
+
+    Events:
+
+    - on_turn_started: Triggered when a turn starts, providing the turn number
+    - on_turn_ended: Triggered when a turn ends, providing the turn number, the turn's
+      duration in seconds, and whether it was interrupted
+
+    A turn counts as interrupted only when the user spoke over the bot. That distinction
+    matters to anything correlating data to turns: an interruption ends one turn and starts the
+    next in the same moment, so whatever the bot was in the middle of arrives once the tracker
+    has already moved on.
     """
 
     def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
