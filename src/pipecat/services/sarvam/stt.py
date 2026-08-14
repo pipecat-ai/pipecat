@@ -16,7 +16,7 @@ server-side endpointing and in-band configuration updates.
 import asyncio
 import base64
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, cast
 from urllib.parse import urlencode
@@ -44,6 +44,7 @@ from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SARVAM_REALTIME_TTFS_P99, SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService, WebsocketSTTService
+from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
@@ -1341,7 +1342,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+    async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Close out the active utterance once the receive loop is done.
 
         Reconnection is disabled, so the loop exiting means no further server
