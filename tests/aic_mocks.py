@@ -6,9 +6,9 @@
 
 """Shared aic_sdk test mocks for the AIC test suite.
 
-Importing in: ``tests/test_aic_filter.py`` and ``tests/test_aic_quail_vad.py``. Keep
-behavior aligned with the live
-``aic_sdk`` 3.0 surface so the suite stays representative.
+Importing in: ``tests/test_aic_filter.py`` and ``tests/test_aic_quail_vad.py``.
+Keep behavior aligned with the live ``aic_sdk`` 3.0 surface so the suite stays
+representative.
 """
 
 from typing import Any

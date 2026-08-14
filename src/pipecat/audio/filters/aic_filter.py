@@ -426,9 +426,6 @@ class AICFilter(BaseAudioFilter):
         Buffers incoming audio and processes it in chunks that match the AIC
         model's required block length. Returns enhanced audio data.
 
-        When a VAD model is configured, each block advances the VAD before it is
-        enhanced, so predictions describe the original signal.
-
         Args:
             audio: Raw audio data as bytes (int16 PCM).
 
