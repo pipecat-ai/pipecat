@@ -2474,5 +2474,70 @@ async def test_sentence_inline_tts_markup_tracks_word_by_word():
     )
 
 
+@pytest.mark.asyncio
+async def test_token_inline_tts_markup_tracks_word_by_word():
+    """TOKEN-mode counterpart of test_sentence_inline_tts_markup_tracks_word_by_word.
+
+    The sentence reaches the TTS as three separate tokens here, the tagged span
+    among them, and the sequencer regroups them into one sentence before tracking
+    it. The result must match SENTENCE mode: only the tagged span is committed
+    whole, every other word advancing progress on its own.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        # One run_tts call per token, each with its own word-time list.
+        # Cartesia echoes the tag block as one token; the service strips it to "1234.".
+        word_times_per_call=[
+            [("I", 0.0)],
+            [("love", 0.2)],
+            [("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
+        ],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    tts._text_aggregator = SkipTagsAggregator(
+        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.TOKEN
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame(text="I"),
+            TextFrame(text=" love"),
+            TextFrame(text=" to count <spell>"),
+            TextFrame(text="1234</spell>."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+    down = frames_received[0]
+    sentence = "I love to count <spell>1234</spell>."
+
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert [f.accumulated_text for f in progress] == [
+        "I",
+        "I love",
+        "I love to",
+        "I love to count",
+        sentence,
+    ]
+    assert [f.remaining_text for f in progress][-1] == ""
+
+    # The tokens are regrouped into a single sentence, so they announce one segment
+    # rather than one per token.
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    assert len(anchors) == 1
+    assert anchors[0].text == sentence
+    assert all(f.segment_id == anchors[0].id for f in progress)
+
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == ["I", "love", "to", "count", "1234."]
+    assert all(f.append_to_context for f in word_frames), (
+        "only the tagged span is atomic, so every word reaches the context: "
+        f"{[(f.text, f.append_to_context) for f in word_frames]}"
+    )
+    assert word_frames[-1].raw_text == "<spell>1234</spell>.", (
+        "the word completing the tagged span must commit it with its tag, got "
+        f"{word_frames[-1].raw_text!r}"
+    )
+
+
 if __name__ == "__main__":
     unittest.main()
