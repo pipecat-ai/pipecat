@@ -75,7 +75,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         track.sid = "video-track-123"
         publication = MagicMock()
         participant = MagicMock()
-        participant.sid = "participant-456"
+        participant.identity = "participant-456"
         return track, publication, participant
 
     async def test_disabled_video_input_does_not_start_queue_producer(self):
@@ -97,7 +97,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._video_queue.qsize(), 0)
 
         # Track metadata should still be recorded
-        self.assertIn(participant.sid, client._video_tracks)
+        self.assertIn(participant.identity, client._video_tracks)
 
         # Callback should still fire for user code
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -116,7 +116,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(video_tasks), 1, "Video processing task should be started")
 
         # Track metadata should be recorded
-        self.assertIn(participant.sid, client._video_tracks)
+        self.assertIn(participant.identity, client._video_tracks)
 
         # Callback should fire
         client._callbacks.on_video_track_subscribed.assert_called_once()
@@ -136,10 +136,10 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
     keeps pushing frames forever; N republishes → N concurrent producers
     interleave audio into the shared queue and downstream STT receives garbage.
 
-    The fix: store ``(stream, task)`` per ``participant.sid`` in
+    The fix: store ``(stream, task)`` per ``participant.identity`` in
     ``_audio_streams`` on subscribe, then ``aclose()`` + cancel on unsubscribe
-    and again on a re-subscribe for the same sid (to handle missed unsubscribe).
-    Symmetric for video.
+    and again on a re-subscribe for the same identity (to handle missed
+    unsubscribe). Symmetric for video.
     """
 
     def _create_client(self, video_in_enabled: bool = False) -> LiveKitTransportClient:
@@ -180,26 +180,24 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         client._task_manager.create_task.side_effect = _make_task
         return client
 
-    def _audio_track(self, sid: str = "audio-track-1", participant_sid: str = "p-1"):
+    def _audio_track(self, sid: str = "audio-track-1", participant_identity: str = "p-1"):
         track = MagicMock()
         track.kind = rtc.TrackKind.KIND_AUDIO
         track.sid = sid
         publication = MagicMock()
         publication.sid = sid
         participant = MagicMock()
-        participant.sid = participant_sid
-        participant.identity = "user"
+        participant.identity = participant_identity
         return track, publication, participant
 
-    def _video_track(self, sid: str = "video-track-1", participant_sid: str = "p-1"):
+    def _video_track(self, sid: str = "video-track-1", participant_identity: str = "p-1"):
         track = MagicMock()
         track.kind = rtc.TrackKind.KIND_VIDEO
         track.sid = sid
         publication = MagicMock()
         publication.sid = sid
         participant = MagicMock()
-        participant.sid = participant_sid
-        participant.identity = "user"
+        participant.identity = participant_identity
         return track, publication, participant
 
     async def test_audio_stream_registered_on_subscribe(self):
@@ -212,8 +210,8 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         with patch.object(rtc, "AudioStream", return_value=mock_stream):
             await client._async_on_track_subscribed(track, pub, participant)
 
-        self.assertIn(participant.sid, client._audio_streams)
-        stream, task = client._audio_streams[participant.sid]
+        self.assertIn(participant.identity, client._audio_streams)
+        stream, task = client._audio_streams[participant.identity]
         self.assertIs(stream, mock_stream)
         self.assertIsNotNone(task)
 
@@ -226,13 +224,13 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         mock_stream.aclose = AsyncMock()
         with patch.object(rtc, "AudioStream", return_value=mock_stream):
             await client._async_on_track_subscribed(track, pub, participant)
-        _, task = client._audio_streams[participant.sid]
+        _, task = client._audio_streams[participant.identity]
 
         await client._async_on_track_unsubscribed(track, pub, participant)
 
         mock_stream.aclose.assert_awaited_once()
         task.cancel.assert_called_once()
-        self.assertNotIn(participant.sid, client._audio_streams)
+        self.assertNotIn(participant.identity, client._audio_streams)
         client._callbacks.on_audio_track_unsubscribed.assert_called_once()
 
     async def test_resubscribe_closes_previous_audio_stream(self):
@@ -247,7 +245,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(rtc, "AudioStream", return_value=first):
             await client._async_on_track_subscribed(track, pub, participant)
-        first_task = client._audio_streams[participant.sid][1]
+        first_task = client._audio_streams[participant.identity][1]
 
         # Republish without an explicit unsubscribe in between.
         with patch.object(rtc, "AudioStream", return_value=second):
@@ -255,7 +253,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
 
         first.aclose.assert_awaited_once()
         first_task.cancel.assert_called_once()
-        self.assertIs(client._audio_streams[participant.sid][0], second)
+        self.assertIs(client._audio_streams[participant.identity][0], second)
 
     async def test_unsubscribe_without_subscribe_is_noop(self):
         """Unsubscribe for an unknown sid does not raise."""
@@ -274,11 +272,11 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         mock_stream.aclose = AsyncMock()
         with patch.object(rtc, "VideoStream", return_value=mock_stream):
             await client._async_on_track_subscribed(track, pub, participant)
-        self.assertIn(participant.sid, client._video_streams)
+        self.assertIn(participant.identity, client._video_streams)
 
         await client._async_on_track_unsubscribed(track, pub, participant)
         mock_stream.aclose.assert_awaited_once()
-        self.assertNotIn(participant.sid, client._video_streams)
+        self.assertNotIn(participant.identity, client._video_streams)
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
@@ -316,7 +314,7 @@ class TestLiveKitSipDtmfInput(unittest.IsolatedAsyncioTestCase):
         """Room sip_dtmf_received events are normalized and forwarded."""
         client = self._create_client()
         participant = MagicMock()
-        participant.sid = "sip-participant-1"
+        participant.identity = "sip-participant-1"
         dtmf = MagicMock()
         dtmf.digit = "5"
         dtmf.code = 5
@@ -497,6 +495,165 @@ class TestLiveKitClientConnectedAlias(unittest.IsolatedAsyncioTestCase):
         transport._call_event_handler.assert_any_call(
             "on_client_disconnected", {"id": "participant-1"}
         )
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitParticipantIdentity(unittest.IsolatedAsyncioTestCase):
+    """The participant_id this transport hands out must be the LiveKit
+    identity, not the SID.
+
+    Regression test (pipecat-ai/pipecat#5218): ``room.remote_participants``
+    is keyed by identity and ``destination_identities`` expects identities,
+    but the transport used to emit ``participant.sid`` everywhere. Callers
+    couldn't feed the ``get_participants()``/event ``participant_id`` back
+    into ``get_participant_metadata``/``mute_participant``/
+    ``unmute_participant``/targeted ``send_message`` — the lookup would
+    silently fail (``room.remote_participants.get(sid)`` returns ``None``).
+    """
+
+    def _create_client(self) -> LiveKitTransportClient:
+        params = LiveKitParams()
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        return client
+
+    def _mock_room_with_participant(
+        self, client: LiveKitTransportClient, *, sid: str, identity: str
+    ):
+        publication = MagicMock()
+        publication.kind = rtc.TrackKind.KIND_AUDIO
+        publication.set_subscribed = MagicMock()
+
+        participant = MagicMock()
+        participant.sid = sid
+        participant.identity = identity
+        participant.name = "Test User"
+        participant.metadata = ""
+        participant.track_publications = {"track-1": publication}
+
+        room = MagicMock()
+        room.remote_participants = {identity: participant}
+        client._room = room
+        return participant, publication
+
+    async def test_get_participants_returns_identity_not_sid(self):
+        client = self._create_client()
+        participant, _ = self._mock_room_with_participant(
+            client, sid="PA_serverSid", identity="repro-client"
+        )
+
+        self.assertEqual(client.get_participants(), ["repro-client"])
+
+    async def test_get_participant_metadata_resolves_id_from_get_participants(self):
+        """The id get_participants() hands out must work as a lookup key."""
+        client = self._create_client()
+        self._mock_room_with_participant(client, sid="PA_serverSid", identity="repro-client")
+
+        (participant_id,) = client.get_participants()
+        metadata = await client.get_participant_metadata(participant_id)
+
+        self.assertEqual(metadata, {"id": "repro-client", "name": "Test User", "metadata": ""})
+
+    async def test_mute_participant_resolves_id_from_get_participants(self):
+        client = self._create_client()
+        _, publication = self._mock_room_with_participant(
+            client, sid="PA_serverSid", identity="repro-client"
+        )
+
+        (participant_id,) = client.get_participants()
+        await client.mute_participant(participant_id)
+
+        publication.set_subscribed.assert_called_once_with(False)
+
+    async def test_unmute_participant_resolves_id_from_get_participants(self):
+        client = self._create_client()
+        _, publication = self._mock_room_with_participant(
+            client, sid="PA_serverSid", identity="repro-client"
+        )
+
+        (participant_id,) = client.get_participants()
+        await client.unmute_participant(participant_id)
+
+        publication.set_subscribed.assert_called_once_with(True)
+
+    async def test_participant_connected_callback_receives_identity(self):
+        client = self._create_client()
+        participant = MagicMock()
+        participant.sid = "PA_serverSid"
+        participant.identity = "repro-client"
+
+        await client._async_on_participant_connected(participant)
+
+        client._callbacks.on_participant_connected.assert_awaited_once_with("repro-client")
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitAudioTrackSubscribedHandler(unittest.TestCase):
+    """The top-level transport's on_audio/video_track_subscribed handlers
+    must not re-derive publications from nonexistent SDK attributes.
+
+    Regression test: these used to look up ``participant.audio_tracks``/
+    ``participant.video_tracks`` (removed from the SDK; ``track_publications``
+    is the only such attribute now) and re-invoke the subscribe wrapper that
+    had already run for this exact track via the room event, redundantly.
+    """
+
+    def test_on_audio_track_subscribed_only_fires_event_handler(self):
+        import asyncio
+
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud", token="test-token", room_name="test-room"
+        )
+        transport._call_event_handler = AsyncMock()
+        transport._client = MagicMock()
+
+        asyncio.run(transport._on_audio_track_subscribed("participant-1"))
+
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_audio_track_subscribed", "participant-1"
+        )
+        transport._client.room.remote_participants.get.assert_not_called()
+
+    def test_on_video_track_subscribed_only_fires_event_handler(self):
+        import asyncio
+
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        transport = LiveKitTransport(
+            url="wss://test.livekit.cloud", token="test-token", room_name="test-room"
+        )
+        transport._call_event_handler = AsyncMock()
+        transport._client = MagicMock()
+
+        asyncio.run(transport._on_video_track_subscribed("participant-1"))
+
+        transport._call_event_handler.assert_awaited_once_with(
+            "on_video_track_subscribed", "participant-1"
+        )
+        transport._client.room.remote_participants.get.assert_not_called()
 
 
 if __name__ == "__main__":
