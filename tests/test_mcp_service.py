@@ -117,6 +117,22 @@ class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.close)
         return client, session, record
 
+    async def _call_via_handler(self, tools_schema, name, arguments=None):
+        """Invoke a tool the way the LLM service does, through its handler.
+
+        Returns:
+            The result callback, so callers can assert on what was delivered.
+        """
+        schema = next(s for s in tools_schema.standard_tools if s.name == name)
+        params = SimpleNamespace(
+            function_name=name,
+            tool_call_id="call-1",
+            arguments=arguments,
+            result_callback=AsyncMock(),
+        )
+        await schema.handler(params)
+        return params.result_callback
+
 
 class TestTools(MCPClientTestBase):
     """tools(): JIT start, handler attachment, filtering."""
@@ -163,6 +179,15 @@ class TestTools(MCPClientTestBase):
         params.result_callback.assert_awaited_once_with("tool_a-RESULT")
         await client.close()
 
+    async def test_handler_applies_output_filter(self):
+        client, session, record = self._make_client(
+            [_tool("tool_a")], tools_output_filters={"tool_a": lambda text: text.upper()}
+        )
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a", {"x": "y"})
+        result_callback.assert_awaited_once_with("TOOL_A-RESULT")
+        await client.close()
+
 
 class TestToolsArguments(MCPClientTestBase):
     """tools_arguments: schema stripping and call-time injection."""
@@ -194,8 +219,10 @@ class TestToolsArguments(MCPClientTestBase):
         client, session, record = self._make_client(
             self._search_tools(), tools_arguments={"search": {"mode": "realtime"}}
         )
-        await client.start()
-        await client.call_tool("search", {"query": "news", "mode": "model-supplied"})
+        tools_schema = await client.tools()
+        await self._call_via_handler(
+            tools_schema, "search", {"query": "news", "mode": "model-supplied"}
+        )
         self.assertEqual(session.calls, [("search", {"query": "news", "mode": "realtime"})])
         await client.close()
 
@@ -203,8 +230,8 @@ class TestToolsArguments(MCPClientTestBase):
         client, session, record = self._make_client(
             self._search_tools(), tools_arguments={"search": {"mode": "realtime"}}
         )
-        await client.start()
-        await client.call_tool("search", None)
+        tools_schema = await client.tools()
+        await self._call_via_handler(tools_schema, "search")
         self.assertEqual(session.calls, [("search", {"mode": "realtime"})])
         await client.close()
 
@@ -217,7 +244,7 @@ class TestToolsArguments(MCPClientTestBase):
         # Stripping a name the schema doesn't have is a no-op...
         self.assertEqual(set(by_name["other"].properties), {"x"})
         # ...but the argument is still injected at call time.
-        await client.call_tool("other", {"x": "y"})
+        await self._call_via_handler(tools_schema, "other", {"x": "y"})
         self.assertEqual(session.calls, [("other", {"x": "y", "hidden": 1})])
         await client.close()
 
@@ -277,12 +304,12 @@ class TestLifecycle(MCPClientTestBase):
         await client.close()
         self.assertEqual(record["exits"], 1)
 
-    async def test_call_tool_after_close_raises(self):
+    async def test_calling_a_tool_after_close_raises(self):
         client, session, record = self._make_client([_tool("tool_a")])
-        await client.start()
+        tools_schema = await client.tools()
         await client.close()
         with self.assertRaises(RuntimeError):
-            await client.call_tool("tool_a", {})
+            await self._call_via_handler(tools_schema, "tool_a", {})
 
     async def test_tools_after_close_reconnects(self):
         client, session, record = self._make_client([_tool("tool_a")])
@@ -305,31 +332,6 @@ class TestLifecycle(MCPClientTestBase):
             tools_schema = await mcp.tools()
             self.assertEqual({s.name for s in tools_schema.standard_tools}, {"tool_a"})
         self.assertEqual(record["exits"], 1)
-
-
-class TestCallTool(MCPClientTestBase):
-    """Public call_tool(): text results and output filters."""
-
-    async def test_call_tool_returns_text(self):
-        client, session, record = self._make_client([_tool("tool_a")])
-        await client.start()
-        result = await client.call_tool("tool_a", {"x": "y"})
-        self.assertEqual(result, "tool_a-RESULT")
-        await client.close()
-
-    async def test_call_tool_applies_output_filter(self):
-        client, session, record = self._make_client(
-            [_tool("tool_a")], tools_output_filters={"tool_a": lambda text: text.upper()}
-        )
-        await client.start()
-        result = await client.call_tool("tool_a", {})
-        self.assertEqual(result, "TOOL_A-RESULT")
-        await client.close()
-
-    async def test_call_tool_requires_connection(self):
-        client, session, record = self._make_client([_tool("tool_a")])
-        with self.assertRaises(RuntimeError):
-            await client.call_tool("tool_a", {})
 
 
 class TestDeprecatedRegistrationApi(MCPClientTestBase):
