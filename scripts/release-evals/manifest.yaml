@@ -238,30 +238,41 @@ suite:
 
   #
   # Async function calling: the tool keeps running after the LLM's turn ends
-  # (cancel_on_interruption=False). Its result lands ~20s later, by which point
-  # the conversation has moved on — so the bot has to deliver the weather as an
-  # aside on a later turn. These bots also carry a share-price tool that hangs
-  # past its own timeout, for the function_call_timeout scenario.
+  # (cancel_on_interruption=False), so its result lands once the conversation has
+  # moved on and the bot has to deliver it as an aside. The cancellation
+  # scenarios go further and abandon work mid-flight, and these bots also carry a
+  # share-price tool that hangs past its own timeout. Text except where the bot
+  # has to be interrupted mid-sentence, which needs real speech to talk over.
   #
   - bot: function-calling/function-calling-anthropic-async.py
     scenarios:
-      - weather_function_call_async_audio
-      - weather_function_call_async_deferred_audio
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
       - function_call_timeout
   - bot: function-calling/function-calling-google-async.py
     scenarios:
-      - weather_function_call_async_audio
-      - weather_function_call_async_deferred_audio
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
       - function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
-      - weather_function_call_async_audio
-      - weather_function_call_async_deferred_audio
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
       - function_call_timeout
+      # gpt-4.1 answers that it is working on the report without calling
+      # write_report, so neither cancellation scenario reaches what it tests.
+      # - async_tool_cancellation
+      # - async_tool_cancellation_concurrent
   - bot: function-calling/function-calling-openai-responses-async.py
     scenarios:
-      - weather_function_call_async_audio
-      - weather_function_call_async_deferred_audio
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
       - function_call_timeout
 
   #

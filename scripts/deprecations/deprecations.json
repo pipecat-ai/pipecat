@@ -2280,6 +2280,17 @@
       "location": "pipecat/services/llm_service.py"
     },
     {
+      "subject": "LLMService.enable_async_tool_cancellation",
+      "module": "pipecat.services.llm_service",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "cancellable_by_llm=True",
+      "message": "Use ``cancellable_by_llm=True`` on the tools that should be cancellable instead. Will be removed in 2.0.0. Whether a tool runs long enough to be stopped at all, and whether the model can be trusted to decide its result is unwanted, are per-tool questions rather than ones answered for every tool at once.",
+      "location": "pipecat/services/llm_service.py"
+    },
+    {
       "subject": "LLMService.register_direct_function",
       "module": "pipecat.services.llm_service",
       "kind": "method",

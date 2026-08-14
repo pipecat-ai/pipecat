@@ -108,7 +108,7 @@ async function results, turn detection), where a bot can pass a scenario half th
 time and look reliable in any one run.
 
 ```sh
-./run.sh -p function-calling -s weather_function_call_async_audio --repeat 50 -c 3
+./run.sh -p function-calling -s async_tool_delivery --repeat 50 -c 3
 ```
 
 Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue

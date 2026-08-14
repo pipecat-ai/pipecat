@@ -1,0 +1,55 @@
+name: async_tool_cancellation_concurrent
+
+# Text: two calls of one cancellable tool are running at once, and the user
+# abandons one of them. The cancel tool can't tell the calls apart on its own, so
+# the bot has to name the one to stop by the tool_call_id the conversation
+# reported it running under, and stop only that one. The other has to survive and
+# still be delivered.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "Write me a report about sea turtles."
+    expect:
+      - event: function_call
+        calls:
+          - name: write_report
+
+  - user: "Also write one about volcanoes."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: write_report
+
+  # Both reports are now in flight. Abandoning one of them is what the cancel
+  # tool can't resolve by name alone.
+  - user: "Actually, never mind the sea turtle report. Tell me a joke instead."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: cancel_write_report
+      # Permissive on purpose: the bot may confirm the cancellation, tell the
+      # joke, or both, and which of those lands in this response is a matter of
+      # where its speech gets segmented. What this scenario tests is which call
+      # got stopped, asserted below.
+      - event: response
+        eval: "responds to the user — a joke, a confirmation that the report was cancelled, or both"
+
+  # No user turn: the volcano report was never cancelled, so it finishes and the
+  # bot reports it unprompted. Speaking again here would race that — whichever
+  # reply the judge caught would depend on which landed first.
+  #
+  # Naming volcanoes is what shows the right call was stopped: had the bot
+  # cancelled the other one, this is where it would announce sea turtles.
+  - expect:
+      - event: response
+        eval: "says a report about volcanoes is finished or ready"

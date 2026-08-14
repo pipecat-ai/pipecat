@@ -69,6 +69,21 @@ async def get_stock_price(params: FunctionCallParams, symbol: str):
     await params.result_callback({"price": "184.20", "currency": "USD"})
 
 
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True, timeout_secs=120)
+async def write_report(params: FunctionCallParams, topic: str):
+    """Write a long research report on a topic.
+
+    Args:
+        topic: What the report should cover.
+    """
+    # Long enough to still be running when the LLM asks to stop it: listing what
+    # is running and then calling the cancel tool, with a spoken reply often in
+    # between, outlasts shorter work.
+    await asyncio.sleep(25)
+    logger.debug("Returning write_report result.")
+    await params.result_callback({"report": f"A 5000-word report on {topic}."})
+
+
 async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
     """Get a restaurant recommendation.
 
@@ -179,7 +194,13 @@ indicate you should use the get_image tool are:
     # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call.
     context = LLMContext(
-        tools=[get_current_weather, get_stock_price, get_image, get_restaurant_recommendation]
+        tools=[
+            get_current_weather,
+            write_report,
+            get_stock_price,
+            get_image,
+            get_restaurant_recommendation,
+        ]
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

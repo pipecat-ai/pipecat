@@ -17,7 +17,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
-from pipecat.utils.async_tool_cancellation import CANCEL_ASYNC_TOOL_NAME
+from pipecat.utils.async_tool_cancellation import cancel_tool_name
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -57,6 +57,15 @@ async def async_task(params: FunctionCallParams, query: str):
         query: The task query.
     """
     await params.result_callback({"status": "done"})
+
+
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
+async def cancellable_task(params: FunctionCallParams, query: str):
+    """A long-running task the LLM may cancel.
+
+    Args:
+        query: What to work on.
+    """
 
 
 @tool_options(cancel_on_interruption=False)
@@ -250,17 +259,25 @@ class TestAutoRegisterSchemaHandlers(unittest.TestCase):
         service._sync_registered_tool_handlers([lookup_order_schema()])
         self.assertEqual(list(service._functions.keys()), ["lookup_order"])
 
-    def test_reserved_name_rejected(self):
+    def test_user_tool_keeps_a_colliding_cancel_tool_name(self):
         service = self._service()
         schema = FunctionSchema(
-            name=CANCEL_ASYNC_TOOL_NAME,
+            name=cancel_tool_name("cancellable_task"),
             description="d",
             properties={},
             required=[],
             handler=lookup_order_handler,
         )
-        with self.assertRaises(ValueError):
-            service._sync_registered_tool_handlers([schema])
+        # A user tool of that name keeps it; the cancel tool is not advertised,
+        # which leaves cancellable_task with no way to be stopped.
+        service._sync_registered_tool_handlers([cancellable_task, schema])
+        self.assertIs(
+            service._functions[cancel_tool_name("cancellable_task")].handler,
+            lookup_order_handler,
+        )
+        self.assertNotIn(
+            cancel_tool_name("cancellable_task"), service.get_llm_adapter().builtin_tools
+        )
 
 
 class TestRedundantManualRegistrationWarning(unittest.TestCase):
@@ -577,26 +594,24 @@ class TestReservedToolName(unittest.TestCase):
 
     def test_register_function_rejects_reserved_name(self):
         service = LLMService()
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
 
         async def handler(params: FunctionCallParams):
             await params.result_callback({})
 
         with self.assertRaises(ValueError):
-            service.register_function(CANCEL_ASYNC_TOOL_NAME, handler)
+            service.register_function(cancel_tool_name("cancellable_task"), handler)
 
     def test_register_direct_function_rejects_reserved_name(self):
         service = LLMService()
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
 
-        async def cancel_async_tool_call(params: FunctionCallParams, tool_call_id: str):
-            """A direct function whose name collides with the reserved built-in.
-
-            Args:
-                tool_call_id: The call to cancel.
-            """
+        async def cancel_cancellable_task(params: FunctionCallParams):
+            """A direct function whose name collides with an advertised cancel tool."""
             await params.result_callback({})
 
         with self.assertRaises(ValueError):
-            service._register_direct_function(cancel_async_tool_call)
+            service._register_direct_function(cancel_cancellable_task)
 
 
 class TestClassicRegisterFunction(unittest.TestCase):
@@ -628,31 +643,35 @@ class TestClassicRegisterFunction(unittest.TestCase):
 
 
 class TestAsyncToolCancellationPruning(unittest.TestCase):
-    """Pruning interacts correctly with the built-in async-tool-cancellation tool."""
+    """The cancellation tools track the advertised set, in both directions."""
 
-    def test_builtin_cancel_tool_survives_pruning_the_last_async_tool(self):
+    def test_withdrawn_when_the_cancellable_tool_is_pruned(self):
         service = LLMService()
-        service._sync_registered_tool_handlers(LLMContext(tools=[async_task]).tools)
-        service._setup_async_tool_cancellation()
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
-        # Drop the only async tool from the advertised set.
-        service._sync_registered_tool_handlers([])
-        self.assertNotIn("async_task", service._functions)
-        # Cancellation follows the service's flag, not what is registered, so an
-        # advertised set that stops carrying async tools leaves it in place.
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        service._sync_registered_tool_handlers(LLMContext(tools=[cancellable_task]).tools)
+        self.assertIn(cancel_tool_name("cancellable_task"), service._functions)
 
-    def test_builtin_cancel_tool_survives_while_async_tools_remain(self):
+        # Drop the only cancellable tool from the advertised set.
+        service._sync_registered_tool_handlers([])
+        self.assertNotIn("cancellable_task", service._functions)
+        self.assertNotIn(cancel_tool_name("cancellable_task"), service._functions)
+        self.assertNotIn(
+            cancel_tool_name("cancellable_task"), service.get_llm_adapter().builtin_tools
+        )
+
+    def test_kept_while_a_cancellable_tool_remains(self):
+        service = LLMService()
+        service._sync_registered_tool_handlers(
+            LLMContext(tools=[cancellable_task, async_task]).tools
+        )
+        # Drop the async tool that never opted in; the cancellable one remains.
+        service._sync_registered_tool_handlers([cancellable_task])
+        self.assertNotIn("async_task", service._functions)
+        self.assertIn(cancel_tool_name("cancellable_task"), service._functions)
+
+    def test_absent_for_async_tools_that_did_not_opt_in(self):
         service = LLMService()
         service._sync_registered_tool_handlers(LLMContext(tools=[async_task, async_task_2]).tools)
-        service._setup_async_tool_cancellation()
-        # Drop one async tool; another remains.
-        service._sync_registered_tool_handlers([async_task])
-        self.assertTrue(service.has_function("async_task"))
-        self.assertNotIn("async_task_2", service._functions)
-        # The built-in cancel tool isn't auto_registered, so the prune loop
-        # leaves it alone.
-        self.assertIn(CANCEL_ASYNC_TOOL_NAME, service._functions)
+        self.assertNotIn(cancel_tool_name("cancellable_task"), service._functions)
 
 
 if __name__ == "__main__":
