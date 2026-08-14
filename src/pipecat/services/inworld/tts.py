@@ -86,6 +86,20 @@ def language_to_inworld_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass(slots=True)
+class ContextTiming:
+    """Per-context generation timing for Inworld WebSocket responses.
+
+    In auto_mode the server controls generations and resets per-generation
+    timestamps to zero on flushCompleted. Offsets are kept per contextId so
+    a late event from an interrupted context cannot shift a newer context's
+    word timestamps.
+    """
+
+    cumulative_time_s: float = 0.0
+    generation_end_time_s: float = 0.0
+
+
 @dataclass
 class InworldTTSSettings(TTSSettings):
     """Settings for InworldTTSService and InworldHttpTTSService.
@@ -727,13 +741,12 @@ class InworldTTSService(WebsocketTTSService):
         self._receive_task = None
         self._keepalive_task = None
 
-        # Track cumulative time across generations for monotonic timestamps within a turn.
-        # When auto_mode is enabled, the server controls generations and timestamps reset
-        # to 0 after each generation, as indicated by a "flushCompleted" message. We
-        # add _cumulative_time to maintain monotonically increasing timestamps.
-        self._cumulative_time = 0.0
-        # Track the end time of the last word in the current generation
-        self._generation_end_time = 0.0
+        # Track cumulative time across generations for monotonic timestamps within a
+        # context. In auto_mode the server controls generations and resets timestamps
+        # to 0 after each generation, as indicated by a "flushCompleted" message. The
+        # offset is kept per contextId so a late event from an interrupted context
+        # cannot shift a newer context's word timestamps.
+        self._timing_by_context_id: dict[str, ContextTiming] = {}
 
         # Context IDs already sent to the server via _send_context, used to
         # make _send_context idempotent so on_turn_context_created can eagerly
@@ -794,10 +807,13 @@ class InworldTTSService(WebsocketTTSService):
             logger.trace(f"Flushing audio for context {flush_id}")
             await self._send_flush(flush_id)
 
-    def _reset_generation_timing(self):
-        """Reset the cumulative time and generation end time for a new generation."""
-        self._cumulative_time = 0.0
-        self._generation_end_time = 0.0
+    def _register_context_timing(self, context_id: str):
+        """Register fresh generation timing for a newly created context."""
+        self._timing_by_context_id[context_id] = ContextTiming()
+
+    def _discard_context_timing(self, context_id: str):
+        """Drop timing state for a context that is no longer active."""
+        self._timing_by_context_id.pop(context_id, None)
 
     async def on_turn_context_created(self, context_id: str):
         """Eagerly open the context on the server when a new turn starts.
@@ -805,24 +821,38 @@ class InworldTTSService(WebsocketTTSService):
         This overlaps server-side context creation with sentence aggregation
         time, so the context is ready by the time text arrives in run_tts.
         """
+        self._register_context_timing(context_id)
         try:
             await self._send_context(context_id)
         except Exception as e:
             logger.warning(f"{self}: Failed to pre-open context: {e}")
 
-    def _calculate_word_times(self, timestamp_info: dict[str, Any]) -> list[tuple[str, float]]:
+    def _calculate_word_times(
+        self,
+        timestamp_info: dict[str, Any],
+        ctx_id: str,
+    ) -> list[tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
-        Adds cumulative time offset to maintain monotonically increasing timestamps
-        across multiple generations within an agent turn. Also tracks the generation
-        end time for updating cumulative time on flush.
+        Adds the context's cumulative time offset to maintain monotonically
+        increasing timestamps across multiple generations within a context. Also
+        tracks the generation end time for updating cumulative time on flush.
+        Events for a context with no tracked timing (interrupted or closed) are
+        dropped rather than creating new state.
 
         Args:
             timestamp_info: The timestamp information from Inworld API.
+            ctx_id: The context the timestamps belong to.
 
         Returns:
             List of (word, timestamp) tuples with cumulative offset applied.
         """
+        timing = self._timing_by_context_id.get(ctx_id)
+        if timing is None:
+            # Late event for a context that was interrupted or closed: do not
+            # create state or shift any other context's timestamps.
+            return []
+
         word_times: list[tuple[str, float]] = []
 
         alignment = timestamp_info.get("wordAlignment", {})
@@ -832,21 +862,36 @@ class InworldTTSService(WebsocketTTSService):
 
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
-                word_start = self._cumulative_time + start_times[i]
+                word_start = timing.cumulative_time_s + start_times[i]
                 word_times.append((word, word_start))
 
             # Track cumulative end time for this generation
             if end_times and len(end_times) > 0:
-                self._generation_end_time = self._cumulative_time + end_times[-1]
+                timing.generation_end_time_s = timing.cumulative_time_s + end_times[-1]
 
             logger.trace(
                 f"{self}: Word timestamps - raw_start_times={start_times}, "
-                f"cumulative_offset={self._cumulative_time}, "
+                f"cumulative_offset={timing.cumulative_time_s}, "
                 f"adjusted_times={[t for _, t in word_times]}, "
-                f"generation_end_time={self._generation_end_time}"
+                f"generation_end_time={timing.generation_end_time_s}"
             )
 
         return word_times
+
+    def _handle_flush_completed(self, ctx_id: str):
+        """Advance a context's cumulative time at the end of a generation.
+
+        A flush for a context with no tracked timing (interrupted or closed)
+        is ignored, so a late flush cannot move another context's offset.
+        """
+        timing = self._timing_by_context_id.get(ctx_id)
+        if timing is None:
+            return
+        logger.trace(
+            f"{self}: Generation completed - updating cumulative time for {ctx_id}: "
+            f"{timing.cumulative_time_s} -> {timing.generation_end_time_s}"
+        )
+        timing.cumulative_time_s = timing.generation_end_time_s
 
     async def _close_context(self, context_id: str | None):
         if not context_id:
@@ -871,6 +916,9 @@ class InworldTTSService(WebsocketTTSService):
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
+        # Invalidate timing before awaiting the remote close so a late
+        # timestamp/flush event for this context cannot shift another context.
+        self._discard_context_timing(context_id)
         await self._maybe_push_fallback_text(context_id)
         await self._close_context(context_id)
         await super().on_audio_context_interrupted(context_id)
@@ -1003,7 +1051,7 @@ class InworldTTSService(WebsocketTTSService):
             await self.remove_active_audio_context()
             self._websocket = None
             self._sent_context_ids.clear()
-            self._reset_generation_timing()
+            self._timing_by_context_id.clear()
             self._context_texts.clear()
             self._contexts_with_timestamps.clear()
             await self._call_event_handler("on_disconnected")
@@ -1078,7 +1126,7 @@ class InworldTTSService(WebsocketTTSService):
             # timestampInfo is inside audioChunk
             timestamp_info = audio_chunk.get("timestampInfo")
             if timestamp_info:
-                word_times = self._calculate_word_times(timestamp_info)
+                word_times = self._calculate_word_times(timestamp_info, ctx_id)
                 if word_times:
                     if ctx_id:
                         self._contexts_with_timestamps.add(ctx_id)
@@ -1086,11 +1134,7 @@ class InworldTTSService(WebsocketTTSService):
 
             # Handle flush completion, which indicates the end of a generation
             if "flushCompleted" in result:
-                logger.trace(
-                    f"{self}: Generation completed - updating cumulative_time: "
-                    f"{self._cumulative_time} -> {self._generation_end_time}"
-                )
-                self._cumulative_time = self._generation_end_time
+                self._handle_flush_completed(ctx_id)
 
             # Handle context closed - context no longer exists on server
             if "contextClosed" in result:
@@ -1099,6 +1143,7 @@ class InworldTTSService(WebsocketTTSService):
                 await self.stop_ttfb_metrics()
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
+                self._discard_context_timing(ctx_id)
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
@@ -1224,7 +1269,7 @@ class InworldTTSService(WebsocketTTSService):
 
             try:
                 if not self.audio_context_available(context_id):
-                    self._reset_generation_timing()
+                    self._register_context_timing(context_id)
                     await self.create_audio_context(context_id)
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
