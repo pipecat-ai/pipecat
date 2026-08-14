@@ -45,6 +45,19 @@ class TestPcmToWav(unittest.TestCase):
         self.assertEqual(sample_rate, 16000)
         self.assertEqual(frames, b"")
 
+    def test_bytearray(self):
+        pcm = bytearray(b"\x01\x00" * 1600)
+        wav = pcm_to_wav(pcm, 16000)
+        _, _, _, frames = self._read_wav(wav)
+        self.assertEqual(frames, bytes(pcm))
+
+    def test_drops_partial_trailing_frame(self):
+        pcm = b"\x01\x00\x02\x00" * 100 + b"\x03\x00"  # stereo plus a lone sample
+        wav = pcm_to_wav(pcm, 24000, num_channels=2)
+        num_channels, _, _, frames = self._read_wav(wav)
+        self.assertEqual(num_channels, 2)
+        self.assertEqual(frames, pcm[:-2])
+
 
 if __name__ == "__main__":
     unittest.main()

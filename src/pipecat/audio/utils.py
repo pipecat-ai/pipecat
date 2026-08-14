@@ -108,12 +108,19 @@ def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
     return stereo.astype(np.int16).tobytes()
 
 
-def pcm_to_wav(pcm: bytes, sample_rate: int, num_channels: int = 1) -> bytes:
+def pcm_to_wav(
+    pcm: bytes | bytearray | memoryview, sample_rate: int, num_channels: int = 1
+) -> bytes:
     """Wrap raw PCM audio in a WAV container.
 
     The PCM data is expected to be signed 16-bit little-endian samples, which
     is what Pipecat pipelines carry (e.g. what ``AudioBufferProcessor`` emits
     from its audio event handlers).
+
+    Trailing bytes that don't complete a frame are dropped. Without this the
+    WAV header would report a frame count that excludes them while the data
+    chunk still carries them, so readers would disagree about the length and a
+    stereo stream truncated mid-frame would swap channels.
 
     Args:
         pcm: Raw PCM audio data (16-bit signed integers).
@@ -123,6 +130,11 @@ def pcm_to_wav(pcm: bytes, sample_rate: int, num_channels: int = 1) -> bytes:
     Returns:
         A complete in-memory WAV file as bytes.
     """
+    block_align = 2 * num_channels
+    remainder = len(pcm) % block_align
+    if remainder:
+        pcm = pcm[: len(pcm) - remainder]
+
     with io.BytesIO() as buffer:
         with wave.open(buffer, "wb") as wav_file:
             wav_file.setnchannels(num_channels)
