@@ -276,8 +276,8 @@ class LiveKitTransportClient:
                 # Increment disconnect counter if we successfully connected.
                 self._disconnect_counter += 1
 
-                self._participant_id = self.room.local_participant.sid
-                logger.info(f"Connected to {self._room_name}")
+                self._participant_id = self.room.local_participant.identity
+                logger.info(f"Connected to {self._room_name} as {self._participant_id}")
 
                 # Set up audio source and track
                 self._audio_source = rtc.AudioSource(
@@ -389,15 +389,15 @@ class LiveKitTransportClient:
         """Get list of participant IDs in the room.
 
         Returns:
-            List of participant IDs.
+            List of participant LiveKit identities.
         """
-        return [p.sid for p in self.room.remote_participants.values()]
+        return [p.identity for p in self.room.remote_participants.values()]
 
     async def get_participant_metadata(self, participant_id: str) -> dict:
         """Get metadata for a specific participant.
 
         Args:
-            participant_id: ID of the participant to get metadata for.
+            participant_id: LiveKit identity of the participant to get metadata for.
 
         Returns:
             Dictionary containing participant metadata.
@@ -405,11 +405,9 @@ class LiveKitTransportClient:
         participant = self.room.remote_participants.get(participant_id)
         if participant:
             return {
-                "id": participant.sid,
+                "id": participant.identity,
                 "name": participant.name,
                 "metadata": participant.metadata,
-                # TODO: not a LiveKit participant attribute; this raises if reached.
-                "is_speaking": participant.is_speaking,  # pyright: ignore[reportAttributeAccessIssue]
             }
         return {}
 
@@ -422,30 +420,33 @@ class LiveKitTransportClient:
         await self.room.local_participant.set_metadata(metadata)
 
     async def mute_participant(self, participant_id: str):
-        """Mute a specific participant's audio tracks.
+        """Stop receiving a specific participant's audio.
+
+        LiveKit doesn't let one participant force-mute another's microphone;
+        this unsubscribes the bot from their audio track instead.
 
         Args:
-            participant_id: ID of the participant to mute.
+            participant_id: LiveKit identity of the participant to stop
+                receiving audio from.
         """
         participant = self.room.remote_participants.get(participant_id)
         if participant:
-            # TODO: not a LiveKit participant attribute; this raises if reached.
-            for track in participant.tracks.values():  # pyright: ignore[reportAttributeAccessIssue]
-                if track.kind == "audio":
-                    await track.set_enabled(False)
+            for publication in participant.track_publications.values():
+                if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                    publication.set_subscribed(False)
 
     async def unmute_participant(self, participant_id: str):
-        """Unmute a specific participant's audio tracks.
+        """Resume receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to unmute.
+            participant_id: LiveKit identity of the participant to resume
+                receiving audio from.
         """
         participant = self.room.remote_participants.get(participant_id)
         if participant:
-            # TODO: not a LiveKit participant attribute; this raises if reached.
-            for track in participant.tracks.values():  # pyright: ignore[reportAttributeAccessIssue]
-                if track.kind == "audio":
-                    await track.set_enabled(True)
+            for publication in participant.track_publications.values():
+                if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                    publication.set_subscribed(True)
 
     # Wrapper methods for event handlers
     def _on_participant_connected_wrapper(self, participant: rtc.RemoteParticipant):
@@ -530,15 +531,15 @@ class LiveKitTransportClient:
     async def _async_on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle participant connected events."""
         logger.info(f"Participant connected: {participant.identity}")
-        await self._callbacks.on_participant_connected(participant.sid)
+        await self._callbacks.on_participant_connected(participant.identity)
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
-            await self._callbacks.on_first_participant_joined(participant.sid)
+            await self._callbacks.on_first_participant_joined(participant.identity)
 
     async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnected events."""
         logger.info(f"Participant disconnected: {participant.identity}")
-        await self._callbacks.on_participant_disconnected(participant.sid)
+        await self._callbacks.on_participant_disconnected(participant.identity)
         if len(self.get_participants()) == 0:
             self._other_participant_has_joined = False
 
@@ -552,36 +553,40 @@ class LiveKitTransportClient:
         assert self._task_manager is not None
 
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
+            logger.info(
+                f"Audio track subscribed: {track.sid} from participant {participant.identity}"
+            )
             # If the participant is re-publishing (e.g. mute/unmute cycle),
             # close + cancel the previous stream/task before replacing the
             # registry entry, so two producers never feed ``_audio_queue``
             # for the same participant.
-            await self._close_audio_stream(participant.sid)
-            self._audio_tracks[participant.sid] = track
+            await self._close_audio_stream(participant.identity)
+            self._audio_tracks[participant.identity] = track
             audio_stream = rtc.AudioStream(track)
             task = self._task_manager.create_task(
-                self._process_audio_stream(audio_stream, participant.sid),
+                self._process_audio_stream(audio_stream, participant.identity),
                 f"{self}::_process_audio_stream",
             )
-            self._audio_streams[participant.sid] = (audio_stream, task)
-            await self._callbacks.on_audio_track_subscribed(participant.sid)
+            self._audio_streams[participant.identity] = (audio_stream, task)
+            await self._callbacks.on_audio_track_subscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
+            logger.info(
+                f"Video track subscribed: {track.sid} from participant {participant.identity}"
+            )
             # Symmetric: clean up any prior video stream/task for the same
             # participant before replacing.
-            await self._close_video_stream(participant.sid)
-            self._video_tracks[participant.sid] = track
+            await self._close_video_stream(participant.identity)
+            self._video_tracks[participant.identity] = track
             # Only process video stream if video input is enabled to prevent
             # unbounded queue growth when there is no consumer for video frames.
             if self._params.video_in_enabled:
                 video_stream = rtc.VideoStream(track)
                 task = self._task_manager.create_task(
-                    self._process_video_stream(video_stream, participant.sid),
+                    self._process_video_stream(video_stream, participant.identity),
                     f"{self}::_process_video_stream",
                 )
-                self._video_streams[participant.sid] = (video_stream, task)
-            await self._callbacks.on_video_track_subscribed(participant.sid)
+                self._video_streams[participant.identity] = (video_stream, task)
+            await self._callbacks.on_video_track_subscribed(participant.identity)
 
     async def _async_on_track_unsubscribed(
         self,
@@ -592,11 +597,11 @@ class LiveKitTransportClient:
         """Handle track unsubscribed events."""
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            await self._close_audio_stream(participant.sid)
-            await self._callbacks.on_audio_track_unsubscribed(participant.sid)
+            await self._close_audio_stream(participant.identity)
+            await self._callbacks.on_audio_track_unsubscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            await self._close_video_stream(participant.sid)
-            await self._callbacks.on_video_track_unsubscribed(participant.sid)
+            await self._close_video_stream(participant.identity)
+            await self._callbacks.on_video_track_unsubscribed(participant.identity)
 
     async def _close_audio_stream(self, participant_id: str) -> None:
         """Close a participant's owned audio stream and cancel its producer task.
@@ -645,7 +650,7 @@ class LiveKitTransportClient:
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
         # LiveKit delivers packets sent by a server SDK with no participant.
-        sender = data.participant.sid if data.participant else None
+        sender = data.participant.identity if data.participant else None
         await self._callbacks.on_data_received(data.data, sender)
 
     async def _async_on_connected(self):
@@ -661,7 +666,7 @@ class LiveKitTransportClient:
     async def _async_on_sip_dtmf_received(self, dtmf: rtc.SipDTMF):
         """Handle inbound SIP DTMF events from LiveKit telephony."""
         participant = getattr(dtmf, "participant", None)
-        participant_id = getattr(participant, "sid", None) if participant else None
+        participant_id = getattr(participant, "identity", None) if participant else None
         data = {
             "tone": dtmf.digit,
             "digit": dtmf.digit,
@@ -1070,6 +1075,15 @@ class LiveKitTransport(BaseTransport):
     messaging, participant management, and room event handling for conversational
     AI applications.
 
+    Every ``participant_id`` surfaced by this transport (event args, frame
+    fields, ``get_participants()``, and the ``get_participant_metadata``/
+    ``mute_participant``/``unmute_participant`` methods) is the participant's
+    LiveKit *identity* (``rtc.Participant.identity``) — the value set when
+    minting its access token, and what LiveKit itself keys
+    ``room.remote_participants`` by and expects in ``destination_identities``.
+    It is not the participant's *SID* (``rtc.Participant.sid``), a
+    per-connection session id that changes on every reconnect.
+
     Event handlers available:
 
     - on_connected: Called when the bot connects to the room.
@@ -1224,7 +1238,7 @@ class LiveKitTransport(BaseTransport):
         """Get list of participant IDs in the room.
 
         Returns:
-            List of participant IDs.
+            List of participant LiveKit identities.
         """
         return self._client.get_participants()
 
@@ -1232,7 +1246,7 @@ class LiveKitTransport(BaseTransport):
         """Get metadata for a specific participant.
 
         Args:
-            participant_id: ID of the participant to get metadata for.
+            participant_id: LiveKit identity of the participant to get metadata for.
 
         Returns:
             Dictionary containing participant metadata.
@@ -1248,18 +1262,20 @@ class LiveKitTransport(BaseTransport):
         await self._client.set_participant_metadata(metadata)
 
     async def mute_participant(self, participant_id: str):
-        """Mute a specific participant's audio tracks.
+        """Stop receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to mute.
+            participant_id: LiveKit identity of the participant to stop
+                receiving audio from.
         """
         await self._client.mute_participant(participant_id)
 
     async def unmute_participant(self, participant_id: str):
-        """Unmute a specific participant's audio tracks.
+        """Resume receiving a specific participant's audio.
 
         Args:
-            participant_id: ID of the participant to unmute.
+            participant_id: LiveKit identity of the participant to resume
+                receiving audio from.
         """
         await self._client.unmute_participant(participant_id)
 
@@ -1297,13 +1313,6 @@ class LiveKitTransport(BaseTransport):
     async def _on_audio_track_subscribed(self, participant_id: str):
         """Handle audio track subscribed events."""
         await self._call_event_handler("on_audio_track_subscribed", participant_id)
-        participant = self._client.room.remote_participants.get(participant_id)
-        if participant:
-            # TODO: not a LiveKit participant attribute; this raises if reached.
-            for publication in participant.audio_tracks.values():  # pyright: ignore[reportAttributeAccessIssue]
-                self._client._on_track_subscribed_wrapper(
-                    publication.track, publication, participant
-                )
 
     async def _on_audio_track_unsubscribed(self, participant_id: str):
         """Handle audio track unsubscribed events."""
@@ -1312,13 +1321,6 @@ class LiveKitTransport(BaseTransport):
     async def _on_video_track_subscribed(self, participant_id: str):
         """Handle video track subscribed events."""
         await self._call_event_handler("on_video_track_subscribed", participant_id)
-        participant = self._client.room.remote_participants.get(participant_id)
-        if participant:
-            # TODO: not a LiveKit participant attribute; this raises if reached.
-            for publication in participant.video_tracks.values():  # pyright: ignore[reportAttributeAccessIssue]
-                self._client._on_track_subscribed_wrapper(
-                    publication.track, publication, participant
-                )
 
     async def _on_video_track_unsubscribed(self, participant_id: str):
         """Handle video track unsubscribed events."""
