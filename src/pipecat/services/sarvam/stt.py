@@ -1410,7 +1410,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         # diffs against a stale value and skips an update the server needs.
         self._settings.apply_update(self.Settings(**fields))
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply runtime settings and send supported fields via ``config.update``."""
         delta = self._with_derived_language_code(delta)
         proposed = self._settings.copy()
@@ -1441,13 +1441,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._send_config_update(payload)
         return changed
 
-    @staticmethod
-    def _with_derived_language_code(delta: Settings) -> Settings:
+    def _with_derived_language_code(self, delta: STTSettings) -> Settings:
         """Fill in ``language_code`` from a ``language`` delta.
 
-        Mirrors the constructor: an explicit ``language_code`` wins, since it
-        also expresses ``auto``, which has no :class:`Language` equivalent.
+        A caller can send the base :class:`STTSettings`, which carries
+        ``language`` but none of the Sarvam fields, so the delta is widened to
+        these settings first. Mirrors the constructor: an explicit
+        ``language_code`` wins, since it also expresses ``auto``, which has no
+        :class:`Language` equivalent.
         """
+        if not isinstance(delta, self.Settings):
+            delta = self.Settings.from_mapping(delta.given_fields())
         if is_given(delta.language_code):
             return delta
         language = _as_language(delta.language)

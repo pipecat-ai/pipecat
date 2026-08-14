@@ -33,6 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.stt import SarvamRealtimeSTTService, SarvamSTTService
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -577,6 +578,24 @@ async def test_language_delta_is_sent_as_language_code():
     service._websocket = _FakeWebsocket()
 
     await service._update_settings(SarvamRealtimeSTTService.Settings(language=Language.HI_IN))
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "language_code": "hi-IN"})
+    ]
+    assert service._settings.language_code == "hi-IN"
+
+
+@pytest.mark.asyncio
+async def test_base_settings_delta_still_derives_a_language_code():
+    """`STTUpdateSettingsFrame(delta=STTSettings(...))` carries no Sarvam fields.
+
+    Widening the delta is what lets a caller who never imports the Sarvam
+    settings change the language and have it reach the server.
+    """
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(STTSettings(language=Language.HI_IN))
 
     assert service._websocket.sent == [
         json.dumps({"event": "config.update", "language_code": "hi-IN"})
