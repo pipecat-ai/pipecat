@@ -151,6 +151,9 @@ def _append_result(
     The line is the machine-readable counterpart to the printed tally: enough to
     compute pass rates and group failures by :attr:`EvalAssertionFailure.kind`
     without parsing logs, plus paths to the artifacts for anything deeper.
+    ``turns`` carries each turn's status, so a scenario scored a turn at a time
+    (``stop_on_failure: false``) yields a per-turn rate here too; the failures
+    themselves stay in the flat ``failures`` list, keyed back by ``turn_index``.
     ``events_seen`` is carried only for runs that did not pass — it is the record
     of what the bot actually did, which is what a failure gets diagnosed from, and
     attaching it to passes would dwarf the file for no benefit.
@@ -181,6 +184,10 @@ def _append_result(
                 "reason": f.reason,
             }
             for f in (result.failures if result else [])
+        ],
+        "turns": [
+            {"turn_index": t.turn_index, "status": t.status, "duration_ms": t.duration_ms}
+            for t in (result.turns if result else [])
         ],
         "artifacts": artifacts,
     }

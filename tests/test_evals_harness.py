@@ -404,6 +404,7 @@ class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.skipped)
         self.assertFalse(result.passed)
         self.assertIn("response", result.skipped)
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
 
 
 class TestTextContainsResolution(unittest.TestCase):
@@ -846,6 +847,8 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # Only turn 0 is reported, and turn 1 is never sent.
         self.assertEqual([f.turn_index for f in result.failures], [0])
         self.assertEqual(self._sent_texts(), ["first"])
+        # The turn the run stopped short of is not_run, not a pass.
+        self.assertEqual([t.status for t in result.turns], ["failed", "not_run"])
 
     async def test_stop_on_failure_false_drives_remaining_turns(self):
         scenario = self._two_turn_first_fails(stop_on_failure=False)
@@ -855,6 +858,28 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual([f.turn_index for f in result.failures], [0])
         self.assertEqual(self._sent_texts(), ["first", "second"])
+        self.assertEqual([t.status for t in result.turns], ["failed", "passed"])
+
+    async def test_turn_results_carry_their_own_failures(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        failed, passed = result.turns
+        self.assertEqual([f.kind for f in failed.failures], ["text_mismatch"])
+        self.assertEqual(passed.failures, [])
+        # Every turn's failures, in order, are the flat list on the result.
+        self.assertEqual([f for t in result.turns for f in t.failures], result.failures)
+
+    async def test_turn_results_are_timed(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        # A driven turn is timed; one that never ran has no duration to report.
+        self.assertGreater(result.turns[0].duration_ms, 0)
+        self.assertGreater(result.turns[1].duration_ms, 0)
+
+        stopping = await EvalSession.from_scenario(
+            self._two_turn_first_fails(stop_on_failure=True), self.server.url
+        ).run()
+        self.assertEqual(stopping.turns[1].duration_ms, 0)
 
     async def test_missing_event_times_out(self):
         scenario = EvalScenario(
@@ -951,6 +976,8 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.failures), 1)
         self.assertEqual(result.failures[0].event_name, "<connect>")
         self.assertIn("failed to connect", result.failures[0].reason)
+        # A run that never reached the bot scored nothing.
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
 
     async def test_unexpected_error_surfaced_not_swallowed(self):
         # A sub-pipeline that fails to start (e.g. a local model thrashing under
@@ -979,6 +1006,8 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # The full traceback is preserved in the debug trace (saved to <bot>.eval.log).
         self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
+        # The raise came before any turn started, so none of them are scored.
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
 
     async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))

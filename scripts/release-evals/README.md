@@ -135,10 +135,11 @@ A repeated sweep always exits 0: it reports a rate, and what rate is acceptable 
 your policy, not the harness's.
 
 Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
-its outcome, its failures (each with a `kind`), and paths to its artifacts —
-appended as each run finishes, so an interrupted sweep keeps everything already
-done. It's the machine-readable counterpart to the printed tally; group and count
-it however your question needs. Runs that didn't pass also carry `events_seen`, the
+its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
+status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
+and paths to its artifacts — appended as each run finishes, so an interrupted sweep
+keeps everything already done. It's the machine-readable counterpart to the printed
+tally; group and count it however your question needs. Runs that didn't pass also carry `events_seen`, the
 record of what the bot actually did, which is usually where a root cause is found.
 
 ### Concurrency and GPU

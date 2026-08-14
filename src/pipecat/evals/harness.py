@@ -67,6 +67,10 @@ Example::
     else:
         for f in result.failures:
             print(f"  {f}")
+
+    # Per-turn outcomes, for a scenario scored a turn at a time.
+    scored = [t for t in result.turns if t.status != "not_run"]
+    print(f"{sum(1 for t in scored if t.status == 'passed')}/{len(scored)} turns")
 """
 
 import asyncio
@@ -137,6 +141,11 @@ FAILURE_KINDS = (
     "harness_error",  # the harness itself raised (sub-pipeline, judge, ...)
 )
 
+# Statuses for :attr:`EvalTurnResult.status`. ``not_run`` is distinct from a pass:
+# a run that stops at the first failure leaves its later turns undriven, and
+# counting those as passes would inflate any rate computed from the result.
+TURN_STATUSES = ("passed", "failed", "not_run")
+
 
 @dataclass
 class EvalAssertionFailure:
@@ -169,6 +178,31 @@ class EvalAssertionFailure:
 
 
 @dataclass
+class EvalTurnResult:
+    """Outcome of one turn within a scenario run.
+
+    The turn is the unit a run is scored by: a turn's expectations share a single
+    deadline anchored at the send and stop at the first one to time out, so they
+    are not scored independently of each other.
+
+    Parameters:
+        turn_index: Index of the turn in the scenario.
+        status: One of ``TURN_STATUSES``. ``not_run`` means the run ended before
+            reaching this turn — see
+            :attr:`~pipecat.evals.scenario.EvalScenario.stop_on_failure`.
+        failures: The turn's failed assertions, in order; empty unless ``status``
+            is ``failed``.
+        duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the
+            turn was not run.
+    """
+
+    turn_index: int
+    status: str = "not_run"
+    failures: list[EvalAssertionFailure] = field(default_factory=list)
+    duration_ms: int = 0
+
+
+@dataclass
 class EvalResult:
     """Outcome of running a scenario in an :class:`EvalSession`.
 
@@ -176,6 +210,10 @@ class EvalResult:
         scenario_name: Name of the scenario that was run.
         passed: Whether every assertion passed.
         failures: The assertions that failed, in order.
+        turns: One :class:`EvalTurnResult` per scenario turn, in order — what a
+            per-turn pass rate is computed from, without needing the scenario
+            file for a denominator. ``failures`` is these turns' failures
+            flattened, plus any that belong to no turn (a failed connect).
         duration_ms: Wall-clock time the run took, in milliseconds.
         events_seen: Every friendly event observed, for diagnostics.
         debug_log: Timestamped trace of the harness's own decisions (events
@@ -189,6 +227,7 @@ class EvalResult:
     scenario_name: str
     passed: bool
     failures: list[EvalAssertionFailure] = field(default_factory=list)
+    turns: list[EvalTurnResult] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
@@ -427,6 +466,11 @@ class EvalSession:
         for line in describe_config(self._scenario).splitlines():
             self._debug(line)
 
+        # One record per scenario turn, filled in as the turns are driven. They
+        # start as not_run and stay that way on every path that ends the run
+        # early, so the result always says which turns were actually scored.
+        turns = [EvalTurnResult(turn_index=i) for i in range(len(self._scenario.turns))]
+
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
         # unreachable: EvalScenario.load resolves `response` to llm_response in text
@@ -437,6 +481,7 @@ class EvalSession:
             return EvalResult(
                 scenario_name=self._scenario.name,
                 passed=False,
+                turns=turns,
                 skipped=reason,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
@@ -468,6 +513,7 @@ class EvalSession:
                         kind="connect_failed",
                     )
                 ],
+                turns=turns,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
@@ -513,7 +559,12 @@ class EvalSession:
                 for turn_idx, turn in enumerate(self._scenario.turns):
                     self._current_turn = turn_idx
                     self._debug(f"--- turn {turn_idx}: {turn.user!r}")
+                    turn_started = time.monotonic()
                     turn_failures = await self._run_turn(turn, turn_idx)
+                    record = turns[turn_idx]
+                    record.status = "failed" if turn_failures else "passed"
+                    record.failures = turn_failures
+                    record.duration_ms = int((time.monotonic() - turn_started) * 1000)
                     failures.extend(turn_failures)
                     if turn_failures:
                         # By default a failed turn ends the scenario: it leaves the
@@ -538,15 +589,21 @@ class EvalSession:
             self._debug(f"error: {type(e).__name__}: {e}")
             for line in traceback.format_exc().rstrip().splitlines():
                 self._debug(line)
-            failures.append(
-                EvalAssertionFailure(
-                    turn_index=self._current_turn,
-                    expectation_index=-1,
-                    event_name="<error>",
-                    reason=f"{type(e).__name__}: {e}",
-                    kind="harness_error",
-                )
+            failure = EvalAssertionFailure(
+                turn_index=self._current_turn,
+                expectation_index=-1,
+                event_name="<error>",
+                reason=f"{type(e).__name__}: {e}",
+                kind="harness_error",
             )
+            failures.append(failure)
+            # The raise happened either inside a turn — which is that turn's
+            # failure — or before any of them started (a sub-pipeline that never
+            # came up), where _current_turn is still -1 and every turn is not_run.
+            if 0 <= self._current_turn < len(turns):
+                record = turns[self._current_turn]
+                record.status = "failed"
+                record.failures.append(failure)
         finally:
             if reader_task is not None:
                 reader_task.cancel()
@@ -577,6 +634,7 @@ class EvalSession:
             scenario_name=self._scenario.name,
             passed=not failures,
             failures=failures,
+            turns=turns,
             duration_ms=int((time.monotonic() - started) * 1000),
             events_seen=self._events_seen,
             debug_log=self._debug_log,
