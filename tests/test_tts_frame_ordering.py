@@ -2413,28 +2413,27 @@ async def test_aggregated_anchor_pts_precedes_its_progress_per_context():
             f"{first_progress_pts} so it is delivered before its own progress"
         )
 
+
 @pytest.mark.asyncio
-async def test_token_streaming_inline_tts_markup_tracks_word_by_word():
+async def test_sentence_inline_tts_markup_tracks_word_by_word():
     """A synthesis tag inline in the source text must not cost the sentence its
     word-level tracking.
 
-    The segment map finds markup by diffing the user-facing text against the TTS
-    text. With no transform in play the two are the same string, so stripping the
-    markup from the user-facing side is what leaves the diff something to isolate;
-    without it the whole sentence is one atomic segment, every word is suppressed
-    from the context, and the sentence produces no progress until it completes.
+    Only the tagged span is unalignable — the TTS reports "1234." for it, so it can
+    only be committed whole. The words around it are byte-identical on both sides
+    and must still advance progress one at a time.
     """
-    tts = _MockTokenStreamingWSTTSService(
+    tts = _MockPerCallWordTimestampWSTTSService(
+        # One run_tts call carries the whole sentence, so all of its words arrive
+        # from this single word-time list.
         # Cartesia echoes the tag block as one token; the service strips it to "1234.".
         word_times_per_call=[
-            [("I", 0.0)],
-            [("love", 0.2)],
-            [("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
+            [("I", 0.0), ("love", 0.2), ("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
         ],
-        text_aggregation_mode=TextAggregationMode.TOKEN,
+        text_aggregation_mode=TextAggregationMode.SENTENCE,
     )
     tts._text_aggregator = SkipTagsAggregator(
-        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.TOKEN
+        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.SENTENCE
     )
     frames_received = await run_test(
         tts,
@@ -2448,6 +2447,7 @@ async def test_token_streaming_inline_tts_markup_tracks_word_by_word():
         ],
     )
     down = frames_received[0]
+    sentence = "I love to count <spell>1234</spell>."
 
     progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
     assert [f.accumulated_text for f in progress] == [
@@ -2455,17 +2455,24 @@ async def test_token_streaming_inline_tts_markup_tracks_word_by_word():
         "I love",
         "I love to",
         "I love to count",
-        "I love to count 1234.",
+        sentence,
     ]
 
     anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
     assert len(anchors) == 1
-    assert anchors[0].text == "I love to count 1234.", "the anchor must carry no synthesis tags"
+    assert anchors[0].text == sentence
 
-    context_frames = [f for f in down if isinstance(f, TTSTextFrame) and f.append_to_context]
-    assert all("<" not in f.text for f in context_frames), (
-        f"synthesis tags leaked into the context: {[f.text for f in context_frames]}"
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == ["I", "love", "to", "count", "1234."]
+    assert all(f.append_to_context for f in word_frames), (
+        "only the tagged span is atomic, so every word reaches the context: "
+        f"{[(f.text, f.append_to_context) for f in word_frames]}"
     )
+    assert word_frames[-1].raw_text == "<spell>1234</spell>.", (
+        "the word completing the tagged span must commit it with its tag, got "
+        f"{word_frames[-1].raw_text!r}"
+    )
+
 
 if __name__ == "__main__":
     unittest.main()
