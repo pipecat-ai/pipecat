@@ -64,6 +64,7 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 # ---------------------------------------------------------------------------
 # Test-only frame
@@ -2412,6 +2413,59 @@ async def test_aggregated_anchor_pts_precedes_its_progress_per_context():
             f"{first_progress_pts} so it is delivered before its own progress"
         )
 
+@pytest.mark.asyncio
+async def test_token_streaming_inline_tts_markup_tracks_word_by_word():
+    """A synthesis tag inline in the source text must not cost the sentence its
+    word-level tracking.
+
+    The segment map finds markup by diffing the user-facing text against the TTS
+    text. With no transform in play the two are the same string, so stripping the
+    markup from the user-facing side is what leaves the diff something to isolate;
+    without it the whole sentence is one atomic segment, every word is suppressed
+    from the context, and the sentence produces no progress until it completes.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        # Cartesia echoes the tag block as one token; the service strips it to "1234.".
+        word_times_per_call=[
+            [("I", 0.0)],
+            [("love", 0.2)],
+            [("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
+        ],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    tts._text_aggregator = SkipTagsAggregator(
+        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.TOKEN
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame(text="I"),
+            TextFrame(text=" love"),
+            TextFrame(text=" to count <spell>"),
+            TextFrame(text="1234</spell>."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+    down = frames_received[0]
+
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert [f.accumulated_text for f in progress] == [
+        "I",
+        "I love",
+        "I love to",
+        "I love to count",
+        "I love to count 1234.",
+    ]
+
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    assert len(anchors) == 1
+    assert anchors[0].text == "I love to count 1234.", "the anchor must carry no synthesis tags"
+
+    context_frames = [f for f in down if isinstance(f, TTSTextFrame) and f.append_to_context]
+    assert all("<" not in f.text for f in context_frames), (
+        f"synthesis tags leaked into the context: {[f.text for f in context_frames]}"
+    )
 
 if __name__ == "__main__":
     unittest.main()
