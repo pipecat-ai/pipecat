@@ -16,7 +16,6 @@ import pytest
 pytest.importorskip("mcp")
 
 from pipecat.services.keenable.search import (  # noqa: E402
-    _SERVER_FETCH_TOOL,
     _SERVER_SEARCH_TOOL,
     _SERVER_URL,
     KeenableWebSearch,
@@ -66,9 +65,8 @@ class TestKeenableWebSearchConfig(unittest.TestCase):
     def test_wires_mcp_client_for_keenable_server(self):
         search, client = self._build()
         self.assertEqual(client.server_params.url, _SERVER_URL)
-        self.assertEqual(
-            client.client_kwargs["tools_filter"], [_SERVER_SEARCH_TOOL, _SERVER_FETCH_TOOL]
-        )
+        # Every tool the server advertises is exposed.
+        self.assertNotIn("tools_filter", client.client_kwargs)
 
     def test_mode_pinned_via_tools_arguments(self):
         search, client = self._build(api_key="k", mode="realtime")

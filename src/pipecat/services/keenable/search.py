@@ -49,9 +49,8 @@ SearchMode = Literal["pro", "realtime"]
 
 _SERVER_URL = "https://api.keenable.ai/mcp"
 
-# The tools on Keenable's MCP server that this wrapper exposes.
+# The search tool on Keenable's MCP server, whose mode this wrapper pins.
 _SERVER_SEARCH_TOOL = "search_web_pages"
-_SERVER_FETCH_TOOL = "fetch_page_content"
 
 
 class KeenableWebSearch:
@@ -59,7 +58,7 @@ class KeenableWebSearch:
 
     A thin configuration wrapper around :class:`~pipecat.services.mcp_service.MCPClient`
     for Keenable's hosted MCP server. :meth:`tools` connects to the server and
-    returns its ``search_web_pages`` and ``fetch_page_content`` tool schemas with
+    returns its tool schemas — searching the web and reading a page — with
     handlers attached, so the LLM registers them automatically when the context's
     tools are advertised.
 
@@ -94,19 +93,17 @@ class KeenableWebSearch:
                 url=_SERVER_URL,
                 headers=self._build_headers(),
             ),
-            tools_filter=[_SERVER_SEARCH_TOOL, _SERVER_FETCH_TOOL],
             tools_arguments={_SERVER_SEARCH_TOOL: {"mode": self._mode}},
         )
 
     async def tools(self) -> ToolsSchema:
-        """Get the search and page-fetch tool schemas, handlers attached.
+        """Get Keenable's tool schemas, handlers attached.
 
         Connects to Keenable's server on first use. Pass the result to an
         ``LLMContext`` and the LLM auto-registers the handlers.
 
         Returns:
-            A ToolsSchema containing the server's ``search_web_pages`` and
-            ``fetch_page_content`` tools.
+            A ToolsSchema containing every tool the server advertises.
         """
         return await self._mcp.tools()
 
