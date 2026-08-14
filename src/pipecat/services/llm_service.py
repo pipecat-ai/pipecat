@@ -352,9 +352,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self._resolve_adapter_class()())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
-        # Objects that own registered tool handlers and opted into having their
-        # close() called at service teardown (see _record_tool_session_owner).
-        self._tool_session_owners: list[Any] = []
+        # Cleanup callables carried by registered tool handlers, awaited at
+        # service teardown (see _record_tool_cleanup).
+        self._tool_cleanups: list[Callable[[], Awaitable[None]]] = []
         # Names we've already warned about for a redundant manual registration
         # (an explicit register_function call for a tool whose advertised
         # FunctionSchema already carries a handler), so the warning fires once
@@ -507,16 +507,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     async def cleanup(self):
         """Release LLM service resources at teardown.
 
-        Besides this service's own tasks, closes any tool-session owners
-        (e.g. MCP clients) whose registered handlers opted into automatic
-        close at teardown.
+        Besides this service's own tasks, runs any cleanup callables carried by
+        registered tool handlers (e.g. closing an MCP client's connection).
         """
         await super().cleanup()
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
-        await self._close_tool_session_owners()
+        await self._run_tool_cleanups()
 
     def _warn_turn_completion_settings_are_strategy_owned(self):
         """Warn that the turn-completion settings belong to the user turn strategy.
@@ -893,34 +892,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 function_name, timeout_secs, handler, "_pipecat_timeout_secs", default=None
             ),
         )
-        self._record_tool_session_owner(handler)
+        self._record_tool_cleanup(handler)
 
-    def _record_tool_session_owner(self, handler: Any) -> None:
-        """Track handler owners that opted into close() at service teardown.
+    def _record_tool_cleanup(self, handler: Any) -> None:
+        """Track cleanup work a registered tool handler asks to run at teardown.
 
-        An object that owns registered tool handlers as bound methods (e.g.
-        ``MCPClient``) can set ``_pipecat_close_on_teardown = True`` to have its
-        ``close()`` awaited when this service is cleaned up — the hook the
-        pipeline guarantees to run at teardown — so its session is released
-        without the developer wiring close() manually. Owners are kept for the
-        service's lifetime even if their tools are later unregistered: the
-        session may outlive any one tool's advertisement, and close() is
-        expected to be idempotent.
+        A handler backed by a resource that outlives the call — an MCP server
+        connection, for instance — can carry a zero-argument async callable
+        under ``_pipecat_cleanup``. It is awaited when this service is cleaned
+        up, the hook the pipeline guarantees to run at teardown, so the resource
+        is released without the developer wiring teardown manually. Handlers
+        sharing a resource carry the same callable, recorded once.
+
+        Cleanups are kept for the service's lifetime even if their handlers are
+        later unregistered: the resource may outlive any one tool's
+        advertisement, and cleanups are expected to be idempotent.
         """
-        owner = getattr(handler, "__self__", None)
-        if owner is None or not getattr(owner, "_pipecat_close_on_teardown", False):
+        cleanup = getattr(handler, "_pipecat_cleanup", None)
+        if cleanup is None or cleanup in self._tool_cleanups:
             return
-        if owner not in self._tool_session_owners:
-            self._tool_session_owners.append(owner)
+        self._tool_cleanups.append(cleanup)
 
-    async def _close_tool_session_owners(self) -> None:
-        """Close recorded tool-session owners; errors are logged, not raised."""
-        owners, self._tool_session_owners = self._tool_session_owners, []
-        for owner in owners:
+    async def _run_tool_cleanups(self) -> None:
+        """Run recorded tool cleanups; errors are logged, not raised."""
+        cleanups, self._tool_cleanups = self._tool_cleanups, []
+        for cleanup in cleanups:
             try:
-                await owner.close()
+                await cleanup()
             except Exception as e:
-                logger.error(f"{self} error closing tool session owner {owner}: {e}")
+                logger.error(f"{self} error running tool cleanup {cleanup}: {e}")
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "

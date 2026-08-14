@@ -8,7 +8,7 @@
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any, TypeAlias
 
@@ -34,6 +34,37 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
+
+
+class _ToolWrapperWithCleanup:
+    """Tool call wrapper that carries the cleanup releasing its backing resource.
+
+    The LLM service registers this wrapper like any other handler and awaits
+    ``_pipecat_cleanup`` when the service is cleaned up, so a resource that
+    outlives individual calls — an MCP server connection — is released at
+    pipeline teardown without the developer wiring teardown manually. A class
+    rather than a closure so the cleanup is a declared attribute.
+    """
+
+    def __init__(
+        self,
+        call_tool: Callable[[FunctionCallParams], Awaitable[None]],
+        cleanup: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Initialize the wrapper.
+
+        Args:
+            call_tool: Invoked for each tool call.
+            cleanup: Awaited once at LLM service teardown. Expected to be
+                idempotent, and equal across wrappers sharing a resource so the
+                service records it once.
+        """
+        self._call_tool = call_tool
+        self._pipecat_cleanup = cleanup
+
+    async def __call__(self, params: FunctionCallParams) -> None:
+        """Handle a tool call."""
+        await self._call_tool(params)
 
 
 class MCPClient(BaseObject):
@@ -63,11 +94,6 @@ class MCPClient(BaseObject):
         TypeError: If server_params is not a supported parameter type.
     """
 
-    # Ask the LLM service to close() this client when the service is cleaned up
-    # at pipeline teardown, so the connection is released without the developer
-    # wiring close() manually.
-    _pipecat_close_on_teardown = True
-
     def __init__(
         self,
         server_params: ServerParameters,
@@ -96,6 +122,9 @@ class MCPClient(BaseObject):
         self._tools_arguments = tools_arguments or {}
         self._exit_stack: AsyncExitStack | None = None
         self._active_session: ClientSession | None = None
+        # One wrapper shared by every tool this client advertises, carrying the
+        # cleanup that releases the connection.
+        self._tool_wrapper_with_cleanup = _ToolWrapperWithCleanup(self._tool_wrapper, self.close)
         # The MCP session is anyio-task-bound: it must be opened and closed in the
         # same task. start() and close() can be called from different tasks, so a
         # dedicated owner task (_run_session) holds the session open and tears it
@@ -247,7 +276,7 @@ class MCPClient(BaseObject):
         session = self._ensure_connected()
         tools_schema = await self._list_tools_helper(session)
         for function_schema in tools_schema.standard_tools:
-            llm.register_function(function_schema.name, self._tool_wrapper)
+            llm.register_function(function_schema.name, self._tool_wrapper_with_cleanup)
         return tools_schema
 
     def _ensure_connected(self) -> ClientSession:
@@ -295,7 +324,7 @@ class MCPClient(BaseObject):
             llm: The Pipecat LLM service to register tools with.
         """
         for function_schema in tools_schema.standard_tools:
-            llm.register_function(function_schema.name, self._tool_wrapper)
+            llm.register_function(function_schema.name, self._tool_wrapper_with_cleanup)
 
     def _convert_mcp_schema_to_pipecat(
         self,
@@ -447,7 +476,7 @@ class MCPClient(BaseObject):
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
                     {"description": tool.description, "input_schema": tool.inputSchema},
-                    handler=self._tool_wrapper if attach_handlers else None,
+                    handler=self._tool_wrapper_with_cleanup if attach_handlers else None,
                 )
 
                 # Add to list of schemas
