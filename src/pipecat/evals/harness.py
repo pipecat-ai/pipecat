@@ -33,6 +33,10 @@ scenario ``event:``             RTVI server message(s)
 ``response``                    local-STT transcription of the bot's actual audio
                                 (audio modality only); ``llm_response`` in text modality
 ``function_call``               ``llm-function-call-in-progress``
+``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
+                                ``tool_call_id`` and ``cancelled``, so a scenario
+                                can tell work that was stopped from work that
+                                finished on its own
 ==========================      ==============================================
 
 Matching semantics: expected events must appear in the specified order, but
@@ -78,6 +82,7 @@ from websockets.asyncio.client import ClientConnection
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import (
+    FUNCTION_CALL_EVENTS,
     EvalExpectation,
     EvalScenario,
     EvalSendAfter,
@@ -614,7 +619,7 @@ class EvalSession:
         needs_name = False
         for turn in self._scenario.turns:
             for exp in turn.expect:
-                if exp.event != "function_call":
+                if exp.event not in FUNCTION_CALL_EVENTS:
                     continue
                 # name/args live in exp.calls (the parser normalizes the single
                 # name:/args: shorthand into it too).
@@ -891,6 +896,20 @@ class EvalSession:
                         "type": "function_call",
                         "name": data.get("function_name"),
                         "args": dict(data.get("arguments") or {}),
+                    }
+                ]
+            case "llm-function-call-stopped":
+                # How the call ended is the assertable part, so `cancelled` sits
+                # in `args` alongside the id: a scenario matches both through the
+                # same `calls:`/`args:` check a function_call uses.
+                return [
+                    {
+                        "type": "function_call_stopped",
+                        "name": data.get("function_name"),
+                        "args": {
+                            "tool_call_id": data.get("tool_call_id"),
+                            "cancelled": data.get("cancelled"),
+                        },
                     }
                 ]
             case _:
@@ -1196,10 +1215,10 @@ class EvalSession:
             expectation.text_contains is not None or expectation.eval is not None
         )
         if not aggregates:
-            if expectation.event == "function_call":
-                # A function_call expectation holds the set of calls the turn should
-                # make; it completes only when all are found, in any order (a
-                # response arriving doesn't short-circuit it).
+            if expectation.event in FUNCTION_CALL_EVENTS:
+                # A call expectation holds the set of calls the turn should make;
+                # it completes only when all are found, in any order (a response
+                # arriving doesn't short-circuit it).
                 return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
             self._debug(f"match: waiting for {expectation.event!r}")
             event = await self._next_matching_event(expectation.event, deadline)
@@ -1344,40 +1363,64 @@ class EvalSession:
 
         matched: list[str] = []
         for spec in expectation.calls or []:
+            want = spec.args or None
             self._debug(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
             try:
-                event = await self._next_function_call(spec.name, deadline)
+                event = await self._next_function_call(spec.name, deadline, want, expectation.event)
             except TimeoutError:
-                want = spec.name or "any function"
-                seen = ", ".join(matched) if matched else "none"
-                return fail(
-                    f"function call {want!r} not seen (matched: {seen})", "missing_function_call"
-                )
-            if spec.args:
-                actual = event.get("args") or {}
-                missing = {k: v for k, v in spec.args.items() if actual.get(k) != v}
-                if missing:
+                # A call of the right name with the wrong arguments is a different
+                # failure from the call never being made, and the bot's arguments
+                # are what the reader needs to see.
+                near = [
+                    ev.get("args")
+                    for ev in self._pending_function_calls
+                    if ev.get("type") == expectation.event
+                    and (spec.name is None or ev.get("name") == spec.name)
+                ]
+                if want is not None and near:
                     return fail(
-                        f"call {event.get('name')!r} args {actual!r} missing expected {missing!r}",
+                        f"no {spec.name!r} call had args {want!r} (saw {near!r})",
                         "function_args_mismatch",
                     )
+                missing = spec.name or "any function"
+                seen = ", ".join(matched) if matched else "none"
+                return fail(
+                    f"function call {missing!r} not seen (matched: {seen})",
+                    "missing_function_call",
+                )
             matched.append(str(event.get("name")))
 
         self._last_match_text = ", ".join(matched) or "function call"
         return None
 
-    async def _next_function_call(self, name: str | None, deadline: float) -> dict:
-        """Return a ``function_call`` event with the given ``name`` (``None`` = any).
+    async def _next_function_call(
+        self,
+        name: str | None,
+        deadline: float,
+        args: dict | None = None,
+        event_type: str = "function_call",
+    ) -> dict:
+        """Return a call event of ``event_type`` matching ``name`` (``None`` = any) and ``args``.
 
         A turn's function calls can arrive in any order, so match against the
         per-turn buffer of calls seen but not yet claimed, plus newly arriving
-        ones; a call with a different name is buffered so another expected call can
-        claim it. Other event types are dropped, as in :meth:`_next_matching_event`.
-        Raises TimeoutError once ``deadline`` passes.
+        ones; a call that doesn't match is buffered so another expected call can
+        claim it. ``args`` is a subset check and participates in matching, so the
+        turn is satisfied by any call matching both name and arguments rather
+        than by the first to share the name — which is what lets a call the LLM
+        corrects and repeats satisfy it. Other event types are dropped, as in
+        :meth:`_next_matching_event`. Raises TimeoutError once ``deadline`` passes.
         """
 
         def matches(ev: dict) -> bool:
-            return name is None or ev.get("name") == name
+            if ev.get("type") != event_type:
+                return False
+            if name is not None and ev.get("name") != name:
+                return False
+            if args is None:
+                return True
+            actual = ev.get("args") or {}
+            return all(actual.get(k) == v for k, v in args.items())
 
         for i, ev in enumerate(self._pending_function_calls):
             if matches(ev):
@@ -1391,7 +1434,7 @@ class EvalSession:
             async with asyncio.timeout(remaining):
                 event = await self._queue.get()
 
-            if event.get("type") != "function_call":
+            if event.get("type") not in FUNCTION_CALL_EVENTS:
                 continue
             if matches(event):
                 return event
