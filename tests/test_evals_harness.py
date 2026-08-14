@@ -800,6 +800,62 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.failures), 1)
         self.assertIn("does not contain", result.failures[0].reason)
 
+    def _two_turn_first_fails(self, *, stop_on_failure: bool) -> EvalScenario:
+        """A scenario whose first turn fails on content and whose second passes."""
+        self.server.on_text(
+            "first",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        self.server.on_text(
+            "second",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Berlin"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        return EvalScenario(
+            name="stop",
+            bot_audio=False,
+            stop_on_failure=stop_on_failure,
+            turns=[
+                EvalTurn(
+                    user="first",
+                    expect=[
+                        EvalExpectation(event="llm_response", within_ms=300, text_contains="London")
+                    ],
+                ),
+                EvalTurn(
+                    user="second",
+                    expect=[
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="Berlin"
+                        )
+                    ],
+                ),
+            ],
+        )
+
+    def _sent_texts(self) -> list[str]:
+        return [m["data"]["content"] for m in self.server.received if m.get("type") == "send-text"]
+
+    async def test_failed_turn_stops_scenario_by_default(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=True)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertFalse(result.passed)
+        # Only turn 0 is reported, and turn 1 is never sent.
+        self.assertEqual([f.turn_index for f in result.failures], [0])
+        self.assertEqual(self._sent_texts(), ["first"])
+
+    async def test_stop_on_failure_false_drives_remaining_turns(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        # The run still fails, but every turn was driven and the passing turn
+        # after the failure adds no failure of its own.
+        self.assertFalse(result.passed)
+        self.assertEqual([f.turn_index for f in result.failures], [0])
+        self.assertEqual(self._sent_texts(), ["first", "second"])
+
     async def test_missing_event_times_out(self):
         scenario = EvalScenario(
             name="never",
