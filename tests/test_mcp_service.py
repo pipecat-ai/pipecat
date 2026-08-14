@@ -37,13 +37,17 @@ def _tool(name, properties=None, required=None, description="A tool."):
 class _FakeTransport:
     """Fake streamablehttp_client context manager; records enter/exit tasks."""
 
-    def __init__(self, record, exit_error=None):
+    def __init__(self, record, exit_error=None, connect_delay=0):
         self._record = record
         self._exit_error = exit_error
+        self._connect_delay = connect_delay
 
     async def __aenter__(self):
         self._record["enters"] = self._record.get("enters", 0) + 1
         self._record["enter_task"] = asyncio.current_task()
+        if self._connect_delay:
+            # A connect window wide enough to cancel the caller inside it.
+            await asyncio.sleep(self._connect_delay)
         return (MagicMock(), MagicMock(), MagicMock())
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -99,13 +103,16 @@ class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
         fail_initializes=0,
         cancel_initialize=False,
         transport_exit_error=None,
+        connect_delay=0,
         **client_kwargs,
     ):
         record = {}
         session = _FakeSession(tools, record, fail_initializes, cancel_initialize)
         ctx = patch.multiple(
             "pipecat.services.mcp_service",
-            streamablehttp_client=lambda **kwargs: _FakeTransport(record, transport_exit_error),
+            streamablehttp_client=lambda **kwargs: _FakeTransport(
+                record, transport_exit_error, connect_delay
+            ),
             ClientSession=lambda read, write: session,
         )
         ctx.start()
@@ -295,6 +302,51 @@ class TestLifecycle(MCPClientTestBase):
         client, session, record = self._make_client([_tool("tool_a")], cancel_initialize=True)
         with self.assertRaises(ConnectionError):
             await asyncio.wait_for(client.tools(), timeout=5)
+
+    async def test_cancelling_the_caller_stops_a_connect_in_flight(self):
+        # Cancelling the task awaiting start() cancels the future it waits on. A
+        # session still inside the connect can't see that, so start() stops it —
+        # an unresponsive server would otherwise hold the transport (a spawned
+        # server process) with nothing left able to reach it.
+        client, session, record = self._make_client([_tool("tool_a")], connect_delay=3600)
+        caller = asyncio.create_task(client.tools())
+        await asyncio.sleep(0.05)  # inside the connect window
+        session_task = client._session_task
+        caller.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await caller
+
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(session_task, timeout=5)
+        self.assertIsNone(client._active_session)
+        self.assertIsNone(client._session_task)
+        # Nothing is left for close() to do, and it says so quietly.
+        await client.close()
+
+    async def test_connection_nobody_awaits_is_released(self):
+        # The connect can still land in the window between the caller's
+        # cancellation and start() reacting to it, leaving a session with no one
+        # to hand it to. It has to release itself rather than sit open.
+        client, session, record = self._make_client([_tool("tool_a")])
+        ready = asyncio.get_running_loop().create_future()
+        ready.cancel()
+
+        await client._run_session(ready, asyncio.Event())
+
+        self.assertEqual(record["exits"], 1)
+        self.assertIsNone(client._active_session)
+
+    async def test_failed_connect_nobody_awaits_settles_quietly(self):
+        # Same window, but the connect fails: with no one waiting, the failure has
+        # nowhere to go and must not become an error of its own.
+        client, session, record = self._make_client([_tool("tool_a")], fail_initializes=1)
+        ready = asyncio.get_running_loop().create_future()
+        ready.cancel()
+
+        await client._run_session(ready, asyncio.Event())
+
+        self.assertEqual(record["exits"], 1)
+        self.assertIsNone(client._active_session)
 
     async def test_close_before_start_and_double_close_are_safe(self):
         client, session, record = self._make_client([_tool("tool_a")])

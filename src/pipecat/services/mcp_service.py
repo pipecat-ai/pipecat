@@ -191,8 +191,14 @@ class MCPClient(BaseObject):
             )
             try:
                 await ready  # resolves once connected; re-raises a connect failure
-            except Exception:
-                self._session_task = None  # let a later call retry cleanly
+            except BaseException:
+                task, self._session_task = self._session_task, None  # retry cleanly later
+                # Cancellation reaches us as a cancelled `ready`. A session that
+                # got as far as connecting releases itself, but one still waiting
+                # on an unresponsive server would hold the transport forever:
+                # nothing can reach this task once the handle is dropped.
+                if ready.cancelled() and self._active_session is None:
+                    task.cancel()
                 raise
 
     async def _run_session(self, ready: asyncio.Future, closing: asyncio.Event) -> None:
@@ -230,18 +236,24 @@ class MCPClient(BaseObject):
                 await exit_stack.aclose()
             except BaseException as e:
                 unwound = e
-            ready.set_exception(
-                _connect_failure_cause(unwound, raised)
-                or ConnectionError(f"{self} could not connect to the MCP server")
-            )
+            if not ready.cancelled():
+                ready.set_exception(
+                    _connect_failure_cause(unwound, raised)
+                    or ConnectionError(f"{self} could not connect to the MCP server")
+                )
             if isinstance(raised, asyncio.CancelledError):
                 raise
             return
 
         self._exit_stack = exit_stack
         self._active_session = session
-        ready.set_result(None)
         try:
+            if ready.cancelled():
+                # The caller was cancelled mid-connect, so nobody will ever call
+                # close() for this session: release it here instead of holding a
+                # connection no one owns.
+                return
+            ready.set_result(None)
             await closing.wait()
         finally:
             self._active_session = None
