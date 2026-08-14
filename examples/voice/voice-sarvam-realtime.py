@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.sarvam.llm import SarvamLLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -55,37 +55,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Sarvam realtime Speech-to-Text with the pipeline endpointing the turns.
-
-    This example uses Sarvam's realtime endpoint with `endpointing="manual"`,
-    so Pipecat decides the turn boundaries and tells Sarvam about them. See
-    `voice-sarvam-vad.py` for server-side endpointing on the transcription
-    endpoint.
-
-    Key features:
-
-    1. Pipeline Turn Detection
-       - `endpointing="manual"` has the service forward the pipeline's VAD
-         boundaries to Sarvam as `speech_start` and `speech_end`
-       - Sarvam finalizes on the boundary it is handed, and its own VAD events
-         are ignored
-       - The user aggregator keeps its local turn detection, since the service
-         recommends no turn strategies in this mode
-
-    2. VAD Is Required
-       - Without a `vad_analyzer` Sarvam receives no boundary and emits no
-         final transcript
-       - It also anchors TTFB: the VAD stop frame carries the stop delay needed
-         to place the real end of speech
-
-    3. Streaming Profile
-       - `stream_type="balanced"` (the default) favors accuracy; `"fast"` emits
-         interim transcripts sooner, and `"simulated"` emits finals only
-
-    4. Audio Rate
-       - The realtime endpoint accepts 8 kHz or 16 kHz, and the pipeline's
-         16 kHz default satisfies it
-    """
+    """Sarvam realtime Speech-to-Text with the pipeline endpointing the turns."""
     logger.info("Starting bot")
 
     stt = SarvamRealtimeSTTService(
@@ -105,17 +75,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = SarvamLLMService(
-        api_key=os.environ["SARVAM_API_KEY"],
-        settings=SarvamLLMService.Settings(
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
     context = LLMContext()
-    # The VAD analyzer carries the whole turn cycle here: it endpoints locally,
-    # supplies the boundaries the service forwards to Sarvam, and times
-    # transcript latency.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
