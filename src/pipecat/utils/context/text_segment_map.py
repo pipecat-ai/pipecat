@@ -60,6 +60,15 @@ def strip_markup(text: str) -> str:
     return "".join(ch for _, ch in _iter_clean_chars(text))
 
 
+_COMPLETE_MARKUP_RE = re.compile(r"<[^>]+>")
+"""Matched '<...>' pairs in a complete text.
+
+The single definition of "what is markup" for a static text, shared by
+:func:`strip_complete_markup` and :func:`_split_markup_runs` so the two can't
+disagree about which characters a segment split may treat as a tag.
+"""
+
+
 def strip_complete_markup(text: str) -> str:
     """Remove well-formed '<...>' markup from a complete, static text.
 
@@ -73,7 +82,7 @@ def strip_complete_markup(text: str) -> str:
     :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
     to default ``user_facing_text`` to a tag-free string.
     """
-    return re.sub(r"<[^>]+>", "", text)
+    return _COMPLETE_MARKUP_RE.sub("", text)
 
 
 def _raw_len_for_clean_chars(text: str, n: int) -> int:
@@ -92,6 +101,47 @@ def _raw_len_for_clean_chars(text: str, n: int) -> int:
         if seen == n:
             return i + 1
     return len(text)
+
+
+def _split_markup_runs(text: str) -> list[str]:
+    """Split *text* into alternating runs of tagged and untagged words.
+
+    A word is considered tagged if it overlaps a complete ``'<...>'`` pair. A lone
+    ``'<'`` is treated as content, not as the start of a tag (see
+    :func:`strip_complete_markup`). Consecutive words with the same classification
+    form a single run, so whitespace inside a tag such as
+    ``<phoneme alphabet="ipa">`` never splits the words it spans across runs.
+
+    Example::
+
+        _split_markup_runs("I love to count <spell>1234</spell>.")
+        # -> ["I love to count ", "<spell>1234</spell>."]
+
+    Text with no markup yields a single run, unchanged.
+
+    Used by :meth:`TextSegmentMap._build` to give a tag its own segment.
+    """
+    tag_spans = [m.span() for m in _COMPLETE_MARKUP_RE.finditer(text)]
+    if not tag_spans:
+        return [text] if text else []
+
+    runs: list[str] = []
+    run_is_tagged: bool | None = None
+    pos = 0
+
+    for token in re.split(r"(\s+)", text):
+        if not token:
+            continue
+        start, end = pos, pos + len(token)
+        pos = end
+        is_tagged = any(tag_start < end and start < tag_end for tag_start, tag_end in tag_spans)
+        if is_tagged == run_is_tagged:
+            runs[-1] += token
+        else:
+            runs.append(token)
+            run_is_tagged = is_tagged
+
+    return runs
 
 
 @dataclass(frozen=True)
@@ -251,9 +301,11 @@ class TextSegmentMap:
     def _build(tts_text: str, original_text: str) -> list[TextSegment]:
         """Build aligned TextSegments from a word-level SequenceMatcher diff.
 
-        Each diff opcode (equal, replace, insert, delete) becomes a segment.
-        Segments whose normalized alphanumeric content differs are later treated
-        as transformed/atomic units during cursor advancement.
+        Each diff opcode (equal, replace, insert, delete) becomes a segment, except
+        that an ``equal`` opcode is further split around any markup it carries (see
+        the ``parts`` comment below). Segments whose normalized alphanumeric content
+        differs are later treated as transformed/atomic units during cursor
+        advancement.
         """
 
         def tokenize(text: str) -> list[str]:
@@ -310,16 +362,37 @@ class TextSegmentMap:
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             orig_chunk = "".join(orig_tokens[i1:i2])
             tts_chunk = "".join(tts_tokens[j1:j2])
-            orig_end = orig_pos + len(orig_chunk)
-            segments.append(
-                TextSegment(
-                    original=orig_chunk,
-                    tts=tts_chunk,
-                    original_start=orig_pos,
-                    original_end=orig_end,
-                )
+
+            # A segment is atomic as soon as it holds any markup, so a tag sitting
+            # in the middle of otherwise identical text would freeze the cursors
+            # for the whole opcode. Splitting the tag into its own segment keeps
+            # that cost to the words the tag actually wraps:
+            #
+            #     original = tts = "I love to count <spell>1234</spell>."
+            #
+            #     "I love to count "       plain, cursors advance word by word
+            #     "<spell>1234</spell>."   atomic, commits when its last word lands
+            #
+            # Only "equal" opcodes can be split: both sides hold the same text, so
+            # one offset cuts both. The other kinds differ side to side, leaving no
+            # shared offset to cut at.
+            parts = (
+                [(part, part) for part in _split_markup_runs(orig_chunk)]
+                if tag == "equal"
+                else [(orig_chunk, tts_chunk)]
             )
-            orig_pos = orig_end
+
+            for orig_part, tts_part in parts:
+                orig_end = orig_pos + len(orig_part)
+                segments.append(
+                    TextSegment(
+                        original=orig_part,
+                        tts=tts_part,
+                        original_start=orig_pos,
+                        original_end=orig_end,
+                    )
+                )
+                orig_pos = orig_end
 
         return segments
 
