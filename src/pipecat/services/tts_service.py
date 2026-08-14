@@ -1688,7 +1688,7 @@ class TTSService(AIService):
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
-    async def _apply_force_complete(self, context_id: str):
+    async def _apply_force_complete(self, context_id: str, *, audio_rendered: bool = True):
         """Force-complete a context's spoken slots and push any unblocked skipped frames.
 
         Called at end-of-context to handle TTS providers that silently drop word-timestamp
@@ -1698,8 +1698,20 @@ class TTSService(AIService):
 
         Args:
             context_id: The audio context that has ended.
+            audio_rendered: Whether any audio arrived for this context. When False
+                (e.g. a websocket that died with the socket still open, so text was
+                sent but no audio ever came back), the remainder frames are stamped
+                ``append_to_context=False`` — the user never heard this text, so it
+                must not enter the LLM context as something the bot said.
         """
-        for f in self._aggregated_frame_sequencer.force_complete(context_id, self._word_last_pts):
+        if not audio_rendered:
+            logger.warning(
+                f"{self} audio context {context_id} produced no audio; "
+                f"excluding its un-rendered text from the LLM context"
+            )
+        for f in self._aggregated_frame_sequencer.force_complete(
+            context_id, self._word_last_pts, suppress_in_context=not audio_rendered
+        ):
             if isinstance(f, TTSTextFrame):
                 # The sequencer stamps every word frame it builds.
                 assert f.pts is not None
@@ -1749,7 +1761,9 @@ class TTSService(AIService):
                             frame.append_to_context = tts_context.append_to_context
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-                        await self._apply_force_complete(context_id)
+                        await self._apply_force_complete(
+                            context_id, audio_rendered=timestamps_started
+                        )
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
@@ -1768,7 +1782,7 @@ class TTSService(AIService):
                     should_push_stop_frame = False
                 break
 
-        await self._apply_force_complete(context_id)
+        await self._apply_force_complete(context_id, audio_rendered=timestamps_started)
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
