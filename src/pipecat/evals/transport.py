@@ -45,7 +45,6 @@ sequential eval connections.
 
 import asyncio
 import io
-import wave
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -54,6 +53,7 @@ import aiofiles
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -111,17 +111,12 @@ async def _write_wav(path: str, audio: bytes, sample_rate: int, num_channels: in
     Encodes the WAV in memory, then writes it to disk without blocking the event
     loop.
     """
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wf:
-        wf.setnchannels(num_channels)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(audio)
+    wav = pcm_to_wav(audio, sample_rate, num_channels)
 
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(p, "wb") as f:
-        await f.write(buffer.getvalue())
+        await f.write(wav)
     logger.info(f"Eval recording saved: {p} ({len(audio)} bytes)")
 
 

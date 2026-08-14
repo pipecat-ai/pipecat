@@ -18,7 +18,6 @@ import asyncio
 import base64
 import copy
 import io
-import wave
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
@@ -29,6 +28,7 @@ from PIL import Image
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import AudioRawFrame
 
 # The sentinel is part of LLMContext's public surface — tools and tool_choice
@@ -191,15 +191,8 @@ class LLMContext:
 
             data = b"".join(frame.audio for frame in audio_frames)
 
-            with io.BytesIO() as buffer:
-                with wave.open(buffer, "wb") as wf:
-                    wf.setsampwidth(2)
-                    wf.setnchannels(num_channels)
-                    wf.setframerate(sample_rate)
-                    wf.writeframes(data)
-
-                encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            return encoded_audio
+            wav = pcm_to_wav(data, sample_rate, num_channels)
+            return base64.b64encode(wav).decode("utf-8")
 
         encoded_audio = await asyncio.to_thread(encode_audio)
 

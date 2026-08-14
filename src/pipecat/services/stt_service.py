@@ -7,10 +7,8 @@
 """Base classes for Speech-to-Text services with continuous and segmented processing."""
 
 import asyncio
-import io
 import time
 import warnings
-import wave
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -18,6 +16,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -879,15 +878,7 @@ class SegmentedSTTService(STTService):
         await self.emit_stt_usage_metrics()
 
         if self.wants_wav_segments:
-            content = io.BytesIO()
-            wav = wave.open(content, "wb")
-            wav.setsampwidth(2)
-            wav.setnchannels(1)
-            wav.setframerate(self.sample_rate)
-            wav.writeframes(self._audio_buffer)
-            wav.close()
-            content.seek(0)
-            audio = content.read()
+            audio = pcm_to_wav(self._audio_buffer, self.sample_rate)
         else:
             # Local models read the buffer as raw 16-bit PCM; wrapping it in a
             # WAV container would make them misread the 44-byte header as audio.
