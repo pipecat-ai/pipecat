@@ -225,15 +225,24 @@ class LangfuseRecordingUploader:
         if worker is not None:
             self._trace_id = self._resolve_trace_id(getattr(worker, "turn_trace_observer", None))
 
+        flush_event = asyncio.Event()
+
+        async def _on_stop_flush(_, audio: bytes, sample_rate: int, num_channels: int) -> None:
+            flush_event.set()
+
+        audio_buffer.add_event_handler("on_audio_data", _on_stop_flush)
         try:
             await audio_buffer.stop_recording()
-            await asyncio.wait_for(self._audio_ready.wait(), timeout=self._flush_timeout_s)
+            await asyncio.wait_for(flush_event.wait(), timeout=self._flush_timeout_s)
         except TimeoutError:
-            logger.warning(
-                f"Langfuse recording: no audio within {self._flush_timeout_s}s of stopping"
-            )
+            if not self._pcm:
+                logger.warning(
+                    f"Langfuse recording: no audio within {self._flush_timeout_s}s of stopping"
+                )
         except Exception as e:
             logger.warning(f"Langfuse recording: could not collect audio: {e}")
+        finally:
+            audio_buffer.remove_event_handler("on_audio_data", _on_stop_flush)
 
     async def upload(self, worker) -> None:
         """Upload the recording and per-turn clips, and link them to the trace.
