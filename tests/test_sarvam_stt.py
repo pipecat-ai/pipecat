@@ -37,6 +37,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.errors import ErrorCategory
 
 
 class _FakeWebsocket:
@@ -635,8 +636,8 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
     pushed_errors = []
     connects = []
 
-    async def fake_push_error(error_msg, exception=None, fatal=False):
-        pushed_errors.append((error_msg, fatal))
+    async def fake_push_error(error_msg, exception=None, fatal=False, category=None, **kwargs):
+        pushed_errors.append((error_msg, fatal, category))
 
     async def fake_connect():
         connects.append(True)
@@ -652,7 +653,26 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
     assert "sample_rate" in pushed_errors[0][0]
     # Non-fatal, so a ServiceSwitcher can fail over to another provider.
     assert pushed_errors[0][1] is False
+    # Permanent, since the rate holds for the session: the service loses its
+    # usability so the switcher stops handing it audio.
+    assert pushed_errors[0][2] is ErrorCategory.INVALID_REQUEST
+    assert pushed_errors[0][2].is_permanent
     assert connects == []
+
+
+@pytest.mark.asyncio
+async def test_unsupported_resolved_sample_rate_costs_the_service_its_usability(monkeypatch):
+    """The verdict has to reach `is_usable`, which is what a switcher reads."""
+    service = SarvamRealtimeSTTService(api_key="test-key")
+
+    monkeypatch.setattr(service, "_connect", AsyncMock())
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+    monkeypatch.setattr(WebsocketSTTService, "start", _noop)
+    service._sample_rate = 44100
+
+    await service.start(StartFrame())
+
+    assert service.is_usable is False
 
 
 @pytest.mark.asyncio

@@ -47,6 +47,7 @@ from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -1213,9 +1214,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         # The rate can come from the pipeline, so it is only known now. Report
         # it rather than raise: `AIService._start` swallows exceptions, which
         # would leave the service quietly dropping every audio chunk instead.
+        # The rate holds for the session, so the failure is permanent and costs
+        # the service its usability, letting a `ServiceSwitcher` move on.
         error = self._resolved_sample_rate_error()
         if error:
-            await self.push_error(error)
+            await self.push_error(error, category=ErrorCategory.INVALID_REQUEST)
             return
         await self._connect()
 
