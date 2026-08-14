@@ -37,8 +37,9 @@ def _tool(name, properties=None, required=None, description="A tool."):
 class _FakeTransport:
     """Fake streamablehttp_client context manager; records enter/exit tasks."""
 
-    def __init__(self, record):
+    def __init__(self, record, exit_error=None):
         self._record = record
+        self._exit_error = exit_error
 
     async def __aenter__(self):
         self._record["enters"] = self._record.get("enters", 0) + 1
@@ -48,16 +49,21 @@ class _FakeTransport:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self._record["exits"] = self._record.get("exits", 0) + 1
         self._record["exit_task"] = asyncio.current_task()
+        if self._exit_error is not None:
+            # A real transport reports a failed connection as its task group
+            # unwinds, rather than at the connect site.
+            raise self._exit_error
         return False
 
 
 class _FakeSession:
     """Fake mcp ClientSession with canned tools and call results."""
 
-    def __init__(self, tools, record, fail_initializes=0):
+    def __init__(self, tools, record, fail_initializes=0, cancel_initialize=False):
         self._tools = tools
         self._record = record
         self._fail_initializes = fail_initializes
+        self._cancel_initialize = cancel_initialize
         self.calls = []
 
     async def __aenter__(self):
@@ -67,6 +73,10 @@ class _FakeSession:
         return False
 
     async def initialize(self):
+        if self._cancel_initialize:
+            # An anyio transport cancels the connecting task when its own
+            # request fails, so initialize() ends in cancellation.
+            raise asyncio.CancelledError("Cancelled via cancel scope")
         if self._fail_initializes > 0:
             self._fail_initializes -= 1
             raise RuntimeError("connect failed")
@@ -83,12 +93,19 @@ class _FakeSession:
 class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
     """Builds MCPClients against a fake transport/session pair."""
 
-    def _make_client(self, tools, fail_initializes=0, **client_kwargs):
+    def _make_client(
+        self,
+        tools,
+        fail_initializes=0,
+        cancel_initialize=False,
+        transport_exit_error=None,
+        **client_kwargs,
+    ):
         record = {}
-        session = _FakeSession(tools, record, fail_initializes)
+        session = _FakeSession(tools, record, fail_initializes, cancel_initialize)
         ctx = patch.multiple(
             "pipecat.services.mcp_service",
-            streamablehttp_client=lambda **kwargs: _FakeTransport(record),
+            streamablehttp_client=lambda **kwargs: _FakeTransport(record, transport_exit_error),
             ClientSession=lambda read, write: session,
         )
         ctx.start()
@@ -229,6 +246,28 @@ class TestLifecycle(MCPClientTestBase):
         await client.start()
         self.assertEqual(record["initializes"], 1)
         await client.close()
+
+    async def test_cancelling_transport_raises_its_underlying_cause(self):
+        # A transport whose request fails cancels the connecting task and reports
+        # the cause only as it unwinds; tools() must raise that cause rather than
+        # wait on a connection that will never arrive.
+        cause = RuntimeError("Client error '401 Unauthorized'")
+        client, session, record = self._make_client(
+            [_tool("tool_a")],
+            cancel_initialize=True,
+            transport_exit_error=ExceptionGroup("unhandled errors in a TaskGroup", [cause]),
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            await asyncio.wait_for(client.tools(), timeout=5)
+        self.assertIs(ctx.exception, cause)
+        self.assertEqual(record.get("exits"), 1)
+
+    async def test_cancelling_transport_without_a_cause_still_raises(self):
+        # Nothing surfaced on unwind, so there's no cause to report — but the
+        # caller still gets an error instead of waiting forever.
+        client, session, record = self._make_client([_tool("tool_a")], cancel_initialize=True)
+        with self.assertRaises(ConnectionError):
+            await asyncio.wait_for(client.tools(), timeout=5)
 
     async def test_close_before_start_and_double_close_are_safe(self):
         client, session, record = self._make_client([_tool("tool_a")])

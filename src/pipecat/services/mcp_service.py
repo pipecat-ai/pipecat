@@ -36,6 +36,30 @@ except ModuleNotFoundError as e:
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
 
 
+def _connect_failure_cause(*candidates: BaseException | None) -> Exception | None:
+    """Find the exception that best explains a failed connect.
+
+    A failing transport cancels the connecting task from inside its own task
+    group, so the exception raised at the connect site is usually just a
+    ``CancelledError``; the real cause — an HTTP error, a refused connection —
+    surfaces separately as the exit stack unwinds. Groups wrapping a single
+    cause are unwrapped so callers see that cause directly.
+
+    Args:
+        candidates: Exceptions seen while connecting, most informative first.
+
+    Returns:
+        The first candidate that is a regular exception, or ``None`` if every
+        candidate is a cancellation.
+    """
+    for candidate in candidates:
+        while isinstance(candidate, BaseExceptionGroup) and len(candidate.exceptions) == 1:
+            candidate = candidate.exceptions[0]
+        if isinstance(candidate, Exception):
+            return candidate
+    return None
+
+
 class _ToolWrapperWithCleanup:
     """Tool call wrapper that carries the cleanup releasing its backing resource.
 
@@ -196,9 +220,22 @@ class MCPClient(BaseObject):
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
-        except Exception as e:
-            await exit_stack.aclose()
-            ready.set_exception(e)
+        except BaseException as raised:
+            # A failing transport cancels this task from inside its own task
+            # group, so `raised` is typically a CancelledError and the cause
+            # worth reporting only surfaces as the exit stack unwinds. Settling
+            # `ready` either way is what keeps start() from waiting forever.
+            unwound: BaseException | None = None
+            try:
+                await exit_stack.aclose()
+            except BaseException as e:
+                unwound = e
+            ready.set_exception(
+                _connect_failure_cause(unwound, raised)
+                or ConnectionError(f"{self} could not connect to the MCP server")
+            )
+            if isinstance(raised, asyncio.CancelledError):
+                raise
             return
 
         self._exit_stack = exit_stack
