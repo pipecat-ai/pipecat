@@ -1317,8 +1317,14 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
+            # Nothing retries this, so a socket that never opened is the end of
+            # the service: `run_stt` would go on discarding audio against a
+            # closed socket. Permanent whatever the cause, where the category
+            # would call a connectivity failure worth retrying.
             await self.push_error(
-                error_msg=f"Unable to connect to Sarvam realtime STT: {e}", exception=e
+                error_msg=f"Unable to connect to Sarvam realtime STT: {e}",
+                exception=e,
+                treat_as_permanent=True,
             )
             await self._call_event_handler("on_connection_error", str(e))
 
@@ -1340,12 +1346,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
         Reconnection is disabled, so the loop exiting means no further server
         event can arrive. An utterance still open at that point would leave
-        downstream turn aggregation waiting on a boundary that is never coming.
-        Cancellation is left alone: that only happens during an intentional
-        disconnect, where teardown is already under way.
+        downstream turn aggregation waiting on a boundary that is never coming,
+        and the service has no transcripts left to give, so it also stops being
+        usable — the base class reports the drop as retryable, which holds only
+        for services that reconnect on demand. Cancellation is left alone: that
+        only happens during an intentional disconnect, where teardown is
+        already under way.
         """
         await super()._receive_task_handler(report_error)
         await self._complete_active_utterance()
+        if not self._disconnecting:
+            await self.set_usable(False)
 
     async def _receive_messages(self):
         """Receive Sarvam realtime server events."""

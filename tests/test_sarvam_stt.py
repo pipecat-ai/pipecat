@@ -263,6 +263,26 @@ async def test_connect_uses_subscription_key_and_user_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_failed_connect_costs_the_service_its_usability(monkeypatch):
+    """A socket that never opens is terminal, whatever kept it from opening.
+
+    Nothing reconnects, so the retryable category a connectivity failure earns
+    would leave a switcher feeding audio to a service with no socket.
+    """
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect",
+        AsyncMock(side_effect=ConnectionError("no route to host")),
+    )
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+
+    await service._connect_websocket()
+
+    assert service._websocket is None
+    assert service.is_usable is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stream_type", ["fast", "balanced", "simulated"])
 async def test_client_sends_50ms_chunks_regardless_of_stream_type(stream_type):
     service = SarvamRealtimeSTTService(
@@ -948,6 +968,22 @@ async def test_receive_errors_are_reported_without_reconnect(monkeypatch, receiv
 
     try_reconnect.assert_not_awaited()
     report_error.assert_awaited_once()
+    # No reconnection path, so a dropped socket ends transcription for the
+    # session and a switcher has to stop handing this service audio.
+    assert service.is_usable is False
+
+
+@pytest.mark.asyncio
+async def test_intentional_disconnect_leaves_the_service_usable(monkeypatch):
+    """Teardown ends the same loop, and must not be read as a failure."""
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    drop = ConnectionClosedError(Close(1006, "Abnormal closure"), None)
+    monkeypatch.setattr(service, "_receive_messages", AsyncMock(side_effect=drop))
+    service._disconnecting = True
+
+    await service._receive_task_handler(AsyncMock())
+
+    assert service.is_usable is True
 
 
 @pytest.mark.asyncio
