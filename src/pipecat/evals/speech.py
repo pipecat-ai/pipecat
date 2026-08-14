@@ -27,7 +27,6 @@ mapping (dispatch + a ``user_audio.factory`` escape hatch) and wraps it;
 rate.
 """
 
-import asyncio
 import hashlib
 import importlib
 import os
@@ -38,6 +37,7 @@ from typing import cast
 
 from loguru import logger
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.evals.services import cartesia_service, kokoro_service
 from pipecat.services.tts_service import TTSService
 from pipecat.services.websocket_service import WebsocketService
@@ -350,8 +350,4 @@ class EvalSpeech:
     @staticmethod
     def _write_wav(path: Path, pcm: bytes, sample_rate: int) -> None:
         """Write mono 16-bit PCM to a WAV file."""
-        with wave.open(str(path), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(pcm)
+        path.write_bytes(pcm_to_wav(pcm, sample_rate))
