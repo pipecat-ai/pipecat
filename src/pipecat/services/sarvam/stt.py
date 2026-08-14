@@ -1080,11 +1080,13 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     than a setting, since it decides which turn strategies the user aggregator
     runs and those are announced once, at startup.
 
-    A VAD analyzer is required in either mode. TTFB is measured from those same
-    ``VADUserStoppedSpeakingFrame`` frames, which carry the stop delay needed to
-    place the real end of speech; Sarvam's own ``vad.speech_end`` arrives only
+    A VAD analyzer is required in either ``endpointing`` mode. Under ``vad`` it
+    times transcription latency: TTFB is measured from
+    ``VADUserStoppedSpeakingFrame``, which carries the stop delay needed to place
+    the real end of speech, where Sarvam's own ``vad.speech_end`` arrives only
     after the server's silence window and would time a shorter interval than
-    every other STT service reports.
+    every other STT service reports. Under ``manual`` those same frames also mark
+    the turn for Sarvam, reaching it as ``speech_start`` and ``speech_end``.
     """
 
     Settings = SarvamRealtimeSTTSettings
