@@ -23,7 +23,6 @@ from urllib.parse import urlencode
 
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -1305,7 +1304,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             url = self._build_ws_url()
             headers = {"API-SUBSCRIPTION-KEY": self._api_key}
             logger.debug(f"Connecting to Sarvam realtime STT WebSocket: {url}")
-            self._websocket = await websocket_connect(
+            self._websocket = await self._websocket_connect(
                 url,
                 additional_headers=headers,
                 user_agent_header=sdk_headers()["User-Agent"],

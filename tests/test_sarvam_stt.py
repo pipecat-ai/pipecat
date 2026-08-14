@@ -246,7 +246,9 @@ async def test_connect_uses_subscription_key_and_user_agent(monkeypatch):
         captured["kwargs"] = kwargs
         return _FakeWebsocket()
 
-    monkeypatch.setattr("pipecat.services.sarvam.stt.websocket_connect", fake_websocket_connect)
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
 
     service = SarvamRealtimeSTTService(api_key="test-key")
     await service._connect_websocket()
@@ -254,6 +256,9 @@ async def test_connect_uses_subscription_key_and_user_agent(monkeypatch):
     assert captured["url"] == service._build_ws_url()
     assert captured["kwargs"]["additional_headers"] == {"API-SUBSCRIPTION-KEY": "test-key"}
     assert captured["kwargs"]["user_agent_header"] == sdk_headers()["User-Agent"]
+    # Routed through the base helper, so teardown uses the service's close
+    # timeout rather than the library's much longer default.
+    assert captured["kwargs"]["close_timeout"] == service._ws_close_timeout
 
 
 @pytest.mark.asyncio
