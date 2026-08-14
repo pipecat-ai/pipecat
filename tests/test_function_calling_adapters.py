@@ -4,8 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import io
 import unittest
 
+from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.responses.function_tool_param import FunctionToolParam
 from openai.types.responses.tool_search_tool_param import ToolSearchToolParam
@@ -120,6 +122,135 @@ class TestFunctionAdapters(unittest.TestCase):
             }
         ]
         assert GeminiLLMAdapter().to_provider_tools_format(self.tools_def) == expected
+
+    def test_gemini_adapter_strips_keys_gemini_rejects(self):
+        """Test Gemini adapter dropping schema keys Gemini's validation rejects."""
+        function_def = FunctionSchema(
+            name="get_file_contents",
+            description="Get the contents of a file",
+            properties={
+                "owner": {
+                    "type": "string",
+                    "description": "Repository owner",
+                    "x-mcp-header": "owner",
+                },
+                # A parameter whose name looks like a vendor extension is still a
+                # parameter, so it survives.
+                "x-api-key": {"type": "string", "description": "Caller's API key"},
+                "options": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"x-ref": {"type": "string"}},
+                },
+            },
+            required=["owner"],
+        )
+        expected = [
+            {
+                "function_declarations": [
+                    {
+                        "name": "get_file_contents",
+                        "description": "Get the contents of a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "owner": {"type": "string", "description": "Repository owner"},
+                                "x-api-key": {
+                                    "type": "string",
+                                    "description": "Caller's API key",
+                                },
+                                "options": {
+                                    "type": "object",
+                                    "properties": {"x-ref": {"type": "string"}},
+                                },
+                            },
+                            "required": ["owner"],
+                        },
+                    }
+                ]
+            }
+        ]
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        assert GeminiLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_gemini_adapter_translates_constructs_gemini_rejects(self):
+        """Test Gemini adapter rewriting schema constructs Gemini can't express."""
+        function_def = FunctionSchema(
+            name="issue_write",
+            description="Set or clear issue fields",
+            properties={
+                # Gemini takes one type per schema, so a union becomes anyOf.
+                "value": {
+                    "type": ["string", "number", "boolean"],
+                    "description": "Value to set",
+                },
+                # Gemini's enum members are strings; a boolean one can't be
+                # rendered, so the constraint is dropped and the type kept.
+                "delete": {"type": "boolean", "enum": [True], "description": "Clear the field"},
+                # A string enum is representable and passes through untouched.
+                "mode": {"type": "string", "enum": ["create", "update"]},
+            },
+            required=["value"],
+        )
+        expected = [
+            {
+                "function_declarations": [
+                    {
+                        "name": "issue_write",
+                        "description": "Set or clear issue fields",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "anyOf": [
+                                        {"type": "string"},
+                                        {"type": "number"},
+                                        {"type": "boolean"},
+                                    ],
+                                    "description": "Value to set",
+                                },
+                                "delete": {
+                                    "type": "boolean",
+                                    "description": "Clear the field",
+                                },
+                                "mode": {"type": "string", "enum": ["create", "update"]},
+                            },
+                            "required": ["value"],
+                        },
+                    }
+                ]
+            }
+        ]
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        assert GeminiLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_gemini_adapter_warns_once_per_adapted_tool(self):
+        """Test Gemini adapter reporting adapted schemas without repeating itself."""
+        function_def = FunctionSchema(
+            name="issue_write",
+            description="Set or clear issue fields",
+            properties={"value": {"type": ["string", "number"], "x-mcp-header": "value"}},
+            required=[],
+        )
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        adapter = GeminiLLMAdapter()
+
+        def convert_capturing_warnings() -> str:
+            sink = io.StringIO()
+            handler_id = logger.add(sink, level="WARNING", format="{message}")
+            try:
+                adapter.to_provider_tools_format(tools_def)
+            finally:
+                logger.remove(handler_id)
+            return sink.getvalue()
+
+        warned = convert_capturing_warnings()
+        assert "issue_write" in warned
+        assert "anyOf" in warned
+        assert "x-mcp-header" in warned
+
+        # The same tools on a later inference don't warn again.
+        assert convert_capturing_warnings() == ""
 
     def test_openai_realtime_adapter(self):
         """Test Anthropic adapter format transformation."""

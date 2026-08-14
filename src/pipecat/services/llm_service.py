@@ -367,6 +367,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self._resolve_adapter_class()())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
+        # Cleanup callables carried by registered tool handlers, awaited at
+        # service teardown (see _record_tool_cleanup).
+        self._tool_cleanups: list[Callable[[], Awaitable[None]]] = []
         # Names we've already warned about for a redundant manual registration
         # (an explicit register_function call for a tool whose advertised
         # FunctionSchema already carries a handler), so the warning fires once
@@ -515,12 +518,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._cancel_summary_task()
 
     async def cleanup(self):
-        """Release LLM service resources at teardown."""
+        """Release LLM service resources at teardown.
+
+        Besides this service's own tasks, runs any cleanup callables carried by
+        registered tool handlers (e.g. closing an MCP client's connection).
+        """
         await super().cleanup()
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
+        await self._run_tool_cleanups()
 
     def _warn_turn_completion_settings_are_strategy_owned(self):
         """Warn that the turn-completion settings belong to the user turn strategy.
@@ -908,6 +916,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 function_name, cancellable_by_llm, handler, resolved_cancel_on_interruption
             ),
         )
+        self._record_tool_cleanup(handler)
+
+    def _record_tool_cleanup(self, handler: Any) -> None:
+        """Track cleanup work a registered tool handler asks to run at teardown.
+
+        A handler backed by a resource that outlives the call — an MCP server
+        connection, for instance — can carry a zero-argument async callable
+        under ``_pipecat_cleanup``. It is awaited when this service is cleaned
+        up, the hook the pipeline guarantees to run at teardown, so the resource
+        is released without the developer wiring teardown manually. Handlers
+        sharing a resource carry the same callable, recorded once.
+
+        Cleanups are kept for the service's lifetime even if their handlers are
+        later unregistered: the resource may outlive any one tool's
+        advertisement, and cleanups are expected to be idempotent.
+        """
+        cleanup = getattr(handler, "_pipecat_cleanup", None)
+        if cleanup is None or cleanup in self._tool_cleanups:
+            return
+        self._tool_cleanups.append(cleanup)
+
+    async def _run_tool_cleanups(self) -> None:
+        """Run recorded tool cleanups; errors are logged, not raised."""
+        cleanups, self._tool_cleanups = self._tool_cleanups, []
+        for cleanup in cleanups:
+            try:
+                await cleanup()
+            except Exception as e:
+                logger.error(f"{self} error running tool cleanup {cleanup}: {e}")
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
