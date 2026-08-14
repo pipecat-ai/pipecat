@@ -31,6 +31,96 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
+class _SilenceGapTracker:
+    """Wall-clock bookkeeping for one track buffer (user or bot).
+
+    Tracks two things used by silence-gap handling:
+
+    - ``expected_len``: the buffer length (in bytes) the track *should* have,
+      derived from cumulative wall-clock time elapsed since the track's
+      reference point (its first reconciled write, or the last buffer reset).
+      ``None`` until anchored.
+    - ``silence_start`` / ``silence_len``: the region of the most recent
+      silence injected by the gap fill. Only this region may be trimmed when a
+      catch-up burst overshoots ``expected_len``, so real audio is never
+      removed and the buffer can never shrink below the position it was at
+      before that stall's silence was added.
+    """
+
+    def __init__(self):
+        self.expected_len: float | None = None
+        self.silence_start: int = 0
+        self.silence_len: int = 0
+
+    def reset(self, *, buffer_len: int | None = None):
+        """Reset tracking state.
+
+        Args:
+            buffer_len: New buffer length to anchor ``expected_len`` at, or
+                None to leave the tracker unanchored (anchors on next write).
+        """
+        self.expected_len = float(buffer_len) if buffer_len is not None else None
+        self.silence_start = 0
+        self.silence_len = 0
+
+    def on_synced(self, buffer_len: int):
+        """Account for padding added by a cross-track sync.
+
+        Padding added by ``_sync_buffer_to_position`` aligns this track to the
+        other track's timeline, so it must never be counted as an overshoot.
+        """
+        if self.expected_len is not None:
+            self.expected_len = max(self.expected_len, float(buffer_len))
+
+
+class _CaptureTimeTracker:
+    """Capture-timestamp bookkeeping for one track buffer (user or bot).
+
+    Anchors the track to the first capture-stamped frame seen (its capture
+    time in nanoseconds and the buffer length at that moment). Subsequent
+    frames are placed at ``base_len + (capture_ns - base_capture_ns)``
+    converted to bytes, so gaps and bursts are resolved by when the audio was
+    captured on the client, not by when it arrived over the network.
+
+    The capture time comes from a transport that actually knows it (e.g.
+    ``TwilioFrameSerializer`` records Twilio's per-message ``timestamp`` in
+    ``frame.metadata["audio_capture_time_ns"]``), never from the generic
+    ``frame.pts`` field, whose units vary by transport.
+    """
+
+    def __init__(self):
+        self.base_capture_ns: int | None = None
+        self.base_len: int = 0
+
+    def reset(self):
+        """Clear the anchor so the tracker re-anchors on the next frame."""
+        self.base_capture_ns = None
+        self.base_len = 0
+
+    def target_len(self, capture_time_ns: int, buffer_len: int, bytes_per_second: int) -> int:
+        """Buffer length (in bytes) where audio captured at ``capture_time_ns`` belongs.
+
+        Anchors on first use, in which case the target is the current buffer
+        length (the frame is simply appended). Also re-anchors if capture time
+        moves backwards (e.g. a Twilio stream restarts and its timestamp resets
+        to 0), so a stale anchor can never stop gap padding for the rest of the
+        session.
+
+        Args:
+            capture_time_ns: Capture timestamp of the incoming frame, in nanoseconds.
+            buffer_len: Current buffer length in bytes (used to anchor).
+            bytes_per_second: Byte rate of the (resampled) track audio.
+        """
+        if self.base_capture_ns is None or capture_time_ns < self.base_capture_ns:
+            self.base_capture_ns = capture_time_ns
+            self.base_len = buffer_len
+            return buffer_len
+        offset_bytes = int(
+            (capture_time_ns - self.base_capture_ns) * bytes_per_second / 1_000_000_000
+        )
+        return self.base_len + offset_bytes
+
+
 class AudioBufferProcessor(FrameProcessor):
     """Processes and buffers audio frames from both input (user) and output (bot) sources.
 
@@ -54,6 +144,24 @@ class AudioBufferProcessor(FrameProcessor):
     - Automatic resampling of incoming audio to match desired sample_rate
     - Silence insertion for non-continuous audio streams
     - Buffer synchronization between user and bot audio
+
+    Placement: insert this processor after ``transport.output()``, as shown in
+    the docs and examples. Bot audio reaching it at that point is paced to
+    real time by the transport. Placing it before ``transport.output()``
+    means bot audio can arrive faster than real time (not paced yet), which
+    the wall-clock gap reconciliation would read as a catch-up burst and
+    trim genuine idle-gap silence for. User audio is unaffected either way,
+    since it always arrives paced by the client.
+
+    Frames that carry a capture timestamp in
+    ``frame.metadata["audio_capture_time_ns"]`` (e.g. recorded by
+    ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``) are
+    positioned by capture time instead, which does not depend on arrival
+    pacing at all. This matters for WebSocket transports, where audio arrives
+    at whatever rate the network and client produce. The generic ``frame.pts``
+    field is intentionally not used for this: its units vary by transport
+    (some set it in samples, not nanoseconds), so it is not a reliable
+    capture-time signal.
     """
 
     def __init__(
@@ -101,6 +209,10 @@ class AudioBufferProcessor(FrameProcessor):
         self._output_resampler = create_stream_resampler()
         self._last_user_buffer_update_time: float | None = None
         self._last_bot_buffer_update_time: float | None = None
+        self._user_gap_tracker = _SilenceGapTracker()
+        self._bot_gap_tracker = _SilenceGapTracker()
+        self._user_capture_tracker = _CaptureTimeTracker()
+        self._bot_capture_tracker = _CaptureTimeTracker()
 
         self._register_event_handler("on_audio_data")
         self._register_event_handler("on_track_audio_data")
@@ -234,11 +346,34 @@ class AudioBufferProcessor(FrameProcessor):
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
                 now = time.monotonic()
-                # Insert silence for any wall-clock gap since the user buffer was
-                # last written (covers muted microphone and other silent periods).
-                self._fill_buffer_silence_gap(
-                    self._user_audio_buffer, self._last_user_buffer_update_time, now, len(resampled)
-                )
+                capture_time_ns = frame.metadata.get("audio_capture_time_ns")
+                if capture_time_ns is not None:
+                    # The frame carries a capture timestamp (e.g. recorded by
+                    # TwilioFrameSerializer from Twilio's per-message
+                    # "timestamp"). Place the audio by capture time; arrival
+                    # pacing is meaningless over WebSocket transports.
+                    self._position_buffer_by_capture_time(
+                        self._user_audio_buffer, self._user_capture_tracker, capture_time_ns
+                    )
+                    # Silence padded by capture time is ground truth; make
+                    # sure the arrival-pacing reconciliation never trims it.
+                    # Anchor at the post-append length (this frame's audio is
+                    # appended below) so that if capture-time metadata later
+                    # disappears mid-stream, the wall-clock reconciliation
+                    # does not start one frame behind and over-trim.
+                    self._user_gap_tracker.reset(
+                        buffer_len=len(self._user_audio_buffer) + len(resampled)
+                    )
+                else:
+                    # Insert silence for any wall-clock gap since the user buffer was
+                    # last written (covers muted microphone and other silent periods).
+                    self._fill_buffer_silence_gap(
+                        self._user_audio_buffer,
+                        self._user_gap_tracker,
+                        self._last_user_buffer_update_time,
+                        now,
+                        len(resampled),
+                    )
                 self._last_user_buffer_update_time = now
                 # Sync bot buffer to current user position before adding user audio.
                 # We sync BEFORE extending to align both buffers at the same starting timestamp.
@@ -263,6 +398,7 @@ class AudioBufferProcessor(FrameProcessor):
                     # back to the last bot frame (which would double-count
                     # silence already injected by the sync above).
                     self._last_bot_buffer_update_time = time.monotonic()
+                    self._bot_gap_tracker.on_synced(len(self._bot_audio_buffer))
                 # Add user audio.
                 self._user_audio_buffer.extend(resampled)
         elif isinstance(frame, OutputAudioRawFrame):
@@ -270,12 +406,27 @@ class AudioBufferProcessor(FrameProcessor):
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
                 now = time.monotonic()
-                # Insert silence for any wall-clock gap since the bot buffer was
-                # last written (covers idle periods between bot utterances, e.g.
-                # while a slow function call runs).
-                self._fill_buffer_silence_gap(
-                    self._bot_audio_buffer, self._last_bot_buffer_update_time, now, len(resampled)
-                )
+                capture_time_ns = frame.metadata.get("audio_capture_time_ns")
+                if capture_time_ns is not None:
+                    # Same capture-time placement as the user track above.
+                    self._position_buffer_by_capture_time(
+                        self._bot_audio_buffer, self._bot_capture_tracker, capture_time_ns
+                    )
+                    # Anchor at the post-append length, same as the user track.
+                    self._bot_gap_tracker.reset(
+                        buffer_len=len(self._bot_audio_buffer) + len(resampled)
+                    )
+                else:
+                    # Insert silence for any wall-clock gap since the bot buffer was
+                    # last written (covers idle periods between bot utterances, e.g.
+                    # while a slow function call runs).
+                    self._fill_buffer_silence_gap(
+                        self._bot_audio_buffer,
+                        self._bot_gap_tracker,
+                        self._last_bot_buffer_update_time,
+                        now,
+                        len(resampled),
+                    )
                 self._last_bot_buffer_update_time = now
                 # Sync user buffer to current bot position before adding bot audio.
                 # Skip silence injection if the user is actively speaking to avoid
@@ -289,6 +440,7 @@ class AudioBufferProcessor(FrameProcessor):
                     # way back to the last user frame (which would double-count
                     # silence already injected by the sync above).
                     self._last_user_buffer_update_time = time.monotonic()
+                    self._user_gap_tracker.on_synced(len(self._user_audio_buffer))
                 # Add bot audio.
                 self._bot_audio_buffer.extend(resampled)
 
@@ -318,23 +470,76 @@ class AudioBufferProcessor(FrameProcessor):
             silence_needed = target_position - current_len
             buffer.extend(b"\x00" * silence_needed)
 
+    def _position_buffer_by_capture_time(
+        self,
+        buffer: bytearray,
+        capture_tracker: _CaptureTimeTracker,
+        capture_time_ns: int,
+    ):
+        """Pad a buffer so incoming audio lands at its client capture time.
+
+        Called before adding new audio when the frame carries a capture
+        timestamp in ``frame.metadata["audio_capture_time_ns"]``, e.g. recorded
+        by ``TwilioFrameSerializer`` from Twilio's per-message ``timestamp``.
+        The capture time says exactly where the audio belongs in the recording,
+        so gaps do not need to be inferred from arrival pacing: a muted mic
+        shows up as a jump in capture time (silence is padded in), while
+        stalled audio delivered late in a burst keeps contiguous capture times
+        (nothing to pad or trim). This removes the muted-mic vs stalled-audio
+        ambiguity that arrival pacing cannot resolve over WebSocket transports.
+
+        Only pads, never trims: if the buffer is already at or past the
+        capture position (cross-track sync padding, resampler jitter), the
+        audio is simply appended. Gaps below the 200 ms jitter threshold are
+        ignored; since the target is absolute, any deferred drift is
+        corrected at the next real gap.
+
+        Args:
+            buffer: The audio buffer to pad (user or bot).
+            capture_tracker: Capture-timestamp tracking state for this buffer.
+            capture_time_ns: Capture timestamp of the incoming frame, in nanoseconds.
+        """
+        if self._sample_rate == 0:
+            return
+
+        bytes_per_second = self._sample_rate * 2
+        target_len = capture_tracker.target_len(capture_time_ns, len(buffer), bytes_per_second)
+        gap_bytes = target_len - len(buffer)
+        if gap_bytes > 0.2 * bytes_per_second:  # 200 ms threshold, same as the gap fill
+            gap_bytes -= gap_bytes % 2  # keep 16-bit alignment
+            buffer.extend(b"\x00" * gap_bytes)
+
     def _fill_buffer_silence_gap(
         self,
         buffer: bytearray,
+        gap_tracker: _SilenceGapTracker,
         last_update_time: float | None,
         now: float,
         frame_bytes: int,
     ):
-        """Insert silence into a buffer when a wall-clock gap is detected.
+        """Reconcile a buffer against wall-clock time before adding new audio.
 
         Called before adding new audio to a buffer. Compares the elapsed
         wall-clock time since the buffer was last written against the duration
-        of the incoming frame. Any excess time (e.g., a muted mic or an idle
-        period between bot utterances) is filled with silence so the recorded
-        utterances remain temporally separated.
+        of the incoming frame, and corrects in both directions:
+
+        - Genuine gap (elapsed exceeds the frame duration by more than the
+          threshold, e.g. a muted mic or an idle period between bot
+          utterances): silence proportional to the gap is appended so the
+          recorded utterances remain temporally separated.
+        - Catch-up burst (frames arriving faster than real time right after a
+          stall, e.g. an event-loop block followed by the transport draining
+          its backlog): appending the frame would push the buffer past the
+          wall-clock expected position, because the stall window was already
+          filled with silence. The overshoot is trimmed out of that previously
+          injected silence before the frame is added, so the stall window is
+          not counted twice (once as silence, once as the late real audio).
+          Only injected silence is ever trimmed, never real audio, and never
+          more than the silence added for the most recent gap.
 
         Args:
-            buffer: The audio buffer to pad (user or bot).
+            buffer: The audio buffer to reconcile (user or bot).
+            gap_tracker: Wall-clock tracking state for this buffer.
             last_update_time: Monotonic time of the last write to this buffer,
                 or None if the buffer has never been written.
             now: Current monotonic time.
@@ -343,15 +548,38 @@ class AudioBufferProcessor(FrameProcessor):
         if last_update_time is None or self._sample_rate == 0:
             return
 
+        bytes_per_second = self._sample_rate * 2
         elapsed = now - last_update_time
-        frame_duration = frame_bytes / (self._sample_rate * 2)
+        frame_duration = frame_bytes / bytes_per_second
         gap = elapsed - frame_duration
 
+        # Advance the wall-clock expected buffer position (anchor on first use).
+        if gap_tracker.expected_len is None:
+            gap_tracker.expected_len = float(len(buffer))
+        gap_tracker.expected_len += elapsed * bytes_per_second
+
         if gap > 0.2:  # 200 ms threshold — safely above normal jitter
-            silence_bytes = int(gap * self._sample_rate * 2)
+            silence_bytes = int(gap * bytes_per_second)
             silence_bytes -= silence_bytes % 2  # keep 16-bit alignment
             if silence_bytes > 0:
+                # Track this injection so a catch-up burst can trim it. Only
+                # the most recent injection is trimmable, which caps trimming
+                # at the position the buffer was at before this gap's silence
+                # was added.
+                gap_tracker.silence_start = len(buffer)
+                gap_tracker.silence_len = silence_bytes
                 buffer.extend(b"\x00" * silence_bytes)
+        elif gap_tracker.silence_len > 0:
+            # Would appending this frame overshoot the wall-clock position?
+            overshoot = len(buffer) + frame_bytes - gap_tracker.expected_len
+            if overshoot > 0:
+                trim = min(int(overshoot), gap_tracker.silence_len)
+                # Never reach past the end of the buffer (defensive).
+                trim = min(trim, max(0, len(buffer) - gap_tracker.silence_start))
+                trim -= trim % 2  # keep 16-bit alignment
+                if trim > 0:
+                    del buffer[gap_tracker.silence_start : gap_tracker.silence_start + trim]
+                    gap_tracker.silence_len -= trim
 
     async def _process_turn_recording(self, frame: Frame, resampled_audio: bytes | None = None):
         """Process frames for turn-based audio recording."""
@@ -417,6 +645,10 @@ class AudioBufferProcessor(FrameProcessor):
         self._reset_all_audio_buffers()
         self._last_user_buffer_update_time = None
         self._last_bot_buffer_update_time = None
+        self._user_gap_tracker.reset()
+        self._bot_gap_tracker.reset()
+        self._user_capture_tracker.reset()
+        self._bot_capture_tracker.reset()
 
     def _reset_all_audio_buffers(self):
         """Reset all audio buffers to empty state."""
@@ -430,6 +662,13 @@ class AudioBufferProcessor(FrameProcessor):
         now = time.monotonic()
         self._last_user_buffer_update_time = now
         self._last_bot_buffer_update_time = now
+        self._user_gap_tracker.reset(buffer_len=0)
+        self._bot_gap_tracker.reset(buffer_len=0)
+        # Buffers are empty again, so capture anchors must re-anchor on the
+        # next capture-stamped frame (the old base_len points into flushed
+        # audio).
+        self._user_capture_tracker.reset()
+        self._bot_capture_tracker.reset()
 
     def _reset_turn_audio_buffers(self):
         """Clear user and bot turn buffers while preserving primary buffers and timestamps."""
