@@ -457,7 +457,22 @@ class CartesiaTTSService(WebsocketTTSService):
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
-        text = self._CARTESIA_TAG_RE.sub(" ", text)
+        """Remove Cartesia SSML tags from a word-timestamp token.
+
+        A tag standing between two alphanumeric characters is replaced by a space,
+        since it is the only thing separating two words (``"to<spell>1234"``).
+        Anywhere else it is removed outright: a space there would not join anything,
+        and it would split a word from its own punctuation
+        (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
+        token no longer matches the text that was sent for synthesis).
+        """
+
+        def replace(match: re.Match) -> str:
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            return " " if before.isalnum() and after.isalnum() else ""
+
+        text = self._CARTESIA_TAG_RE.sub(replace, text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
@@ -699,6 +714,7 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
+                logger.info(f"{self}: FF => received word timestamps: {processed_timestamps}")
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
