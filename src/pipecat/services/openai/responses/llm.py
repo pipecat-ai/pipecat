@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from typing import Any, Literal
 import httpx
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
-from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
+from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
     ResponseCompletedEvent,
@@ -85,6 +86,12 @@ class _PreviousResponseNotFoundError(_RetryableError):
 
 class _ConnectionLimitReachedError(_RetryableError):
     """WebSocket connection hit the 60-minute server-side limit."""
+
+    pass
+
+
+class _ResponseTimeoutError(_RetryableError):
+    """Response did not begin producing output within the retry timeout."""
 
     pass
 
@@ -219,6 +226,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         default_headers: Mapping[str, str] | None = None,
         service_tier: str | None = None,
         settings: Settings | None = None,
+        retry_timeout_secs: float | None = 5.0,
+        retry_on_timeout: bool | None = False,
         **kwargs,
     ):
         """Initialize the OpenAI Responses API LLM service.
@@ -231,6 +240,12 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             settings: Runtime-updatable settings.
+            retry_timeout_secs: How long an inference may go without producing
+                output before it is abandoned and re-issued, when
+                ``retry_on_timeout`` is set. Defaults to 5.0 seconds.
+            retry_on_timeout: Whether to re-issue the request once if the first
+                attempt produces no output within ``retry_timeout_secs``. The
+                retry is unbounded, so it either produces a response or fails.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
@@ -263,6 +278,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         # variant connects via raw websockets and needs the key explicitly.
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._service_tier = service_tier
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         # Tracks the model we've already warned about (reasoning configured on a
         # non-reasoning model) so we log it once per model rather than per turn.
         self._reasoning_unsupported_warned_for: str | None = None
@@ -921,8 +938,10 @@ class OpenAIResponsesLLMService(
         """Run inference over WebSocket with retry and previous_response_id.
 
         Tries once with the ``previous_response_id`` optimization.  On a
-        retriable error (cache miss, connection limit, connection drop),
-        clears state and retries once with the full context.  Transport-level
+        retriable error (cache miss, connection limit, connection drop, or —
+        when ``retry_on_timeout`` is set — a response that produces no output
+        in time), clears state and retries once with the full context and no
+        timeout, so the retry either responds or fails.  Transport-level
         ``ConnectionClosed`` errors are handled transparently by
         ``_ws_send``/``_ws_recv`` (auto-reconnect → ``WebsocketReconnectedError``).
 
@@ -954,11 +973,11 @@ class OpenAIResponsesLLMService(
                 params = self._apply_previous_response_optimization(params, full_input)
             return params
 
-        async def send_and_receive(params: dict):
+        async def send_and_receive(params: dict, output_timeout_secs: float | None = None):
             await self._ensure_connected()
             await self.start_ttfb_metrics()
             await self._ws_send({"type": "response.create", **params})
-            await self._receive_response_events(context, full_input)
+            await self._receive_response_events(context, full_input, output_timeout_secs)
 
         async def cleanup():
             self._clear_previous_response_state()
@@ -967,8 +986,20 @@ class OpenAIResponsesLLMService(
         # -- first attempt (with previous_response_id optimization) -----------
 
         try:
-            await send_and_receive(build_params(apply_optimization=True))
+            await send_and_receive(
+                build_params(apply_optimization=True),
+                output_timeout_secs=self._retry_timeout_secs if self._retry_on_timeout else None,
+            )
             return  # Success
+        except _ResponseTimeoutError:
+            # Dropping the connection discards the abandoned response's events,
+            # so the retry starts on a clean socket with no draining needed.
+            logger.warning(
+                f"{self}: No output within {self._retry_timeout_secs}s — reconnecting "
+                f"and retrying with full context ({len(full_input)} items)"
+            )
+            await cleanup()
+            await self._try_reconnect(report_error=self._report_error)
         except _PreviousResponseNotFoundError:
             logger.warning(
                 f"{self}: previous_response_not_found — "
@@ -1002,16 +1033,24 @@ class OpenAIResponsesLLMService(
             await cleanup()
             raise
 
-    async def _receive_response_events(self, context: LLMContext, full_input: list):
+    async def _receive_response_events(
+        self, context: LLMContext, full_input: list, output_timeout_secs: float | None = None
+    ):
         """Receive and process WebSocket events until the response completes.
 
         Args:
             context: The LLM context for the current inference.
             full_input: The complete input items list (for storing state on success).
+            output_timeout_secs: How long to wait for the response to start
+                producing output before raising ``_ResponseTimeoutError``. Once
+                the first output event arrives the wait becomes unbounded, since
+                by then content is already on its way downstream and re-issuing
+                would duplicate it. None waits indefinitely throughout.
 
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
+            _ResponseTimeoutError: Response produced no output in time.
             WebsocketReconnectedError: Connection was lost and auto-recovered.
             ConnectionClosed: Connection was lost and could not be recovered.
         """
@@ -1019,14 +1058,31 @@ class OpenAIResponsesLLMService(
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
 
+        deadline = time.monotonic() + output_timeout_secs if output_timeout_secs else None
+
         while True:
-            event = await self._ws_recv()
+            if deadline is None:
+                event = await self._ws_recv()
+            else:
+                try:
+                    event = await asyncio.wait_for(
+                        self._ws_recv(), timeout=max(deadline - time.monotonic(), 0)
+                    )
+                except TimeoutError:
+                    raise _ResponseTimeoutError(
+                        f"No output within {output_timeout_secs}s"
+                    ) from None
+
             event_type = event.get("type")
 
             if event_type == "response.created":
                 self._current_response_id = event.get("response", {}).get("id")
                 logger.debug(f"{self}: Response started: {self._current_response_id}")
                 continue
+
+            # Anything past response.created means the response is under way, so
+            # the window for abandoning and re-issuing it has closed.
+            deadline = None
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
@@ -1191,6 +1247,27 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         else:
             await self.push_frame(frame, direction)
 
+    async def _create_stream(self, params: dict) -> AsyncStream[ResponseStreamEvent]:
+        """Open a streaming Responses API request, retrying once on timeout.
+
+        Args:
+            params: Parameters for the Responses API call.
+
+        Returns:
+            Async stream of response events.
+        """
+        if not self._retry_on_timeout:
+            return await self._client.responses.create(**params)
+
+        try:
+            return await asyncio.wait_for(
+                self._client.responses.create(**params), timeout=self._retry_timeout_secs
+            )
+        except (TimeoutError, APITimeoutError):
+            # Retry, this time without a timeout so we get a response
+            logger.debug(f"{self}: Retrying response creation due to timeout")
+            return await self._client.responses.create(**params)
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
@@ -1207,7 +1284,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
         await self.start_ttfb_metrics()
 
-        stream: AsyncStream[ResponseStreamEvent] = await self._client.responses.create(**params)
+        stream: AsyncStream[ResponseStreamEvent] = await self._create_stream(params)
 
         # Track function calls across stream events
         function_calls: dict[str, dict[str, str]] = {}  # item_id -> {name, call_id, arguments}

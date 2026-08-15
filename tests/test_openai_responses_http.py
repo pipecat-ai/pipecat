@@ -6,9 +6,12 @@
 
 """Tests for the HTTP variant of OpenAIResponsesHttpLLMService."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from openai import APITimeoutError
 from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseErrorEvent,
@@ -521,3 +524,87 @@ class TestHttpStreamErrorEvents:
 
         error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
         assert error_frames, "Expected an ErrorFrame after an in-stream response.failed event"
+
+
+# ---------------------------------------------------------------------------
+# retry_on_timeout
+# ---------------------------------------------------------------------------
+
+
+class TestHttpRetryOnTimeout:
+    def test_disabled_by_default(self):
+        service = _make_service()
+        assert service._retry_on_timeout is False
+        assert service._retry_timeout_secs == 5.0
+
+    @pytest.mark.asyncio
+    async def test_no_timeout_applied_when_disabled(self):
+        service = _make_service()
+
+        async def slow_create(**kwargs):
+            await asyncio.sleep(0.1)
+            return _FakeAsyncStream([])
+
+        service._client.responses.create = AsyncMock(side_effect=slow_create)
+
+        await service._create_stream({})
+
+        assert service._client.responses.create.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_reissues_request_on_timeout(self):
+        service = _make_service(retry_on_timeout=True, retry_timeout_secs=0.05)
+
+        stream = _FakeAsyncStream([])
+        attempts = []
+
+        async def create(**kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                await asyncio.sleep(10)
+            return stream
+
+        service._client.responses.create = AsyncMock(side_effect=create)
+
+        assert await service._create_stream({"model": "gpt-4.1"}) is stream
+        assert len(attempts) == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_is_unbounded(self):
+        """The retry must outlive retry_timeout_secs, or it would be pointless."""
+        service = _make_service(retry_on_timeout=True, retry_timeout_secs=0.05)
+
+        stream = _FakeAsyncStream([])
+        attempts = 0
+
+        async def create(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                await asyncio.sleep(10)
+            await asyncio.sleep(0.15)  # longer than retry_timeout_secs
+            return stream
+
+        service._client.responses.create = AsyncMock(side_effect=create)
+
+        assert await service._create_stream({}) is stream
+        assert attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_api_timeout_error_also_retries(self):
+        service = _make_service(retry_on_timeout=True, retry_timeout_secs=0.05)
+
+        stream = _FakeAsyncStream([])
+        attempts = 0
+
+        async def create(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise APITimeoutError(request=httpx.Request("POST", "https://api.openai.com"))
+            return stream
+
+        service._client.responses.create = AsyncMock(side_effect=create)
+
+        assert await service._create_stream({}) is stream
+        assert attempts == 2
