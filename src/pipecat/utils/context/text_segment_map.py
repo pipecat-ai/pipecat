@@ -512,7 +512,10 @@ class TextSegmentMap:
            boundary (see :meth:`_literal_hop`'s ``require_word_boundary``).
         3. Markup-stripped on both sides: for a provider that wraps the word
            token in tags absent from ``tts_text`` (or vice versa). Recomputed
-           fresh each call -- no persisted tag state.
+           fresh each call -- no persisted tag state. As in 1 and 2, the word's
+           own trailing punctuation is also tried removed: a provider may end a
+           tagged span with punctuation the source text left to a following line
+           break.
 
         Strategies 1 and 2 yield :attr:`_HopKind.PLACED` (word fits inside this
         segment) or :attr:`_HopKind.CROSSES` (the segment's remaining text is
@@ -562,10 +565,14 @@ class TextSegmentMap:
             return hop
 
         # Strategy 3: markup-stripped match.
+        haystack = strip_markup(stripped)
         clean_word = strip_markup(remaining_word)
-        if clean_word and strip_markup(stripped).startswith(clean_word):
-            raw_len = _raw_len_for_clean_chars(stripped, len(clean_word))
-            return _Hop(_HopKind.PLACED, seg_chars=lead_ws + raw_len)
+        trimmed_word = strip_trailing_punctuation(clean_word)
+        clean_words = (clean_word,) if trimmed_word == clean_word else (clean_word, trimmed_word)
+        for candidate in clean_words:
+            if candidate and haystack.startswith(candidate):
+                raw_len = _raw_len_for_clean_chars(stripped, len(candidate))
+                return _Hop(_HopKind.PLACED, seg_chars=lead_ws + raw_len)
 
         # Nothing spoken left here: drain so the word can try the next segment.
         if not normalize(segment_remaining):
