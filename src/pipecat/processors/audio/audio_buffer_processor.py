@@ -42,7 +42,7 @@ _DEPRECATED_TURN_AUDIO_EVENTS = {
 
 
 @dataclass
-class TurnAudio:
+class TurnAudioData:
     """One speaker's audio for one conversation turn.
 
     Parameters:
@@ -70,9 +70,9 @@ class AudioBufferProcessor(FrameProcessor):
 
     - on_audio_data: Triggered when buffer_size is reached, providing merged audio
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-    - on_user_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudio` with
+    - on_user_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudioData` with
       everything the user said during it
-    - on_bot_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudio` with
+    - on_bot_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudioData` with
       everything the bot said during it
     - on_recording_started: Triggered when recording starts (state transitions to active)
     - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
@@ -495,7 +495,7 @@ class AudioBufferProcessor(FrameProcessor):
         if user_audio:
             await self._call_event_handler(
                 "on_user_turn_audio",
-                TurnAudio(
+                TurnAudioData(
                     turn_number=turn_number,
                     audio=bytes(user_audio),
                     sample_rate=self.sample_rate,
@@ -505,7 +505,7 @@ class AudioBufferProcessor(FrameProcessor):
         if bot_audio:
             await self._call_event_handler(
                 "on_bot_turn_audio",
-                TurnAudio(
+                TurnAudioData(
                     turn_number=turn_number,
                     audio=bytes(bot_audio),
                     sample_rate=self.sample_rate,
