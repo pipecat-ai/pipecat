@@ -7,6 +7,7 @@
 import asyncio
 import struct
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -1053,13 +1054,13 @@ class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
         )
         events = []
 
-        @processor.event_handler("on_user_turn_audio_data")
-        async def on_user(buffer, audio, sample_rate, num_channels, turn_number):
-            events.append(("user", turn_number, bytes(audio)))
+        @processor.event_handler("on_user_turn_audio")
+        async def on_user(buffer, turn):
+            events.append(("user", turn.turn_number, bytes(turn.audio)))
 
-        @processor.event_handler("on_bot_turn_audio_data")
-        async def on_bot(buffer, audio, sample_rate, num_channels, turn_number):
-            events.append(("bot", turn_number, bytes(audio)))
+        @processor.event_handler("on_bot_turn_audio")
+        async def on_bot(buffer, turn):
+            events.append(("bot", turn.turn_number, bytes(turn.audio)))
 
         await run_test(
             processor,
@@ -1133,6 +1134,39 @@ class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
         events = await self._turn_events(_bot_run())
 
         self.assertEqual(events, [("bot", 1, TURN_CHUNK)])
+
+    async def test_deprecated_events_still_report_each_run_of_speech(self):
+        # The superseded events keep their old shape: one call per run of
+        # speech, four arguments, no turn number.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE,
+            num_channels=1,
+            enable_turn_audio=True,
+            auto_start_recording=True,
+        )
+        runs = []
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @processor.event_handler("on_user_turn_audio_data")
+            async def on_user(buffer, audio, sample_rate, num_channels):
+                runs.append(("user", bytes(audio)))
+
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        self.assertIn("on_user_turn_audio", str(caught[0].message))
+
+        # Two runs of user speech in one turn produce two calls.
+        await run_test(
+            processor,
+            frames_to_send=[*_user_run(), *_user_run(), *_bot_run()],
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=TURN_SAMPLE_RATE, audio_out_sample_rate=TURN_SAMPLE_RATE
+            ),
+        )
+
+        self.assertEqual(runs, [("user", TURN_CHUNK), ("user", TURN_CHUNK)])
 
     async def test_open_mic_audio_stays_out_of_the_interrupted_turn(self):
         # The mic keeps delivering while the bot speaks, so at a barge-in the

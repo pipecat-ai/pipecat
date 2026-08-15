@@ -12,6 +12,8 @@ configurations and event-driven processing.
 """
 
 import time
+import warnings
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -32,6 +34,30 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+# Events superseded by on_user_turn_audio and on_bot_turn_audio.
+_DEPRECATED_TURN_AUDIO_EVENTS = {
+    "on_user_turn_audio_data": "on_user_turn_audio",
+    "on_bot_turn_audio_data": "on_bot_turn_audio",
+}
+
+
+@dataclass
+class TurnAudio:
+    """One speaker's audio for one conversation turn.
+
+    Parameters:
+        turn_number: The turn this audio belongs to.
+        audio: Everything the speaker said during the turn, as raw PCM, with
+            the pauses between their runs of speech left out.
+        sample_rate: Sample rate of the audio in Hz.
+        num_channels: Number of channels in the audio.
+    """
+
+    turn_number: int
+    audio: bytes
+    sample_rate: int
+    num_channels: int
+
 
 class AudioBufferProcessor(FrameProcessor):
     """Processes and buffers audio frames from both input (user) and output (bot) sources.
@@ -44,12 +70,23 @@ class AudioBufferProcessor(FrameProcessor):
 
     - on_audio_data: Triggered when buffer_size is reached, providing merged audio
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-    - on_user_turn_audio_data: Triggered when a turn ends, providing everything the user said
-      during it and the turn number
-    - on_bot_turn_audio_data: Triggered when a turn ends, providing everything the bot said
-      during it and the turn number
+    - on_user_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudio` with
+      everything the user said during it
+    - on_bot_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudio` with
+      everything the bot said during it
     - on_recording_started: Triggered when recording starts (state transitions to active)
     - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
+    - on_user_turn_audio_data: Triggered when the user stops speaking, providing that run of
+      speech
+
+      .. deprecated:: 1.8.0
+          Use ``on_user_turn_audio`` instead. Will be removed in 2.0.0.
+
+    - on_bot_turn_audio_data: Triggered when the bot stops speaking, providing that run of
+      speech
+
+      .. deprecated:: 1.8.0
+          Use ``on_bot_turn_audio`` instead. Will be removed in 2.0.0.
 
     Audio handling:
 
@@ -116,8 +153,27 @@ class AudioBufferProcessor(FrameProcessor):
         self._register_event_handler("on_track_audio_data")
         self._register_event_handler("on_user_turn_audio_data")
         self._register_event_handler("on_bot_turn_audio_data")
+        self._register_event_handler("on_user_turn_audio")
+        self._register_event_handler("on_bot_turn_audio")
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
+
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        replacement = _DEPRECATED_TURN_AUDIO_EVENTS.get(event_name)
+        if replacement:
+            warnings.warn(
+                f"`{event_name}` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+                f"Use `{replacement}` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().add_event_handler(event_name, handler)
 
     @property
     def sample_rate(self) -> int:
@@ -370,8 +426,14 @@ class AudioBufferProcessor(FrameProcessor):
         # Speaking state (_user_speaking / _bot_speaking) is maintained by
         # _process_recording so it is always up-to-date here.
         if isinstance(frame, UserStoppedSpeakingFrame):
+            await self._call_event_handler(
+                "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
+            )
             self._end_user_run()
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._call_event_handler(
+                "on_bot_turn_audio_data", self._bot_turn_audio_buffer, self.sample_rate, 1
+            )
             self._end_bot_run()
 
         if isinstance(frame, InputAudioRawFrame) and resampled_audio:
@@ -394,7 +456,7 @@ class AudioBufferProcessor(FrameProcessor):
             return
 
         worker = self._pipeline_worker
-        turn_tracker = getattr(worker, "turn_tracking_observer", None) if worker else None
+        turn_tracker = worker.turn_tracking_observer if worker else None
         if turn_tracker is None:
             logger.warning(
                 f"{self}: enable_turn_audio is set but turn tracking is off, so no turn audio "
@@ -432,11 +494,23 @@ class AudioBufferProcessor(FrameProcessor):
 
         if user_audio:
             await self._call_event_handler(
-                "on_user_turn_audio_data", user_audio, self.sample_rate, 1, turn_number
+                "on_user_turn_audio",
+                TurnAudio(
+                    turn_number=turn_number,
+                    audio=bytes(user_audio),
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
             )
         if bot_audio:
             await self._call_event_handler(
-                "on_bot_turn_audio_data", bot_audio, self.sample_rate, 1, turn_number
+                "on_bot_turn_audio",
+                TurnAudio(
+                    turn_number=turn_number,
+                    audio=bytes(bot_audio),
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
             )
 
     async def _call_on_audio_data_handler(self):
