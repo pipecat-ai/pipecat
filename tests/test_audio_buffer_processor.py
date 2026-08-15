@@ -1135,6 +1135,31 @@ class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, [("bot", 1, TURN_CHUNK)])
 
+    async def test_turn_audio_needs_turn_tracking(self):
+        # Turn boundaries come from the tracker, so without one there is nothing
+        # to report. Say so rather than going quiet.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE, num_channels=1, enable_turn_audio=True
+        )
+        await processor.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=TaskManager(),
+                pipeline_worker=SimpleNamespace(  # type: ignore[arg-type]
+                    app_resources=None, turn_tracking_observer=None
+                ),
+            )
+        )
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.logger") as mock_logger:
+            await processor.process_frame(
+                StartFrame(audio_out_sample_rate=TURN_SAMPLE_RATE), FrameDirection.DOWNSTREAM
+            )
+
+        mock_logger.warning.assert_called_once()
+        self.assertIn("enable_turn_tracking", mock_logger.warning.call_args[0][0])
+        await processor.cleanup()
+
     async def test_deprecated_events_still_report_each_run_of_speech(self):
         # The superseded events keep their old shape: one call per run of
         # speech, four arguments, no turn number.
