@@ -344,6 +344,28 @@
       "location": "pipecat/processors/aggregators/llm_response_universal.py"
     },
     {
+      "subject": "AudioBufferProcessor",
+      "module": "pipecat.processors.audio.audio_buffer_processor",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_user_turn_audio",
+      "message": "Use ``on_user_turn_audio`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/audio/audio_buffer_processor.py"
+    },
+    {
+      "subject": "AudioBufferProcessor",
+      "module": "pipecat.processors.audio.audio_buffer_processor",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_bot_turn_audio",
+      "message": "Use ``on_bot_turn_audio`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/audio/audio_buffer_processor.py"
+    },
+    {
       "subject": "WakeCheckFilter",
       "module": "pipecat.processors.filters.wake_check_filter",
       "kind": "class",
