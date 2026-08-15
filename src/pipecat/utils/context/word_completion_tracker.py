@@ -253,7 +253,14 @@ class WordCompletionTracker:
         if self._llm_text is not None:
             self._attribute_llm_consumed(word, prev_llm_pos)
 
-        return self.is_complete
+        complete = self.is_complete
+        if complete:
+            # Everything speakable has been spoken, so whatever is left is text no
+            # word will ever arrive for -- a tag closing the frame, or one sitting
+            # between the last word and its punctuation. It belongs to this frame,
+            # so the cursor takes it rather than leaving it out of the turn.
+            self._user_facing_pos = len(self._user_facing_text)
+        return complete
 
     def _attribute_llm_consumed(self, word: str, prev_llm_pos: int) -> None:
         """Set ``_llm_consumed`` to the llm_text span the just-advanced word maps to.
