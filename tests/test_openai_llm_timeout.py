@@ -6,6 +6,7 @@
 
 """Unit tests for OpenAI LLM error handling."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -296,6 +297,60 @@ async def test_openai_llm_async_iterator_closed_on_stream_end():
         assert iterator_aclosed, "Async iterator should be explicitly closed"
         # Verify the stream was also closed (releases HTTP resources)
         assert stream_closed, "Stream should be closed to release HTTP resources"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_streamed_tool_call_index_can_start_after_zero():
+    """Tool-call indexes may be sparse when a provider streams non-tool output first."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        class MockAsyncStream:
+            def __init__(self, chunks):
+                self._chunks = chunks
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._chunks:
+                    raise StopAsyncIteration()
+                return self._chunks.pop(0)
+
+            async def close(self):
+                pass
+
+        def tool_chunk(index, *, tool_call_id=None, name=None, arguments=None):
+            function = SimpleNamespace(name=name, arguments=arguments)
+            tool_call = SimpleNamespace(index=index, id=tool_call_id, function=function)
+            delta = SimpleNamespace(tool_calls=[tool_call], content=None)
+            choice = SimpleNamespace(delta=delta)
+            return SimpleNamespace(usage=None, model=None, choices=[choice])
+
+        mock_stream = MockAsyncStream(
+            [
+                tool_chunk(1, tool_call_id="call_weather", name="get_weather", arguments=""),
+                tool_chunk(1, arguments='{"city": "San Francisco"}'),
+            ]
+        )
+
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.run_function_calls = AsyncMock()
+
+        context = LLMContext(messages=[{"role": "user", "content": "weather?"}])
+
+        await service._process_context(context)
+
+        service.run_function_calls.assert_called_once()
+        function_calls = service.run_function_calls.call_args.args[0]
+        assert len(function_calls) == 1
+        assert function_calls[0].tool_call_id == "call_weather"
+        assert function_calls[0].function_name == "get_weather"
+        assert function_calls[0].arguments == {"city": "San Francisco"}
 
 
 @pytest.mark.asyncio
