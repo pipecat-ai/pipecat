@@ -455,7 +455,7 @@ class AudioBufferProcessor(FrameProcessor):
         if self._turn_tracker_attached:
             return
 
-        worker = self._pipeline_worker
+        worker = self.pipeline_worker
         turn_tracker = worker.turn_tracking_observer if worker else None
         if turn_tracker is None:
             logger.warning(
