@@ -1318,14 +1318,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
-            # Nothing retries this, so a socket that never opened is the end of
-            # the service: `run_stt` would go on discarding audio against a
-            # closed socket. Permanent whatever the cause, where the category
-            # would call a connectivity failure worth retrying.
+            # Left on the category the failure earns: `_try_reconnect` skips a
+            # service that has stopped being usable, so reporting a socket that
+            # would not open as permanent bars the retry that could open it.
             await self.push_error(
-                error_msg=f"Unable to connect to Sarvam realtime STT: {e}",
-                exception=e,
-                treat_as_permanent=True,
+                error_msg=f"Unable to connect to Sarvam realtime STT: {e}", exception=e
             )
             await self._call_event_handler("on_connection_error", str(e))
 

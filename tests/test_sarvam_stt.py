@@ -263,11 +263,11 @@ async def test_connect_uses_subscription_key_and_user_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_failed_connect_costs_the_service_its_usability(monkeypatch):
-    """A socket that never opens is terminal, whatever kept it from opening.
+async def test_failed_connect_leaves_the_service_usable(monkeypatch):
+    """A socket that never opened can still be opened on a later attempt.
 
-    Nothing reconnects, so the retryable category a connectivity failure earns
-    would leave a switcher feeding audio to a service with no socket.
+    `_try_reconnect` skips a service that has stopped being usable, so
+    reporting the failure as permanent would bar the retry that could fix it.
     """
     monkeypatch.setattr(
         "pipecat.services.websocket_service.websocket_connect",
@@ -279,7 +279,7 @@ async def test_failed_connect_costs_the_service_its_usability(monkeypatch):
     await service._connect_websocket()
 
     assert service._websocket is None
-    assert service.is_usable is False
+    assert service.is_usable is True
 
 
 @pytest.mark.asyncio
