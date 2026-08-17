@@ -84,6 +84,18 @@ def int_to_krisp_frame_duration(frame_duration_ms: int):
     return KRISP_FRAME_DURATIONS[frame_duration_ms]
 
 
+# Krisp SDK switched its Python bindings from pybind11 to nanobind starting in
+# 1.11.0. Among other things, this changed the noise suppression level argument
+# from int to float and requires writable (not just readable) ndarray input.
+_NANOBIND_SDK_VERSION = (1, 11, 0)
+
+
+def krisp_sdk_uses_nanobind_bindings() -> bool:
+    """Whether the installed krisp_audio build uses nanobind bindings (>= 1.11.0)."""
+    version = krisp_audio.getVersion()
+    return (version.major, version.minor, version.patch) >= _NANOBIND_SDK_VERSION
+
+
 class KrispVivaSDKManager:
     """Singleton manager for Krisp VIVA SDK with reference counting."""
 

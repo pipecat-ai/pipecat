@@ -63,6 +63,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("RIME_API_KEY", ""),
         settings=RimeTTSService.Settings(
             voice="luna",
+            model="coda",
         ),
     )
 

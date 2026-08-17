@@ -62,7 +62,7 @@ pipecat = "pipecat.cli.main:run"
 pc = "pipecat.cli.main:run"
 
 [project.optional-dependencies]
-aic = [ "aic-sdk~=2.5.0" ]
+aic = [ "aic-sdk~=3.1.0" ]
 anthropic = [ "anthropic>=0.49.0,<1" ]
 assemblyai = []
 asyncai = []
@@ -93,6 +93,7 @@ heygen = [ "livekit>=1.0.13,<2" ]
 hume = [ "hume>=0.11.2,<1" ]
 inception = []
 inworld = []
+keenable = [ "pipecat-ai[mcp]" ]
 koala = [ "pvkoala~=2.0.3" ]
 kokoro = [ "kokoro-onnx>=0.5.0,<1", "requests>=2.32.5,<3" ]
 langchain = [ "langchain>=1.2.13,<2", "langchain-community>=0.4.1,<1", "langchain-openai>=1.1.12,<2" ]
@@ -107,7 +108,7 @@ mistral = ["mistralai>=2.0.0,<3"]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0,<6" ]
 moonshine = [ "moonshine-voice>=0.0.62" ]
-moq = [ "moq-rs>=0.3.2,<1.0.0", "cryptography>=45.0.0" ]
+moq = [ "moq-rs~=0.3.2", "cryptography>=45.0.0" ]
 nebius = []
 neuphonic = []
 novita = []
@@ -232,13 +233,28 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
+    "ASYNC", # Blocking calls and other misuse inside async functions
     "B", # Likely bugs and design problems
     "D", # Docstring rules
     "F", # Pyflakes
     "I", # Import rules
+    "RUF006", # asyncio tasks nothing holds a reference to
     "UP", # Modern Python
 ]
 ignore = [
+    # Async rules that do not fit this codebase.
+    #
+    # ASYNC109 objects to a `timeout` parameter on an async function, which is
+    # how cancellation is spelled throughout pipecat's own API, and ASYNC240
+    # prescribes trio.Path or anyio.path for filesystem work; pipecat runs on
+    # asyncio, and the calls it flags are in CLI and startup paths.
+    "ASYNC109",
+    "ASYNC240",
+    #
+    # ASYNC110 is a deferral: its one site polls a queue in the audio output
+    # path, and swapping it for an Event means restructuring a real-time loop.
+    "ASYNC110",
+    #
     # Bugbear rules that do not fit this codebase.
     #
     # Base classes leave optional hooks empty so subclasses override only what
@@ -268,10 +284,13 @@ ignore = [
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-# Skip docstring checks for non-source code
-"examples/**/*.py" = ["D"]
-"tests/**/*.py" = ["D"]
-"scripts/**/*.py" = ["D"]
+# Skip docstring checks for non-source code. ASYNC230 and RUF006 are enforced in
+# the framework, where a blocked event loop stalls a live session and a collected
+# task drops one, and left off the demo and test code around it: both findings
+# there want a per-site rewrite that would bury what the file is teaching.
+"examples/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"tests/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"scripts/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]

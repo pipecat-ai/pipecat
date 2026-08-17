@@ -394,6 +394,25 @@ def _eval_verdict(r: EvalRun) -> str:
     return "passed" if r.result.passed else "failed"
 
 
+def _turn_tally(r: EvalRun) -> str:
+    """``7/10 turns`` for a run that drove every turn and failed some, else ``""``.
+
+    A rate needs every turn scored. A run that stopped at its first failure left
+    the rest undriven, and a fraction over those would read as turns that failed
+    when they were never attempted — what it stopped on is in the failure listing
+    instead. A run that passed is already said by the ✓.
+    """
+    result = r.result
+    if result is None or not result.turns:
+        return ""
+    if any(t.status == "not_run" for t in result.turns):
+        return ""
+    failed = sum(1 for t in result.turns if t.status == "failed")
+    if not failed:
+        return ""
+    return f"{len(result.turns) - failed}/{len(result.turns)} turns"
+
+
 def _fmt_duration(seconds: float) -> str:
     """Human-friendly elapsed time, e.g. ``12.3s`` or ``2m 04s``."""
     if seconds < 60:
@@ -596,6 +615,9 @@ def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
         return
     glyph, _, code = _EVAL_GLYPH[_eval_verdict(r)]
     extra = f"({r.duration_ms}ms)" if r.duration_ms is not None and not r.error else (r.error or "")
+    tally = _turn_tally(r)
+    if tally:
+        extra = f"{tally} {extra}"
     scenario = f"{r.scenario} #{r.attempt}" if show_attempt else r.scenario
     print(f"  {_color(glyph, code)} {r.bot} {_color(scenario, '36')} {_dim(extra)}", flush=True)
 
@@ -672,7 +694,10 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     print(f"  {_color(f'Failures ({len(failed)} of {total}):', '1;31')}")
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
+        tally = _turn_tally(r)
         header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        if tally:
+            header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
             print(f"{header} {_dim('— ' + r.error)}")
         elif r.result is not None:

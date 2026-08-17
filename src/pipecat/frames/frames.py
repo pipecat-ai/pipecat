@@ -35,6 +35,7 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -698,11 +699,12 @@ class LLMSetToolsFrame(DataFrame):
     Parameters:
         tools: The tools to advertise. May be a ``ToolsSchema``, a plain list of
             direct functions and/or ``FunctionSchema`` objects (normalized to a
-            ``ToolsSchema``, with direct-function handlers auto-registered), a
-            list of provider-specific tool dicts, or ``NOT_GIVEN`` to clear tools.
+            ``ToolsSchema``, with direct-function handlers auto-registered), or
+            ``NOT_GIVEN`` to clear tools. Provider-native tools travel in a
+            ``ToolsSchema``'s ``custom_tools``, keyed by adapter type.
     """
 
-    tools: list[dict] | list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
+    tools: list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
 
 
 @dataclass
@@ -962,15 +964,27 @@ class ErrorFrame(SystemFrame):
         fatal: Whether the error is fatal and requires bot shutdown.
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
+        category: What kind of failure this was, drawn from `ErrorCategory`:
+            rejected credentials, an unreachable provider, a malformed request
+            and so on. ``None`` means nobody has said yet, which invites the
+            category to be worked out from the exception; set it to
+            `ErrorCategory.UNKNOWN` to report an error whose cause can't be
+            attributed. Always set by the time the frame travels.
     """
 
     error: str
     fatal: bool = False
     processor: FrameProcessor | None = None
     exception: Exception | None = None
+    category: ErrorCategory | None = None
 
     def __str__(self):
-        return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
+        category = (
+            f", category: {self.category.value}"
+            if self.category and self.category is not ErrorCategory.UNKNOWN
+            else ""
+        )
+        return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"
 
 
 @dataclass
@@ -1246,10 +1260,15 @@ class FunctionCallCancelFrame(SystemFrame):
     Parameters:
         function_name: Name of the function that was cancelled.
         tool_call_id: Unique identifier for the cancelled function call.
+        run_llm: Whether to run the LLM after this cancellation. Only a call
+            cancelled by its own timeout sets this: an interruption must not
+            trigger inference, and a cancellation the LLM asked for already
+            runs inference through the result of the tool that requested it.
     """
 
     function_name: str
     tool_call_id: str
+    run_llm: bool = False
 
 
 @dataclass

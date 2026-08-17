@@ -31,6 +31,14 @@ from pipecat.runner.run import (
     _verify_and_consume_ws_token,
 )
 
+try:
+    import jwt as _jwt  # noqa: F401
+    from livekit import api as _livekit_api  # noqa: F401
+
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
+
 
 class TestRunnerRun(unittest.TestCase):
     def _capture_startup_message(self, args: argparse.Namespace) -> str:
@@ -49,6 +57,7 @@ class TestRunnerRun(unittest.TestCase):
         self.assertEqual(_transport_route_dependencies("plivo"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("exotel"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("vonage"), ())
+        self.assertEqual(_transport_route_dependencies("livekit"), ("livekit.api",))
 
     def test_transport_routes_enabled_maps_transports_to_dependency_checks(self):
         def module_available(module: str) -> bool:
@@ -271,6 +280,7 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
+                "livekit (install pipecat-ai[livekit]), "
                 "webrtc (install pipecat-ai[webrtc]), "
                 "moq (install pipecat-ai[moq])\n"
                 "   → Allowed origins: all (no restriction)\n"
@@ -292,7 +302,7 @@ class TestRunnerRun(unittest.TestCase):
                 "\n"
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
-                "   → Enabled transports: daily, webrtc, telephony, websocket, moq\n"
+                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
@@ -334,6 +344,58 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitRunnerRoutes(unittest.TestCase):
+    def test_livekit_credentials_raises_when_unconfigured(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(Exception, "LIVEKIT_URL"):
+                livekit_credentials()
+
+    def test_livekit_credentials_returns_configured_values(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        env = {
+            "LIVEKIT_URL": "wss://test.livekit.cloud",
+            "LIVEKIT_API_KEY": "key",
+            "LIVEKIT_API_SECRET": "secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            url, api_key, api_secret = livekit_credentials()
+        self.assertEqual((url, api_key, api_secret), (env["LIVEKIT_URL"], "key", "secret"))
+
+    def test_generate_session_tokens_suffixes_identity_with_session_id(self):
+        """Regression: fixed identities collide across concurrent sessions sharing
+        a room (e.g. a fixed LIVEKIT_ROOM_NAME), evicting the earlier participant.
+        """
+        import uuid
+
+        import jwt
+
+        from pipecat.runner.livekit import generate_session_tokens
+
+        agent_token_1, user_token_1 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+        agent_token_2, user_token_2 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+
+        def identity(token: str) -> str:
+            return jwt.decode(token, options={"verify_signature": False})["sub"]
+
+        identities = {
+            identity(agent_token_1),
+            identity(user_token_1),
+            identity(agent_token_2),
+            identity(user_token_2),
+        }
+        self.assertEqual(
+            len(identities), 4, "every session/role pair should have a unique identity"
+        )
 
 
 class TestWsAuthTokens(unittest.TestCase):

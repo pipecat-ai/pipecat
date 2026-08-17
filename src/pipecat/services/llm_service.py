@@ -53,6 +53,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     StartFrame,
 )
+from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -66,14 +67,16 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
     ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
-    CANCEL_ASYNC_TOOL_NAME,
-    CANCEL_ASYNC_TOOL_SCHEMA,
+    CANCEL_TOOL_PREFIX,
+    build_cancel_tool_schema,
+    cancel_tool_name,
 )
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
@@ -173,7 +176,11 @@ class FunctionCallRegistryItem:
             continues the conversation immediately without waiting for the
             result, and the result is injected later via a developer message.
         timeout_secs: Optional per-tool timeout in seconds. Overrides the global
-            ``function_call_timeout_secs`` for this specific function.
+            ``function_call_timeout_secs`` for this specific function. A call
+            that runs past it is cancelled.
+        cancellable_by_llm: Whether the LLM may cancel this call while it runs. Only
+            meaningful on an async call (``cancel_on_interruption=False``), since
+            a synchronous one holds the LLM until it returns.
         auto_registered: True only for a direct function that was auto-registered
             from an advertised tool set (listed in an ``LLMContext`` or
             ``LLMSetToolsFrame``). False for every explicitly registered handler —
@@ -184,6 +191,7 @@ class FunctionCallRegistryItem:
     handler: FunctionCallHandler | DirectFunctionWrapper
     cancel_on_interruption: bool
     timeout_secs: float | None = None
+    cancellable_by_llm: bool = False
     auto_registered: bool = False
 
 
@@ -203,6 +211,10 @@ class FunctionCallRunnerItem:
         group_id: Shared identifier for all function calls from the same LLM
             response batch. Used to trigger the LLM exactly once when the last
             call in the group completes.
+        settled: Whether the call has already reached a terminal state — a
+            final result, a timeout, or a cancellation. Results reported after
+            that are rejected, since the rest of the pipeline has stopped
+            tracking the call.
     """
 
     registry_item: FunctionCallRegistryItem
@@ -212,6 +224,7 @@ class FunctionCallRunnerItem:
     context: LLMContext
     run_llm: bool | None = None
     group_id: str | None = None
+    settled: bool = False
 
 
 # `default=BaseLLMAdapter` (PEP 696) so that unparameterized subclasses
@@ -232,7 +245,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
     - on_completion_timeout: Called when an LLM completion timeout occurs
     - on_function_calls_started: Called when function calls are received and
-      execution is about to start. Built-in tools (e.g. ``cancel_async_tool_call``)
+      execution is about to start. Built-in tools (e.g. a ``cancel_<name>`` tool)
       are excluded from this event.
     - on_function_calls_cancelled: Called after one or more async tool calls are
       cancelled.
@@ -270,6 +283,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         "The function `{function_name}` is not currently available."
     )
 
+    # Returned to the LLM as the tool result when a handler raises. It names the
+    # function as the thing that failed. The exception itself is deliberately
+    # left out.
+    FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE = (
+        "The function `{function_name}` failed and returned no result."
+    )
+
     def __init__(
         self,
         run_in_parallel: bool = True,
@@ -288,13 +308,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 is triggered exactly once after all calls in the batch complete. When
                 False, each function call result triggers the LLM independently as it
                 arrives. Defaults to True.
-            function_call_timeout_secs: Optional timeout in seconds for deferred function
-                calls.
-            enable_async_tool_cancellation: When True, injects the
-                ``cancel_async_tool_call`` built-in tool and its system instructions
-                so the LLM can cancel in-progress async function calls
-                (``cancel_on_interruption=False``) whose results are no longer
-                wanted. Defaults to False.
+            function_call_timeout_secs: Optional timeout in seconds for function calls.
+                A call that runs past it is cancelled: its handler is thrown an
+                ``asyncio.CancelledError``, the call is settled as cancelled, and
+                inference runs so the LLM can report that it didn't complete.
+            enable_async_tool_cancellation: When True, treats every async function
+                (``cancel_on_interruption=False``) as cancellable by the LLM.
+                Defaults to False.
+
+                .. deprecated:: 1.8.0
+                    Use ``cancellable_by_llm=True`` on the tools that should be
+                    cancellable instead. Will be removed in 2.0.0. Whether a tool
+                    runs long enough to be stopped at all, and whether the model
+                    can be trusted to decide its result is unwanted, are per-tool
+                    questions rather than ones answered for every tool at once.
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
@@ -309,12 +336,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._run_in_parallel = run_in_parallel
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
+        if enable_async_tool_cancellation:
+            warnings.warn(
+                "`enable_async_tool_cancellation` is deprecated since 1.8.0 and will be "
+                "removed in 2.0.0. Set `cancellable_by_llm=True` on the tools that should be "
+                "cancellable instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
         # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
         self._warn_turn_completion_settings_are_strategy_owned()
-        self._async_tool_cancellation_enabled: bool = False
+        # The per-tool cancel tools currently advertised, by name.
+        self._cancel_tool_names: set[str] = set()
+        # Cancel-tool names that collide with a user's own tool, warned about once.
+        self._warned_cancel_collisions: set[str] = set()
         # The user's base system instruction, without composed addons. Captured
         # here and refreshed when the user changes ``system_instruction`` at
         # runtime; ``_compose_system_instruction`` always rebuilds the effective
@@ -329,6 +367,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self._resolve_adapter_class()())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
+        # Cleanup callables carried by registered tool handlers, awaited at
+        # service teardown (see _record_tool_cleanup).
+        self._tool_cleanups: list[Callable[[], Awaitable[None]]] = []
         # Names we've already warned about for a redundant manual registration
         # (an explicit register_function call for a tool whose advertised
         # FunctionSchema already carries a handler), so the warning fires once
@@ -453,8 +494,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
-        if self._enable_async_tool_cancellation:
-            self._setup_async_tool_cancellation()
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
@@ -479,12 +518,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._cancel_summary_task()
 
     async def cleanup(self):
-        """Release LLM service resources at teardown."""
+        """Release LLM service resources at teardown.
+
+        Besides this service's own tasks, runs any cleanup callables carried by
+        registered tool handlers (e.g. closing an MCP client's connection).
+        """
         await super().cleanup()
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
+        await self._run_tool_cleanups()
 
     def _warn_turn_completion_settings_are_strategy_owned(self):
         """Warn that the turn-completion settings belong to the user turn strategy.
@@ -530,6 +574,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._appended_system_instructions.append(instruction)
         self._compose_system_instruction()
 
+    def _has_async_tools(self) -> bool:
+        """Whether any registered tool runs asynchronously.
+
+        Returns:
+            True when a tool is registered with ``cancel_on_interruption=False``,
+            which is what makes the async-tool guidance worth composing in. The
+            built-in cancellation tool is registered as a synchronous one, so it
+            never counts on its own.
+        """
+        return any(not item.cancel_on_interruption for item in self._functions.values())
+
     def _compose_system_instruction(self):
         """Rebuild ``system_instruction`` from the base prompt and all active addons.
 
@@ -545,8 +600,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         parts.extend(self._appended_system_instructions)
         if self._filter_incomplete_user_turns:
             parts.append(self._user_turn_completion_config.completion_instructions)
-        if self._async_tool_cancellation_enabled:
+        if self._cancel_tool_names:
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
+        if self._has_async_tools():
+            parts.append(ASYNC_TOOL_INSTRUCTIONS)
         composed = "\n\n".join(p for p in parts if p)
         self._settings.system_instruction = composed or None
         logger.debug(f"{self}: System instruction composed: {self._settings.system_instruction}")
@@ -793,6 +850,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         *,
         cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
+        cancellable_by_llm: bool | None = None,
     ):
         """Register a function handler for LLM function calls.
 
@@ -818,13 +876,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 dropped and an error is raised. Use a non-realtime LLM
                 service if your tool needs to stream intermediate results.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
-                global ``function_call_timeout_secs``. Defaults to ``None`` (fall
-                back to the ``@tool_options`` decorator value, then to the global
-                timeout).
+                global ``function_call_timeout_secs``. A call that runs past it is
+                cancelled: the handler is thrown an ``asyncio.CancelledError``, the
+                call is settled as cancelled, and inference runs so the LLM can
+                report that it didn't complete. Defaults to ``None`` (fall back to
+                the ``@tool_options`` decorator value, then to the global timeout).
+            cancellable_by_llm: Whether the LLM may cancel this call while it runs,
+                through the ``cancel_<name>`` tool advertised alongside it. Pair it with
+                ``cancel_on_interruption=False``; a synchronous call holds the LLM
+                until it returns, so there is no moment at which it could ask for
+                the call to stop. Defaults to ``None`` (fall back to the
+                ``@tool_options`` decorator value, then to False).
         """
-        if function_name == CANCEL_ASYNC_TOOL_NAME:
+        if function_name in self._cancel_tool_names:
             raise ValueError(
-                f"'{CANCEL_ASYNC_TOOL_NAME}' is a reserved built-in tool name and cannot be "
+                f"'{function_name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
             )
         # Explicitly registering a handler clears any standalone-unregister
@@ -832,20 +898,53 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._explicitly_unregistered_function_names.discard(function_name)
         # Registering a function with the function_name set to None will run
         # that handler for all functions
+        resolved_cancel_on_interruption = self._resolve_tool_option(
+            function_name,
+            cancel_on_interruption,
+            handler,
+            "_pipecat_cancel_on_interruption",
+            default=True,
+        )
         self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
-            cancel_on_interruption=self._resolve_tool_option(
-                function_name,
-                cancel_on_interruption,
-                handler,
-                "_pipecat_cancel_on_interruption",
-                default=True,
-            ),
+            cancel_on_interruption=resolved_cancel_on_interruption,
             timeout_secs=self._resolve_tool_option(
                 function_name, timeout_secs, handler, "_pipecat_timeout_secs", default=None
             ),
+            cancellable_by_llm=self._resolve_cancellable_by_llm(
+                function_name, cancellable_by_llm, handler, resolved_cancel_on_interruption
+            ),
         )
+        self._record_tool_cleanup(handler)
+
+    def _record_tool_cleanup(self, handler: Any) -> None:
+        """Track cleanup work a registered tool handler asks to run at teardown.
+
+        A handler backed by a resource that outlives the call — an MCP server
+        connection, for instance — can carry a zero-argument async callable
+        under ``_pipecat_cleanup``. It is awaited when this service is cleaned
+        up, the hook the pipeline guarantees to run at teardown, so the resource
+        is released without the developer wiring teardown manually. Handlers
+        sharing a resource carry the same callable, recorded once.
+
+        Cleanups are kept for the service's lifetime even if their handlers are
+        later unregistered: the resource may outlive any one tool's
+        advertisement, and cleanups are expected to be idempotent.
+        """
+        cleanup = getattr(handler, "_pipecat_cleanup", None)
+        if cleanup is None or cleanup in self._tool_cleanups:
+            return
+        self._tool_cleanups.append(cleanup)
+
+    async def _run_tool_cleanups(self) -> None:
+        """Run recorded tool cleanups; errors are logged, not raised."""
+        cleanups, self._tool_cleanups = self._tool_cleanups, []
+        for cleanup in cleanups:
+            try:
+                await cleanup()
+            except Exception as e:
+                logger.error(f"{self} error running tool cleanup {cleanup}: {e}")
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
@@ -889,9 +988,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 dropped and an error is raised. Use a non-realtime LLM
                 service if your tool needs to stream intermediate results.
             timeout_secs: Optional per-tool timeout in seconds, overriding the
-                global ``function_call_timeout_secs``. Defaults to ``None`` (fall
-                back to the ``@tool_options`` decorator value, then to the global
-                timeout).
+                global ``function_call_timeout_secs``. A call that runs past it is
+                cancelled: the handler is thrown an ``asyncio.CancelledError``, the
+                call is settled as cancelled, and inference runs so the LLM can
+                report that it didn't complete. Defaults to ``None`` (fall back to
+                the ``@tool_options`` decorator value, then to the global timeout).
         """
         self._register_direct_function(
             handler,
@@ -905,6 +1006,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         *,
         cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
+        cancellable_by_llm: bool | None = None,
     ):
         """Register a direct function handler.
 
@@ -918,11 +1020,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 decorator value (then the True default).
             timeout_secs: Explicit override, or ``None`` to use the decorator
                 value (then the None default, i.e. the global timeout).
+            cancellable_by_llm: Explicit override, or ``None`` to use the decorator
+                value (then the False default).
         """
         wrapper = DirectFunctionWrapper(handler)
-        if wrapper.name == CANCEL_ASYNC_TOOL_NAME:
+        if wrapper.name in self._cancel_tool_names:
             raise ValueError(
-                f"'{CANCEL_ASYNC_TOOL_NAME}' is a reserved built-in tool name and cannot be "
+                f"'{wrapper.name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
             )
         cancel_on_interruption = cast(
@@ -953,7 +1057,46 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
             timeout_secs=timeout_secs,
+            cancellable_by_llm=self._resolve_cancellable_by_llm(
+                wrapper.name, cancellable_by_llm, handler, cancel_on_interruption
+            ),
         )
+
+    def _resolve_cancellable_by_llm(
+        self,
+        function_name: str | None,
+        explicit: bool | None,
+        handler: Any,
+        cancel_on_interruption: bool,
+    ) -> bool:
+        """Resolve whether the LLM may cancel a tool's calls.
+
+        Args:
+            function_name: The tool's name, for the warning below.
+            explicit: The value passed to the register call, or None if omitted.
+            handler: The handler, which may carry a ``@tool_options`` value.
+            cancel_on_interruption: The tool's interruption behaviour, already
+                resolved by the caller — resolving it again here would read past
+                whatever the caller was told explicitly.
+
+        Returns:
+            Whether the LLM may cancel this tool's calls.
+        """
+        resolved = self._resolve_tool_option(
+            function_name, explicit, handler, "_pipecat_cancellable_by_llm", default=False
+        )
+        if not resolved:
+            return False
+        if cancel_on_interruption:
+            # A synchronous call holds the LLM until it returns, so it is never
+            # running at a moment the LLM could ask to cancel it.
+            logger.warning(
+                f"{self}: '{function_name}' sets cancellable_by_llm=True with "
+                "cancel_on_interruption=True. The LLM cannot cancel a synchronous "
+                "call; pair it with cancel_on_interruption=False."
+            )
+            return False
+        return True
 
     def _resolve_tool_option(
         self, function_name: str | None, explicit: Any, handler: Any, attr: str, *, default: Any
@@ -1152,6 +1295,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # so re-advertising it (a later tool-set change) registers it afresh.
         self._explicitly_unregistered_function_names &= advertised
 
+        # What the registry holds decides both whether the async-tool guidance
+        # belongs in the system instruction and whether the cancellation tools do,
+        # and it is settled only here: tools advertised on a context frame register
+        # during this sync, a manual registration never goes through that path at
+        # all, and a context can advertise nothing.
+        self._sync_cancel_tools()
+        self._compose_system_instruction()
+
     def _unregister_unadvertised_tool_handlers(self, advertised: set[str | None]) -> None:
         """Drop auto-registered handlers for tools no longer advertised.
 
@@ -1265,7 +1416,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Exclude the built-in cancel tool — it's an internal mechanism and
         # should not be surfaced to user-facing event handlers or frames.
         user_visible_calls = [
-            fc for fc in function_calls if fc.function_name != CANCEL_ASYNC_TOOL_NAME
+            fc for fc in function_calls if fc.function_name not in self._cancel_tool_names
         ]
         if user_visible_calls:
             await self._call_event_handler("on_function_calls_started", user_visible_calls)
@@ -1333,8 +1484,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await task
-            del self._function_call_tasks[task]
+            try:
+                # Wait on the task rather than awaiting it directly: a function
+                # call cancelled from elsewhere (interruption, timeout) must not
+                # tear down the runner along with it.
+                await asyncio.wait({task})
+            finally:
+                # Waiting doesn't hand cancellation down the way awaiting the
+                # task would, so a runner going away has to cancel the call it
+                # was running itself.
+                if not task.done():
+                    await self.cancel_task(task)
+                # The canceller may already have dropped the entry.
+                self._function_call_tasks.pop(task, None)
 
     async def _run_parallel_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
         tasks = []
@@ -1394,6 +1556,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         async def function_call_result_callback(
             result: Any, *, properties: FunctionCallResultProperties | None = None
         ):
+            nonlocal timeout_task
+
             is_final = properties.is_final if properties else True
             if not is_final and item.cancel_on_interruption:
                 logger.warning(
@@ -1404,7 +1568,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 )
                 return
 
-            nonlocal timeout_task
+            # A handler can outlive its call and still hold this callback, so
+            # late results are rejected here rather than broadcast for the
+            # aggregator to drop.
+            if runner_item.settled:
+                logger.warning(
+                    f"{self} Ignoring result for function call"
+                    f" [{runner_item.function_name}:{runner_item.tool_call_id}]: the call has"
+                    " already finished (it reported a result, timed out, or was cancelled)."
+                )
+                return
+
+            if is_final:
+                runner_item.settled = True
 
             # Cancel timeout task if it exists
             if timeout_task and not timeout_task.done():
@@ -1422,19 +1598,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         # Start a timeout task for deferred function calls
         async def timeout_handler():
-            try:
-                effective_timeout = item.timeout_secs or self._function_call_timeout_secs
-                # This task is only started when one of the two is set.
-                assert effective_timeout is not None
-                await asyncio.sleep(effective_timeout)
-                logger.warning(
-                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {effective_timeout} seconds."
-                    f" You can increase this timeout by passing `timeout_secs` to `register_function()`,"
-                    f" or set a global default via `function_call_timeout_secs` on the LLM constructor."
-                )
-                await function_call_result_callback(None)
-            except asyncio.CancelledError:
-                raise
+            effective_timeout = item.timeout_secs or self._function_call_timeout_secs
+            # This task is only started when one of the two is set.
+            assert effective_timeout is not None
+            await asyncio.sleep(effective_timeout)
+            logger.warning(
+                f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {effective_timeout} seconds and is being cancelled."
+                f" You can increase this timeout by passing `timeout_secs` to `register_function()`,"
+                f" or set a global default via `function_call_timeout_secs` on the LLM constructor."
+            )
+            # Settle the call before cancelling, so a result racing in while the
+            # handler unwinds is rejected instead of broadcast.
+            runner_item.settled = True
+            # Cancelling goes through a detached task because it awaits the
+            # function call task this handler runs inside of.
+            self.create_task(self._timeout_function_call(runner_item))
 
         if item.timeout_secs or self._function_call_timeout_secs:
             timeout_task = self.create_task(timeout_handler())
@@ -1468,10 +1646,28 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     app_resources=self.pipeline_worker.app_resources,
                 )
                 await item.handler(params)
+        except asyncio.CancelledError:
+            # Backstop for cancellation that doesn't run through
+            # _cancel_function_call_tasks, e.g. teardown.
+            runner_item.settled = True
+            raise
         except Exception as e:
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
-            logger.error(f"{self} {error_message}")
-            await self.push_error(error_msg=error_message, exception=e, fatal=False)
+            # Pushing the error with category "APPLICATION" since the failure came
+            # from the application's function handler code.
+            await self.push_error(
+                error_msg=error_message,
+                exception=e,
+                fatal=False,
+                category=ErrorCategory.APPLICATION,
+            )
+            # A handler that raised will never report, so settle the call on its
+            # behalf.
+            await function_call_result_callback(
+                self.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(
+                    function_name=runner_item.function_name
+                )
+            )
         finally:
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
@@ -1529,125 +1725,187 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"currently advertised tool set."
             )
 
-    def _setup_async_tool_cancellation(self):
-        """Enable async tool cancellation.
+    def _is_cancellable(self, item: FunctionCallRegistryItem) -> bool:
+        """Whether the LLM may cancel calls of a registered tool.
 
-        Recomposes the system instruction to include the cancellation
-        instructions, registers the built-in ``cancel_async_tool_call`` handler,
-        and injects its schema into the adapter's built-in tool dict.
-
-        Called from :meth:`start`, before any provider session is configured, so
-        a service that sends its system instruction once at session setup sends
-        the composed one.
-        """
-        logger.debug(f"{self}: Enabling async tool cancellation")
-
-        self._async_tool_cancellation_enabled = True
-        self._compose_system_instruction()
-
-        self._adapter.builtin_tools[CANCEL_ASYNC_TOOL_NAME] = CANCEL_ASYNC_TOOL_SCHEMA
-
-        if CANCEL_ASYNC_TOOL_NAME not in self._functions:
-            self._functions[CANCEL_ASYNC_TOOL_NAME] = FunctionCallRegistryItem(
-                function_name=CANCEL_ASYNC_TOOL_NAME,
-                handler=self._cancel_async_tool_call_handler,
-                cancel_on_interruption=True,
-            )
-
-    async def _cancel_async_tool_call_handler(self, params: FunctionCallParams):
-        """Handle a ``cancel_async_tool_call`` invocation from the LLM.
+        The one place that decides it, so what gets advertised and what a cancel
+        tool will actually stop can't drift apart.
 
         Args:
-            params: Function call parameters containing ``tool_call_id`` to cancel.
+            item: The registered tool to judge.
+
+        Returns:
+            True if the tool opted in, or if the deprecated
+            ``enable_async_tool_cancellation`` covers it by being async.
         """
-        logger.debug(f"{self}: cancel_async_tool_call invoked")
+        return item.cancellable_by_llm or (
+            self._enable_async_tool_cancellation and not item.cancel_on_interruption
+        )
 
+    def _cancellable_tool_names(self) -> set[str]:
+        """Names of the registered tools the LLM may cancel.
+
+        Returns:
+            The tools that opted in with ``cancellable_by_llm=True``. The
+            deprecated ``enable_async_tool_cancellation`` widens this to every
+            async tool.
+        """
+        return {
+            name for name, item in self._functions.items() if name and self._is_cancellable(item)
+        }
+
+    def _sync_cancel_tools(self) -> None:
+        """Match the advertised cancel tools to the tools currently registered.
+
+        One cancel tool per cancellable tool, named for it, reconciled from a
+        single reading of the registry so the advertised set can never drift from
+        what is actually cancellable. A tool that never opted in has no cancel
+        tool at all, so there is nothing for the LLM to call against it.
+        """
+        wanted = {cancel_tool_name(name): name for name in self._cancellable_tool_names()}
+
+        for stale in self._cancel_tool_names - set(wanted):
+            self._adapter.builtin_tools.pop(stale, None)
+            self._functions.pop(stale, None)
+            self._cancel_tool_names.discard(stale)
+
+        for name, target in wanted.items():
+            if name in self._cancel_tool_names:
+                continue
+            if name in self._functions:
+                # Once per name: this runs on every context frame, and the
+                # collision persists for as long as both tools are registered.
+                if name not in self._warned_cancel_collisions:
+                    self._warned_cancel_collisions.add(name)
+                    logger.warning(
+                        f"{self}: '{target}' is cancellable but its cancel tool can't be "
+                        f"advertised — '{name}' is already registered as a tool of its own. "
+                        f"Rename one of them, or the LLM has no way to stop {target}."
+                    )
+                continue
+            self._adapter.builtin_tools[name] = build_cancel_tool_schema(target)
+            self._functions[name] = FunctionCallRegistryItem(
+                function_name=name,
+                handler=self._cancel_tool_handler,
+                cancel_on_interruption=True,
+            )
+            self._cancel_tool_names.add(name)
+
+    async def _cancel_tool_handler(self, params: FunctionCallParams):
+        """Handle a ``cancel_<tool>`` invocation from the LLM.
+
+        Which work to stop comes from the tool the model called, so the common
+        case takes no arguments at all. ``tool_call_id`` only has to be given to
+        choose between several running calls of the same tool.
+
+        Args:
+            params: Function call parameters, optionally carrying ``tool_call_id``.
+        """
+        target = (params.function_name or "")[len(CANCEL_TOOL_PREFIX) :]
         tool_call_id: str | None = params.arguments.get("tool_call_id")
-        if not tool_call_id:
-            logger.warning(f"{self} cancel_async_tool_call called with no tool_call_id")
-            await params.result_callback({"cancelled": None})
-            return
 
-        await self._cancel_function_calls_by_tool_call_id(tool_call_id)
+        async def refuse(reason: str, **extra: Any) -> None:
+            logger.debug(f"{self}: declining to cancel {target} — {reason}")
+            await params.result_callback(
+                {"cancelled": None, "reason": reason, **extra},
+                properties=FunctionCallResultProperties(run_llm=True),
+            )
+
+        candidates = [
+            item
+            for item in self._function_call_tasks.values()
+            if item.function_name == target and self._is_cancellable(item.registry_item)
+        ]
+        if not candidates:
+            await refuse(f"no {target} call is running")
+            return
+        if tool_call_id:
+            match = next((i for i in candidates if i.tool_call_id == tool_call_id), None)
+            if match is None:
+                await refuse(f"no running {target} call has that tool_call_id")
+                return
+        elif len(candidates) > 1:
+            # Several calls of the one tool: the model has to say which, so the
+            # refusal carries the ids to say it with.
+            # Spell the choices out in the reason itself: a model reading a
+            # refusal acts on what it says far more readily than on a field
+            # beside it.
+            choices = "; ".join(
+                f"{i.tool_call_id} (called with {json.dumps(i.arguments, default=str)})"
+                for i in candidates
+            )
+            await refuse(
+                f"{len(candidates)} {target} calls are running: {choices}. Call "
+                f"{params.function_name} again with tool_call_id set to the one to stop.",
+                running=[
+                    {"tool_call_id": i.tool_call_id, "arguments": i.arguments} for i in candidates
+                ],
+            )
+            return
+        else:
+            match = candidates[0]
+
+        logger.debug(f"{self}: cancelling [{match.function_name}:{match.tool_call_id}]")
+        await self._cancel_function_calls_by_tool_call_id(match.tool_call_id)
         await params.result_callback(
-            {"cancelled": tool_call_id},
+            {"cancelled": match.tool_call_id, "function_name": match.function_name},
             properties=FunctionCallResultProperties(run_llm=True),
         )
 
-    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
-        """Cancel in-progress function call tasks by their tool_call_id.
+    async def _cancel_function_call_tasks(
+        self,
+        predicate: Callable[[FunctionCallRunnerItem], bool],
+        *,
+        reason: str,
+        run_llm: bool = False,
+    ) -> list[FunctionCallFromLLM]:
+        """Cancel the in-flight function calls selected by a predicate.
+
+        Cancelling a call delivers ``asyncio.CancelledError`` to its handler so
+        cancel-aware handlers run their cleanup, broadcasts a
+        ``FunctionCallCancelFrame`` so the rest of the pipeline can settle the
+        call, and notifies application code via ``on_function_calls_cancelled``.
 
         Args:
-            tool_call_id: tool_call_id to cancel.
+            predicate: Selects which in-flight calls to cancel.
+            reason: Short description of what triggered the cancellation,
+                included in the log messages.
+            run_llm: Whether inference should run once the cancelled calls are
+                settled in the context.
+
+        Returns:
+            The function calls that were cancelled.
         """
         cancelled_tasks = set()
         cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
-            if runner_item.tool_call_id == tool_call_id:
-                name = runner_item.function_name
-                tool_call_id = runner_item.tool_call_id
+        # Snapshot first: cancel_task awaits, during which done callbacks may
+        # mutate _function_call_tasks.
+        for task, runner_item in list(self._function_call_tasks.items()):
+            if not predicate(runner_item):
+                continue
 
-                logger.debug(
-                    f"{self} Cancelling async function call [{name}:{tool_call_id}] "
-                    "by LLM request..."
-                )
+            name = runner_item.function_name
+            tool_call_id = runner_item.tool_call_id
 
-                if task:
-                    task.remove_done_callback(self._function_call_task_finished)
-                    await self.cancel_task(task)
-                    cancelled_tasks.add(task)
+            logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}] ({reason})...")
 
-                await self.broadcast_frame(
-                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
-                )
+            # Settle before cancelling: a handler that catches its
+            # CancelledError and reports a result while unwinding must not be
+            # able to reopen a call the pipeline has stopped tracking.
+            runner_item.settled = True
 
-                cancelled_items.append(
-                    FunctionCallFromLLM(
-                        function_name=runner_item.function_name,
-                        tool_call_id=runner_item.tool_call_id,
-                        arguments=runner_item.arguments,
-                        context=runner_item.context,
-                    )
-                )
-                logger.debug(f"{self} Async function call [{name}:{tool_call_id}] cancelled")
+            if task:
+                # We remove the callback because we are going to cancel the
+                # task next, otherwise we will be removing it from the set
+                # while we are iterating.
+                task.remove_done_callback(self._function_call_task_finished)
+                await self.cancel_task(task)
+                cancelled_tasks.add(task)
 
-        for task in cancelled_tasks:
-            self._function_call_task_finished(task)
-
-        if cancelled_items:
-            await self._call_event_handler("on_function_calls_cancelled", cancelled_items)
-
-    async def _cancel_function_call(self, function_name: str | None):
-        cancelled_tasks = set()
-        cancelled_items = []
-        for task, runner_item in self._function_call_tasks.items():
-            if runner_item.registry_item.function_name == function_name:
-                name = runner_item.function_name
-                tool_call_id = runner_item.tool_call_id
-
-                logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}]...")
-
-                if task:
-                    # We remove the callback because we are going to cancel the
-                    # task next, otherwise we will be removing it from the set
-                    # while we are iterating.
-                    task.remove_done_callback(self._function_call_task_finished)
-                    await self.cancel_task(task)
-                    cancelled_tasks.add(task)
-
-                await self.broadcast_frame(
-                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
-                )
-
-                cancelled_items.append(
-                    FunctionCallFromLLM(
-                        function_name=runner_item.function_name,
-                        tool_call_id=runner_item.tool_call_id,
-                        arguments=runner_item.arguments,
-                        context=runner_item.context,
-                    )
-                )
-                logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
+            cancelled_items.append(
+                await self._broadcast_function_call_cancelled(runner_item, run_llm=run_llm)
+            )
+            logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
         # Remove all cancelled tasks from our set.
         for task in cancelled_tasks:
@@ -1655,6 +1913,77 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         if cancelled_items:
             await self._call_event_handler("on_function_calls_cancelled", cancelled_items)
+
+        return cancelled_items
+
+    async def _broadcast_function_call_cancelled(
+        self, runner_item: FunctionCallRunnerItem, *, run_llm: bool = False
+    ) -> FunctionCallFromLLM:
+        """Settle a cancelled function call downstream.
+
+        Args:
+            runner_item: The function call that was cancelled.
+            run_llm: Whether inference should run once the call is settled in
+                the context.
+
+        Returns:
+            The cancelled call, described for ``on_function_calls_cancelled``.
+        """
+        await self.broadcast_frame(
+            FunctionCallCancelFrame,
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            run_llm=run_llm,
+        )
+        return FunctionCallFromLLM(
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=runner_item.arguments,
+            context=runner_item.context,
+        )
+
+    async def _timeout_function_call(self, runner_item: FunctionCallRunnerItem):
+        """Cancel a function call that ran past its deadline.
+
+        The handler usually still owns the call and is cancelled outright. If it
+        happened to finish while the timeout was being processed its task is
+        already gone and there is nothing left to cancel, but the deadline has
+        settled the call, so its result is rejected — the pipeline is told the
+        call is over regardless, or it waits on a result that can never arrive.
+
+        A deadline is the one cancellation nothing else follows up on, so it
+        asks for inference: without it the LLM never learns the call is over and
+        the user is left waiting on an answer that never comes.
+
+        Args:
+            runner_item: The function call that timed out.
+        """
+        cancelled = await self._cancel_function_call_tasks(
+            lambda item: item.tool_call_id == runner_item.tool_call_id,
+            reason="timeout",
+            run_llm=True,
+        )
+        if cancelled:
+            return
+
+        item = await self._broadcast_function_call_cancelled(runner_item, run_llm=True)
+        await self._call_event_handler("on_function_calls_cancelled", [item])
+
+    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
+        """Cancel in-progress function call tasks by their tool_call_id.
+
+        Args:
+            tool_call_id: tool_call_id to cancel.
+        """
+        await self._cancel_function_call_tasks(
+            lambda item: item.tool_call_id == tool_call_id, reason="User request"
+        )
+
+    async def _cancel_function_call(self, function_name: str | None):
+        await self._cancel_function_call_tasks(
+            lambda item: item.registry_item.function_name == function_name,
+            reason="interruption",
+        )
 
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
@@ -1852,6 +2181,6 @@ class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapt
             "not via a continuous background loop"
         )
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)

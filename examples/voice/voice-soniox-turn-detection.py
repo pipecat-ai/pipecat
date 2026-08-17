@@ -97,7 +97,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = SonioxTTSService(
         api_key=os.environ["SONIOX_API_KEY"],
         settings=SonioxTTSService.Settings(
-            voice="Maya",
+            voice="Nora",
         ),
     )
 

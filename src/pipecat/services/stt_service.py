@@ -7,10 +7,8 @@
 """Base classes for Speech-to-Text services with continuous and segmented processing."""
 
 import asyncio
-import io
 import time
 import warnings
-import wave
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -18,6 +16,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -437,6 +436,11 @@ class STTService(AIService):
             return
 
         if self._muted:
+            return
+
+        # A service that can no longer work can't transcribe anything, and
+        # services that connect on demand would attempt a handshake per chunk.
+        if not self.is_usable:
             return
 
         self._last_audio_time = time.monotonic()
@@ -863,21 +867,18 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
+        # A service that can no longer work can't transcribe this segment.
+        if not self.is_usable:
+            self._audio_buffer.clear()
+            return
+
         # Report usage for the raw segment before transcription so tracing can
         # attach it to the STT span the resulting TranscriptionFrame closes.
         self._record_stt_audio_usage(self._audio_buffer)
         await self.emit_stt_usage_metrics()
 
         if self.wants_wav_segments:
-            content = io.BytesIO()
-            wav = wave.open(content, "wb")
-            wav.setsampwidth(2)
-            wav.setnchannels(1)
-            wav.setframerate(self.sample_rate)
-            wav.writeframes(self._audio_buffer)
-            wav.close()
-            content.seek(0)
-            audio = content.read()
+            audio = pcm_to_wav(self._audio_buffer, self.sample_rate)
         else:
             # Local models read the buffer as raw 16-bit PCM; wrapping it in a
             # WAV container would make them misread the 44-byte header as audio.
@@ -1025,6 +1026,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         # counts toward usage.
         self._record_stt_audio_usage(silence)
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)

@@ -50,6 +50,8 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   `~/.cache/pipecat/evals/tts`). No keys, no per-run cost. Non-English
   transcription needs a multilingual model, which the English-only defaults
   aren't — `language_switch_audio` pulls Whisper's `tiny` (75MB).
+- **Node.js** (MCP bot only). `mcp/mcp-stdio.py` spawns its memory MCP server
+  with `npx`; the server package downloads on first use.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
   service API keys it normally would, in your `.env` (e.g. `$OPENAI_API_KEY`,
   `$CARTESIA_API_KEY`, `$DEEPGRAM_API_KEY`, ...). A bot whose keys are missing
@@ -108,7 +110,7 @@ async function results, turn detection), where a bot can pass a scenario half th
 time and look reliable in any one run.
 
 ```sh
-./run.sh -p function-calling -s weather_function_call_async_audio --repeat 50 -c 3
+./run.sh -p function-calling -s async_tool_delivery --repeat 50 -c 3
 ```
 
 Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue
@@ -133,10 +135,11 @@ A repeated sweep always exits 0: it reports a rate, and what rate is acceptable 
 your policy, not the harness's.
 
 Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
-its outcome, its failures (each with a `kind`), and paths to its artifacts —
-appended as each run finishes, so an interrupted sweep keeps everything already
-done. It's the machine-readable counterpart to the printed tally; group and count
-it however your question needs. Runs that didn't pass also carry `events_seen`, the
+its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
+status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
+and paths to its artifacts — appended as each run finishes, so an interrupted sweep
+keeps everything already done. It's the machine-readable counterpart to the printed
+tally; group and count it however your question needs. Runs that didn't pass also carry `events_seen`, the
 record of what the bot actually did, which is usually where a root cause is found.
 
 ### Concurrency and GPU

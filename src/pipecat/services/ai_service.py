@@ -153,6 +153,9 @@ class AIService(FrameProcessor):
 
         if changed:
             logger.info(f"{self.name}: updated settings fields: {set(changed)}")
+            # New settings may be the ones that make the service work, so give
+            # it another chance rather than leaving it permanently written off.
+            await self.set_usable(True)
 
         return changed
 

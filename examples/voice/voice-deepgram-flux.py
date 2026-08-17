@@ -68,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = DeepgramFluxTTSService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramFluxTTSService.Settings(
-            voice="flux-drew-en",
+            voice="flux-cole-en",
         ),
     )
 

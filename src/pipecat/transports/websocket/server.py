@@ -12,9 +12,7 @@ handling, and frame serialization.
 """
 
 import asyncio
-import io
 import time
-import wave
 from collections.abc import Awaitable, Callable
 from typing import cast
 
@@ -25,6 +23,7 @@ from websockets.asyncio.server import serve as websocket_serve
 from websockets.protocol import State
 from websockets.typing import Origin
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
@@ -460,18 +459,11 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         )
 
         if self._params.add_wav_header:
-            with io.BytesIO() as buffer:
-                with wave.open(buffer, "wb") as wf:
-                    wf.setsampwidth(2)
-                    wf.setnchannels(frame.num_channels)
-                    wf.setframerate(frame.sample_rate)
-                    wf.writeframes(frame.audio)
-                wav_frame = OutputAudioRawFrame(
-                    buffer.getvalue(),
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
-                frame = wav_frame
+            frame = OutputAudioRawFrame(
+                pcm_to_wav(frame.audio, frame.sample_rate, frame.num_channels),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
 
         await self._write_frame(frame)
 

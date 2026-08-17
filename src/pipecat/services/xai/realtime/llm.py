@@ -16,7 +16,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any
+from typing import Any, Self, cast
 from urllib.parse import quote
 
 from loguru import logger
@@ -111,7 +111,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> dict[str, Any]:
+    def apply_update(self, delta: Self) -> dict[str, Any]:
         """Merge a delta, keeping ``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -289,7 +289,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         self._audio_input_paused = start_audio_paused
         self._websocket = None
         self._receive_task = None
-        self._context: LLMContext = None
+        self._context: LLMContext | None = None
 
         self._llm_needs_conversation_setup = True
 
@@ -355,7 +355,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
         if audio_config and audio_config.format:
             # PCM format has configurable rate
-            if hasattr(audio_config.format, "rate"):
+            if isinstance(audio_config.format, events.PCMAudioFormat):
                 return audio_config.format.rate
             # PCMU/PCMA formats are fixed at 8000 Hz (G.711 standard)
             elif audio_config.format.type in ("audio/pcmu", "audio/pcma"):
@@ -430,7 +430,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         self._current_audio_response = None
 
     def _calculate_audio_duration_ms(
-        self, total_bytes: int, sample_rate: int = None, bytes_per_sample: int = 2
+        self, total_bytes: int, sample_rate: int | None = None, bytes_per_sample: int = 2
     ) -> int:
         """Calculate audio duration in milliseconds based on PCM audio parameters."""
         if sample_rate is None:
@@ -517,11 +517,15 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             props.audio = events.AudioConfiguration()
         if not props.audio.input:
             props.audio.input = events.AudioInput(
-                format=events.PCMAudioFormat(rate=input_sample_rate)
+                format=events.PCMAudioFormat(
+                    rate=cast(events.SUPPORTED_SAMPLE_RATES, input_sample_rate)
+                )
             )
         if not props.audio.output:
             props.audio.output = events.AudioOutput(
-                format=events.PCMAudioFormat(rate=output_sample_rate)
+                format=events.PCMAudioFormat(
+                    rate=cast(events.SUPPORTED_SAMPLE_RATES, output_sample_rate)
+                )
             )
 
     async def start(self, frame: StartFrame):
@@ -631,6 +635,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             # Model is selected via query param at connection time; xAI does
             # not support changing it via session.update.
             model = assert_given(self._settings.model)
+            # The service is constructed with a model and the URL needs one.
+            assert model is not None
             uri = f"{self.base_url}?model={quote(model, safe='')}"
 
             self._websocket = await websocket_connect(
@@ -709,7 +715,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
             # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
-                settings.tools = llm_invocation_params["tools"]
+                settings.tools = cast(list[events.GrokTool], llm_invocation_params["tools"])
 
             # The adapter resolves conflicts between init-provided and
             # context-provided system instructions (preferring init-provided).
@@ -718,7 +724,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
         # Convert ToolsSchema to list of dicts if needed
         if settings.tools and isinstance(settings.tools, ToolsSchema):
-            settings.tools = adapter.from_standard_tools(settings.tools)
+            settings.tools = cast(
+                list[events.GrokTool], adapter.from_standard_tools(settings.tools)
+            )
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
@@ -728,6 +736,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
+        assert self._websocket is not None
+
         async for message in self._websocket:
             try:
                 evt = events.parse_server_event(message)
@@ -1078,6 +1088,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             self._run_llm_when_api_session_ready = True
             return
 
+        assert self._context is not None
+
         adapter = self.get_llm_adapter()
 
         if self._llm_needs_conversation_setup:
@@ -1111,6 +1123,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         """Process completed function calls and send results to the service."""
+        assert self._context is not None
+
         sent_new_result = False
 
         for message in self._context.get_messages():
@@ -1163,7 +1177,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     if send_new_results:
                         sent_new_result = True
-                        await self._send_tool_result(tool_call_id, message.get("content"))
+                        await self._send_tool_result(
+                            tool_call_id, cast(str | None, message.get("content"))
+                        )
                     self._completed_tool_calls.add(tool_call_id)
 
         if sent_new_result:
@@ -1189,7 +1205,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
-    async def _send_tool_result(self, tool_call_id: str, result: str):
+    async def _send_tool_result(self, tool_call_id: str, result: str | None):
         """Send a tool call result to Grok."""
         logger.debug(f"Sending tool result to Grok Realtime for tool_call_id={tool_call_id}")
         item = events.ConversationItem(

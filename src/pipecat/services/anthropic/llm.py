@@ -434,8 +434,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             response = await self._create_message_stream(self._client.beta.messages.create, params)
 
-            await self.stop_ttfb_metrics()
-
             # Function calling
             tool_use_block = None
             json_accumulator = ""
@@ -443,6 +441,11 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             function_calls = []
             async for event in response:
                 # Aggregate streaming content, create frames, trigger events
+
+                # The events that open the stream (message_start, ping) carry no
+                # model output, so TTFB ends at the first content block.
+                if event.type in ("content_block_start", "content_block_delta"):
+                    await self.stop_ttfb_metrics()
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):

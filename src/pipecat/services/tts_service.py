@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
@@ -532,7 +533,8 @@ class TTSService(AIService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a language to the service-specific language format.
@@ -1119,7 +1121,11 @@ class TTSService(AIService):
             context_id: The context these frames belong to.
         """
         for f in frames:
-            if self._is_streaming_tokens and self.audio_context_available(context_id):
+            if (
+                self._is_streaming_tokens
+                and context_id
+                and self.audio_context_available(context_id)
+            ):
                 await self.append_to_audio_context(context_id, f)
             else:
                 await self.push_frame(f)
@@ -1139,7 +1145,7 @@ class TTSService(AIService):
     async def _push_tts_frames(
         self,
         src_frame: AggregatedTextFrame,
-        includes_inter_frame_spaces: bool | None = False,
+        includes_inter_frame_spaces: bool = False,
         append_tts_text_to_context: bool = True,
         push_assistant_aggregation: bool | None = False,
     ):
@@ -1240,7 +1246,19 @@ class TTSService(AIService):
         transformed_text = text
         for aggregation_type, transform in self._text_transforms:
             if aggregation_type == type or aggregation_type == "*":
-                transformed_text = await transform(transformed_text, type)
+                try:
+                    transformed_text = await transform(transformed_text, type)
+                except Exception as e:
+                    # Pushing the error with category "APPLICATION" since the failure came
+                    # from the application's text transformer. Speaking the untransformed
+                    # text isn't safe — a transformer may exist to remove something — so this
+                    # turn produces no audio.
+                    await self.push_error(
+                        error_msg=f"Error transforming text for TTS [{transformed_text}]: {e}",
+                        exception=e,
+                        category=ErrorCategory.APPLICATION,
+                    )
+                    return
 
         self._tts_contexts[context_id] = TTSContext(
             append_to_context=append_tts_text_to_context,
@@ -1286,7 +1304,16 @@ class TTSService(AIService):
         else:
             logger.debug(f"{self}: Generating TTS [{prepared_text}]")
 
-        await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
+        # A service that can no longer work can't synthesize anything, and
+        # services that connect on demand would attempt a handshake per request.
+        # The surrounding bookkeeping still runs, so the turn completes with no
+        # audio rather than stalling.
+        if not self.is_usable:
+            # Name the text that goes unspoken: silence from the bot is
+            # otherwise hard to trace back to the service that caused it.
+            logger.warning(f"{self}: service is no longer usable, not speaking [{prepared_text}]")
+        else:
+            await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.stop_processing_metrics()
@@ -1318,7 +1345,7 @@ class TTSService(AIService):
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
-    ) -> bool:
+    ):
         """Process frames from an async generator, routing them through the audio context.
 
         All non-None frames yielded by the generator are appended to the audio context
@@ -1456,6 +1483,8 @@ class TTSService(AIService):
                     word, pts, context_id, includes_inter_frame_spaces
                 ):
                     if isinstance(f, TTSTextFrame):
+                        # The sequencer stamps every word frame it builds.
+                        assert f.pts is not None
                         self._word_last_pts = f.pts
                     await self.push_frame(f)
 
@@ -1625,7 +1654,7 @@ class TTSService(AIService):
 
             self._serialization_queue.task_done()
 
-    async def _maybe_reset_word_timestamps(self, context_id: str | None = None):
+    async def _maybe_reset_word_timestamps(self, context_id: str):
         """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
 
         Called at the end of an audio context (either on clean completion timeout or
@@ -1672,6 +1701,8 @@ class TTSService(AIService):
         """
         for f in self._aggregated_frame_sequencer.force_complete(context_id, self._word_last_pts):
             if isinstance(f, TTSTextFrame):
+                # The sequencer stamps every word frame it builds.
+                assert f.pts is not None
                 self._word_last_pts = f.pts
             await self.push_frame(f)
 
@@ -1860,9 +1891,9 @@ class WebsocketTTSService(TTSService, WebsocketService):
         await super().cleanup()
         await self._disconnect()
 
-    async def _report_error(self, error: ErrorFrame):
+    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
 
 
 class InterruptibleTTSService(WebsocketTTSService):
