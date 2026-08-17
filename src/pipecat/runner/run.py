@@ -805,12 +805,14 @@ def _setup_unified_start_route(
             return result
 
         elif transport == "livekit":
-            livekit_url, api_key, api_secret = _livekit_credentials()
+            from pipecat.runner.livekit import generate_session_tokens, livekit_credentials
+
+            livekit_url, api_key, api_secret = livekit_credentials()
 
             body = request_data.get("body", {})
             room_name = os.getenv("LIVEKIT_ROOM_NAME") or f"pipecat-{uuid.uuid4().hex[:8]}"
             session_id = str(uuid.uuid4())
-            agent_token, user_token = _mint_livekit_tokens(
+            agent_token, user_token = generate_session_tokens(
                 room_name, session_id, api_key, api_secret
             )
 
@@ -1375,50 +1377,6 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
                 "dailyToken": room_config.token,
                 "sessionId": session_id,
             }
-
-
-def _livekit_credentials() -> tuple[str, str, str]:
-    """Return ``(url, api_key, api_secret)`` from the environment.
-
-    Raises:
-        HTTPException: 500, if any of ``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, or
-            ``LIVEKIT_API_SECRET`` is not configured on the server.
-    """
-    url = os.getenv("LIVEKIT_URL")
-    api_key = os.getenv("LIVEKIT_API_KEY")
-    api_secret = os.getenv("LIVEKIT_API_SECRET")
-    if not url or not api_key or not api_secret:
-        logger.error("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set")
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be configured "
-                "on the server"
-            ),
-        )
-    return url, api_key, api_secret
-
-
-def _mint_livekit_tokens(
-    room_name: str, session_id: str, api_key: str, api_secret: str
-) -> tuple[str, str]:
-    """Mint distinct agent/user tokens for a session.
-
-    Identities are suffixed with the session id so concurrent sessions sharing
-    a room (e.g. a fixed ``LIVEKIT_ROOM_NAME``) don't collide — LiveKit evicts
-    the earlier connection when a new one joins with the same identity.
-
-    Returns:
-        ``(agent_token, user_token)``, for the bot and the caller respectively.
-    """
-    from pipecat.runner.livekit import generate_token, generate_token_with_agent
-
-    suffix = session_id[:8]
-    agent_token = generate_token_with_agent(
-        room_name, f"Pipecat Agent-{suffix}", api_key, api_secret
-    )
-    user_token = generate_token(room_name, f"User-{suffix}", api_key, api_secret)
-    return agent_token, user_token
 
 
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_tokens: set[str]):
