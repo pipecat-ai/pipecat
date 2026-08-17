@@ -941,7 +941,7 @@ class OpenAIResponsesLLMService(
         retriable error (cache miss, connection limit, connection drop, or —
         when ``retry_on_timeout`` is set — a response that produces no output
         in time), clears state and retries once with the full context and no
-        timeout, so the retry either responds or fails.  Transport-level
+        timeout.  Transport-level
         ``ConnectionClosed`` errors are handled transparently by
         ``_ws_send``/``_ws_recv`` (auto-reconnect → ``WebsocketReconnectedError``).
 
