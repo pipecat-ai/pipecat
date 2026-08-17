@@ -326,6 +326,7 @@ class TavusTransportClient:
         """
         return await self._api.get_persona_name(self._persona_id)
 
+    @acquires("conversation")
     async def join(self):
         """Join the room hosting the conversation."""
         if not self._client:
@@ -333,8 +334,13 @@ class TavusTransportClient:
 
         await self._client.join()
 
+    @releases("conversation")
     async def stop(self):
-        """Stop the client and end the conversation."""
+        """Stop the client and end the conversation.
+
+        Runs once the last of the transports sharing this client has stopped,
+        so the conversation outlives the audio the output transport is flushing.
+        """
         if not self._client:
             return
 
@@ -758,6 +764,7 @@ class TavusOutputTransport(BaseOutputTransport):
         await super().setup(setup)
 
         await self._client.setup(setup)
+        await self._client.join()
 
     async def cleanup(self):
         """Cleanup output transport resources."""

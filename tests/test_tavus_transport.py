@@ -101,3 +101,59 @@ async def test_concurrent_setup_builds_a_single_daily_client(monkeypatch):
 
     assert len(conversations) == 1, "a Tavus conversation was created per caller"
     assert len(built) == 1, f"{len(built)} Daily clients built, so one is orphaned"
+
+
+@pytest.mark.asyncio
+async def test_the_output_transport_joins_the_room():
+    """Both transports join, so a pipeline using only the output one still joins."""
+    transport, client = _make_output_transport()
+    client.setup = AsyncMock()
+    client.join = AsyncMock()
+
+    await transport.setup(frame_processor_setup(TaskManager()))
+
+    client.join.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_conversation_outlives_the_first_transport_to_stop(monkeypatch):
+    """The input and output transports share one client, and both join its room.
+
+    The input transport stops first, while the output still has audio to flush,
+    so leaving the room and ending the conversation wait for the output too.
+    """
+    import pipecat.transports.tavus.transport as tavus
+
+    daily = MagicMock()
+    daily.setup = AsyncMock()
+    daily.join = AsyncMock()
+    daily.leave = AsyncMock()
+    monkeypatch.setattr(tavus, "DailyTransportClient", lambda *args, **kwargs: daily)
+
+    client = TavusTransportClient(
+        bot_name="Pipecat",
+        callbacks=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+        session=MagicMock(),
+    )
+
+    async def fake_initialize():
+        client._conversation_id = "conversation-1"
+        return "https://example.daily.co/room"
+
+    monkeypatch.setattr(client, "_initialize", fake_initialize)
+    client._api = MagicMock()
+    client._api.end_conversation = AsyncMock()
+
+    setup = frame_processor_setup(TaskManager())
+    await asyncio.gather(client.setup(setup), client.setup(setup))
+    await asyncio.gather(client.join(), client.join())
+
+    await client.stop()
+    daily.leave.assert_not_awaited()
+    client._api.end_conversation.assert_not_awaited()
+
+    await client.stop()
+    daily.leave.assert_awaited_once()
+    client._api.end_conversation.assert_awaited_once()
