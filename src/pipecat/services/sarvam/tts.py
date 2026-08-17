@@ -571,6 +571,45 @@ class SarvamHttpTTSService(TTSService):
         """
         await super().start(frame)
 
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta, recomputing model-dependent state if needed."""
+        changed = await super()._update_settings(delta)
+
+        if "model" in changed:
+            resolved_model = assert_given(self._settings.model)
+            if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
+                allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
+                raise ValueError(
+                    f"Unsupported model '{resolved_model}'. Allowed values: {allowed}."
+                )
+            self._config = TTS_MODEL_CONFIGS[resolved_model]
+
+            # Re-clamp pace to the new model's valid range
+            pace = self._settings.pace
+            pace_min, pace_max = self._config.pace_range
+            if pace is not None and (pace < pace_min or pace > pace_max):
+                logger.warning(
+                    f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping."
+                )
+                self._settings.pace = max(pace_min, min(pace_max, pace))
+
+            # Force preprocessing for models that require it
+            if self._config.preprocessing_always_enabled:
+                self._settings.enable_preprocessing = True
+
+            # Null out parameters unsupported by the new model
+            if not self._config.supports_pitch and self._settings.pitch is not None:
+                logger.warning(f"pitch parameter is ignored for {resolved_model}")
+                self._settings.pitch = None
+            if not self._config.supports_loudness and self._settings.loudness is not None:
+                logger.warning(f"loudness parameter is ignored for {resolved_model}")
+                self._settings.loudness = None
+            if not self._config.supports_temperature and self._settings.temperature is not None:
+                logger.warning(f"temperature parameter is ignored for {resolved_model}")
+                self._settings.temperature = None
+
+        return changed
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Sarvam AI's API.
