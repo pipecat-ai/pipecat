@@ -20,8 +20,6 @@ from starlette.testclient import WebSocketDisconnect
 from pipecat.runner.run import (
     _extract_ws_token,
     _generate_ws_token,
-    _livekit_credentials,
-    _mint_livekit_tokens,
     _print_startup_message,
     _setup_daily_routes,
     _setup_telephony_routes,
@@ -348,27 +346,28 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
 
 
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
 class TestLiveKitRunnerRoutes(unittest.TestCase):
     def test_livekit_credentials_raises_when_unconfigured(self):
-        from fastapi import HTTPException
+        from pipecat.runner.livekit import livekit_credentials
 
         with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaises(HTTPException) as ctx:
-                _livekit_credentials()
-        self.assertEqual(ctx.exception.status_code, 500)
+            with self.assertRaisesRegex(Exception, "LIVEKIT_URL"):
+                livekit_credentials()
 
     def test_livekit_credentials_returns_configured_values(self):
+        from pipecat.runner.livekit import livekit_credentials
+
         env = {
             "LIVEKIT_URL": "wss://test.livekit.cloud",
             "LIVEKIT_API_KEY": "key",
             "LIVEKIT_API_SECRET": "secret",
         }
         with patch.dict("os.environ", env, clear=True):
-            url, api_key, api_secret = _livekit_credentials()
+            url, api_key, api_secret = livekit_credentials()
         self.assertEqual((url, api_key, api_secret), (env["LIVEKIT_URL"], "key", "secret"))
 
-    @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
-    def test_mint_livekit_tokens_suffixes_identity_with_session_id(self):
+    def test_generate_session_tokens_suffixes_identity_with_session_id(self):
         """Regression: fixed identities collide across concurrent sessions sharing
         a room (e.g. a fixed LIVEKIT_ROOM_NAME), evicting the earlier participant.
         """
@@ -376,10 +375,12 @@ class TestLiveKitRunnerRoutes(unittest.TestCase):
 
         import jwt
 
-        agent_token_1, user_token_1 = _mint_livekit_tokens(
+        from pipecat.runner.livekit import generate_session_tokens
+
+        agent_token_1, user_token_1 = generate_session_tokens(
             "shared-room", str(uuid.uuid4()), "key", "secret"
         )
-        agent_token_2, user_token_2 = _mint_livekit_tokens(
+        agent_token_2, user_token_2 = generate_session_tokens(
             "shared-room", str(uuid.uuid4()), "key", "secret"
         )
 
