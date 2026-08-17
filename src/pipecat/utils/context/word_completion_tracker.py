@@ -11,7 +11,11 @@ import unicodedata
 
 from loguru import logger
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
+from pipecat.utils.context.text_segment_map import (
+    TextSegmentMap,
+    isolate_complete_markup,
+    strip_complete_markup_preserving_boundaries,
+)
 
 
 class WordCompletionTracker:
@@ -82,23 +86,34 @@ class WordCompletionTracker:
                 into it so callers can retrieve the spoken and unspoken portions in
                 terms of user-visible text via ``get_accumulated_user_facing_text()``
                 and ``get_remaining_user_facing_text()``. Defaults to ``tts_text``
-                with markup stripped when not provided -- user-facing text should
-                never carry synthesis tags.
+                when not provided. Markup is stripped either way -- user-facing text
+                should never carry synthesis tags -- keeping the space a tag written
+                flush between two words stood in for.
         """
         # _tts_text is the raw text sent to TTS (may carry SSML tags). The segment
         # map's raw_pos indexes into it; the get_*_tts_text accessors slice it.
-        self._tts_text = tts_text
+        # Markup written flush between two words is space-isolated first: the
+        # differ cannot otherwise separate such a tag from its neighbours, so the
+        # transformed segment it produces swallows the words on either side. These
+        # spaces exist only in this cursor reference -- the text was already sent
+        # to the TTS by the time a tracker is built, so nothing re-synthesizes.
+        self._tts_text = isolate_complete_markup(tts_text)
 
         # _user_facing_text is the original text returned to the user (e.g. via RTVI).
-        # Falls back to tts_text (markup stripped) when not provided so this cursor
-        # is always valid, and so the segment map still splits out a non-tagged
-        # prefix/suffix around any markup instead of treating the whole identical
-        # string as one big segment.
+        # Falls back to tts_text when not provided so this cursor is always valid.
+        # Markup is stripped whether the text was passed in or defaulted: a caller
+        # whose frame text carries its own synthesis tags (SSML the LLM emitted, so
+        # tts_text == frame.text) would otherwise make every segment report
+        # is_transformed, pinning this cursor for the whole frame -- no progress is
+        # reported, the frame completes as soon as the first segment does, and the
+        # tags reach the user. The strip preserves the word boundary a flush tag
+        # stood in for, so this stays one token per spoken word and matches the
+        # isolated tts cursor above.
         # _user_facing_pos is a cursor into it, kept in sync with the segment map
         # except when a slot is force-completed (which the segment map never
         # observes, since it manually jumps this cursor to the end).
-        self._user_facing_text: str = (
-            user_facing_text if user_facing_text is not None else strip_complete_markup(tts_text)
+        self._user_facing_text: str = strip_complete_markup_preserving_boundaries(
+            user_facing_text if user_facing_text is not None else tts_text
         )
         self._user_facing_pos = 0
 
@@ -122,7 +137,9 @@ class WordCompletionTracker:
         # stale -- this flag is the authoritative completion signal from then on.
         self._force_completed = False
 
-        self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
+        # Built from the isolated cursor reference, not the argument: raw_pos indexes
+        # into _tts_text, and the get_*_tts_text accessors slice that same string.
+        self._segment_map = TextSegmentMap(self._tts_text, self._user_facing_text, llm_text)
 
     # Typographic variants that LLMs commonly emit but TTS services normalize away.
     _TYPOGRAPHY_FOLD = str.maketrans(
