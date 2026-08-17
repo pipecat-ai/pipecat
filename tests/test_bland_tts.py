@@ -737,7 +737,12 @@ async def test_bland_http_tts_non_json_error_response(aiohttp_client):
 
 
 def _refusing_server(captured: dict, *, code: str = "insufficient_credits"):
-    """A server that refuses admission on every `speak`, as it does per delta."""
+    """Refuses admission for the turn's context, once, as the server does.
+
+    A refused context is recorded and its later deltas dropped silently, so a
+    client that keeps feeding one gets no further reply — which is what makes the
+    count of `speak` messages the thing worth asserting.
+    """
 
     async def handler(ws):
         try:
@@ -756,11 +761,15 @@ def _refusing_server(captured: dict, *, code: str = "insufficient_credits"):
                         )
                     )
                 elif msg["type"] == "speak":
+                    context_id = msg["context_id"]
+                    if context_id in captured.setdefault("refused", set()):
+                        continue
+                    captured["refused"].add(context_id)
                     await ws.send(
                         json.dumps(
                             {
                                 "type": "error",
-                                "context_id": msg["context_id"],
+                                "context_id": context_id,
                                 "code": code,
                                 "message": "wallet depleted",
                             }
