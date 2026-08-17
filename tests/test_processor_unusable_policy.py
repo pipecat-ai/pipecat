@@ -6,11 +6,13 @@
 
 import asyncio
 import unittest
+import warnings
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
+    FatalErrorFrame,
     Frame,
     TextFrame,
 )
@@ -38,6 +40,32 @@ class ErroringProcessor(FrameProcessor):
 
         # Forward everything, so lifecycle frames reach the sink and every
         # processor in the pipeline gets a chance to report its own error.
+        await self.push_frame(frame, direction)
+
+
+class PermanentlyFailingProcessor(FrameProcessor):
+    """Processor whose failure keeps recurring, whatever its category says."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self.push_error(
+                "service failed for good", category=ErrorCategory.SERVER, treat_as_permanent=True
+            )
+
+        await self.push_frame(frame, direction)
+
+
+class FatalErroringProcessor(FrameProcessor):
+    """Processor reporting errors through the deprecated ``fatal`` flag."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self.push_error("service failed", fatal=True)
+
         await self.push_frame(frame, direction)
 
 
@@ -171,3 +199,67 @@ class TestErrorsThePipelineActsOn(UnusableProcessorTestCase):
         )
 
         self.assertEqual(unusable, [])
+
+    async def test_permanent_errors_are_acted_on_whatever_the_category(self):
+        unusable, finished = await self.run_worker(
+            PermanentlyFailingProcessor(),
+            ProcessorUnusablePolicy.CANCEL,
+            [TextFrame("hello")],
+        )
+
+        self.assertEqual(len(unusable), 1)
+        self.assertTrue(any(isinstance(frame, CancelFrame) for frame in finished))
+
+
+class TestDeprecatedFatalFlag(UnusableProcessorTestCase):
+    def assert_warns_fatal(self, warnings_raised, subject: str):
+        """Assert the deprecation was reported once, naming both replacements."""
+        self.assertEqual(len(warnings_raised), 1)
+        message = str(warnings_raised[0].message)
+        self.assertIs(warnings_raised[0].category, DeprecationWarning)
+        self.assertIn(subject, message)
+        self.assertIn("treat_as_permanent=True", message)
+        self.assertIn("EndWorkerFrame", message)
+
+    def test_error_frame_warns_when_fatal(self):
+        with warnings.catch_warnings(record=True) as raised:
+            ErrorFrame("service failed", fatal=True)
+
+        self.assert_warns_fatal(raised, "`ErrorFrame.fatal`")
+
+    def test_error_frame_stays_quiet_without_fatal(self):
+        with warnings.catch_warnings(record=True) as raised:
+            ErrorFrame("service failed")
+            ErrorFrame("service failed", fatal=False)
+
+        self.assertEqual(raised, [])
+
+    def test_fatal_error_frame_warns_about_itself_only(self):
+        with warnings.catch_warnings(record=True) as raised:
+            FatalErrorFrame("service failed")
+
+        self.assertEqual(len(raised), 1)
+        self.assertIn("`FatalErrorFrame` is deprecated", str(raised[0].message))
+
+    async def test_push_error_warns_when_fatal_and_still_cancels(self):
+        """The flag keeps cancelling until it goes away, whatever the policy."""
+        with warnings.catch_warnings(record=True) as raised:
+            unusable, finished = await self.run_worker(
+                FatalErroringProcessor(),
+                ProcessorUnusablePolicy.CONTINUE,
+                [TextFrame("hello")],
+            )
+
+        self.assert_warns_fatal(raised, "`push_error(fatal=True)`")
+        self.assertEqual(unusable, [])
+        self.assertTrue(any(isinstance(frame, CancelFrame) for frame in finished))
+
+    async def test_push_error_stays_quiet_when_permanent(self):
+        with warnings.catch_warnings(record=True) as raised:
+            await self.run_worker(
+                PermanentlyFailingProcessor(),
+                ProcessorUnusablePolicy.CANCEL,
+                [TextFrame("hello")],
+            )
+
+        self.assertEqual(raised, [])

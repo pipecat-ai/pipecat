@@ -146,7 +146,7 @@ async def test_run_stt_skips_send_when_connection_is_none():
 @pytest.mark.asyncio
 async def test_connection_handler_gives_up_immediately_on_4xx_api_error():
     """A 4xx ApiError (e.g. invalid API key) should stop retrying after a
-    single attempt and report a non-fatal error."""
+    single attempt and report the error."""
     service = _make_bare_service()
     mock_client = MagicMock()
     mock_client.listen.v1.connect = MagicMock(
@@ -158,15 +158,12 @@ async def test_connection_handler_gives_up_immediately_on_4xx_api_error():
 
     assert mock_client.listen.v1.connect.call_count == 1
     service.push_error.assert_awaited_once()
-    _, kwargs = service.push_error.call_args
-    assert kwargs.get("fatal", False) is False
 
 
 @pytest.mark.asyncio
 async def test_connection_handler_gives_up_after_max_quick_failures(monkeypatch):
     """Repeated fast failures (e.g. network errors) should stop retrying after
-    max_consecutive_failures in a row, with backoff between attempts, and none
-    of the reported errors should be fatal."""
+    max_consecutive_failures in a row, with backoff between attempts."""
     monkeypatch.setattr("pipecat.services.deepgram.stt.exponential_backoff_time", lambda attempt: 0)
     service = _make_bare_service()
     max_failures = service._quick_failure_tracker.max_consecutive_failures
@@ -181,8 +178,6 @@ async def test_connection_handler_gives_up_after_max_quick_failures(monkeypatch)
     assert mock_client.listen.v1.connect.call_count == max_failures
     # One push_error per failed attempt, plus a final give-up error.
     assert service.push_error.await_count == max_failures + 1
-    for call in service.push_error.await_args_list:
-        assert call.kwargs.get("fatal", False) is False
 
 
 @pytest.mark.asyncio

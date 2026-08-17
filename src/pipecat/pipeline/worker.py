@@ -145,6 +145,8 @@ class ProcessorUnusablePolicy(Enum):
 
     An unusable processor keeps failing for as long as the pipeline keeps
     using it, so the pipeline has to decide whether it is still worth running.
+    A processor becomes unusable through a permanent error category or through
+    :meth:`FrameProcessor.push_error` with ``treat_as_permanent=True``.
 
     Parameters:
         CONTINUE: Report the error and keep running. The application can decide
@@ -1283,6 +1285,8 @@ class PipelineWorker(BaseWorker):
             await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
+            # The deprecated `fatal` flag cancels whatever the unusable policy
+            # says. It goes away in 2.0.0, leaving the policy to decide alone.
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
                 await self._cancel(reason=f"fatal error: {frame.error}")

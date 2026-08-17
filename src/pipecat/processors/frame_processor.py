@@ -856,6 +856,16 @@ class FrameProcessor(BaseObject):
             fatal: Whether this error should be considered fatal to the pipeline.
                 Fatal errors typically cause the entire pipeline to stop processing.
                 Defaults to False for non-fatal errors.
+
+                .. deprecated:: 1.8.0
+                    Use ``treat_as_permanent=True`` instead, when the error
+                    leaves this processor unable to do its job: the pipeline
+                    worker then applies its :class:`ProcessorUnusablePolicy`, of
+                    which ``CANCEL`` matches what ``fatal=True`` did. For an
+                    error that isn't about this processor's state, push an
+                    :class:`EndWorkerFrame` after the error to end the pipeline.
+                    Will be removed in 2.0.0.
+
             category: Why the error occurred, when the caller knows. Leave it
                 unset to let the category be worked out from the exception, or
                 pass `ErrorCategory.UNKNOWN` to report an error whose cause
@@ -867,28 +877,52 @@ class FrameProcessor(BaseObject):
                 work — having failed too many times to keep trying, say. Only
                 needed for a failure the category doesn't already convey:
                 leaving it False doesn't keep the processor usable, since a
-                permanent category costs it its usability on its own.
+                permanent category costs it its usability on its own. Either way
+                the processor stops being given work, and the pipeline worker
+                decides what to do about it through its
+                :class:`ProcessorUnusablePolicy`: report the error and keep
+                running (the default), end the pipeline, or cancel it.
 
         Example::
 
             ```python
-            # Non-fatal error
+            # An error this processor can recover from
             await self.push_error("Failed to process audio chunk, skipping")
 
-            # Fatal error with exception context
+            # An error that leaves this processor unable to do any more work
             try:
                 result = some_critical_operation()
             except Exception as e:
-                await self.push_error("Critical operation failed", exception=e, fatal=True)
+                await self.push_error(
+                    "Critical operation failed", exception=e, treat_as_permanent=True
+                )
             ```
         """
+        if fatal:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
+                    "in 2.0.0. If the error leaves this processor unable to do its job, pass "
+                    "`treat_as_permanent=True` instead: that marks the processor unusable, "
+                    "and the PipelineWorker acts on it according to its "
+                    "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
+                    "`fatal=True` did). Otherwise, drop `fatal` and push an "
+                    "`EndWorkerFrame` after the error to end the pipeline.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         error_frame = ErrorFrame(
             error=error_msg,
-            fatal=fatal,
             exception=exception,
             processor=self,
             category=category,
         )
+        # Set after construction so the frame doesn't warn about the deprecated
+        # flag on top of the warning already reported above.
+        error_frame.fatal = fatal
+
         # Subclasses may override `push_error_frame` with its original
         # one-argument signature, so only pass the flag when it is set.
         if treat_as_permanent:
@@ -900,7 +934,8 @@ class FrameProcessor(BaseObject):
         """Push an error frame upstream.
 
         Args:
-            error: The error frame to push.
+            error: The error frame to push. Its deprecated ``fatal`` flag still
+                cancels the pipeline; ``treat_as_permanent`` is the replacement.
             treat_as_permanent: Whether to treat this error as one that will
                 keep recurring, leaving the processor unable to do any more
                 work. Leaving it False doesn't keep the processor usable — a

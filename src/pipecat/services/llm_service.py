@@ -1658,7 +1658,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self.push_error(
                 error_msg=error_message,
                 exception=e,
-                fatal=False,
                 category=ErrorCategory.APPLICATION,
             )
             # A handler that raised will never report, so settle the call on its

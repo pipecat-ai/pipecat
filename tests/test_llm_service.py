@@ -831,7 +831,6 @@ class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("kaboom", errors[0]["error_msg"])
         self.assertIsInstance(errors[0]["exception"], RuntimeError)
-        self.assertFalse(errors[0]["fatal"])
 
     async def test_the_exception_is_kept_out_of_the_llm_context(self):
         """Exception text reaches the user through the LLM; the ErrorFrame carries it instead."""

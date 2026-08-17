@@ -1017,12 +1017,21 @@ class ErrorFrame(SystemFrame):
     """Frame notifying of errors in the pipeline.
 
     This is used to notify upstream that an error has occurred downstream in
-    the pipeline. A fatal error indicates the error is unrecoverable and that the
-    bot should exit.
+    the pipeline.
 
     Parameters:
         error: Description of the error that occurred.
         fatal: Whether the error is fatal and requires bot shutdown.
+
+            .. deprecated:: 1.8.0
+                Use :meth:`FrameProcessor.push_error` with
+                ``treat_as_permanent=True`` instead, when the error leaves the
+                processor that reported it unable to do its job: it marks the
+                processor unusable and the pipeline worker applies its
+                :class:`ProcessorUnusablePolicy`. For an error that isn't about
+                a processor's state, push an :class:`EndWorkerFrame` after the
+                error to end the pipeline. Will be removed in 2.0.0.
+
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
         category: What kind of failure this was, drawn from `ErrorCategory`:
@@ -1039,6 +1048,26 @@ class ErrorFrame(SystemFrame):
     exception: Exception | None = None
     category: ErrorCategory | None = None
 
+    def __post_init__(self):
+        super().__post_init__()
+        # Only a set flag carries behavior worth warning about, and
+        # `FatalErrorFrame` already warns about itself.
+        if self.fatal and not isinstance(self, FatalErrorFrame):
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                    "2.0.0. If the error leaves the processor that reported it unable to do "
+                    "its job, report it with `push_error(..., treat_as_permanent=True)`: that "
+                    "marks the processor unusable, and the PipelineWorker acts on it "
+                    "according to its `processor_unusable_policy` "
+                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                    "`EndWorkerFrame` to end the pipeline.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+
     def __str__(self):
         category = (
             f", category: {self.category.value}"
@@ -1048,12 +1077,22 @@ class ErrorFrame(SystemFrame):
         return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"
 
 
+@deprecated(
+    "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+    "Use `ErrorFrame` instead."
+)
 @dataclass
 class FatalErrorFrame(ErrorFrame):
     """Frame notifying of unrecoverable errors requiring bot shutdown.
 
-    This is used to notify upstream that an unrecoverable error has occurred and
-    that the bot should exit immediately.
+    .. deprecated:: 1.8.0
+        Use :class:`ErrorFrame` instead. Report the error with
+        :meth:`FrameProcessor.push_error` and ``treat_as_permanent=True`` when it
+        leaves the reporting processor unable to do its job — the pipeline worker
+        then applies its :class:`ProcessorUnusablePolicy`, of which ``CANCEL``
+        shuts the bot down. For an error that isn't about a processor's state,
+        push an :class:`EndWorkerFrame` after the error instead. Will be removed
+        in 2.0.0.
 
     Parameters:
         fatal: Always True for fatal errors.
