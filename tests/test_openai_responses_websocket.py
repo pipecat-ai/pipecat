@@ -966,3 +966,128 @@ class TestStartsWithResponseOutputReasoning:
         response_output = [{"type": "reasoning", "id": "rs_1"}]
         items = [{"type": "reasoning", "id": "rs_2"}]
         assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+
+# ---------------------------------------------------------------------------
+# retry_on_timeout
+# ---------------------------------------------------------------------------
+
+
+def _ws_script(*items):
+    """Build a mock WebSocket from a script of events and float stalls.
+
+    A dict item is delivered by recv(); a number stalls recv() for that many
+    seconds. recv() blocks indefinitely once the script is exhausted.
+    """
+    ws = AsyncMock()
+    pending = list(items)
+
+    async def recv():
+        while pending:
+            item = pending.pop(0)
+            if isinstance(item, (int, float)):
+                await asyncio.sleep(item)
+                continue
+            return json.dumps(item)
+        await asyncio.sleep(3600)
+
+    ws.recv = AsyncMock(side_effect=recv)
+    ws.send = AsyncMock()
+    ws.close = AsyncMock()
+    ws.close_code = None
+    return ws
+
+
+class TestRetryOnTimeout:
+    def test_disabled_by_default(self):
+        service = _make_service()
+        assert service._retry_on_timeout is False
+        assert service._retry_timeout_secs == 5.0
+
+    @pytest.mark.asyncio
+    async def test_silent_response_times_out(self):
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service._websocket = _ws_script()
+
+        with pytest.raises(_ResponseTimeoutError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+    @pytest.mark.asyncio
+    async def test_response_created_alone_does_not_close_the_window(self):
+        """An acknowledged-but-silent response is exactly what retrying is for."""
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service()
+        service._websocket = _ws_script({"type": "response.created", "response": {"id": "resp_1"}})
+
+        with pytest.raises(_ResponseTimeoutError):
+            await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+    @pytest.mark.asyncio
+    async def test_no_timeout_when_not_requested(self):
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._websocket = _ws_script(
+            0.1,
+            {"type": "response.output_text.delta", "delta": "hi"},
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [])
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+    @pytest.mark.asyncio
+    async def test_first_output_makes_the_wait_unbounded(self):
+        """Once content is downstream, a stall must not abandon the response."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service._websocket = _ws_script(
+            {"type": "response.output_text.delta", "delta": "hi"},
+            0.15,  # longer than the timeout below
+            {"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4.1"}},
+        )
+
+        await service._receive_response_events(MagicMock(spec=LLMContext), [], 0.05)
+
+        service._push_llm_text.assert_awaited_once_with("hi")
+
+    @pytest.mark.asyncio
+    async def test_timeout_reconnects_and_retries_with_full_context(self):
+        from pipecat.services.openai.responses.llm import _ResponseTimeoutError
+
+        service = _make_service(retry_on_timeout=True, retry_timeout_secs=0.05)
+        service._websocket = _ws_script()
+        service._ensure_connected = AsyncMock()
+        service._ws_send = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service._try_reconnect = AsyncMock(return_value=True)
+
+        # Stale state from an earlier turn; the retry must not reuse it.
+        service._previous_response_id = "resp_stale"
+
+        timeouts = []
+
+        async def receive(context, full_input, output_timeout_secs=None):
+            timeouts.append(output_timeout_secs)
+            if len(timeouts) == 1:
+                raise _ResponseTimeoutError("no output")
+
+        service._receive_response_events = receive
+
+        await service._process_context(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+        # First attempt bounded, retry unbounded.
+        assert timeouts == [0.05, None]
+        service._try_reconnect.assert_awaited_once()
+        assert service._previous_response_id is None
+        sent = [call.args[0] for call in service._ws_send.await_args_list]
+        assert len(sent) == 2
+        assert "previous_response_id" not in sent[1]

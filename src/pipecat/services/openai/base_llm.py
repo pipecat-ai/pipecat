@@ -186,8 +186,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
-            retry_on_timeout: Whether to retry the request once if it times out.
+            retry_timeout_secs: How long an inference may go without producing
+                output before it is abandoned and re-issued, when
+                ``retry_on_timeout`` is set. Defaults to 5.0 seconds.
+            retry_on_timeout: Whether to re-issue the request once if the first
+                attempt produces no output within ``retry_timeout_secs``. The
+                retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
