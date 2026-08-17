@@ -714,7 +714,6 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
-                logger.info(f"{self}: FF => received word timestamps: {processed_timestamps}")
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
