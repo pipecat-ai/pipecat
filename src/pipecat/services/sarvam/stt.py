@@ -973,21 +973,9 @@ SUPPORTED_SAMPLE_RATES = {8000, 16000}
 # transcript latency doesn't scale with the chosen profile.
 _CLIENT_CHUNK_MS = 50
 
-# Rejected in a `config.update`. Sarvam reads these only from the connection
-# query string, so changing one needs a new stream; `endpointing` is a
-# constructor argument and belongs to the same stream-lifetime contract.
-_CONNECTION_ONLY_FIELDS = frozenset(
-    {
-        "sample_rate",
-        "return_timestamps",
-        "prefix_padding_ms",
-        "endpointing",
-    }
-)
-
-# Accepted in a `config.update` message. Of these, `language_code`,
-# `stream_type`, `mode`, and `prompt` are boundary-gated: the server defers
-# them to the next utterance boundary.
+# Accepted in a `config.update` message, and so the whole of `Settings`. Of
+# these, `language_code`, `stream_type`, `mode`, and `prompt` are
+# boundary-gated: the server defers them to the next utterance boundary.
 _RUNTIME_CONFIG_FIELDS = frozenset(
     {
         "language_code",
@@ -1003,7 +991,6 @@ _RUNTIME_CONFIG_FIELDS = frozenset(
 # Only meaningful while the server is doing the endpointing.
 _VAD_TUNING_FIELDS = (
     "threshold",
-    "prefix_padding_ms",
     "silence_duration_ms",
     "min_speech_duration_ms",
 )
@@ -1040,16 +1027,16 @@ def language_to_sarvam_realtime_language(language: Language) -> str:
 class SarvamRealtimeSTTSettings(STTSettings):
     """Settings for SarvamRealtimeSTTService.
 
+    Sarvam reads these from the connection query string but also accepts them
+    in a ``config.update``. The values it only reads at connection time are
+    constructor arguments on the service instead.
+
     Parameters:
         language_code: Sarvam realtime language code or ``auto``.
         stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
-        sample_rate: Declared input audio sample rate. ``None`` adopts the
-            pipeline's input rate.
         mode: Realtime STT task mode.
         prompt: Optional decoding prompt.
-        return_timestamps: Whether final transcripts should include segment offsets.
         threshold: Optional VAD sensitivity threshold.
-        prefix_padding_ms: Optional VAD prefix padding.
         silence_duration_ms: Optional silence duration for end-of-speech.
         min_speech_duration_ms: Optional minimum speech duration.
     """
@@ -1058,12 +1045,9 @@ class SarvamRealtimeSTTSettings(STTSettings):
     stream_type: Literal["fast", "balanced", "simulated"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    sample_rate: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     mode: SarvamMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    return_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prefix_padding_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
@@ -1100,6 +1084,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         api_key: str,
         base_url: str = "wss://api.sarvam.ai/speech-to-text-realtime/ws",
         endpointing: Literal["vad", "manual"] = "vad",
+        sample_rate: int | None = None,
+        return_timestamps: bool = False,
+        prefix_padding_ms: int | None = None,
         settings: Settings | None = None,
         should_interrupt: bool = True,
         ttfs_p99_latency: float | None = SARVAM_REALTIME_TTFS_P99,
@@ -1114,6 +1101,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 own detection, or ``manual`` for the pipeline's. Decides the turn
                 strategies this service asks the user aggregator to run, so it is
                 fixed for the life of the service. Defaults to ``vad``.
+            sample_rate: Declared input audio sample rate, 8000 or 16000. ``None``
+                adopts the pipeline's input rate.
+            return_timestamps: Whether final transcripts should include segment
+                offsets. Defaults to False.
+            prefix_padding_ms: Optional VAD prefix padding, used only under
+                ``endpointing="vad"``.
             settings: Runtime-updatable realtime settings.
             should_interrupt: Determine whether the bot should be interrupted when
                 Sarvam detects user speech. Passed along to the user turn
@@ -1136,17 +1129,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 "SarvamRealtimeSTTService does not support reconnect_on_error; "
                 "reconnection is always disabled"
             )
+        if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
+            allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
+            raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
         default_settings = self.Settings(
             model=_REALTIME_MODEL,
             language=None,
             language_code="en-IN",
             stream_type="balanced",
-            sample_rate=None,
             mode="transcribe",
             prompt=None,
-            return_timestamps=False,
             threshold=None,
-            prefix_padding_ms=None,
             silence_duration_ms=None,
             min_speech_duration_ms=None,
         )
@@ -1165,7 +1158,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._validate_settings(default_settings)
 
         super().__init__(
-            sample_rate=assert_given(default_settings.sample_rate),
+            sample_rate=sample_rate,
             settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
             reconnect_on_error=False,
@@ -1174,6 +1167,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._base_url = base_url
+        self._return_timestamps = return_timestamps
+        self._prefix_padding_ms = prefix_padding_ms
         self._should_interrupt = should_interrupt
         self._receive_task: asyncio.Task | None = None
         self._audio_buffer = bytearray()
@@ -1428,18 +1423,15 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         delta = self._with_derived_language_code(delta)
         proposed = self._settings.copy()
         proposed.apply_update(delta)
-        self._validate_settings(proposed)
 
+        # Drawn from the runtime-updatable set, so the payload carries nothing
+        # a `config.update` would have to reject.
         payload = {
             name: getattr(proposed, name)
             for name in _RUNTIME_CONFIG_FIELDS
             if is_given(getattr(proposed, name))
             and getattr(proposed, name) != getattr(self._settings, name)
         }
-        # The wire guards compare a requested value against the live one, so
-        # they have to run while the store still holds it.
-        if payload:
-            self._validate_config_update(payload)
 
         changed = await super()._update_settings(delta)
         if not changed:
@@ -1595,10 +1587,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             "sample_rate": self.sample_rate,
             "model": self._settings.model,
             "mode": self._settings.mode,
-            "return_timestamps": str(self._settings.return_timestamps).lower(),
+            "return_timestamps": str(self._return_timestamps).lower(),
         }
         optional: dict[str, Any] = {"prompt": self._settings.prompt}
         if self._endpointing == "vad":
+            optional["prefix_padding_ms"] = self._prefix_padding_ms
             optional.update(
                 {name: getattr(self._settings, name) for name in _VAD_TUNING_FIELDS},
             )
@@ -1659,24 +1652,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
         return f"Unsupported sample_rate '{self.sample_rate}'. Allowed values: {allowed}."
 
-    def _validate_config_update(self, fields: dict[str, Any]):
-        connection_only = sorted(_CONNECTION_ONLY_FIELDS.intersection(fields))
-        if connection_only:
-            names = ", ".join(connection_only)
-            raise ValueError(
-                f"{names} cannot be changed mid-session; they are connection "
-                "parameters. Open a new stream instead."
-            )
-        unknown = sorted(set(fields) - _RUNTIME_CONFIG_FIELDS)
+    def _validate_config_update(self, update: dict[str, Any]):
+        """Reject a ``config.update`` field Sarvam has no setting for."""
+        unknown = sorted(set(update) - {setting.name for setting in fields(self.Settings)})
         if unknown:
             names = ", ".join(unknown)
-            allowed = ", ".join(sorted(_RUNTIME_CONFIG_FIELDS))
-            raise ValueError(f"Unsupported config.update field(s) {names}. Allowed: {allowed}.")
-        if "stream_type" in fields:
-            current = assert_given(self._settings.stream_type)
-            requested = fields["stream_type"]
-            if current == "simulated" or requested == "simulated":
-                raise ValueError("Changing to or from stream_type='simulated' is not supported.")
+            raise ValueError(f"Unknown config.update field(s) {names}.")
 
     @staticmethod
     def _validate_settings(settings: Settings):
@@ -1690,12 +1671,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         model = assert_given(settings.model)
         if model != _REALTIME_MODEL:
             raise ValueError(f"Unsupported model '{model}'. Only '{_REALTIME_MODEL}' is supported.")
-
-        # The audio path has to produce this rate, so it can't wait for the wire.
-        sample_rate = assert_given(settings.sample_rate)
-        if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
-            allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
-            raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
 
     @traced_stt
     async def _trace_transcription(

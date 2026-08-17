@@ -6,6 +6,7 @@
 
 import base64
 import json
+from dataclasses import fields
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -32,7 +33,11 @@ from pipecat.metrics.metrics import STTUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.sarvam.stt import SarvamRealtimeSTTService, SarvamSTTService
+from pipecat.services.sarvam.stt import (
+    SarvamRealtimeSTTService,
+    SarvamRealtimeSTTSettings,
+    SarvamSTTService,
+)
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -110,7 +115,6 @@ def test_sarvam_without_vad_signals_recommends_no_strategies():
     ("field", "value"),
     [
         ("stream_type", "balanced"),
-        ("sample_rate", 8000),
         ("mode", "translate"),
     ],
 )
@@ -124,7 +128,6 @@ def test_settings_values_are_applied_via_settings():
         api_key="test-key",
         settings=SarvamRealtimeSTTService.Settings(
             stream_type="balanced",
-            sample_rate=8000,
             mode="translate",
         ),
     )
@@ -132,8 +135,22 @@ def test_settings_values_are_applied_via_settings():
     query = _query(service)
 
     assert query["stream_type"] == ["balanced"]
-    assert query["sample_rate"] == ["8000"]
     assert query["mode"] == ["translate"]
+
+
+def test_connection_only_values_are_applied_via_constructor_arguments():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=8000,
+        return_timestamps=True,
+        prefix_padding_ms=200,
+    )
+
+    query = _query(service)
+
+    assert query["sample_rate"] == ["8000"]
+    assert query["return_timestamps"] == ["true"]
+    assert query["prefix_padding_ms"] == ["200"]
 
 
 def test_default_url_uses_realtime_contract_params():
@@ -197,17 +214,19 @@ def test_string_language_setting_does_not_use_enum_converter(monkeypatch):
     assert Language.HI_IN in converter_calls
 
 
-@pytest.mark.parametrize(
-    "settings",
-    [
-        SarvamRealtimeSTTService.Settings(model="saarika:v2.5"),
-        SarvamRealtimeSTTService.Settings(sample_rate=44100),
-    ],
-)
-def test_invalid_realtime_settings_raise(settings):
+def test_invalid_realtime_settings_raise():
     """Only the settings this integration itself depends on are checked here."""
     with pytest.raises(ValueError):
-        SarvamRealtimeSTTService(api_key="test-key", settings=settings)
+        SarvamRealtimeSTTService(
+            api_key="test-key",
+            settings=SarvamRealtimeSTTService.Settings(model="saarika:v2.5"),
+        )
+
+
+def test_unusable_sample_rate_raises():
+    """The audio path has to produce this rate, so it can't wait for the wire."""
+    with pytest.raises(ValueError, match="44100"):
+        SarvamRealtimeSTTService(api_key="test-key", sample_rate=44100)
 
 
 @pytest.mark.parametrize(
@@ -515,7 +534,7 @@ async def test_session_begin_logs_request_id_at_info(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_config_update_sends_without_reconnect_and_rejects_simulated_change():
+async def test_config_update_sends_without_reconnect():
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket()
 
@@ -532,8 +551,16 @@ async def test_config_update_sends_without_reconnect_and_rejects_simulated_chang
         )
     ]
 
-    with pytest.raises(ValueError):
-        await service.update_config(stream_type="simulated")
+
+@pytest.mark.asyncio
+async def test_update_config_rejects_a_field_sarvam_has_no_setting_for():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    with pytest.raises(ValueError, match="langauge_code"):
+        await service.update_config(langauge_code="hi-IN")
+
+    assert service._websocket.sent == []
 
 
 @pytest.mark.asyncio
@@ -547,21 +574,18 @@ async def test_config_update_sends_without_reconnect_and_rejects_simulated_chang
     ],
 )
 async def test_connection_only_fields_rejected_by_update_config(field, value):
+    """Connection-time values are constructor arguments, so `Settings` has none.
+
+    That leaves nothing for a `config.update` to carry them in, which is what
+    keeps them from reaching a stream that cannot apply them.
+    """
+    assert field not in {setting.name for setting in fields(SarvamRealtimeSTTSettings)}
+
     service = SarvamRealtimeSTTService(api_key="test-key")
     service._websocket = _FakeWebsocket()
 
-    with pytest.raises(ValueError, match="connection"):
+    with pytest.raises(ValueError, match=field):
         await service.update_config(**{field: value})
-
-    assert service._websocket.sent == []
-
-
-@pytest.mark.asyncio
-async def test_connection_only_setting_change_is_not_sent_as_config_update():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    service._websocket = _FakeWebsocket()
-
-    await service._update_settings(SarvamRealtimeSTTService.Settings(return_timestamps=True))
 
     assert service._websocket.sent == []
 
@@ -584,18 +608,19 @@ async def test_update_config_keeps_the_settings_store_in_step():
 
 
 @pytest.mark.asyncio
-async def test_stream_type_guard_compares_against_the_live_value():
+async def test_stream_type_change_is_left_to_the_server():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
         settings=SarvamRealtimeSTTService.Settings(stream_type="simulated"),
     )
     service._websocket = _FakeWebsocket()
 
-    with pytest.raises(ValueError, match="simulated"):
-        await service._update_settings(SarvamRealtimeSTTService.Settings(stream_type="fast"))
+    await service._update_settings(SarvamRealtimeSTTService.Settings(stream_type="fast"))
 
-    assert service._websocket.sent == []
-    assert service._settings.stream_type == "simulated"
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "stream_type": "fast"})
+    ]
+    assert service._settings.stream_type == "fast"
 
 
 @pytest.mark.asyncio
@@ -636,11 +661,8 @@ def test_sample_rate_defaults_to_the_pipeline_rate():
     assert _query(service, sample_rate=8000)["sample_rate"] == ["8000"]
 
 
-def test_explicit_sample_rate_setting_pins_the_rate():
-    service = SarvamRealtimeSTTService(
-        api_key="test-key",
-        settings=SarvamRealtimeSTTService.Settings(sample_rate=8000),
-    )
+def test_explicit_sample_rate_pins_the_rate():
+    service = SarvamRealtimeSTTService(api_key="test-key", sample_rate=8000)
 
     assert service._init_sample_rate == 8000
 
@@ -762,11 +784,11 @@ def test_vad_params_are_omitted_for_manual_endpointing():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
         endpointing="manual",
+        prefix_padding_ms=200,
         settings=SarvamRealtimeSTTService.Settings(
             threshold=0.4,
             silence_duration_ms=700,
             min_speech_duration_ms=120,
-            prefix_padding_ms=200,
         ),
     )
 
