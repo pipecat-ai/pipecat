@@ -773,6 +773,10 @@ class DailyTransportClient(EventHandler):
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+        # The executor's job is done after the final cleanup; shut it down so
+        # its worker thread doesn't outlive the session (one leaked thread per
+        # session in a process that serves sessions back to back).
+        self._executor.shutdown(wait=False)
 
     async def start(self, frame: StartFrame):
         """Start the client and initialize audio/video components.
