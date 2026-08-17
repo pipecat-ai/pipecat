@@ -770,13 +770,21 @@ class DailyTransportClient(EventHandler):
         if self._video_task and self._task_manager:
             await self._task_manager.cancel_task(self._video_task)
             self._video_task = None
-        # Make sure we don't block the event loop in case `client.release()`
-        # takes extra time.
-        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
-        # The executor's job is done after the final cleanup; shut it down so
-        # its worker thread doesn't outlive the session (one leaked thread per
-        # session in a process that serves sessions back to back).
-        self._executor.shutdown(wait=False)
+        try:
+            # Make sure we don't block the event loop in case `client.release()`
+            # takes extra time. The `_client` guard keeps extra cleanup() calls
+            # a no-op (some wrappers, like the LemonSlice transport, call the
+            # shared client's cleanup from both input and output): without it a
+            # second call would schedule work on an already shut down executor.
+            if self._client:
+                await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+        finally:
+            # The executor's job is done after the final cleanup; shut it down
+            # so its worker thread doesn't outlive the session (one leaked
+            # thread per session in a process that serves sessions back to
+            # back). In a `finally` so a raising or cancelled release() still
+            # signals the worker thread to exit; shutdown() is idempotent.
+            self._executor.shutdown(wait=False)
 
     async def start(self, frame: StartFrame):
         """Start the client and initialize audio/video components.
