@@ -7,6 +7,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -466,6 +467,157 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
             processor,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(first_speech_latencies), 0)
+
+    async def test_transcription_turn_measures_latency(self):
+        """VAD-miss path: UserStoppedSpeakingFrame must still open a measurement."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        latencies = []
+        breakdowns = []
+
+        @observer.event_handler("on_latency_measured")
+        async def on_latency(obs, latency_seconds):
+            latencies.append(latency_seconds)
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.15),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[
+                UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
+                BotStartedSpeakingFrame,
+            ],
+            observers=[observer],
+        )
+
+        self.assertEqual(len(latencies), 1)
+        self.assertGreaterEqual(latencies[0], 0.1)
+        self.assertEqual(len(breakdowns), 1)
+        # Stop and turn-release are the same event; do not invent a wait.
+        self.assertIsNone(breakdowns[0].user_turn_secs)
+        self.assertIsNotNone(breakdowns[0].user_turn_start_time)
+
+    async def test_transcription_turn_collects_metrics_after_stop(self):
+        """Fallback stop must open the metrics window the VAD stop normally opens."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        breakdowns = []
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        llm_ttfb = TTFBMetricsData(processor="OpenAILLMService#0", value=0.250)
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            MetricsFrame(data=[llm_ttfb]),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(breakdowns), 1)
+        self.assertEqual(len(breakdowns[0].ttfb), 1)
+        self.assertEqual(breakdowns[0].ttfb[0].processor, "OpenAILLMService#0")
+
+    async def test_vad_stop_is_not_overwritten_by_user_stopped(self):
+        """Dual start strategies: VAD timing stays authoritative once set."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        breakdowns = []
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.2),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(breakdowns), 1)
+        self.assertIsNotNone(breakdowns[0].user_turn_secs)
+        self.assertGreaterEqual(breakdowns[0].user_turn_secs, 0.1)
+
+    async def test_user_started_without_stop_does_not_measure(self):
+        """A turn that never ends must not emit stop-to-bot latency."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        latencies = []
+
+        @observer.event_handler("on_latency_measured")
+        async def on_latency(obs, latency_seconds):
+            latencies.append(latency_seconds)
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(latencies), 0)
+
+    async def test_first_bot_speech_skipped_when_transcription_turn_starts_first(self):
+        """UserStartedSpeakingFrame must abandon greeting latency, same as VAD start."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        first_speech_latencies = []
+
+        @observer.event_handler("on_first_bot_speech_latency")
+        async def on_first_bot_speech(obs, latency_seconds):
+            first_speech_latencies.append(latency_seconds)
+
+        frames_to_send = [
+            ClientConnectedFrame(),
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
             observers=[observer],
         )
 

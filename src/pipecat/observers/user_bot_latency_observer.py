@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -92,8 +93,9 @@ class LatencyBreakdown(BaseModel):
         text_aggregation: First text aggregation measurement, representing
             the latency cost of sentence aggregation in the TTS pipeline.
         user_turn_start_time: Unix timestamp when the user turn started
-            (actual user silence, adjusted for VAD stop_secs). ``None`` if
-            no ``VADUserStoppedSpeakingFrame`` was observed.
+            (actual user silence, adjusted for VAD stop_secs). Falls back
+            to ``UserStoppedSpeakingFrame`` time when VAD never fired.
+            ``None`` if neither stop frame was observed.
         user_turn_secs: Duration in seconds of the user's turn, measured
             from when the user actually stopped speaking to when the turn
             was released (``UserStoppedSpeakingFrame``). This includes
@@ -143,10 +145,12 @@ class LatencyBreakdown(BaseModel):
 class UserBotLatencyObserver(BaseObserver):
     """Observer that tracks user-to-bot response latency.
 
-    Measures the time between when a user stops speaking (VADUserStoppedSpeakingFrame)
-    and when the bot starts speaking (BotStartedSpeakingFrame). Emits events when
-    latency is measured, allowing consumers to log, trace, or otherwise process
-    the latency data.
+    Measures the time between when a user stops speaking and when the bot
+    starts speaking (BotStartedSpeakingFrame). The stop timestamp prefers
+    ``VADUserStoppedSpeakingFrame`` (VAD time minus ``stop_secs``). When VAD
+    never fires — for example ``TranscriptionUserTurnStartStrategy`` starting
+    a turn that STT heard but local VAD missed — ``UserStoppedSpeakingFrame``
+    is the fallback so the turn is not dropped silently.
 
     When ``enable_metrics=True`` in pipeline params, also collects per-service
     latency breakdown (TTFB, text aggregation) and emits an
@@ -233,15 +237,12 @@ class UserBotLatencyObserver(BaseObserver):
             return
 
         # Track speech and pipeline events for latency
-        if isinstance(data.frame, VADUserStartedSpeakingFrame):
-            # Reset when user starts speaking
-            self._user_stopped_time = None
-            self._user_turn_start_time = None
-            self._user_turn = None
-            self._reset_accumulators()
-            # If user speaks before the bot's first speech, abandon the
-            # first-bot-speech measurement — it's only meaningful for greetings.
-            self._first_bot_speech_measured = True
+        if isinstance(data.frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+            # New user turn. UserStartedSpeakingFrame is the strategy-level
+            # boundary (transcription / external / wake-phrase starts); VAD
+            # start is the audio-level one. Both must reset: otherwise a
+            # VAD-miss turn never clears first-bot-speech or stale stop time.
+            self._reset_user_speech_cycle()
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             # Record the actual time the user stopped speaking, which is
             # the VAD determination time minus the stop_secs silence duration
@@ -249,11 +250,18 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
             self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
-            # Measure the user turn duration: from actual user silence to
-            # turn release. Includes VAD silence detection, STT finalization,
-            # and any turn analyzer wait.
             if self._user_stopped_time is not None:
+                # VAD path: turn release minus actual silence. Includes VAD
+                # stop_secs, STT finalization, and any turn analyzer wait.
                 self._user_turn = time.time() - self._user_stopped_time
+            else:
+                # No VAD stop this turn (TranscriptionUserTurnStartStrategy
+                # and any other start that never produced VAD frames).
+                # Turn release is the best stop timestamp we have. Do not
+                # invent user_turn_secs: stop and release are the same event.
+                now = time.time()
+                self._user_stopped_time = now
+                self._user_turn_start_time = now
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
@@ -310,8 +318,9 @@ class UserBotLatencyObserver(BaseObserver):
         """Extract latency metrics from a MetricsFrame.
 
         Accumulates metrics when a measurement is in progress: either a
-        user→bot cycle (after ``VADUserStoppedSpeakingFrame``) or the
-        first-bot-speech window (after ``ClientConnectedFrame``).
+        user→bot cycle (after ``VADUserStoppedSpeakingFrame`` or the
+        ``UserStoppedSpeakingFrame`` fallback) or the first-bot-speech
+        window (after ``ClientConnectedFrame``).
         """
         waiting_for_first_speech = (
             self._client_connected_time is not None and not self._first_bot_speech_measured
@@ -339,6 +348,16 @@ class UserBotLatencyObserver(BaseObserver):
                         start_time=now - metrics_data.value,
                         duration_secs=metrics_data.value,
                     )
+
+    def _reset_user_speech_cycle(self):
+        """Clear stop timing and accumulators at the start of a user turn."""
+        self._user_stopped_time = None
+        self._user_turn_start_time = None
+        self._user_turn = None
+        self._reset_accumulators()
+        # If the user speaks before the bot's first speech, abandon the
+        # first-bot-speech measurement — it's only meaningful for greetings.
+        self._first_bot_speech_measured = True
 
     def _reset_accumulators(self):
         """Clear per-cycle metric accumulators."""
