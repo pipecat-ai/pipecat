@@ -245,7 +245,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
                 ``retry_on_timeout`` is set. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to re-issue the request once if the first
                 attempt produces no output within ``retry_timeout_secs``. The
-                retry is unbounded, so it either produces a response or fails.
+                retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
