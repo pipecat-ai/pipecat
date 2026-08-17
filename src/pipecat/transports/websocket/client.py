@@ -39,6 +39,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 
 class WebsocketClientParams(TransportParams):
@@ -104,7 +105,6 @@ class WebsocketClientSession:
         self._callbacks = callbacks
         self._transport_name = transport_name
 
-        self._leave_counter = 0
         self._task_manager: BaseTaskManager | None = None
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -130,15 +130,16 @@ class WebsocketClientSession:
         Args:
             task_manager: The task manager to use for session tasks.
         """
-        self._leave_counter += 1
         if not self._task_manager:
             self._task_manager = task_manager
 
+    @acquires("connection")
     async def connect(self):
-        """Connect to the WebSocket server."""
-        if self._websocket:
-            return
+        """Connect to the WebSocket server.
 
+        An input and an output transport share this session and both connect
+        while they are set up, concurrently, so only the first of them dials.
+        """
         try:
             self._websocket = await websocket_connect(
                 uri=self._uri,
@@ -153,10 +154,14 @@ class WebsocketClientSession:
         except TimeoutError:
             logger.error(f"Timeout connecting to {self._uri}")
 
+    @releases("connection")
     async def disconnect(self):
-        """Disconnect from the WebSocket server."""
-        self._leave_counter -= 1
-        if not self._websocket or self._leave_counter > 0:
+        """Disconnect from the WebSocket server.
+
+        Runs once the last of the transports sharing this session has let go,
+        so neither is left sending over a closed socket.
+        """
+        if not self._websocket:
             return
 
         await self.task_manager.cancel_task(self._client_task)
