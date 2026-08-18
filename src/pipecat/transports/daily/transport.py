@@ -15,7 +15,6 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -528,10 +527,6 @@ class DailyTransportClient(EventHandler):
 
         self._task_manager: BaseTaskManager | None = None
 
-        # We use the executor to cleanup the client. We just do it from one
-        # place, so only one thread is really needed.
-        self._executor = ThreadPoolExecutor(max_workers=1)
-
         self._client: CallClient = CallClient(event_handler=self)
 
         # We use separate tasks to execute callbacks (events, audio or
@@ -816,7 +811,7 @@ class DailyTransportClient(EventHandler):
             self._video_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
-        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+        await asyncio.to_thread(self._cleanup)
 
     @acquires("room")
     async def join(self):
