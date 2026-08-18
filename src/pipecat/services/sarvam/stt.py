@@ -1203,14 +1203,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         """Convert a Language enum to Sarvam realtime's language code."""
         return language_to_sarvam_realtime_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and connect the websocket."""
-        await super().start(frame)
-        # The rate can come from the pipeline, so it is only known now. Report
-        # it rather than raise: `AIService._start` swallows exceptions, which
-        # would leave the service quietly dropping every audio chunk instead.
-        # The rate holds for the session, so the failure is permanent and costs
-        # the service its usability, letting a `ServiceSwitcher` move on.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect the websocket.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        # The rate can come from the pipeline, so it is only settled once the
+        # service is set up. It holds for the session, so an unsupported one is
+        # a permanent failure that costs the service its usability, letting a
+        # `ServiceSwitcher` move on.
         error = self._resolved_sample_rate_error()
         if error:
             await self.push_error(error, category=ErrorCategory.INVALID_REQUEST)
