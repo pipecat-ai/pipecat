@@ -12,7 +12,7 @@ could be clearer or sturdier, recorded so the reasoning is not lost.
 `get_accumulated_user_facing_text()`, `get_remaining_user_facing_text()`, plus internal
 uses in `AggregatedFrameSequencer`.
 
-The name describes **one consumer** rather than the text itself. The channel is simply
+**The name describes one consumer rather than the text itself.** The channel is simply
 `AggregatedTextFrame.text` — the segment as the aggregator produced it — and the property
 that makes it useful is that a progress frame always splits it exactly:
 
@@ -42,8 +42,8 @@ rename needs the usual deprecation cycle.
 `word_belongs_current_segment()` needs to answer "would this token match?" without moving
 any cursor, so `_word_matches_remaining` replays the same hop-by-hop walk as
 `_advance_raw` against copies of the cursor state. The two loops classify hops in the same
-order and must agree on every outcome, but they are separate code kept in sync by
-convention — a new hop kind or a change in hop ordering has to be applied twice, and a
+order and **must agree on every outcome, but they are separate code kept in sync by
+convention** — a new hop kind or a change in hop ordering has to be applied twice, and a
 divergence would show up as a token that passes the dry run and then fails to advance.
 
 **Candidate fix:** a single walk parameterised by whether it commits, so the dry run and

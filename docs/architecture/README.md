@@ -26,15 +26,15 @@ From that single output, three things must happen:
 | **The user's screen** *(the example used throughout — but any downstream consumer works the same way)* | `Your card is XXXX-XXXX-XXXX-3456.` + a syntax-highlighted code block, with each word bolded as it is spoken | The UI renders and redacts; the raw tags are noise |
 | **The TTS provider** | `Your card is <spell>1234-5678-9012-3456</spell>.` — and *nothing* for the code block | Digits must be spelled out; code must not be read aloud |
 
-The provider streams back word-timestamp events containing only the words it actually
-spoke. Those words are the *only* signal available.
+The provider streams back word-timestamp events containing **only the words it actually
+spoke**. Those words are the *only* signal available.
 Everything in these documents exists to answer, for each incoming word:
 
 1. **Where are we?** — which position in the displayed text, so the UI can highlight it
 2. **What should I add to the context?** — which span of the LLM's own text, so the context keeps the tags
 3. **Is this frame ready to be pushed?** — in what order, relative to everything else in the turn
 
-[§2](#2-the-problems-this-solves) is what went wrong before those questions had answers;
+[§2](#2-the-original-problems) is what went wrong before those questions had answers;
 [§3](#3-how-the-problems-are-solved) is how they are solved.
 
 ---
@@ -45,8 +45,8 @@ Everything in these documents exists to answer, for each incoming word:
 
 The text appended to the conversation context was the text that came *back from the TTS*,
 not the text the LLM produced. Everything that made the output speakable — the tags removed
-before synthesis, the values rewritten for pronunciation —, so what landed in the context 
-was never quite what the LLM had written.
+before synthesis, the values rewritten for pronunciation — was lost on the round trip, so
+what landed in the context **was never quite what the LLM had written**.
 
 The failure mode was subtle and slow: the LLM is asked to wrap credit cards in `<card>`
 tags, does so on turn one, and then sees a context where its own tags are absent. After a
@@ -62,7 +62,7 @@ them**. The feature quietly decays.
 
 A frame that is never sent to the TTS — a code block, with
 `skip_aggregator_types=["code"]` — has no audio and no word events to wait for. It was
-pushed the moment it appeared, so it landed *before* the sentence that precedes it:
+**pushed the moment it appeared**, so it landed *before* the sentence that precedes it:
 
 ```
 LLM:      "Run this:"  →  <code>npm install</code>  →  "Then reload."
@@ -72,22 +72,22 @@ Context:  <code>npm install</code>      ← arrived first, nothing to wait for
           "Then reload."
 ```
 
-The transcript reads out of order, and on interruption the mismatch is worse: text that
-was never spoken could still be recorded as if it had been.
+The transcript reads out of order, and on interruption the mismatch is worse: **text that
+was never spoken could still be recorded as if it had been**.
 
 ### 2.3 Highlighting spoken words was not possible
 
 The UI receives sentence-level frames (`AggregationType.SENTENCE`) to render, and
 word-level frames (`AggregationType.WORD`) as speech progresses. There was **no
 correspondence between them** — a word frame carried no indication of which sentence
-frame it belonged to, or where inside it. The client could not turn a stream of words
-into a highlight moving through a rendered sentence.
+frame it belonged to, or where inside it. **The client could not turn a stream of words
+into a highlight moving through a rendered sentence.**
 
 ### 2.4 RTVI `bot_output_transforms` were useless word-by-word
 
 Client-side transforms — obfuscating a credit card before it reaches the screen — operate
 on a segment. Receiving text word by word, with no segment identity and no notion of
-"spoken so far" versus "remaining", left nothing coherent to transform. You could not
+"spoken so far" versus "remaining", **left nothing coherent to transform**. You could not
 redact a credit card number that arrives as `1234`, `5678`, `9012`, `3456` across four
 disconnected events.
 
@@ -110,9 +110,9 @@ text before it reaches the TTS**, so the audio comes out right.
 
 The obstacle was that the rewritten text was also the text everything else saw. Expanding
 `$42.50` for the synthesizer meant the user read "forty-two dollars and fifty cents" on
-screen and the conversation context recorded it that way too — so a transform that
-improved the audio corrupted the transcript. Tracking the three texts separately is what
-makes the rewrite safe: it reaches the TTS and nothing else.
+screen and the conversation context recorded it that way too — so **a transform that
+improved the audio corrupted the transcript**. Tracking the three texts separately is what
+makes the rewrite safe: **it reaches the TTS and nothing else**.
 
 These are the built-in transforms (`src/pipecat/utils/text/transforms/`, bundled by
 `VoiceFormatter`):
@@ -212,14 +212,14 @@ span becomes its own segment, with its own type:
 | 5 | **`code`** | `<code>npm install</code>` | `npm install` | *(never sent — skipped)* |
 | 6 | `sentence` | ` to start.` | `to start.` | `to start.` |
 
-Only the two tagged frames do anything interesting. Frame 2's delimiters moved into
+**Only the two tagged frames do anything interesting.** Frame 2's delimiters moved into
 `raw_text` so the context keeps them, while its `credit_card` transformer wrapped the
 digits in Cartesia's `<spell>` tags so they are read out one by one. Frame 5 is never
 spoken at all — which is what creates the ordering problem in
 [§2.2](#22-skipped-frames-arrived-out-of-order). The four `sentence` frames are identical
 in all three columns.
 
-`aggregated_by` is the routing key throughout: it selects which transformer applies
+`aggregated_by` is **the routing key throughout**: it selects which transformer applies
 (`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
 (`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
 (`bot_output_transforms=[("credit_card", …)]`).
@@ -233,11 +233,11 @@ being spoken:
 progress.accumulated_text + progress.remaining_text  ==  AggregatedTextFrame.text
 ```
 
-Exactly — character for character, after every single word. The two halves of a progress
+Exactly — **character for character, after every single word**. The two halves of a progress
 frame are always a clean split of the string the segment frame is already carrying: never
 a paraphrase of it, never a normalised copy, never off by a space.
 
-That is what makes the progress frames usable by anything, without coordination. A
+That is what makes the progress frames **usable by anything, without coordination**. A
 consumer that has the segment frame does not have to guess how the text was transformed on
 its way to the TTS, or re-derive positions itself — it can index straight into the string
 it already holds. Highlight the first half and leave the second plain, and you have word
@@ -332,7 +332,7 @@ show: the client renders `XXXX-XXXX-XXXX-3456` rather than the real digits, beca
 redacts the segment on its way out while the highlight keeps advancing over the redacted
 form.
 
-The client is only ~10 lines of rendering logic, because the hard part is already done
+The client is **only ~10 lines of rendering logic**, because the hard part is already done
 server-side.
 
 ### 3.7 Going deeper

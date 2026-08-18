@@ -9,7 +9,8 @@
 ### 1.1 The spoken word does not appear in the original text
 
 A provider tells you it just spoke `dollars`. Nothing in that event says which part of
-`Your balance is $42.50` you have reached — the word does not appear in that text at all.
+`Your balance is $42.50` you have reached — **the word does not appear in that text at
+all**.
 
 Every transform opens the same gap:
 
@@ -21,8 +22,8 @@ Every transform opens the same gap:
 | URL cleanup | `https://pipecat.ai` | `pipecat.ai` |
 | Pattern delimiters | `<card>4111</card>` | `4111` |
 
-Without a mapping, a consumer cannot tell where in the sentence the audio has reached — a
-UI has nothing to highlight, and a redaction filter has no split to redact around.
+Without a mapping, **a consumer cannot tell where in the sentence the audio has reached** —
+a UI has nothing to highlight, and a redaction filter has no split to redact around.
 
 ### 1.2 The context drifted from what the LLM wrote
 
@@ -127,8 +128,8 @@ TextSegment(original='$42.50',
 
 ### Transformed vs unchanged segments
 
-A segment is **transformed** (`TextSegment.is_transformed`) when its two sides cannot be
-walked character for character. Three things trigger it:
+A segment is **transformed** (`TextSegment.is_transformed`) when **its two sides cannot be
+walked character for character**. Three things trigger it:
 
 1. The alphanumeric content differs (`$42.50` vs `forty-two dollars…`)
 2. The word count differs (a replacement changed tokenization)
@@ -163,8 +164,8 @@ There is exactly one real cursor — `raw_pos`, the position reached in the TTS 
 
 - **Unchanged segment** — they advance proportionally, word for word.
 - **Transformed segment** — they are *held* until the segment's entire TTS text is
-  consumed, then jump to the end of its original span in one step. There is no meaningful
-  position halfway through `$42.50`, so the map refuses to invent one.
+  consumed, then **jump to the end of its original span in one step**. There is no
+  meaningful position halfway through `$42.50`, so the map refuses to invent one.
 
 ### Worked example
 
@@ -189,8 +190,8 @@ Feeding the eight spoken words in one at a time:
 | `fifty` | 43 | 15 | 15 | **True** | `Your balance is` |
 | `cents` | 49 | **22** | **22** | False | `Your balance is $42.50` |
 
-The raw cursor climbs steadily. The other two freeze at 15 for four words, then jump
-straight to 22 when the segment completes. `last_completed_segment` then reports the
+The raw cursor climbs steadily. **The other two freeze at 15 for four words, then jump
+straight to 22** when the segment completes. `last_completed_segment` then reports the
 `$42.50` segment — the signal callers use to attribute the whole original span to the word
 that finished it.
 
@@ -230,11 +231,10 @@ tts='Hello there world'   original='Hello world'
   word='world'   raw_pos=17   user_facing_pos=11
 ```
 
-
 ## 4. Matching real provider tokens
 
 The other half of the job: word-timestamp tokens are *messy*, and no two providers agree.
-Rather than special-casing each one, `_classify_hop` matches the token against the
+**Rather than special-casing each one**, `_classify_hop` matches the token against the
 segment's remaining raw text using three strategies, in order, stopping at the first hit.
 
 ```mermaid
@@ -259,8 +259,8 @@ flowchart TD
     ST -->|yes| NM(["<b>NO_MATCH</b><br/>nudge past punctuation, stop"])
 ```
 
-Every strategy also retries with the token's own trailing punctuation removed. The whole
-thing is stateless — recomputed fresh each call, no tag parsing, no cross-call
+Every strategy also retries with the token's own trailing punctuation removed. **The whole
+thing is stateless** — recomputed fresh each call, no tag parsing, no cross-call
 bookkeeping.
 
 ### Which strategy fires, for real token shapes
@@ -290,9 +290,9 @@ skip offsets *and* a trailing-punctuation-trimmed variant of the token.
 | `EXHAUSTED` | No spoken content left here | Drain segment, carry the **whole token** onward |
 | `NO_MATCH` | Token does not belong here | Nudge past leading punctuation, stop |
 
-`PLACED` and `NO_MATCH` end the walk. `CROSSES` and `EXHAUSTED` do not — they complete the
-current segment and loop to the next one, where the token is classified again from
-scratch. The difference is only how much of the token survives the hop.
+`PLACED` and `NO_MATCH` end the walk. **`CROSSES` and `EXHAUSTED` do not** — they complete
+the current segment and loop to the next one, where the token is classified again from
+scratch. The difference is only **how much of the token survives the hop**.
 
 **`CROSSES` — the token outlives the segment.** A provider that merges two words into one
 token produces this. The segment's remaining text is consumed as a prefix of the token,
@@ -358,7 +358,7 @@ The two agree on everything except an unmatched `<`:
 
 ### Why having two is safe
 
-Each is applied only where its assumption actually holds, so the disagreement never
+**Each is applied only where its assumption actually holds**, so the disagreement never
 matters:
 
 - **`strip_markup` runs on provider tokens.** These are *fragments* — some providers split
@@ -373,7 +373,7 @@ matters:
   generic type like `List<int>`. Swallowing the rest of the sentence would silently drop
   real text from the segment text and from `is_transformed`'s judgement.
 
-Applying either function to the other's input is what would be unsafe; keeping them
+**Applying either function to the other's input is what would be unsafe**; keeping them
 separate is what makes each one correct in its own place.
 
 ## 6. Public surface

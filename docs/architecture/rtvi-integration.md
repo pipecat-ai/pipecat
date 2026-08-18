@@ -18,8 +18,8 @@ emits two frames for every spoken word. Only one of them concerns RTVI:
 | `AggregatedTextProgressFrame` | **RTVI → the client** — and any other consumer | `segment_id` + `accumulated_text` / `remaining_text` |
 
 The progress frame is the one `RTVIObserver` turns into client messages: `segment_id` is
-the id of the sentence `AggregatedTextFrame` the word belongs to, which is what lets a
-client match a stream of words back to a sentence it already rendered.
+the id of the sentence `AggregatedTextFrame` the word belongs to, which is **what lets a
+client match a stream of words back to a sentence it already rendered**.
 
 Nothing about the frame is RTVI-specific, though — `accumulated_text + remaining_text`
 reconstructs that frame's text exactly, so any processor holding the segment can position
@@ -47,7 +47,7 @@ into it. RTVI is simply the consumer Pipecat ships, and the one this document fo
    spoken_status = "completed"      accumulated=<full sentence> remaining=""
 ```
 
-The status is derived, not tracked: the observer emits `"completed"` exactly when
+**The status is derived, not tracked:** the observer emits `"completed"` exactly when
 `remaining == ""`.
 
 Word- and token-level `bot-output` events are **suppressed** for v2 clients — progress is
@@ -79,7 +79,7 @@ async def obfuscate_credit_card(
     return BotOutputTransformResult(text=transformed)
 ```
 
-This is the capability that was impossible before: the transform receives a **whole
+**This is the capability that was impossible before:** the transform receives a **whole
 segment** plus the current spoken split, so it can redact the full card number *and* keep
 the highlight advancing over the redacted form. Given only disconnected word events
 (`1234`, `5678`, `9012`, `3456`) there is nothing coherent to redact.
@@ -123,8 +123,8 @@ highlightSpokenText(data) {
 ```
 
 `data.aggregated_by` carries the segment type, so the client also renders a `code` segment
-as a syntax-highlighted `<pre>` block and a `link` segment as an anchor — without parsing
-any tags itself.
+as a syntax-highlighted `<pre>` block and a `link` segment as an anchor — **without parsing
+any tags itself**.
 
 ## 5. Everything together: code-helper
 
@@ -160,7 +160,7 @@ For one sentence, all four channels stay correct and independent:
 | What the user saw | `Your card is XXXX-XXXX-XXXX-3456`, bolded word by word |
 
 And the code block, which is never spoken, still lands in the transcript **after** the
-sentence that precedes it — because it waited its turn in the sequencer's slot queue.
+sentence that precedes it — **because it waited its turn in the sequencer's slot queue**.
 
 ## Related
 

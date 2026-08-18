@@ -109,7 +109,7 @@ Context:     <code>npm install</code>   ← WRONG: arrived first
 ### The model: an ordered slot queue
 
 **Every** frame passing through `_push_tts_frames` takes a slot, whether or not it is
-spoken. A skipped frame waits in the queue at its correct position.
+spoken. **A skipped frame waits in the queue at its correct position.**
 
 ```
         head                                                   tail
@@ -134,7 +134,7 @@ spoken. A skipped frame waits in the queue at its correct position.
 | Skipped | Emit it, pop it, keep walking |
 | Spoken **and not** complete | **Stop** |
 
-That single rule is the whole ordering guarantee. As words arrive and slot 1 completes,
+**That single rule is the whole ordering guarantee.** As words arrive and slot 1 completes,
 the queue drains and slot 2 is released — in the right position, at the right time:
 
 ```
@@ -160,8 +160,8 @@ await seq.register_skipped(code_frame, "ctx1", None)     # -> []  blocked
 | `process_word("the")` | `TTSTextFrame('the')`, `Progress(acc='Here is the', rem=' code')` |
 | `process_word("code")` | `TTSTextFrame('code')`, `Progress(…, rem='')`, **`AggregatedTextFrame("print('hi')")`** |
 
-The code block is released by the very word that completes the sentence in front of it, in
-the same call, in the correct position.
+The code block is released by **the very word that completes the sentence in front of
+it** — in the same call, in the correct position.
 
 On interruption `clear()` drops the whole queue, so a skipped frame whose preceding
 sentence was never finished is never recorded either.
@@ -203,7 +203,7 @@ context A's slot and the transcript would be scrambled.
 
 ### The model: three tiers of state
 
-State is deliberately split rather than kept in one structure:
+**State is deliberately split rather than kept in one structure:**
 
 | Field | Scope | Lifetime |
 | --- | --- | --- |
@@ -228,8 +228,8 @@ where concurrency cannot occur — matches any slot.
 
 ### Liveness and stale words
 
-The presence of a `_context_append_to_context` entry is the "this context is live" signal.
-A word for a context with no entry is **dropped as stale**. That is what stops
+**The presence of a `_context_append_to_context` entry is the "this context is live"
+signal.** A word for a context with no entry is **dropped as stale**. That is what stops
 word-timestamps a provider delivers seconds after an interruption from being interleaved
 into the next turn, and it is why `force_complete` forgets its context on the way out.
 
@@ -247,8 +247,8 @@ rather than whole sentences. But word tracking and RTVI progress both need a *se
 you cannot report "accumulated vs remaining" for a segment that does not exist yet.
 
 Worse, a sentence boundary is only confirmed by **lookahead** — the first non-whitespace
-character of the *next* sentence. So the sentence is always known one token late, and word
-events for it can arrive before it exists.
+character of the *next* sentence. So **the sentence is always known one token late**, and
+word events for it can arrive before it exists.
 
 ### The model: accumulate, promote, replay
 
@@ -279,7 +279,7 @@ Promotion lagging one token behind, in practice:
 
 ### Buffered words
 
-Because promotion lags, a word can arrive before its slot exists. It is parked, then
+Because promotion lags, **a word can arrive before its slot exists**. It is parked, then
 replayed on the next promotion:
 
 | call | frames returned |

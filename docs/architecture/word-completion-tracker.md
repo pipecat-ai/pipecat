@@ -21,8 +21,8 @@ TTS providers do not behave. A tracker owns one `AggregatedTextFrame` from dispa
   slice of LLM text credited to a word may not actually contain that word. Recording it
   anyway fills the conversation context with wrong text.
 
-So the tracker is the *policy* layer: the map says where things are, the tracker decides
-what that means for this frame.
+So the tracker is the *policy* layer: **the map says where things are, the tracker decides
+what that means for this frame**.
 
 ## 2. What it produces per word
 
@@ -61,8 +61,8 @@ A **span** is a contiguous slice of `llm_text`, identified by where the cursor w
 the word and where it is after. **Attributing** it means declaring: *this slice is what
 that spoken word stands for.*
 
-It matters because the conversation context is rebuilt by concatenating the spans, not the
-spoken words. The provider says `4111`; the context needs `<card>4111`:
+It matters because **the conversation context is rebuilt by concatenating the spans, not
+the spoken words**. The provider says `4111`; the context needs `<card>4111`:
 
 ```
 llm_text   Your │ card │ is │ <card>4111 │ 1111 │ </card> thanks
@@ -74,8 +74,8 @@ to the word that *follows* it, and the closing `</card>` to the word that *prece
 neither ever arrives as its own word-timestamp event, so each has to ride along with a
 real word.
 
-The spans cover `llm_text` in order and do not overlap, so reassembling them in the order
-the words were spoken reproduces the LLM's output — tags included. That is the mechanism
+The spans cover `llm_text` in order and do not overlap, so **reassembling them reproduces
+the LLM's output — tags included**. That is the mechanism
 that stops the context from drifting away from what the LLM wrote.
 
 ### Recovering the LLM structure
@@ -111,8 +111,8 @@ withheld until the completing word carries the whole original span:
 | `fifty`   | `fifty`                | `None`               | **True**                |
 | `cents`   | `cents`                | **`$42.50`**         | False                   |
 
-The words are still emitted — the UI needs them to highlight progress — but only the last
-one writes to the context, and it writes `$42.50`.
+The words are still emitted — the UI needs them to highlight progress — but **only the
+last one writes to the context, and it writes `$42.50`**.
 
 ## 3. Recovery: dropped events
 
@@ -131,7 +131,7 @@ tracker.add_word_and_check_complete("Goodbye")   # belongs to the *next* frame
 | `Hello`   | True                | False    | `Hello`                | `None`                |
 | `Goodbye` | **False**           | **True** | **`there world`**      | **`Goodbye`**         |
 
-The unspoken remainder `there world` is still emitted, so the context keeps the full
+**The unspoken remainder `there world` is still emitted**, so the context keeps the full
 sentence; the foreign word is handed back as overflow for the next slot. From this point
 `_force_completed` — not the map — is the authoritative completion signal, since the map
 was never advanced and its own `is_complete` stays stale.
@@ -149,8 +149,8 @@ tracker = WordCompletionTracker("The code is 1111")
 | `is`      | False    | `is`                   | `None`                |
 | `1111And` | **True** | **`1111`**             | **`And`**             |
 
-The token is split at the frame boundary. Each half is attributed to the frame it
-actually belongs to.
+The token is split at the frame boundary. **Each half is attributed to the frame it
+actually belongs to.**
 
 ## 5. The attribution safeguard
 
@@ -159,8 +159,8 @@ rule: **the LLM span credited to a
 word must contain that word.** If it does not, the two texts have fallen out of
 alignment and the span is dropped with a warning rather than corrupting the context.
 
-The comparison is deliberately lenient — casefolded, with hyphens and spaces collapsed —
-so a legitimate replacement is not mistaken for a desync:
+The comparison is **deliberately lenient** — casefolded, with hyphens and spaces
+collapsed — so a legitimate replacement is not mistaken for a desync:
 
 | Case                  | LLM text     | Spoken   | Verdict            |
 | --------------------- | ------------ | -------- | ------------------ |
@@ -207,8 +207,8 @@ of a progress frame relies on (see
 
 ### `is_complete` is delegated, not tracked
 
-The tracker keeps no completion bookkeeping of its own. It forwards the question to the
-segment map, which owns the only cursor that can answer it:
+**The tracker keeps no completion bookkeeping of its own.** It forwards the question to
+the segment map, which owns the only cursor that can answer it:
 
 ```python
 @property
