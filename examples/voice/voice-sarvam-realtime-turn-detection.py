@@ -9,16 +9,20 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.sarvam.llm import SarvamLLMService
-from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -51,35 +55,13 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Sarvam Speech-to-Text with Sarvam's server-side VAD driving turns.
-
-    This example uses Sarvam's VAD signals for turn taking, instead of
-    Pipecat's local VAD/smart-turn analysis.
-
-    Key features:
-
-    1. Sarvam Turn Detection
-       - Set `vad_signals=True` to have Sarvam report speech boundaries
-       - Sarvam decides when the user starts and stops speaking; the service
-         proposes those turn boundaries and the user aggregator resolves them
-         into turn frames and interruptions
-
-    2. No Local VAD
-       - Sarvam ignores local VAD frames in this mode, so there's no
-         `vad_analyzer` on the user aggregator — see `voice-sarvam.py` for the
-         Pipecat-side turn detection setup
-
-    3. VAD Sensitivity (Optional)
-       - `high_vad_sensitivity=True` makes Sarvam quicker to call speech, at the
-         cost of more false starts on background noise
-    """
+    """Sarvam realtime Speech-to-Text with Sarvam endpointing the turns."""
     logger.info("Starting bot")
 
-    stt = SarvamSTTService(
+    stt = SarvamRealtimeSTTService(
         api_key=os.environ["SARVAM_API_KEY"],
-        settings=SarvamSTTService.Settings(
-            model="saaras:v3",
-            vad_signals=True,  # Use Sarvam's VAD signals for turn detection
+        settings=SarvamRealtimeSTTService.Settings(
+            language_code="en-IN",
         ),
     )
 
@@ -90,18 +72,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="shubh",
         ),
     )
-
-    llm = SarvamLLMService(
-        api_key=os.environ["SARVAM_API_KEY"],
-        settings=SarvamLLMService.Settings(
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
     context = LLMContext()
-    # No vad_analyzer: Sarvam's VAD signals drive turns, and the service
-    # recommends the external turn strategies that resolve them.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # The VAD analyzer carries the whole turn cycle here: it endpoints locally,
+    # supplies the boundaries the service forwards to Sarvam, and times
+    # transcript latency.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
