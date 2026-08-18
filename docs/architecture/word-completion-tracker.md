@@ -2,7 +2,9 @@
 
 `src/pipecat/utils/context/word_completion_tracker.py`
 
-## The problem
+> **Job:** decide what one spoken word means for the frame it belongs to.
+
+## 1. The problem
 
 [`TextSegmentMap`](./text-segment-map.md) will tell you where a spoken word lands. It
 will not tell you what to *do* about it, and it assumes the provider behaves.
@@ -20,7 +22,7 @@ Providers do not behave. A tracker owns one `AggregatedTextFrame` from dispatch 
 So the tracker is the *policy* layer: the map says where things are, the tracker decides
 what that means for this frame.
 
-## What it produces per word
+## 2. What it produces per word
 
 One call in, four answers out:
 
@@ -67,8 +69,7 @@ withheld until the completing word carries the whole original span:
 | word      | `get_word_for_frame()` | `get_llm_consumed()` | `suppress_in_context()` |
 | --------- | ---------------------- | -------------------- | ----------------------- |
 | `is`      | `is`                   | `is`                 | False                   |
-| `forty`   | `forty`                | `None`               | **True**                |
-| `two`     | `two`                  | `None`               | **True**                |
+| `forty-two` | `forty-two`          | `None`               | **True**                |
 | `dollars` | `dollars`              | `None`               | **True**                |
 | `and`     | `and`                  | `None`               | **True**                |
 | `fifty`   | `fifty`                | `None`               | **True**                |
@@ -77,7 +78,7 @@ withheld until the completing word carries the whole original span:
 The words are still emitted — the UI needs them to highlight progress — but only the last
 one writes to the context, and it writes `$42.50`.
 
-## Recovery: dropped events
+## 3. Recovery: dropped events
 
 Before advancing, every word is checked with `word_belongs_here`. A word that does not
 match means the provider skipped something, so the slot is **force-completed** rather
@@ -99,7 +100,7 @@ sentence; the foreign word is handed back as overflow for the next slot. From th
 `_force_completed` — not the map — is the authoritative completion signal, since the map
 was never advanced and its own `is_complete` stays stale.
 
-## Recovery: straddling tokens
+## 4. Recovery: straddling tokens
 
 ```python
 tracker = WordCompletionTracker("The code is 1111")
@@ -115,7 +116,7 @@ tracker = WordCompletionTracker("The code is 1111")
 The token is split at the frame boundary. Each half is attributed to the frame it
 actually belongs to.
 
-## The attribution safeguard
+## 5. The attribution safeguard
 
 `_discard_llm_span_if_frame_word_missing` enforces one invariant: **the LLM span credited
 to a word must contain that word.** If it does not, the two texts have drifted and the
@@ -136,9 +137,9 @@ the *preceding* word's span, so a provider that reports it with the *following* 
 word and the attribution is kept.
 
 Validation is skipped when the completing word finished a transformed segment — `dollars`
-is never going to appear inside `$5`.
+is never going to appear inside `$42.50`.
 
-## Public surface
+## 6. Public surface
 
 | Member                                | Purpose                                            |
 | ------------------------------------- | -------------------------------------------------- |
@@ -165,7 +166,7 @@ tracker.get_remaining_user_facing_text()     # 'there world'
 `get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so
 accumulated + remaining reconstructs the original exactly.
 
-## Tests
+## 7. Tests
 
 `tests/test_word_completion_tracker.py` — 199 tests, the largest suite of the three.
 Most of it is a regression corpus of real provider behaviour.
@@ -176,3 +177,10 @@ Most of it is a regression corpus of real provider behaviour.
 | Recovery                 | `MissingWord`, `Overflow`, `MultiFrameSimulation`               |
 | Provider quirks          | `UnicodeSymbolSubstitution`, `AddedTerminalPunctuation`, `CaseFolding`, `AccentFolding`, `SpaceBeforePunctuation`, `MultiAttributeSsmlTag`, `EmojiInSentence`, `CJK`, `StrayAngleBracket` |
 | Transform interaction    | `WithTransforms`, `TokenChangingReplacements`, `TransformAtEndOfUtterance`, `LLMText`, `Normalization` |
+
+## Related
+
+- [Architecture overview](./README.md)
+- [TextSegmentMap](./text-segment-map.md) — the alignment this layer drives
+- [AggregatedFrameSequencer](./aggregated-frame-sequencer.md) — the layer that owns these trackers
+- [RTVI integration](./rtvi-integration.md) — where the accumulated/remaining text ends up
