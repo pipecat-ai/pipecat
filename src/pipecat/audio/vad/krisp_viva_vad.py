@@ -208,6 +208,7 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
 
     async def cleanup(self):
         """Cleanup analyzer resources."""
+        await super().cleanup()
         try:
             self._session = None
             KrispVivaSDKManager.release()
