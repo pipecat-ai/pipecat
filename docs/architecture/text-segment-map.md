@@ -34,7 +34,8 @@ conversation history**. The LLM sees a transcript where its own convention is ab
 stops producing it.
 
 That is why the map tracks a *third* text. The two it diffs are `tts_text` and
-`original_text` (the **segment text** — see [naming](./README.md#naming-what-the-segment-text-is));
+`original_text` (the **segment text** — see
+[where the three texts come from](./README.md#where-the-three-texts-come-from));
 `llm_text` rides along on its own cursor:
 
 | Cursor | Text | Indexes |

@@ -15,7 +15,7 @@ sync — word by word, while audio is playing.
 
 ## 1. The end goal
 
-One sentence from the LLM has to satisfy three consumers that want *different text*.
+One response from the LLM has to satisfy three consumers that want *different text*.
 
 Take a bot that has been prompted to wrap credit cards in `<card>` tags and code in
 `<code>` tags (this is the [`code-helper`](#5-the-code-helper-example) example):
@@ -34,51 +34,76 @@ From that single output, three things must happen:
 | **The user's screen** *(the example used throughout — but any downstream consumer works the same way)* | `Your card is XXXX-XXXX-XXXX-3456.` + a syntax-highlighted code block, with each word bolded as it is spoken | The UI renders and redacts; the raw tags are noise |
 | **The TTS provider** | `Your card is <spell>1234-5678-9012-3456</spell>.` — and *nothing* for the code block | Digits must be spelled out; code must not be read aloud |
 
-So there are three parallel texts for every sentence:
+### Where the three texts come from
 
-```mermaid
-flowchart LR
-    LLM["<b>LLM text</b><br/>Your card is<br/>&lt;card&gt;1234-…-3456&lt;/card&gt;"]
-    LLM --> UF["<b>segment text</b><br/>Your card is<br/>1234-…-3456"]
-    LLM --> TTS["<b>TTS text</b><br/>Your card is<br/>&lt;spell&gt;1234-…-3456&lt;/spell&gt;"]
-    UF --> UI["the UI<br/><i>or any other consumer</i>"]
-    LLM --> CTX["conversation context"]
-    TTS --> PROV["TTS provider"]
-    PROV -->|"word timestamps:<br/>'Your' 'card' 'is' '1' '2' …"| BACK(["where are we?"])
-    BACK -.->|highlight| UI
-    BACK -.->|record| CTX
+They are not authored separately — they are produced by **two split points** in the
+pipeline, one owned by an aggregator and one by the TTS service's transformers:
+
+```
+   LLM tokens
+        │
+        ▼
+ ┌───────────────────────────────────────────────┐
+ │  LLMTextProcessor  (or TTSService itself)     │   SPLIT 1 — the aggregator
+ │  BaseTextAggregator, e.g.                     │   decides where segments end
+ │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter
+ └───────────────────────────────────────────────┘
+        │
+        ├──────── raw_text ─────────▶  ① LLM TEXT        → conversation context
+        │
+        └──────── text ─────────────▶  ② SEGMENT TEXT    → downstream consumers
+                                            │                (the AggregatedTextFrame)
+                                            ▼
+                                  ┌──────────────────────┐
+                                  │  TTSService          │   SPLIT 2 — filters and
+                                  │  text filters        │   per-type transformers
+                                  │  text transformers   │   rewrite for speech only
+                                  └──────────────────────┘
+                                            │
+                                            ▼
+                                       ③ TTS TEXT         → the provider
 ```
 
-### Naming: what the "segment text" is
+Both `text` and `raw_text` come off the same aggregation: `raw_text` is its `full_match`
+when the aggregator produced a `PatternMatch`, and identical to `text` otherwise.
 
-The middle channel is easy to mis-name. It is **not** defined by who reads it — it is the
-**text carried on the `AggregatedTextFrame` itself** (`frame.text`).
+Three properties fall out of this shape:
 
-That frame is built by whichever processor is aggregating the LLM's tokens — either
-`LLMTextProcessor` (when one is in the pipeline) or `TTSService` itself — and both fill it
-the same way, from the configured `BaseTextAggregator`:
+- **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
+  **segment text**, because that is what it is — `frame.text`, the segment as the
+  aggregator produced it. It is not defined by who reads it.
+- **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
+  the TTS; `frame.text` keeps what the aggregator produced.
+- **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
+  transformers, all three are the same string.
 
-```python
-AggregatedTextFrame(
-    text=aggregation.text,
-    aggregated_by=aggregation.type,
-    raw_text=aggregation.full_match if isinstance(aggregation, PatternMatch)
-             else aggregation.text,
-)
+### What that looks like for one LLM response
+
+Given the `code-helper` prompt, the LLM emits:
+
+```
+Your card is <card>1234-5678-9012-3456</card>. Thanks!
 ```
 
-So what `text` contains depends entirely on the aggregator in use:
+The `PatternPairAggregator` splits this into **four** frames — the tagged span becomes its
+own segment, with its own type — and only that one is touched by a transformer:
 
-| Aggregator | `frame.text` | `frame.raw_text` |
-| --- | --- | --- |
-| `SimpleTextAggregator` (the default) | The sentence or token as the LLM wrote it | **Identical** to `text` |
-| `PatternPairAggregator`, on a matched pattern | The content *between* the delimiters — `1234-…-3456` | The `full_match`, delimiters included — `<card>1234-…-3456</card>` |
-| `PatternPairAggregator`, on unmatched text | The text as-is | Identical to `text` |
+| # | `aggregated_by` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
+| --- | --- | --- | --- | --- |
+| 1 | `sentence` | `Your card is ` | `Your card is` | `Your card is` |
+| 2 | **`credit_card`** | `<card>1234-5678-9012-3456</card>` | `1234-5678-9012-3456` | `<spell>1234-5678-9012-3456</spell>` |
+| 3 | `sentence` | `.` | `.` | `.` |
+| 4 | `sentence` | ` Thanks!` | `Thanks!` | `Thanks!` |
 
-The two channels therefore only diverge where an aggregator deliberately splits them —
-most commonly a `PatternPairAggregator` match, which is the case these documents follow.
-With the default aggregator they are the same string, and the LLM-text cursor is simply
-along for the ride.
+Frame 2 is where all the work happens. The aggregator moved the delimiters into `raw_text`
+so the context keeps them; the `credit_card` transformer wrapped the digits in Cartesia's
+`<spell>` tags so they are read out one by one. The other three frames are identical in
+all three columns.
+
+`aggregated_by` is the routing key throughout: it selects which transformer applies
+(`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
+(`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
+(`bot_output_transforms=[("credit_card", …)]`).
 
 ### The guarantee that makes it useful
 
@@ -125,8 +150,9 @@ texts exactly. Everything in these documents exists to answer, for each incoming
 ### 2.1 The context drifted from what the LLM wrote
 
 The text appended to the conversation context was the text that came *back from the TTS*,
-not the text the LLM produced. Tags and formatting were stripped before synthesis, so
-they never made it into the context.
+not the text the LLM produced. The aggregator had already moved the delimiters aside into
+`raw_text`, and the transformers rewrote what was left, so nothing the LLM actually wrote
+survived the round trip into the context.
 
 The failure mode was subtle and slow: the LLM is asked to wrap credit cards in `<card>`
 tags, does so on turn one, and then sees a context where its own tags are absent. After a
