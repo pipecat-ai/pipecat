@@ -75,6 +75,8 @@ class TestInworldUpdateSettingsRotatesContextGracefully(unittest.IsolatedAsyncio
             temperature=None,
             delivery_mode=None,
         )
+        # Applying a settings delta reports the service usable again.
+        service._is_usable = True
 
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)
