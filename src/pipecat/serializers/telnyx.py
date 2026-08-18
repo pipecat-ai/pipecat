@@ -7,10 +7,13 @@
 """Telnyx WebSocket frame serializer for Pipecat."""
 
 import base64
+import binascii
 import json
+import sys
 from typing import cast
 
 import aiohttp
+import numpy as np
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -32,6 +35,35 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+
+
+def _import_opuslib():
+    """Import opuslib, the optional dependency behind the OPUS codec.
+
+    Imported on demand rather than at module import: OPUS is one of several codecs
+    Telnyx can use, so bots on PCMU, PCMA or L16 shouldn't need the dependency at all.
+    """
+    try:
+        import opuslib
+    except ModuleNotFoundError as e:
+        logger.error(f"Exception: {e}")
+        logger.error('In order to use OPUS, you need to `uv add "pipecat-ai[opus]"`.')
+        raise ImportError(f"Missing module: {e}") from e
+    except Exception as e:
+        # opuslib raises a bare Exception, not ModuleNotFoundError, when the libopus
+        # system library isn't on the loader path.
+        logger.error(f"Exception: {e}")
+        logger.error(
+            "OPUS requires the libopus system library: `brew install opus` (macOS) or "
+            "`apt install libopus0` (Debian/Ubuntu). With Homebrew on macOS you may "
+            "also need to set DYLD_LIBRARY_PATH=/opt/homebrew/lib, which is where "
+            "ctypes won't look by default."
+        )
+        # Re-raise as ImportError so callers have one exception type to handle,
+        # whichever half of the dependency is missing.
+        raise ImportError(f"Could not load libopus: {e}") from e
+
+    return opuslib
 
 
 class TelnyxFrameSerializer(FrameSerializer):
@@ -81,10 +113,21 @@ class TelnyxFrameSerializer(FrameSerializer):
             call_control_id: The Call Control ID for the Telnyx call (optional, but required for auto hang-up).
             api_key: Your Telnyx API key (required for auto hang-up).
             params: Configuration parameters.
+
+        Raises:
+            ImportError: If either encoding is OPUS but opuslib or the libopus system
+                library is unavailable.
+            ValueError: If auto_hang_up is enabled without the credentials it needs.
         """
         params = params or TelnyxFrameSerializer.InputParams()
         super().__init__(params)
         self._params: TelnyxFrameSerializer.InputParams = params
+
+        # Resolve the OPUS dependency here rather than on the first audio frame: a
+        # failure mid-call can't be surfaced to the caller, who just gets dead air.
+        self._opuslib = (
+            _import_opuslib() if "OPUS" in (inbound_encoding, outbound_encoding) else None
+        )
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -116,6 +159,30 @@ class TelnyxFrameSerializer(FrameSerializer):
         )
         self._hangup_attempted = False
 
+        # OPUS encoder/decoder (lazy init)
+        self._opus_encoder = None
+        self._opus_decoder = None
+
+        # OPUS frame buffering - must encode in 20ms chunks
+        # At 16kHz: 20ms = 320 samples = 640 bytes (16-bit PCM)
+        self._opus_frame_samples = self._telnyx_sample_rate // 50  # 20ms
+        self._opus_frame_bytes = self._opus_frame_samples * 2  # 16-bit = 2 bytes/sample
+        self._opus_encode_buffer = bytearray()
+
+    def _get_opus_encoder(self):
+        # self._opuslib is set whenever a codec is OPUS, so these are only reached
+        # after __init__ has resolved the import.
+        if self._opus_encoder is None:
+            self._opus_encoder = self._opuslib.Encoder(
+                self._telnyx_sample_rate, 1, self._opuslib.APPLICATION_VOIP
+            )
+        return self._opus_encoder
+
+    def _get_opus_decoder(self):
+        if self._opus_decoder is None:
+            self._opus_decoder = self._opuslib.Decoder(self._telnyx_sample_rate, 1)
+        return self._opus_decoder
+
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
 
@@ -124,7 +191,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         """
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
-    async def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | list | None:
         """Serializes a Pipecat frame to Telnyx WebSocket format.
 
         Handles conversion of various frame types to Telnyx WebSocket messages.
@@ -134,7 +201,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             frame: The Pipecat frame to serialize.
 
         Returns:
-            Serialized data as string or bytes, or None if the frame isn't handled.
+            Serialized data as string, bytes, list of strings (for OPUS), or None.
 
         Raises:
             ValueError: If an unsupported encoding is specified.
@@ -148,6 +215,9 @@ class TelnyxFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            # Drop buffered audio too, or the partial 20ms frame left over from the
+            # interrupted utterance gets prepended to the next one.
+            self._opus_encode_buffer.clear()
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -162,6 +232,59 @@ class TelnyxFrameSerializer(FrameSerializer):
                 serialized_data = await pcm_to_alaw(
                     data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
+            elif self._params.inbound_encoding == "L16":
+                # L16 audio to Telnyx - resample then send as little-endian
+                resampled_data = await self._output_resampler.resample(
+                    data, frame.sample_rate, self._telnyx_sample_rate
+                )
+                if resampled_data is None or len(resampled_data) == 0:
+                    return None
+                if len(resampled_data) % 2 != 0:
+                    resampled_data = resampled_data[: len(resampled_data) - 1]
+                # Telnyx expects little-endian L16
+                if sys.byteorder == "little":
+                    serialized_data = resampled_data
+                else:
+                    audio_array = np.frombuffer(resampled_data, dtype=np.int16)
+                    serialized_data = audio_array.byteswap().tobytes()
+            elif self._params.inbound_encoding == "OPUS":
+                # Resample to target rate first
+                resampled_data = await self._output_resampler.resample(
+                    data, frame.sample_rate, self._telnyx_sample_rate
+                )
+                if resampled_data is None or len(resampled_data) == 0:
+                    return None
+
+                # Buffer audio and encode in 20ms frames (OPUS requirement)
+                # Each OPUS frame must be sent as a separate WebSocket message
+                self._opus_encode_buffer.extend(resampled_data)
+
+                # Need at least one full frame
+                if len(self._opus_encode_buffer) < self._opus_frame_bytes:
+                    return None
+
+                # Encode ALL complete frames and return as a list
+                # (Telnyx requires one OPUS packet per WebSocket message)
+                encoder = self._get_opus_encoder()
+                messages = []
+                offset = 0
+
+                while offset + self._opus_frame_bytes <= len(self._opus_encode_buffer):
+                    frame_data = bytes(
+                        self._opus_encode_buffer[offset : offset + self._opus_frame_bytes]
+                    )
+                    offset += self._opus_frame_bytes
+
+                    opus_packet = encoder.encode(frame_data, self._opus_frame_samples)
+                    # Use f-string instead of json.dumps for fixed structure (faster)
+                    payload = base64.b64encode(opus_packet).decode("utf-8")
+                    messages.append(f'{{"event":"media","media":{{"payload":"{payload}"}}}}')
+
+                # Keep only remaining incomplete frame data
+                if offset > 0:
+                    self._opus_encode_buffer = self._opus_encode_buffer[offset:]
+
+                return messages if messages else None
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
 
@@ -248,13 +371,24 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON message")
+            return None
+
+        if not isinstance(message, dict) or "event" not in message:
+            return None
 
         if message["event"] == "media":
             payload_base64 = message["media"]["payload"]
-            payload = base64.b64decode(payload_base64)
+            try:
+                payload = base64.b64decode(payload_base64)
+            except binascii.Error:
+                logger.warning("Failed to decode base64 audio payload")
+                return None
 
-            # Input: Convert Telnyx's 8kHz encoded audio to PCM at pipeline input rate
+            # Input: Convert Telnyx audio to PCM at pipeline input rate
             if self._params.outbound_encoding == "PCMU":
                 deserialized_data = await ulaw_to_pcm(
                     payload,
@@ -268,6 +402,36 @@ class TelnyxFrameSerializer(FrameSerializer):
                     self._telnyx_sample_rate,
                     self._sample_rate,
                     self._input_resampler,
+                )
+            elif self._params.outbound_encoding == "L16":
+                # L16 audio from Telnyx - little-endian
+                if len(payload) % 2 != 0:
+                    payload = payload[: len(payload) - 1]
+                if len(payload) == 0:
+                    return None
+                # Telnyx sends little-endian L16
+                if sys.byteorder == "little":
+                    host_audio = payload
+                else:
+                    audio_array = np.frombuffer(payload, dtype="<i2")
+                    host_audio = audio_array.byteswap().tobytes()
+                # Resample if rates differ
+                deserialized_data = await self._input_resampler.resample(
+                    host_audio,
+                    self._telnyx_sample_rate,
+                    self._sample_rate,
+                )
+            elif self._params.outbound_encoding == "OPUS":
+                decoder = self._get_opus_decoder()
+                # Decode OPUS to PCM - frame size is samples per channel
+                # At 16kHz, 20ms = 320 samples
+                frame_size = self._telnyx_sample_rate // 50  # 20ms frame
+                pcm_data = decoder.decode(payload, frame_size)
+                # Resample if needed
+                deserialized_data = await self._input_resampler.resample(
+                    pcm_data,
+                    self._telnyx_sample_rate,
+                    self._sample_rate,
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")
