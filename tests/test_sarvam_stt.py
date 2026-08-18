@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -42,7 +41,9 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:
@@ -669,11 +670,7 @@ def test_explicit_sample_rate_pins_the_rate():
 
 @pytest.mark.asyncio
 async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkeypatch):
-    """An unusable pipeline rate has to surface as an error frame.
-
-    `AIService._start` swallows exceptions, so raising here would leave the
-    service silently discarding every audio chunk for the whole session.
-    """
+    """An unusable pipeline rate has to surface as an error frame."""
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed_errors = []
     connects = []
@@ -686,10 +683,10 @@ async def test_unsupported_resolved_sample_rate_reports_and_skips_connect(monkey
 
     monkeypatch.setattr(service, "push_error", fake_push_error)
     monkeypatch.setattr(service, "_connect", fake_connect)
-    monkeypatch.setattr(WebsocketSTTService, "start", _noop)
+    monkeypatch.setattr(WebsocketSTTService, "setup", _noop)
     service._sample_rate = 44100
 
-    await service.start(StartFrame())
+    await service.setup(frame_processor_setup())
 
     assert len(pushed_errors) == 1
     assert "sample_rate" in pushed_errors[0][0]
@@ -709,10 +706,10 @@ async def test_unsupported_resolved_sample_rate_costs_the_service_its_usability(
 
     monkeypatch.setattr(service, "_connect", AsyncMock())
     monkeypatch.setattr(service, "push_frame", AsyncMock())
-    monkeypatch.setattr(WebsocketSTTService, "start", _noop)
+    monkeypatch.setattr(WebsocketSTTService, "setup", _noop)
     service._sample_rate = 44100
 
-    await service.start(StartFrame())
+    await service.setup(frame_processor_setup())
 
     assert service.is_usable is False
 
@@ -740,7 +737,7 @@ async def test_final_transcript_reports_usage(monkeypatch, final_text):
     session reports nothing at all.
     """
     service = SarvamRealtimeSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=True)
     service._stt_usage_pending_seconds = 2.5
     pushed = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))

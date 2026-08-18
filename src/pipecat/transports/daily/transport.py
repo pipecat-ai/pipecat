@@ -57,6 +57,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 try:
     from daily import (
@@ -522,11 +523,8 @@ class DailyTransportClient(EventHandler):
         self._dial_out_session_id: str = ""
         self._dial_in_session_id: str = ""
 
-        self._joining = False
         self._joined = False
         self._joined_event = asyncio.Event()
-        self._leave_counter = 0
-        self._cleanup_counter = 0
 
         self._task_manager: BaseTaskManager | None = None
 
@@ -735,53 +733,23 @@ class DailyTransportClient(EventHandler):
             logger.warning(f"{self} unable to write video frames to destination [{destination}]")
             return False
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        self._cleanup_counter += 1
-        if self._task_manager:
-            return
-
         self._task_manager = setup.task_manager
+
+        self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
+        self._out_sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
 
         self._event_queue = asyncio.Queue()
         self._event_task = self._task_manager.create_task(
             self._callback_task_handler(self._event_queue),
             f"{self}::event_callback_task",
         )
-
-    async def cleanup(self):
-        """Cleanup client resources and cancel tasks."""
-        # Decrement cleanup counter. DailyInputTransport and DailyOutputTransport
-        # share this client and both call cleanup(), so only run on the last call.
-        self._cleanup_counter -= 1
-        if self._cleanup_counter > 0:
-            return
-
-        if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
-            self._event_task = None
-        if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
-            self._audio_task = None
-        if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
-            self._video_task = None
-        # Make sure we don't block the event loop in case `client.release()`
-        # takes extra time.
-        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
-
-    async def start(self, frame: StartFrame):
-        """Start the client and initialize audio/video components.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
         if self._params.audio_in_enabled:
             if self._params.audio_in_user_tracks and not self._audio_task and self._task_manager:
@@ -834,16 +802,26 @@ class DailyTransportClient(EventHandler):
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
+    @releases("client")
+    async def cleanup(self):
+        """Cleanup client resources and cancel tasks."""
+        if self._event_task and self._task_manager:
+            await self._task_manager.cancel_task(self._event_task)
+            self._event_task = None
+        if self._audio_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_task)
+            self._audio_task = None
+        if self._video_task and self._task_manager:
+            await self._task_manager.cancel_task(self._video_task)
+            self._video_task = None
+        # Make sure we don't block the event loop in case `client.release()`
+        # takes extra time.
+        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+
+    @acquires("room")
     async def join(self):
         """Join the Daily room with configured settings."""
-        # Transport already joined or joining, ignore.
-        if self._joined or self._joining:
-            # Increment leave counter if we already joined.
-            self._leave_counter += 1
-            return
-
         logger.info(f"Joining {self._room_url}")
-        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -855,28 +833,25 @@ class DailyTransportClient(EventHandler):
 
         (data, error) = await self._join()
 
-        if not error:
-            self._joined = True
-            self._joining = False
-            # Increment leave counter if we successfully joined.
-            self._leave_counter += 1
-
-            participant_id = data.get("participants", {}).get("local", {}).get("id")
-            meeting_id = data.get("meetingSession", {}).get("id")
-            logger.info(
-                f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
-            )
-
-            await self._callbacks.on_joined(data)
-
-            self._joined_event.set()
-
-            await self._flush_join_messages()
-        else:
+        if error:
             error_msg = f"Error joining {self._room_url}: {error}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
-            self._joining = False
+            return
+
+        self._joined = True
+
+        participant_id = data.get("participants", {}).get("local", {}).get("id")
+        meeting_id = data.get("meetingSession", {}).get("id")
+        logger.info(
+            f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
+        )
+
+        await self._callbacks.on_joined(data)
+
+        self._joined_event.set()
+
+        await self._flush_join_messages()
 
     async def _join(self) -> tuple[Any, Any]:
         """Execute the actual room join operation.
@@ -942,13 +917,11 @@ class DailyTransportClient(EventHandler):
 
         return await future
 
+    @releases("room")
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
-        # Decrement leave counter when leaving.
-        self._leave_counter -= 1
-
         # Transport not joined, ignore.
-        if not self._joined or self._leave_counter > 0:
+        if not self._joined:
             return
 
         self._joined = False
@@ -1848,9 +1821,6 @@ class DailyInputTransport(BaseInputTransport):
 
         self._video_renderers = {}
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
         # Whether we have started audio streaming.
         self._streaming_started = False
 
@@ -1861,27 +1831,6 @@ class DailyInputTransport(BaseInputTransport):
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: asyncio.Task | None = None
 
-    async def _start_audio_in_streaming(self):
-        """Start receiving audio from participants."""
-        if not self._params.audio_in_enabled:
-            return
-
-        logger.debug("Start receiving audio")
-
-        if self._params.audio_in_enabled:
-            if self._params.audio_in_user_tracks:
-                # Capture invididual participant tracks.
-                for participant_id, audio_source, sample_rate in self._capture_participant_audio:
-                    await self._client.capture_participant_audio(
-                        participant_id, self._on_participant_audio_data, audio_source, sample_rate
-                    )
-            elif not self._audio_in_task:
-                # Create audio task. It reads audio frames from a single room
-                # track and pushes them internally for VAD processing.
-                self._audio_in_task = self.create_task(self._audio_in_task_handler())
-
-        self._streaming_started = True
-
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport with shared client setup.
 
@@ -1889,7 +1838,11 @@ class DailyInputTransport(BaseInputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
+
+        # Join the room.
+        await self._client.join()
 
     async def cleanup(self):
         """Release input transport resources at teardown."""
@@ -1906,17 +1859,6 @@ class DailyInputTransport(BaseInputTransport):
         """
         # Parent start.
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        # Setup client.
-        await self._client.start(frame)
-
-        # Join the room.
-        await self._client.join()
 
         # Indicate the transport that we are connected.
         await self.set_transport_ready(frame)
@@ -1943,6 +1885,27 @@ class DailyInputTransport(BaseInputTransport):
         # Parent cancel.
         await super().cancel(frame)
         await self._teardown()
+
+    async def _start_audio_in_streaming(self):
+        """Start receiving audio from participants."""
+        if not self._params.audio_in_enabled:
+            return
+
+        logger.debug("Start receiving audio")
+
+        if self._params.audio_in_enabled:
+            if self._params.audio_in_user_tracks:
+                # Capture invididual participant tracks.
+                for participant_id, audio_source, sample_rate in self._capture_participant_audio:
+                    await self._client.capture_participant_audio(
+                        participant_id, self._on_participant_audio_data, audio_source, sample_rate
+                    )
+            elif not self._audio_in_task:
+                # Create audio task. It reads audio frames from a single room
+                # track and pushes them internally for VAD processing.
+                self._audio_in_task = self.create_task(self._audio_in_task_handler())
+
+        self._streaming_started = True
 
     async def _teardown(self):
         """Leave the room and stop the audio-in task.
@@ -2153,9 +2116,6 @@ class DailyOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._client = client
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
-
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
 
@@ -2163,7 +2123,11 @@ class DailyOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
+
+        # Join the room.
+        await self._client.join()
 
     async def cleanup(self):
         """Cleanup output transport and shared resources."""
@@ -2179,17 +2143,6 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         # Parent start.
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        # Setup client.
-        await self._client.start(frame)
-
-        # Join the room.
-        await self._client.join()
 
         # Indicate the transport that we are connected.
         await self.set_transport_ready(frame)
@@ -2870,13 +2823,18 @@ class DailyTransport(BaseTransport):
                 await self._on_error(f"Unable to start transcription: {error}")
             else:
                 transcription_started = True
+
+        # Push frames.
+        processor = self._input or self._output
+        if processor:
+            await processor.push_frame(BotConnectedFrame())
+
+        if self._input and transcription_started:
+            await self._input.push_stt_metadata_frame()
+
         await self._call_event_handler("on_joined", data)
         # Also call on_connected for compatibility with other transports
         await self._call_event_handler("on_connected", data)
-        if self._input:
-            await self._input.push_frame(BotConnectedFrame())
-            if transcription_started:
-                await self._input.push_stt_metadata_frame()
 
     async def _on_left(self):
         """Handle room left events."""

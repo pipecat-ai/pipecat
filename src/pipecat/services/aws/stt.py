@@ -27,9 +27,9 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import (
     build_event_message,
     decode_event,
@@ -192,13 +192,13 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Initialize the connection when the service starts.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Start frame signaling service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

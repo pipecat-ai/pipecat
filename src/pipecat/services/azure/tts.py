@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
@@ -408,17 +408,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Azure TTS service and initialize speech synthesizer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: Start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
-        if self._speech_config:
-            return
-
+        await super().setup(setup)
         # Now self.sample_rate is properly initialized
         if self._private_endpoint:
             self._speech_config = SpeechConfig(
@@ -451,6 +447,14 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
         self._speech_synthesizer.synthesis_word_boundary.connect(self._handle_word_boundary)
+
+    async def start(self, frame: StartFrame):
+        """Start the Azure TTS service and initialize speech synthesizer.
+
+        Args:
+            frame: Start frame containing initialization parameters.
+        """
+        await super().start(frame)
 
         # Start word processor task
         if not self._word_processor_task:
@@ -940,16 +944,13 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Azure HTTP TTS service and initialize speech synthesizer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: Start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
-        if self._speech_config:
-            return
+        await super().setup(setup)
 
         if self._private_endpoint:
             self._speech_config = SpeechConfig(

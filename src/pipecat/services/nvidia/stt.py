@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
@@ -471,6 +472,19 @@ class NvidiaSTTService(STTService):
             model: Model name to set.
         """
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._initialize_client()
+        self._config = self._create_recognition_config()
+        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
+        self._create_keepalive_task()
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
+
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Nemotron Speech STT service and initialize streaming configuration.
 
@@ -478,16 +492,9 @@ class NvidiaSTTService(STTService):
             frame: StartFrame indicating pipeline start.
         """
         await super().start(frame)
-        self._initialize_client()
-        self._config = self._create_recognition_config()
-        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
-
-        self._create_keepalive_task()
-
-        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Nemotron Speech STT service and clean up resources.

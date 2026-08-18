@@ -34,9 +34,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -831,14 +831,19 @@ class GoogleSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering the service start.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Release streaming resources."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service and clean up resources.
@@ -856,11 +861,6 @@ class GoogleSTTService(STTService):
             frame: The cancel frame triggering the service cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release streaming resources."""
-        await super().cleanup()
         await self._disconnect()
 
     @deprecated(

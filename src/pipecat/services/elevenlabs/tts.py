@@ -34,12 +34,11 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import (
     TextAggregationMode,
@@ -728,13 +727,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the ElevenLabs TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
@@ -1322,13 +1321,13 @@ class ElevenLabsHttpTTSService(TTSService):
         self._partial_word_start_time = 0.0
         logger.debug(f"{self}: Reset internal state")
 
-    async def start(self, frame: StartFrame):
-        """Start the ElevenLabs HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         self._reset_state()
 

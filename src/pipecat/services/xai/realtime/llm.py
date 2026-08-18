@@ -45,7 +45,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -57,7 +56,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -528,14 +527,14 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 )
             )
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        self._ensure_audio_config(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
+        await super().setup(setup)
+        self._ensure_audio_config(setup.audio_in_sample_rate, setup.audio_out_sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

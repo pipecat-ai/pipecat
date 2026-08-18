@@ -26,6 +26,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # Suppress gRPC fork warnings
@@ -39,7 +40,6 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
 )
@@ -364,13 +364,13 @@ class NvidiaTTSService(TTSService):
                 f"{self._zero_shot_audio_prompt_file}"
             ) from e
 
-    async def start(self, frame: StartFrame):
-        """Start the NVIDIA TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._initialize_client()
         self._config = self._create_synthesis_config()
         self._load_zero_shot_audio_prompt()

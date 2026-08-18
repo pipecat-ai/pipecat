@@ -34,9 +34,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -1487,13 +1487,13 @@ class GeminiTTSService(GoogleBaseTTSService):
         """
         return language_to_gemini_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Gemini TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self.sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS requires {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "

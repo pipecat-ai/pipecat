@@ -45,7 +45,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings
 from pipecat.services.websocket_service import WebsocketService
@@ -575,6 +575,21 @@ class TTSService(AIService):
         """
         pass
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+
+    async def cleanup(self):
+        """Release TTS resources at teardown."""
+        await super().cleanup()
+        await self._stop_audio_context_task()
+        await self._cancel_pause_watchdog()
+
     async def start(self, frame: StartFrame):
         """Start the TTS service.
 
@@ -582,7 +597,6 @@ class TTSService(AIService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         self._create_audio_context_task()
 
     async def stop(self, frame: EndFrame):
@@ -608,12 +622,6 @@ class TTSService(AIService):
         await super().cancel(frame)
         # Prompt stop of audio production. cleanup() repeats this idempotently.
         await self._stop_audio_context_task()
-
-    async def cleanup(self):
-        """Release TTS resources at teardown."""
-        await super().cleanup()
-        await self._stop_audio_context_task()
-        await self._cancel_pause_watchdog()
 
     def add_text_transformer(
         self,

@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
 
@@ -72,6 +73,14 @@ class UserIdleController(BaseObject):
         self._idle_timer_task: asyncio.Task | None = None
 
         self._register_event_handler("on_user_turn_idle", sync=True)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        return await super().setup(setup.task_manager)
 
     async def cleanup(self):
         """Cleanup the controller."""

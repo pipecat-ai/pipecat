@@ -44,7 +44,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -56,7 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
     SessionContinuationParams,
@@ -509,13 +508,13 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # standard AIService frame handling
     #
 
-    async def start(self, frame: StartFrame):
-        """Start the service and initiate connection to AWS Nova Sonic.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._wants_connection = True
         await self._start_connecting()
 

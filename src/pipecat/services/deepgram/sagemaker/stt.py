@@ -35,11 +35,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
 from pipecat.services.settings import STTSettings
@@ -239,13 +238,13 @@ class DeepgramSageMakerSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram SageMaker STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

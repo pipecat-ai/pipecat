@@ -33,13 +33,12 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SARVAM_REALTIME_TTFS_P99, SARVAM_TTFS_P99
@@ -570,13 +569,13 @@ class SarvamSTTService(STTService):
         await self._disconnect()
         await self._connect()
 
-    async def start(self, frame: StartFrame):
-        """Start the Sarvam STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -1204,14 +1203,17 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         """Convert a Language enum to Sarvam realtime's language code."""
         return language_to_sarvam_realtime_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and connect the websocket."""
-        await super().start(frame)
-        # The rate can come from the pipeline, so it is only known now. Report
-        # it rather than raise: `AIService._start` swallows exceptions, which
-        # would leave the service quietly dropping every audio chunk instead.
-        # The rate holds for the session, so the failure is permanent and costs
-        # the service its usability, letting a `ServiceSwitcher` move on.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect the websocket.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        # The rate can come from the pipeline, so it is only settled once the
+        # service is set up. It holds for the session, so an unsupported one is
+        # a permanent failure that costs the service its usability, letting a
+        # `ServiceSwitcher` move on.
         error = self._resolved_sample_rate_error()
         if error:
             await self.push_error(error, category=ErrorCategory.INVALID_REQUEST)

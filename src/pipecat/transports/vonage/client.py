@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
-    StartFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
@@ -334,6 +333,11 @@ class VonageClient:
 
         self._task_manager = setup.task_manager
 
+        if self._params.audio_in_sample_rate is None:
+            self._audio_in_sample_rate = setup.audio_in_sample_rate
+        if self._params.audio_out_sample_rate is None:
+            self._audio_out_sample_rate = setup.audio_out_sample_rate
+
         # tasks from the generic event queue should allow concurrent processing as they
         # may await on new events posted to the same queue
         self._event_queue = asyncio.Queue()
@@ -389,12 +393,8 @@ class VonageClient:
         """
         self._listeners.pop(listener_id, None)
 
-    async def connect(self, frame: StartFrame | None = None) -> None:
-        """Connect to the Vonage session.
-
-        Args:
-            frame: Optional StartFrame to configure audio sample rates if not already set.
-        """
+    async def connect(self) -> None:
+        """Connect to the Vonage session."""
         logger.info(f"Connecting with session string {self._session_id}")
 
         if self._disconnecting_future is not None:
@@ -415,13 +415,6 @@ class VonageClient:
             await self._connecting_future
             self._connection_counter += 1
             return
-
-        # Set audio sample rates from StartFrame if params are not set
-        if frame:
-            if self._params.audio_in_sample_rate is None:
-                self._audio_in_sample_rate = frame.audio_in_sample_rate
-            if self._params.audio_out_sample_rate is None:
-                self._audio_out_sample_rate = frame.audio_out_sample_rate
 
         # this future will allow concurrent calls to connect to wait until the first connect call is done
         self._connecting_future = self._get_event_loop().create_future()

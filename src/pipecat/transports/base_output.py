@@ -47,7 +47,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
@@ -76,13 +76,13 @@ class BaseOutputTransport(FrameProcessor):
 
         self._params = params
 
-        # Output sample rate. It will be initialized on StartFrame.
+        # Output sample rate. It will be initialized during setup.
         self._sample_rate = 0
 
         # We write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This helps with interruption handling. It will be
-        # initialized on StartFrame.
+        # initialized during setup.
         self._audio_chunk_size = 0
 
         # We will have one media sender per output frame destination. This allow
@@ -120,19 +120,37 @@ class BaseOutputTransport(FrameProcessor):
         """
         return self._audio_chunk_size
 
-    async def start(self, frame: StartFrame):
-        """Start the output transport and initialize components.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+        await super().setup(setup)
+        self._sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
 
         # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
         audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        for _, sender in self._media_senders.items():
+            await sender.cleanup()
+
+    async def start(self, frame: StartFrame):
+        """Start the output transport.
+
+        Base hook for subclasses, which reach it through ``super()``. The
+        transport's own audio configuration is resolved in :meth:`setup`.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        pass
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and cleanup resources.
@@ -151,12 +169,6 @@ class BaseOutputTransport(FrameProcessor):
         """
         for _, sender in self._media_senders.items():
             await sender.cancel(frame)
-
-    async def cleanup(self):
-        """Release output transport resources at teardown."""
-        await super().cleanup()
-        for _, sender in self._media_senders.items():
-            await sender.cleanup()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.

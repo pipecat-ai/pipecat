@@ -229,14 +229,14 @@ class EvalSpeech:
         # and the FrameProcessor.pipeline_worker property keeps raising if touched.
         await self._service.setup(
             FrameProcessorSetup(
+                audio_out_sample_rate=self._sample_rate,
                 clock=clock,
+                enable_metrics=False,
                 task_manager=task_manager,
                 pipeline_worker=None,  # pyright: ignore[reportArgumentType]
             )
         )
-        await self._service.start(
-            StartFrame(audio_out_sample_rate=self._sample_rate, enable_metrics=False)
-        )
+        await self._service.start(StartFrame())
         self._started = True
 
     async def generate(self, text: str) -> tuple[bytes, int]:

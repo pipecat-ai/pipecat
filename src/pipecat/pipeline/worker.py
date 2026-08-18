@@ -95,6 +95,10 @@ IDLE_TIMEOUT_SECS = 300
 
 CANCEL_TIMEOUT_SECS = 20.0
 
+SETUP_TIMEOUT_SECS = 20.0
+
+START_TIMEOUT_SECS = 20.0
+
 
 T = TypeVar("T")
 
@@ -215,6 +219,16 @@ class PipelineWorker(BaseWorker):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
+    - on_pipeline_timeout: Called when a frame the worker was waiting on never
+          reached the end of the pipeline, meaning a processor is blocked. Inspect
+          the frame to tell the cases apart:
+
+              - StartFrame: the pipeline never started and is being torn down
+              - CancelFrame: the pipeline was cancelled but did not drain
+
+          There is no EndFrame case: ending flushes whatever is queued, so the
+          worker waits for it however long that takes.
+
     - on_pipeline_error: Called when an error occurs with ErrorFrame. Handler can read
           ``frame.processor.is_usable`` to distinguish between errors that end a
           processor's usability from those that don't.
@@ -226,7 +240,7 @@ class PipelineWorker(BaseWorker):
             ...
 
         @worker.event_handler("on_heartbeat_timeout")
-        async def on_heartbeat_timeout(worker):
+        async def on_pipeline_heartbeat_timeout(worker):
             ...
 
         @worker.event_handler("on_idle_timeout")
@@ -241,8 +255,16 @@ class PipelineWorker(BaseWorker):
         async def on_pipeline_finished(worker, frame):
             ...
 
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(worker, frame):
+            ...
+
         @worker.event_handler("on_pipeline_error")
         async def on_pipeline_error(worker, frame):
+            ...
+
+        @worker.event_handler("on_setup_timeout")
+        async def on_setup_timeout(worker):
             ...
     """
 
@@ -272,6 +294,8 @@ class PipelineWorker(BaseWorker):
         params: PipelineParams | None = None,
         rtvi_processor: RTVIProcessor | None = None,
         rtvi_observer_params: RTVIObserverParams | None = None,
+        setup_timeout_secs: float = SETUP_TIMEOUT_SECS,
+        start_timeout_secs: float = START_TIMEOUT_SECS,
         task_manager: BaseTaskManager | None = None,
         tool_resources: Any = None,
     ):
@@ -341,6 +365,14 @@ class PipelineWorker(BaseWorker):
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
+            setup_timeout_secs: Timeout (in seconds) to wait for every processor
+                to be set up. Processors connect while they are set up, so one
+                that blocks connecting never lets the pipeline start, and the
+                worker is torn down instead of waiting forever.
+            start_timeout_secs: Timeout (in seconds) to wait for the ``StartFrame``
+                to reach the end of the pipeline. A processor that blocks while
+                handling it never lets the pipeline start, so the worker is torn
+                down instead of waiting forever.
             task_manager: Optional task manager for handling asyncio tasks.
             tool_resources: Deprecated alias for ``app_resources``.
 
@@ -371,6 +403,8 @@ class PipelineWorker(BaseWorker):
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
+        self._setup_timeout_secs = setup_timeout_secs
+        self._start_timeout_secs = start_timeout_secs
         self._clock = clock or SystemClock()
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
@@ -531,6 +565,8 @@ class PipelineWorker(BaseWorker):
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_timeout")
+        self._register_event_handler("on_setup_timeout")
         self._register_event_handler("on_pipeline_error")
 
         # Bridge pipeline lifecycle to the BaseWorker lifecycle so the bus
@@ -716,26 +752,31 @@ class PipelineWorker(BaseWorker):
         if self.has_finished():
             return
 
-        # Setup processors.
-        await self._setup(params)
-
-        # Create all main tasks and wait for the main push worker. This is the
-        # worker that pushes frames to the very beginning of our pipeline (i.e. to
-        # our controlled source processor).
-        await self._create_tasks()
-
         try:
-            # Wait for pipeline to finish.
-            await self._wait_for_pipeline_finished()
-        except asyncio.CancelledError:
-            logger.debug(f"Pipeline worker {self} got cancelled from outside...")
-            # We have been cancelled from outside, let's just cancel everything.
-            await self._cancel()
-            # Wait again for pipeline to finish. This time we have really
-            # cancelled, so it should really finish.
-            await self._wait_for_pipeline_finished()
-            # Re-raise in case there's more cleanup to do.
-            raise
+            # Setup processors.
+            if not await self._setup_within_timeout(params):
+                # Nothing was pushed into the pipeline, so there is nothing to
+                # drain: release whatever was set up and give up.
+                await self._cleanup(cleanup_pipeline=True)
+                return
+
+            # Create all main tasks and wait for the main push worker. This is the
+            # worker that pushes frames to the very beginning of our pipeline (i.e. to
+            # our controlled source processor).
+            await self._create_tasks()
+
+            try:
+                # Wait for pipeline to finish.
+                await self._wait_for_pipeline_finished()
+            except asyncio.CancelledError:
+                logger.debug(f"Pipeline worker {self} got cancelled from outside...")
+                # We have been cancelled from outside, let's just cancel everything.
+                await self._cancel()
+                # Wait again for pipeline to finish. This time we have really
+                # cancelled, so it should really finish.
+                await self._wait_for_pipeline_finished()
+                # Re-raise in case there's more cleanup to do.
+                raise
         finally:
             # We can reach this point for different reasons:
             #
@@ -993,12 +1034,29 @@ class PipelineWorker(BaseWorker):
             data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
-    async def _wait_for_pipeline_start(self, frame: Frame):
-        """Wait for the specified start frame to reach the end of the pipeline."""
+    async def _wait_for_pipeline_start(self, frame: Frame) -> bool:
+        """Wait for the specified start frame to reach the end of the pipeline.
+
+        Returns:
+            Whether the pipeline started. A pipeline that doesn't start within
+            ``start_timeout_secs`` is torn down, since nothing pushed into it
+            afterwards would be processed.
+        """
         logger.debug(f"{self}: Starting. Waiting for {frame} to reach the end of the pipeline...")
-        await self._pipeline_start_event.wait()
+        try:
+            await asyncio.wait_for(
+                self._pipeline_start_event.wait(), timeout=self._start_timeout_secs
+            )
+        except TimeoutError:
+            logger.error(
+                f"{self}: timeout waiting for {frame} to reach the end of the pipeline "
+                "(being blocked somewhere?), stopping the pipeline."
+            )
+            await self._call_event_handler("on_pipeline_timeout", frame)
+            return False
         self._pipeline_start_event.clear()
         logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is now ready.")
+        return True
 
     async def _wait_for_pipeline_end(self, frame: Frame):
         """Wait for the specified frame to reach the end of the pipeline."""
@@ -1013,6 +1071,7 @@ class PipelineWorker(BaseWorker):
                 logger.warning(
                     f"{self}: timeout waiting for {frame} to reach the end of the pipeline (being blocked somewhere?)."
                 )
+                await self._call_event_handler("on_pipeline_timeout", frame)
             finally:
                 await self._call_event_handler("on_pipeline_finished", frame)
 
@@ -1021,6 +1080,9 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, CancelFrame):
             await wait_for_cancel()
         else:
+            # Ending flushes what is queued, so cutting the wait short would
+            # drop the audio the EndFrame exists to play out. A processor that
+            # could hold it up watches for that itself.
             await self._pipeline_end_event.wait()
             logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is closing.")
 
@@ -1037,15 +1099,53 @@ class PipelineWorker(BaseWorker):
             await self._process_push_task
             self._process_push_task = None
 
+    async def _setup_within_timeout(self, params: WorkerParams) -> bool:
+        """Set up the pipeline worker and all processors, bounded by a timeout.
+
+        Returns:
+            Whether everything was set up. A processor that blocks while being
+            set up never lets the pipeline start, so setting up is abandoned
+            once ``setup_timeout_secs`` elapses.
+        """
+        try:
+            await asyncio.wait_for(self._setup(params), timeout=self._setup_timeout_secs)
+            return True
+        except TimeoutError:
+            logger.error(
+                f"{self}: timeout setting the pipeline up "
+                "(a processor blocked while connecting?), stopping the pipeline."
+            )
+            await self._call_event_handler("on_setup_timeout")
+            return False
+
     async def _setup(self, params: WorkerParams):
         """Set up the pipeline worker and all processors."""
+        # Processors connect while they are set up and push frames as they do,
+        # so the clock runs from here rather than from the StartFrame, which
+        # would leave those frames timestamped zero.
+        self._clock.start()
+
         await super().setup(self._task_manager or params.task_manager)
 
+        # Do any additional pipeline worker setup externally.
+        await self._load_setup_files()
+
+        # Start worker observer.
+        await self._observer.setup(self.task_manager)
+
+        # Setup processors
         setup = FrameProcessorSetup(
+            audio_in_sample_rate=self._params.audio_in_sample_rate,
+            audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
-            task_manager=self.task_manager,
+            enable_metrics=self._params.enable_metrics,
+            enable_tracing=self._enable_tracing,
+            enable_usage_metrics=self._params.enable_usage_metrics,
             observer=self._observer,
             pipeline_worker=self,
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            task_manager=self.task_manager,
+            tracing_context=self._tracing_context,
             # Populate the deprecated `tool_resources` field for backwards
             # compatibility with custom FrameProcessor subclasses whose
             # ``setup()`` overrides still read it. Reading the field emits a
@@ -1053,14 +1153,7 @@ class PipelineWorker(BaseWorker):
             # ``setup.pipeline_worker.app_resources`` instead.
             tool_resources=self._app_resources,
         )
-        await self._pipeline.setup(setup)
-
-        # Do any additional pipeline worker setup externally.
-        await self._load_setup_files()
-
-        # Start worker observer.
-        await self._observer.setup(self.task_manager)
-        await self._observer.start()
+        await self.create_task(self._pipeline.setup(setup))
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
@@ -1068,7 +1161,6 @@ class PipelineWorker(BaseWorker):
         await self.cleanup()
 
         # Cleanup observers.
-        await self._observer.stop()
         await self._observer.cleanup()
 
         # End conversation tracing if it's active - this will also close any active turn span
@@ -1108,8 +1200,6 @@ class PipelineWorker(BaseWorker):
         a StartFrame and by pushing any other frames queued by the user. It runs
         until the worker is cancelled or stopped (e.g. with an EndFrame).
         """
-        self._clock.start()
-
         self._maybe_start_idle_task()
 
         # Services spend most of the start sequence waiting on the network, which
@@ -1118,6 +1208,9 @@ class PipelineWorker(BaseWorker):
             asyncio.to_thread(warm_deferred_imports), name=f"{self}::warm_deferred_imports"
         )
 
+        # Processors read the pipeline configuration from FrameProcessorSetup,
+        # but the deprecated StartFrame fields carry it until they are removed,
+        # so that a processor still reading one gets the configured value.
         start_frame = StartFrame(
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
@@ -1131,12 +1224,13 @@ class PipelineWorker(BaseWorker):
         await self._pipeline.queue_frame(start_frame)
 
         # Wait for the pipeline to be started before pushing any other frame.
-        await self._wait_for_pipeline_start(start_frame)
+        running = await self._wait_for_pipeline_start(start_frame)
 
-        if self._params.enable_metrics and self._params.send_initial_empty_metrics:
+        if running and self._params.enable_metrics and self._params.send_initial_empty_metrics:
             await self._pipeline.queue_frame(self._initial_metrics_frame())
 
-        running = True
+        # A pipeline that never started can't process anything we push into it,
+        # so skip straight to cleanup.
         cleanup_pipeline = True
         while running:
             frame = await self._push_queue.get()

@@ -47,7 +47,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         async def mock_push_error(error_msg, exception=None):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
-        async def mock_timeout_handler(event_name):
+        async def mock_timeout_handler(event_name, *args):
             nonlocal timeout_handler_called
             if event_name == "on_completion_timeout":
                 timeout_handler_called = True
@@ -76,7 +76,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         await service.process_frame(frame, FrameDirection.DOWNSTREAM)
 
         # Verify timeout handler was called
-        service._call_event_handler.assert_called_once_with("on_completion_timeout")
+        service._call_event_handler.assert_any_call("on_completion_timeout")
         assert timeout_handler_called
 
         # Verify push_error was called with correct message

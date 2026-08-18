@@ -190,6 +190,83 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "StartFrame.audio_in_sample_rate",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.audio_out_sample_rate",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_out_sample_rate",
+      "message": "Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_metrics",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_metrics",
+      "message": "Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_tracing",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_tracing",
+      "message": "Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.enable_usage_metrics",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "enable_usage_metrics",
+      "message": "Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.report_only_initial_ttfb",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_only_initial_ttfb",
+      "message": "Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
+      "subject": "StartFrame.tracing_context",
+      "module": "pipecat.frames.frames",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "tracing_context",
+      "message": "Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "StopTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",

@@ -25,6 +25,7 @@ from pipecat.services.llm_service import (
 )
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 @dataclass
@@ -105,7 +106,9 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         service = _MockLLMService()
         resources = _Resources(user_name="John")
         # Stub the pipeline worker with just the bit LLMService reads.
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(), pipeline_worker=SimpleNamespace(app_resources=resources)
+        )
 
         captured: dict[str, Any] = {}
 
@@ -136,7 +139,9 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_direct_function_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._setup = frame_processor_setup(
+            TaskManager(), pipeline_worker=SimpleNamespace(app_resources=resources)
+        )
         captured: dict[str, Any] = {}
 
         async def lookup(params: FunctionCallParams):
@@ -294,7 +299,7 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
 
     def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        with self.assertRaisesRegex(Exception, "pipeline worker is still not set"):
+        with self.assertRaisesRegex(Exception, "is still not set up"):
             _ = recorder.pipeline_worker
 
 

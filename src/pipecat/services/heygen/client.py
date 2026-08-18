@@ -26,7 +26,6 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     AudioRawFrame,
     ImageRawFrame,
-    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import HeyGenApi, NewSessionRequest
@@ -37,6 +36,7 @@ from pipecat.services.heygen.api_liveavatar import (
 from pipecat.services.heygen.base_api import BaseAvatarApi, StandardSessionResponse
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 
 try:
     from livekit import rtc
@@ -173,14 +173,17 @@ class HeyGenClient:
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
+        # computed during setup.
         self._next_send_time = 0
         self._audio_seconds_sent = 0.0
         self._transport_ready = False
-        # HeyGen enforces a protection mechanism that will automatically disconnect the avatar if a user does not join within 5 minutes,
+        # HeyGen enforces a protection mechanism that will automatically
+        # disconnect the avatar if a user does not join within 5 minutes,
         # regardless of whether the Pipecat agent remains present in the room.
-        # To prevent unexpected disconnections in HeyGenVideoService, we ensure that a user connection is established using the user's token.
-        # This keeps the avatar session active and avoids forced logouts due to inactivity from the user side.
+        # To prevent unexpected disconnections in HeyGenVideoService, we ensure
+        # that a user connection is established using the user's token.  This
+        # keeps the avatar session active and avoids forced logouts due to
+        # inactivity from the user side.
         self._connect_as_user = connect_as_user
 
     async def _initialize(self):
@@ -194,6 +197,7 @@ class HeyGenClient:
         )
         logger.info("HeyGen session started")
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
         """Setup the client and initialize the conversation.
 
@@ -202,9 +206,6 @@ class HeyGenClient:
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._heyGen_session is not None:
-            logger.debug("heygen_session already initialized")
-            return
         self._task_manager = setup.task_manager
         try:
             await self._initialize()
@@ -214,12 +215,29 @@ class HeyGenClient:
                 self._callback_task_handler(self._event_queue),
                 f"{self}::event_callback_task",
             )
+
+            self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
+            self._out_sample_rate = (
+                self._params.audio_out_sample_rate or setup.audio_out_sample_rate
+            )
+            await self._ws_connect()
+            await self._livekit_connect()
+
+            self._keep_alive_task = self._task_manager.create_task(
+                self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
+            )
+            self._call_event_callback(self._callbacks.on_connected)
         except Exception as e:
             logger.error(f"Failed to setup HeyGenClient: {e}")
-            await self.cleanup()
+            await self._teardown()
 
+    @releases("client")
     async def cleanup(self) -> None:
-        """Cleanup client resources."""
+        """Cleanup client resources once the last processor is done with them."""
+        await self._teardown()
+
+    async def _teardown(self) -> None:
+        """Close every connection and cancel every task, and can run again."""
         try:
             if self._keep_alive_task and self._task_manager:
                 await self._task_manager.cancel_task(self._keep_alive_task)
@@ -239,39 +257,14 @@ class HeyGenClient:
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
 
-    async def start(self, frame: StartFrame) -> None:
-        """Start the client and establish all necessary connections.
-
-        Initializes WebSocket and LiveKit connections using the provided configuration.
-        Sets up audio processing with the specified sample rates.
-
-        Args:
-            frame: Initial configuration frame containing audio parameters
-        """
-        if self._websocket:
-            logger.debug("heygen client already started")
-            return
-
-        logger.debug("HeyGenClient starting")
-        # setup() stores the task manager before anything can start.
-        assert self._task_manager is not None
-
-        self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-        await self._ws_connect()
-        await self._livekit_connect()
-        self._keep_alive_task = self._task_manager.create_task(
-            self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
-        )
-        self._call_event_callback(self._callbacks.on_connected)
-
     async def stop(self) -> None:
         """Stop the client and terminate all connections.
 
-        Delegates to the idempotent :meth:`cleanup`.
+        Tears the connections down there and then, however many processors
+        still hold the client, since the session is ending for all of them.
         """
         logger.debug("HeyGenVideoService stopping")
-        await self.cleanup()
+        await self._teardown()
 
     # websocket connection methods
     async def _ws_connect(self):

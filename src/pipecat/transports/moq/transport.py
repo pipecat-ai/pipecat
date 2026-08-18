@@ -509,8 +509,8 @@ class MOQTransportClient:
     def connect(self):
         """Register a holder and start the MOQ session on the first call.
 
-        Called by both :meth:`MOQInputTransport.start` and
-        :meth:`MOQOutputTransport.start`, after ``setup()`` has wired in
+        Called by both :meth:`MOQInputTransport.setup` and
+        :meth:`MOQOutputTransport.setup`, after ``setup()`` has wired in
         the task manager. Only the first call actually dials/serves;
         later calls just record another holder, balanced against
         :meth:`stop`/:meth:`cancel` releasing it.
@@ -520,7 +520,7 @@ class MOQTransportClient:
             return
         assert self._task_manager is not None, (
             "MOQTransportClient.setup() must run before connect(); "
-            "input/output processors forward setup on the pipeline's first frame."
+            "input/output processors forward setup from their own setup()."
         )
         self._connection_task = self._task_manager.create_task(self._run(), "moq_run")
 
@@ -531,9 +531,9 @@ class MOQTransportClient:
     def open_audio_track(self, sample_rate: int):
         """Open the bot's audio track via ``publish_audio``.
 
-        Called by :class:`MOQOutputTransport.start` once it knows the
-        pipeline's output sample rate. No-op if the track is already
-        open or audio output is disabled.
+        Called by :meth:`MOQOutputTransport.setup` with the pipeline's
+        output sample rate. No-op if the track is already open or audio
+        output is disabled.
         """
         if self._audio_out is not None or not self._params.audio_out_enabled:
             return
@@ -1112,7 +1112,6 @@ class MOQInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Forward setup to the shared MOQTransportClient so it can create tasks.
@@ -1121,7 +1120,14 @@ class MOQInputTransport(BaseInputTransport):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
+        self._client.connect()
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        await super().cleanup()
+        await self._client.cleanup()
 
     async def start(self, frame: StartFrame):
         """Auto-connect to the MOQ relay when the pipeline starts.
@@ -1130,11 +1136,7 @@ class MOQInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
 
-        self._client.connect()
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -1166,11 +1168,6 @@ class MOQInputTransport(BaseInputTransport):
         """
         await super().cancel(frame)
         await self._client.cancel()
-
-    async def cleanup(self):
-        """Cleanup resources."""
-        await super().cleanup()
-        await self._client.cleanup()
 
     async def push_received_audio(self, audio: bytes, sample_rate: int):
         """Push a received audio frame downstream.
@@ -1219,7 +1216,6 @@ class MOQOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Forward setup to the shared MOQTransportClient so it can create tasks.
@@ -1229,6 +1225,13 @@ class MOQOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
         await self._client.setup(setup)
+        # Open the publish_audio track before connecting, so the broadcast
+        # carries its audio track by the time _run() publishes it to the origin.
+        self._client.open_audio_track(self.sample_rate)
+        logger.debug(
+            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
+        )
+        self._client.connect()
 
     async def start(self, frame: StartFrame):
         """Start the MOQ output transport.
@@ -1237,19 +1240,6 @@ class MOQOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self._initialized:
-            return
-        self._initialized = True
-        self._client.connect()
-        # Open the publish_audio track now that we know the pipeline's
-        # output sample rate. The producer side of the broadcast was
-        # created in MOQTransportClient.__init__, so this call is
-        # synchronous — no race with _run()'s async bring-up to lose
-        # initial audio frames.
-        self._client.open_audio_track(self.sample_rate)
-        logger.debug(
-            f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
-        )
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):

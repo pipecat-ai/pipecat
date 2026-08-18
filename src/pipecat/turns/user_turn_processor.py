@@ -14,11 +14,14 @@ from pipecat.frames.frames import (
     Frame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -119,6 +122,16 @@ class UserTurnProcessor(FrameProcessor):
         self._user_idle_controller = UserIdleController(user_idle_timeout=user_idle_timeout)
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._user_turn_controller.setup(setup)
+        await self._user_idle_controller.setup(setup)
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -138,12 +151,7 @@ class UserTurnProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
-        elif isinstance(frame, EndFrame):
+        if isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
@@ -166,10 +174,6 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
-
-    async def _start(self, frame: StartFrame):
-        await self._user_turn_controller.setup(self.task_manager)
-        await self._user_idle_controller.setup(self.task_manager)
 
     async def _stop(self, frame: EndFrame):
         await self._cleanup()

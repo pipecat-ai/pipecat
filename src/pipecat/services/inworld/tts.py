@@ -41,13 +41,12 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -278,13 +277,13 @@ class InworldHttpTTSService(TTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -772,13 +771,13 @@ class InworldTTSService(WebsocketTTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
         await self._connect()
 
