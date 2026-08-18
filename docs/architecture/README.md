@@ -192,7 +192,7 @@ Three properties fall out of this shape:
 
 - **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
   **segment text**, because that is what it is — `frame.text`, the segment as the
-  aggregator produced it. It is not defined by who reads it.
+  aggregator produced it.
 - **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
   the TTS; `frame.text` keeps what the aggregator produced.
 - **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
@@ -284,7 +284,7 @@ Each layer owns one concern, and none of them knows about the layer above:
 | Layer | Scope | Question it answers | Why it has to exist |
 | --- | --- | --- | --- |
 | [`TextSegmentMap`](./text-segment-map.md) | One segment | Where in the other two texts are we, given this spoken word? | The text sent to the TTS is not the text the LLM wrote or the segment carries, so something has to hold three cursors in alignment across transforms and markup while matching noisy, provider-specific tokens |
-| [`WordCompletionTracker`](./word-completion-tracker.md) | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? | One frame needs a completion verdict and an attributed LLM span per word even when the TTS provider misbehaves — policy the pure alignment map deliberately does not own |
+| [`WordCompletionTracker`](./word-completion-tracker.md) | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? | One frame needs a completion verdict and an attributed LLM span per word even when the TTS provider misbehaves |
 | [`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md) | The whole turn | In what order do frames leave the TTS service? | Words arrive per-frame but the conversation context is global and ordered, so spoken, skipped, buffered, and concurrent-context frames must be serialized into one timeline |
 
 ### 3.5 Where they are wired up
