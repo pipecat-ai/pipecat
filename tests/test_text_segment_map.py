@@ -13,6 +13,7 @@ from pipecat.utils.context.text_segment_map import (
     strip_complete_markup,
     strip_markup,
 )
+from pipecat.utils.text.transforms._alnum_utils import fold_for_matching
 
 
 class TestStripMarkupHelpers(unittest.TestCase):
@@ -516,3 +517,63 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassifyHopFoldsTypographicVariants(unittest.TestCase):
+    """Strategy 2 folds typographic variants, not just case and accents.
+
+    LLMs emit the typographic forms; a TTS service may report the ASCII form in its
+    word-timestamp events (or the reverse). Without folding, the hop is NO_MATCH and the
+    slot force-completes, collapsing the rest of the sentence into one frame.
+    """
+
+    def test_curly_apostrophe_matches_ascii_token(self):
+        hop = TextSegmentMap._classify_hop("don’t worry", "don't")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+    def test_ascii_apostrophe_matches_curly_token(self):
+        hop = TextSegmentMap._classify_hop("don't worry", "don’t")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+    def test_en_dash_matches_hyphen_token(self):
+        hop = TextSegmentMap._classify_hop("2020–2021 report", "2020-2021")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+    def test_curly_quotes_match_straight_quotes(self):
+        hop = TextSegmentMap._classify_hop("“hello” there", '"hello"')
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+    def test_unrelated_token_still_does_not_match(self):
+        """Folding must not turn a genuine mismatch into a match."""
+        hop = TextSegmentMap._classify_hop("hello world", "goodbye")
+        self.assertEqual(hop.kind, _HopKind.NO_MATCH)
+
+
+class TestFoldPreservesLength(unittest.TestCase):
+    """The fold must map each character to exactly one character.
+
+    Strategy 2 finds a match offset in folded space and applies it to the raw text, so a
+    fold that changed length would silently mis-place the cursor rather than fail loudly.
+    The property is not self-evident: ``str.lower()`` is not length-preserving in Unicode
+    (``"İ".lower()`` is two characters), and the fold survives that only because
+    ``_fold_accented_char`` decomposes first and keeps the base character.
+    """
+
+    def test_fold_is_length_preserving_across_unicode(self):
+        sample = "".join(chr(i) for i in range(32, 0x110000) if chr(i).isprintable())
+        self.assertEqual(len(fold_for_matching(sample)), len(sample))
+
+    def test_dotted_capital_i_folds_to_one_character(self):
+        # "İ".lower() is "i" + COMBINING DOT ABOVE; folding must not inherit that.
+        self.assertEqual(fold_for_matching("\u0130"), "i")
+
+    def test_fold_is_narrow(self):
+        """Only the listed variants change -- no blanket Unicode compatibility folding.
+
+        A compatibility normalization would fold thousands of characters (CJK
+        compatibility ideographs, halfwidth katakana, math alphanumerics) that no TTS
+        service is known to substitute, widening the match surface far beyond the
+        provider behaviour this is meant to absorb.
+        """
+        for char in ("\ufb01", "\u00bd", "\uff11", "\u4e09", "\u2032", "\u00a0"):
+            self.assertEqual(fold_for_matching(char), char)
