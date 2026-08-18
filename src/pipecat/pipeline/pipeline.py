@@ -11,7 +11,6 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-import asyncio
 from collections.abc import Callable, Coroutine, Sequence
 
 from pipecat.frames.frames import Frame
@@ -179,7 +178,7 @@ class Pipeline(BasePipeline):
     async def cleanup(self):
         """Clean up the pipeline and all contained processors."""
         await super().cleanup()
-        await asyncio.gather(*[p.cleanup() for p in self._processors])
+        await self._cleanup_processors(self._processors)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames by routing them through the pipeline.

@@ -32,7 +32,11 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import HeartbeatsObserver, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -880,6 +884,68 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         # Nothing else tells the application its pipeline never came up.
         assert len(timed_out) == 1
         assert isinstance(timed_out[0], StartFrame)
+
+    async def test_task_setup_never_finishes(self):
+        """Processors connect while they are set up, so one that never connects
+        would otherwise leave run() waiting on it with nothing to time it out."""
+
+        class SetupBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        pipeline = Pipeline([SetupBlocker()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        timed_out = []
+
+        @worker.event_handler("on_setup_timeout")
+        async def on_setup_timeout(_worker):
+            timed_out.append(True)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+
+        # Nothing else tells the application its pipeline never came up.
+        assert len(timed_out) == 1
+
+    async def test_task_setup_timeout_still_cleans_the_rest_up(self):
+        """Setting up is abandoned part-way, so processors are cleaned up from
+        states they never finished reaching."""
+
+        class SetupBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        class CleanupFailer(FrameProcessor):
+            async def cleanup(self):
+                await super().cleanup()
+                raise RuntimeError("cannot clean up")
+
+        cleaned = []
+
+        class CleanupRecorder(FrameProcessor):
+            async def cleanup(self):
+                await super().cleanup()
+                cleaned.append(self.name)
+
+        pipeline = Pipeline([CleanupFailer(), SetupBlocker(), CleanupRecorder()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        # The failing cleanup must not cost the others theirs.
+        assert len(cleaned) == 1
 
     async def test_task_end_frame_blocked_by_paused_tts_service(self):
         """TTSService pauses its process queue while audio is in flight

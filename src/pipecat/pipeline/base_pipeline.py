@@ -10,6 +10,8 @@ import asyncio
 import time
 from collections.abc import Sequence
 
+from loguru import logger
+
 from pipecat.observers.base_observer import ProcessorSetUp
 from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 
@@ -57,3 +59,23 @@ class BasePipeline(FrameProcessor):
                 )
 
         await asyncio.gather(*[setup_processor(p) for p in processors])
+
+    async def _cleanup_processors(self, processors: Sequence[FrameProcessor]):
+        """Clean up the given processors concurrently.
+
+        Tearing down is best effort: a processor that raises is logged and the
+        rest are still released. Cleaning up runs after a processor failed to
+        set up, or was abandoned part-way through being set up, so some of them
+        are released from a state they never finished reaching.
+
+        Args:
+            processors: The processors to clean up.
+        """
+
+        async def cleanup_processor(processor: FrameProcessor):
+            try:
+                await processor.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {processor}: {e}")
+
+        await asyncio.gather(*[cleanup_processor(p) for p in processors])

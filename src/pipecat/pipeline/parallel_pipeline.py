@@ -11,7 +11,6 @@ sub-pipelines concurrently, with coordination for system frames and proper
 handling of pipeline lifecycle events.
 """
 
-import asyncio
 from itertools import chain
 
 from loguru import logger
@@ -129,7 +128,7 @@ class ParallelPipeline(BasePipeline):
     async def cleanup(self):
         """Clean up the parallel pipeline and all its branches."""
         await super().cleanup()
-        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel branches with lifecycle coordination.

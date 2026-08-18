@@ -247,7 +247,7 @@ class SyncParallelPipeline(BasePipeline):
     async def cleanup(self):
         """Clean up the parallel pipeline and all contained processors."""
         await super().cleanup()
-        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Send a frame through all parallel pipelines and release output once all finish.
