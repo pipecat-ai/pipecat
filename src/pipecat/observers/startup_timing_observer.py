@@ -6,15 +6,15 @@
 
 """Observer for tracking pipeline startup timing.
 
-This module provides an observer that measures how long each processor's
-``start()`` method takes during pipeline startup. It works by tracking
-when a ``StartFrame`` arrives at a processor (``on_process_frame``) versus
-when it leaves (``on_push_frame``), giving the exact ``start()`` duration
-for each processor in the pipeline.
+This module provides an observer that measures how long each processor's takes
+during pipeline startup (i.e. setup() and ``StartFrame``). It works by tracking
+``setup()`` time and when the ``StartFrame`` arrives at a processor
+(``on_process_frame``) versus when it leaves (``on_push_frame``), giving the
+exact ``start()`` duration for each processor in the pipeline.
 
-It also measures transport timing — the time from ``StartFrame`` to the
-first ``BotConnectedFrame`` (SFU transports only) and ``ClientConnectedFrame``
-— via a separate ``on_transport_timing_report`` event.
+It also measures transport timing — the time from before ``setup()`` to the
+first ``BotConnectedFrame`` (SFU transports only) and ``ClientConnectedFrame`` —
+via a separate ``on_transport_timing_report`` event.
 
 Example::
 
@@ -32,6 +32,7 @@ Example::
         print(f"Client connected in {report.client_connected_secs:.3f}s")
 
     worker = PipelineWorker(pipeline, observers=[observer])
+
 """
 
 import time
@@ -126,10 +127,11 @@ class TransportTimingReport(BaseModel):
 class StartupTimingObserver(BaseObserver):
     """Observer that measures processor startup times during pipeline initialization.
 
-    Tracks how long each processor's ``start()`` method takes by measuring the
-    time between when a ``StartFrame`` arrives at a processor and when it is
-    pushed downstream. This captures WebSocket connections, API authentication,
-    model loading, and other initialization work.
+    Tracks what each processor costs to get ready: its ``setup()`` and its
+    ``start()`` together, the latter measured from the ``StartFrame`` arriving
+    at the processor to it being pushed downstream. This captures WebSocket
+    connections, API authentication, model loading, and other initialization
+    work, most of which happens while the processor is being set up.
 
     Also measures transport timing, the time from the pipeline starting to set
     up until each connection milestone. A transport connects while it is set
@@ -354,10 +356,14 @@ class StartupTimingObserver(BaseObserver):
             return
 
         self._transport_timing_reported = True
+        client_connected_secs = data.timestamp / 1e9
         report = TransportTimingReport(
-            start_time=self._setup_wall_clock,
+            # Both offsets are elapsed pipeline-clock time, which starts before
+            # this observer does, so the wall clock they are offsets from comes
+            # from the same clock rather than from a second reading of its own.
+            start_time=time.time() - client_connected_secs,
             bot_connected_secs=self._bot_connected_secs,
-            client_connected_secs=data.timestamp / 1e9,
+            client_connected_secs=client_connected_secs,
         )
         await self._call_event_handler("on_transport_timing_report", report)
 
