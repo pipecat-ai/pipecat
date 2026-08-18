@@ -503,6 +503,25 @@ class TestVonageVideoConnectorTransport:
         return transport
 
     @pytest.mark.asyncio
+    async def test_vonage_client_thread_outlives_the_first_holder(self) -> None:
+        """The input and output transports both set this client up and both clean
+        it up, and the last of them is the one that actually disconnects, on this
+        thread. Releasing it with the first would leave the SDK connection live."""
+        params = self.VonageVideoConnectorTransportParams()
+        client = self.VonageClient(self.application_id, self.session_id, self.token, params)
+
+        setup = self._get_frame_processor_setup()
+        await client.setup(setup)
+        await client.setup(setup)
+
+        await client.cleanup()
+        client._executor.submit(lambda: None).result(timeout=5)
+
+        await client.cleanup()
+        with pytest.raises(RuntimeError):
+            client._executor.submit(lambda: None)
+
+    @pytest.mark.asyncio
     async def test_vonage_client_setup_n_cleanup(self) -> None:
         """Test VonageClient setup and cleanup methods."""
         params = self.VonageVideoConnectorTransportParams()

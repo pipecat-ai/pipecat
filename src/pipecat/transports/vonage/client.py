@@ -40,6 +40,7 @@ from pipecat.transports.vonage.utils import (
     process_audio,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.shared import acquires, releases
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -322,15 +323,13 @@ class VonageClient:
             self._video_out_color_format_vonage
         ]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup) -> None:
         """Setup the client with task manager and event queues.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._task_manager:
-            return
-
         self._task_manager = setup.task_manager
 
         if self._params.audio_in_sample_rate is None:
@@ -373,9 +372,19 @@ class VonageClient:
                 await self._task_manager.cancel_task(self._video_task)
                 self._video_task = None
         finally:
-            # Disconnecting can time out and raise, and that is the case where
+            # Released even when disconnecting raised, which is the case where
             # the thread is most likely still blocked in the SDK.
-            self._executor.shutdown(wait=False)
+            await self._release_executor()
+
+    @releases("client")
+    async def _release_executor(self) -> None:
+        """Release the thread the SDK's blocking calls run on.
+
+        An input and an output transport share this client and both clean it up,
+        and the last of them is the one that actually disconnects, so the thread
+        it disconnects on has to outlive the others.
+        """
+        self._executor.shutdown(wait=False)
 
     def add_listener(self, listener: VonageClientListener) -> int:
         """Add a listener to the Vonage client.
