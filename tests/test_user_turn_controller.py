@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -146,6 +147,24 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(
                     len(handler.handlers), 1, f"{name} double-registered on {strategy}"
                 )
+
+    async def test_update_strategies_replays_start_frame(self):
+        """Strategies installed after startup receive pipeline configuration."""
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            )
+        )
+        await controller.setup(self.task_manager)
+        await controller.process_frame(StartFrame(audio_in_sample_rate=24_000))
+
+        analyzer = MagicMock()
+        analyzer.cleanup = AsyncMock()
+        replacement = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
+        await controller.update_strategies(UserTurnStrategies(stop=[replacement]))
+
+        analyzer.set_sample_rate.assert_called_once_with(24_000)
+        await controller.cleanup()
 
     async def test_inference_triggered_fires_alongside_stopped(self):
         """Default strategies fire both inference-triggered and stopped, in order."""
