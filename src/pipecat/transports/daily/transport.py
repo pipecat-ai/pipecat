@@ -2945,16 +2945,16 @@ class DailyTransport(BaseTransport):
                 ) as r:
                     if r.status != 200:
                         text = await r.text()
-                        logger.error(
+                        await self._on_dialin_error(
                             f"Unable to handle dialin-ready event (status: {r.status}, error: {text})"
                         )
                         return
 
                     logger.debug("Event dialin-ready was handled successfully")
             except TimeoutError:
-                logger.error(f"Timeout handling dialin-ready event ({url})")
+                await self._on_dialin_error(f"Timeout handling dialin-ready event ({url})")
             except Exception as e:
-                logger.error(f"Error handling dialin-ready event ({url}): {e}")
+                await self._on_dialin_error(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""
