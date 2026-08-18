@@ -267,7 +267,6 @@ class AudioBufferProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
             if self._enable_turn_audio:
                 self._attach_turn_tracker()

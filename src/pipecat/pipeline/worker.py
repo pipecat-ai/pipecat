@@ -1174,9 +1174,6 @@ class PipelineWorker(BaseWorker):
         # Processors read the pipeline configuration from FrameProcessorSetup,
         # but the deprecated StartFrame fields carry it until they are removed,
         # so that a processor still reading one gets the configured value.
-        # Processors read the pipeline configuration from FrameProcessorSetup,
-        # but the deprecated StartFrame fields carry it until they are removed,
-        # so that a processor still reading one gets the configured value.
         start_frame = StartFrame(
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
