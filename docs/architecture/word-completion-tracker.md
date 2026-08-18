@@ -47,8 +47,8 @@ complete = tracker.add_word_and_check_complete("4111")
 | `get_llm_consumed()` | `process_word` | The **`raw_text`** of that frame — what the conversation context records |
 | `suppress_in_context()` | `process_word` | Sets `append_to_context=False` and skips the progress frame |
 | `get_overflow_word()` | `process_word` | Re-entered as a new word against the *next* slot |
-| `get_accumulated_user_facing_text()` | `_build_progress_frame` | `accumulated_text` → the highlighted part on screen |
-| `get_remaining_user_facing_text(strip=False)` | `_build_progress_frame` | `remaining_text` → the not-yet-spoken part on screen |
+| `get_accumulated_user_facing_text()` | `_build_progress_frame` | `accumulated_text` → the spoken part of the segment text (what a UI highlights) |
+| `get_remaining_user_facing_text(strip=False)` | `_build_progress_frame` | `remaining_text` → the unspoken part of the segment text (what a UI leaves plain) |
 | `get_remaining_tts_text()` | `force_complete` | Text of the catch-up frame when a provider goes silent |
 | `get_remaining_llm_text()` | `force_complete` | `raw_text` of that catch-up frame |
 
@@ -80,8 +80,9 @@ that stops the context from drifting away from what the LLM wrote.
 
 ### Recovering the LLM structure
 
-Word events arrive stripped of the delimiters the LLM wrote. The tracker maps each one
-back, so the closing tag rides along with the word that follows it:
+The TTS only ever synthesized the segment text, so word events carry no trace of the
+delimiters the aggregator split off into `raw_text`. The tracker maps each word back onto
+that fuller string:
 
 | word     | complete | `get_word_for_frame()` | `get_llm_consumed()` |
 | -------- | -------- | ---------------------- | -------------------- |
@@ -154,8 +155,8 @@ actually belongs to.
 ## 5. The attribution safeguard
 
 `_discard_llm_span_if_frame_word_missing` guards against that desync. It enforces one
-invariant: **the LLM span credited
-to a word must contain that word.** If it does not, the two texts have fallen out of
+rule: **the LLM span credited to a
+word must contain that word.** If it does not, the two texts have fallen out of
 alignment and the span is dropped with a warning rather than corrupting the context.
 
 The comparison is deliberately lenient — casefolded, with hyphens and spaces collapsed —
@@ -199,8 +200,10 @@ tracker.get_accumulated_user_facing_text()   # 'Hello'
 tracker.get_remaining_user_facing_text()     # 'there world'
 ```
 
-`get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so
-accumulated + remaining reconstructs the original exactly.
+`get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so accumulated
++ remaining reconstructs the segment text exactly. That guarantee is what every consumer
+of a progress frame relies on (see
+[the guarantee](./README.md#the-guarantee-that-makes-it-useful)).
 
 ### `is_complete` is delegated, not tracked
 

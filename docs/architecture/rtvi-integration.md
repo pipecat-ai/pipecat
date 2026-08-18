@@ -15,11 +15,15 @@ emits two frames for every spoken word. Only one of them concerns RTVI:
 | Frame | Destination | Carries |
 | --- | --- | --- |
 | `TTSTextFrame` | The conversation context | The word, plus `raw_text` — the LLM span it represents |
-| `AggregatedTextProgressFrame` | **RTVI → the client** | `segment_id` + `accumulated_text` / `remaining_text` |
+| `AggregatedTextProgressFrame` | **RTVI → the client** — and any other consumer | `segment_id` + `accumulated_text` / `remaining_text` |
 
-The progress frame is the one `RTVIObserver` turns into client messages, and
-`segment_id` — the id of the sentence `AggregatedTextFrame` the word belongs to — is what
-lets a client match a stream of words back to a sentence it already rendered.
+The progress frame is the one `RTVIObserver` turns into client messages: `segment_id` is
+the id of the sentence `AggregatedTextFrame` the word belongs to, which is what lets a
+client match a stream of words back to a sentence it already rendered.
+
+Nothing about the frame is RTVI-specific, though — `accumulated_text + remaining_text`
+reconstructs that frame's text exactly, so any processor holding the segment can position
+into it. RTVI is simply the consumer Pipecat ships, and the one this document follows.
 
 ## 2. The segment lifecycle over RTVI
 

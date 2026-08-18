@@ -28,14 +28,14 @@ to `process_word` builds up to two frames — `_build_word_frame` and
 | Frame | Destination | Carries |
 | --- | --- | --- |
 | `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents |
-| `AggregatedTextProgressFrame` | **RTVI → the client** | `segment_id` + `accumulated_text` / `remaining_text` |
+| `AggregatedTextProgressFrame` | **Any downstream consumer** — a UI via RTVI is the usual one | `segment_id` + `accumulated_text` / `remaining_text` |
 
 ```mermaid
 flowchart LR
     PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>append_to_context=True"]
     PW --> PF["<b>AggregatedTextProgressFrame</b><br/>segment_id=42<br/>accumulated='Your balance is $42.50'<br/>remaining=''"]
     TF --> CTX["conversation context"]
-    PF --> OBS["RTVIObserver"] --> CLIENT["client"]
+    PF --> OBS["RTVIObserver<br/><i>or any consumer</i>"] --> CLIENT["the UI"]
 ```
 
 ### The context frame
@@ -71,8 +71,11 @@ AggregatedTextProgressFrame(
 )
 ```
 
-`accumulated + remaining` reconstructs the sentence exactly (hence `strip=False`), so a
-client can render the split without ever losing a character. What the client does with it
+`accumulated_text + remaining_text` reconstructs `AggregatedTextFrame.text` exactly (hence
+`strip=False`), so any consumer holding the segment frame can position into the string it
+already has without ever losing a character. Highlighting text in a UI is the usual case
+and the example used throughout, but nothing here is UI- or RTVI-specific; see
+[the guarantee](./README.md#the-guarantee-that-makes-it-useful). What the client does with it
 is covered in [RTVI integration](./rtvi-integration.md).
 
 A progress frame accompanies a word frame whenever the word was matched to a real slot and

@@ -9,6 +9,7 @@ sync — word by word, while audio is playing.
 | [WordCompletionTracker](./word-completion-tracker.md) | Tracks one frame to completion |
 | [AggregatedFrameSequencer](./aggregated-frame-sequencer.md) | Orders frames downstream |
 | [RTVI integration](./rtvi-integration.md) | How the frames reach the client |
+| [Possible improvements](./improvements.md) | Known rough edges, with reasoning |
 
 ---
 
@@ -30,7 +31,7 @@ From that single output, three things must happen:
 | Consumer | Wants | Why |
 | --- | --- | --- |
 | **Conversation context** | `Your card is <card>1234-5678-9012-3456</card>. Run <code>npm install</code> to start.` | The LLM must see its own tags on the next turn, or it stops producing them |
-| **The user's screen** | `Your card is XXXX-XXXX-XXXX-3456.` + a syntax-highlighted code block, with each word bolded as it is spoken | The UI renders and redacts; the raw tags are noise |
+| **The user's screen** *(the example used throughout — but any downstream consumer works the same way)* | `Your card is XXXX-XXXX-XXXX-3456.` + a syntax-highlighted code block, with each word bolded as it is spoken | The UI renders and redacts; the raw tags are noise |
 | **The TTS provider** | `Your card is <spell>1234-5678-9012-3456</spell>.` — and *nothing* for the code block | Digits must be spelled out; code must not be read aloud |
 
 So there are three parallel texts for every sentence:
@@ -38,9 +39,9 @@ So there are three parallel texts for every sentence:
 ```mermaid
 flowchart LR
     LLM["<b>LLM text</b><br/>Your card is<br/>&lt;card&gt;1234-…-3456&lt;/card&gt;"]
-    LLM --> UF["<b>user-facing text</b><br/>Your card is<br/>1234-…-3456"]
+    LLM --> UF["<b>segment text</b><br/>Your card is<br/>1234-…-3456"]
     LLM --> TTS["<b>TTS text</b><br/>Your card is<br/>&lt;spell&gt;1234-…-3456&lt;/spell&gt;"]
-    UF --> UI["screen<br/><i>+ RTVI transforms</i>"]
+    UF --> UI["the UI<br/><i>or any other consumer</i>"]
     LLM --> CTX["conversation context"]
     TTS --> PROV["TTS provider"]
     PROV -->|"word timestamps:<br/>'Your' 'card' 'is' '1' '2' …"| BACK(["where are we?"])
@@ -48,11 +49,72 @@ flowchart LR
     BACK -.->|record| CTX
 ```
 
+### Naming: what the "segment text" is
+
+The middle channel is easy to mis-name. It is **not** defined by who reads it — it is the
+**text carried on the `AggregatedTextFrame` itself** (`frame.text`).
+
+That frame is built by whichever processor is aggregating the LLM's tokens — either
+`LLMTextProcessor` (when one is in the pipeline) or `TTSService` itself — and both fill it
+the same way, from the configured `BaseTextAggregator`:
+
+```python
+AggregatedTextFrame(
+    text=aggregation.text,
+    aggregated_by=aggregation.type,
+    raw_text=aggregation.full_match if isinstance(aggregation, PatternMatch)
+             else aggregation.text,
+)
+```
+
+So what `text` contains depends entirely on the aggregator in use:
+
+| Aggregator | `frame.text` | `frame.raw_text` |
+| --- | --- | --- |
+| `SimpleTextAggregator` (the default) | The sentence or token as the LLM wrote it | **Identical** to `text` |
+| `PatternPairAggregator`, on a matched pattern | The content *between* the delimiters — `1234-…-3456` | The `full_match`, delimiters included — `<card>1234-…-3456</card>` |
+| `PatternPairAggregator`, on unmatched text | The text as-is | Identical to `text` |
+
+The two channels therefore only diverge where an aggregator deliberately splits them —
+most commonly a `PatternPairAggregator` match, which is the case these documents follow.
+With the default aggregator they are the same string, and the LLM-text cursor is simply
+along for the ride.
+
+### The guarantee that makes it useful
+
+Whatever the aggregator put in `frame.text`, one rule always holds while that segment is
+being spoken:
+
+```
+progress.accumulated_text + progress.remaining_text  ==  AggregatedTextFrame.text
+```
+
+Exactly — character for character, after every single word. The two halves of a progress
+frame are always a clean split of the string the segment frame is already carrying: never
+a paraphrase of it, never a normalised copy, never off by a space.
+
+That is what makes the progress frames usable by anything, without coordination. A
+consumer that has the segment frame does not have to guess how the text was transformed on
+its way to the TTS, or re-derive positions itself — it can index straight into the string
+it already holds. Highlight the first half and leave the second plain, and you have word
+highlighting; redact both halves and you have redaction; concatenate them and you get the
+original back.
+
+**These documents use a UI highlighting spoken words as the running example**, because it
+makes the moving cursor easy to picture — but that is all it is, an example. A custom
+processor, a transcript writer, a redaction filter, or a logger consumes the same frames on
+exactly the same terms.
+
+> The API spells this channel `user_facing_*` (`user_facing_text`, `user_facing_pos`,
+> `get_accumulated_user_facing_text()`). These documents say **segment text** for the
+> concept and keep `user_facing_*` when naming actual API members — see
+> [possible improvements](./improvements.md#1-the-user_facing_-naming).
+
 The provider streams back word-timestamp events containing only the words it actually
 spoke. Those words are the *only* signal available, and they match none of the three
 texts exactly. Everything in these documents exists to answer, for each incoming word:
 
-1. **Where are we?** — which position in the user-facing text, so the UI can highlight it
+1. **Where are we?** — which position in the segment text, so the UI can highlight it
 2. **What do we record?** — which span of the *LLM* text, so the context keeps the tags
 3. **When do we push it?** — in what order, relative to everything else in the turn
 

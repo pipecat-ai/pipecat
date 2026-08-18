@@ -21,24 +21,27 @@ Every transform opens the same gap:
 | URL cleanup | `https://pipecat.ai` | `pipecat.ai` |
 | Pattern delimiters | `<card>4111</card>` | `4111` |
 
-Without a mapping, the UI cannot highlight what is being said, because it has no idea
-where in the rendered sentence the audio has reached.
+Without a mapping, a consumer cannot tell where in the sentence the audio has reached — a
+UI has nothing to highlight, and a redaction filter has no split to redact around.
 
 ### 1.2 The context drifted from what the LLM wrote
 
-The second problem is the one that silently degrades a bot over time. Delimiters the LLM
-was asked to produce are stripped before synthesis, so if the context is rebuilt from what
-the TTS spoke, **the tags vanish from the conversation history**. The LLM then sees a
-transcript where its own convention is absent and stops producing it.
+The second problem is the one that silently degrades a bot over time. When an aggregator
+splits a segment into content and delimiters — a `PatternPairAggregator` match yields
+`text='4111'` alongside `raw_text='<card>4111</card>'` — only the content is synthesized.
+If the context is then rebuilt from what the TTS spoke, **the tags vanish from the
+conversation history**. The LLM sees a transcript where its own convention is absent and
+stops producing it.
 
 That is why the map tracks a *third* text. The two it diffs are `tts_text` and
-`original_text` (user-facing); `llm_text` rides along on its own cursor:
+`original_text` (the **segment text** — see [naming](./README.md#naming-what-the-segment-text-is));
+`llm_text` rides along on its own cursor:
 
-| Cursor | Text | Consumer |
+| Cursor | Text | Indexes |
 | --- | --- | --- |
-| `raw_pos` | `Your card is 4111` | The TTS stream — the only cursor that really moves |
-| `user_facing_pos` | `Your card is 4111` | The screen |
-| `llm_pos` | `Your card is <card>4111</card>` | The conversation context |
+| `raw_pos` | `Your card is 4111` | The TTS text — the only cursor that really moves |
+| `user_facing_pos` | `Your card is 4111` | The segment text — e.g. what the UI highlights |
+| `llm_pos` | `Your card is <card>4111</card>` | The LLM text — what the conversation context records |
 
 Walking that example one word at a time, the two derived cursors stay together until the
 tag appears, then diverge:
@@ -167,14 +170,14 @@ There is exactly one real cursor — `raw_pos`, the position reached in the TTS 
 ```python
 TextSegmentMap(
     tts_text      = "Your balance is forty-two dollars and fifty cents",
-    original_text = "Your balance is $42.50",     # user-facing
-    llm_text      = "Your balance is $42.50",     # what the LLM wrote
+    original_text = "Your balance is $42.50",     # frame.text — the segment text
+    llm_text      = "Your balance is $42.50",     # frame.raw_text
 )
 ```
 
 Feeding the eight spoken words in one at a time:
 
-| word | `raw_pos` | `user_facing_pos` | `llm_pos` | `in_transformed_segment` | accumulated user-facing |
+| word | `raw_pos` | `user_facing_pos` | `llm_pos` | `in_transformed_segment` | segment text consumed |
 | --- | ---: | ---: | ---: | --- | --- |
 | `Your` | 4 | 4 | 4 | False | `Your` |
 | `balance` | 12 | 12 | 12 | False | `Your balance` |
@@ -190,9 +193,10 @@ straight to 22 when the segment completes. `last_completed_segment` then reports
 `$42.50` segment — the signal callers use to attribute the whole original span to the word
 that finished it.
 
-When the LLM text has extra delimiters the third cursor diverges from the second:
-`llm_text="Your balance is <price>$42.50</price>"` moves `llm_pos` past the tags while
-`user_facing_pos` never sees them.
+Here `llm_text` and the segment text are the same string, so the last two columns move
+together — the common case with the default `SimpleTextAggregator`. They diverge only when
+an aggregator splits content from delimiters: with `llm_text="Your balance is
+<price>$42.50</price>"`, `llm_pos` steps over the tags that `user_facing_pos` never sees.
 
 ### Empty-sided segments
 
@@ -210,8 +214,8 @@ tts='Hello world'   original='Hello there world'
   word='world'   user_facing_pos=17   'Hello there world'   ← 'there ' folded in here
 ```
 
-The deleted word is never lost from the user-facing text or the context; it is simply
-never spoken.
+The deleted word is never lost from the segment text or the context; it is simply never
+spoken.
 
 **`insert` — text that exists only in the TTS side.** The segment's original span is
 empty (`original_start == original_end`), so the inserted word consumes raw text but
@@ -304,7 +308,7 @@ tts='Hello five'   original='Hello 5'
     └─ seg1: PLACED  → seg1 completes, user_facing_pos jumps to 7 ('Hello 5')
 ```
 
-One incoming token therefore completed two segments and moved the user-facing cursor
+One incoming token therefore completed two segments and moved the segment-text cursor
 across a transform, in a single `advance_word` call.
 
 **`EXHAUSTED` — the segment outlives nothing.** The segment has no alphanumeric content
@@ -338,7 +342,7 @@ text need opposite treatment of a lone `<`:
 | Function | Input | `5 < 10` becomes | Used for |
 | --- | --- | --- | --- |
 | `strip_markup` | A possibly-truncated token | `5 ` | Matching a token that may be mid-tag |
-| `strip_complete_markup` | A whole, static text | `5 < 10` | `is_transformed`, default user-facing text |
+| `strip_complete_markup` | A whole, static text | `5 < 10` | `is_transformed`, default segment text |
 
 The two agree on everything except an unmatched `<`:
 
@@ -366,7 +370,7 @@ matters:
 - **`strip_complete_markup` runs on whole texts we assembled ourselves.** Nothing here is
   truncated, so a lone `<` is content the LLM genuinely wrote — `5 < 10`, `I <3 this`, a
   generic type like `List<int>`. Swallowing the rest of the sentence would silently drop
-  real text from the user-facing view and from `is_transformed`'s judgement.
+  real text from the segment text and from `is_transformed`'s judgement.
 
 Applying either function to the other's input is what would be unsafe; keeping them
 separate is what makes each one correct in its own place.
@@ -377,7 +381,7 @@ separate is what makes each one correct in its own place.
 | --- | --- |
 | `advance_word(word)` | Consume one token, moving all cursors |
 | `word_belongs_current_segment(word)` | Non-mutating dry run of the same matching |
-| `user_facing_pos` / `llm_pos` / `raw_pos` | The three cursors |
+| `user_facing_pos` / `llm_pos` / `raw_pos` | The three cursors (`user_facing_pos` indexes the segment text) |
 | `is_complete` | All alphanumeric content accounted for |
 | `in_transformed_segment` | Cursor sits mid-transform (callers suppress context writes) |
 | `last_completed_segment` | Segment finished by the last `advance_word` |
