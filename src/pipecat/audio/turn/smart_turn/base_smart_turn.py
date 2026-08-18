@@ -174,6 +174,13 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         """Reset the turn analyzer to its initial state."""
         self._clear(EndOfTurnState.COMPLETE)
 
+    async def cleanup(self):
+        """Release the analyzer's resources, including the thread it runs the model on."""
+        try:
+            await super().cleanup()
+        finally:
+            self._executor.shutdown(wait=False)
+
     def _clear(self, turn_state: EndOfTurnState):
         """Clear internal state based on turn completion status."""
         # If the state is still incomplete, keep the _speech_triggered as True
