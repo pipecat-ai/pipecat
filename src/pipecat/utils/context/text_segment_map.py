@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from pipecat.utils.text.transforms._alnum_utils import (
+    absorb_attached_punctuation,
     advance_by_alnums,
     fold_case_and_accents,
     normalize,
@@ -164,18 +165,30 @@ class TextSegment:
     def is_transformed(self) -> bool:
         """True when this segment cannot be tracked by proportional char advancement.
 
-        This holds when:
+        Byte-identical sides are never a transform, markup included: such a
+        segment comes from an equal diff opcode, and both cursors skip tags the
+        same way (normalize strips them from the consumed TTS span,
+        advance_by_alnums jumps them in the original), so proportional
+        advancement is exact. Without this, a sentence that keeps a tag in both
+        channels (e.g. Cartesia's ``<spell>``) is held atomically, and an
+        interruption before its final word drops every word already spoken from
+        the accumulated text.
+
+        When the sides differ, this holds when:
 
         - alphanumeric content differs between original and TTS sides;
         - a replacement changed word count / tokenization;
-        - the TTS side contains markup, even if the spoken alphanumeric content is
-          the same as the original.
+        - the TTS side contains markup the original does not, even if the spoken
+          alphanumeric content is the same.
 
         The markup check is syntax-based and tag-name independent. For example,
-        ``<phoneme ...>Siobhan</phoneme>`` is transformed because the TTS segment
-        has raw markup around the original word, so the raw segment cursor can move
-        while the original/LLM cursors must remain held.
+        ``<phoneme ...>Siobhan</phoneme>`` against original ``Siobhan`` is
+        transformed because only the TTS segment has raw markup around the word,
+        so the raw segment cursor can move while the original/LLM cursors must
+        remain held.
         """
+        if self.original == self.tts:
+            return False
         if self.tts != strip_complete_markup(self.tts):
             return True
         if normalize(self.original) != normalize(self.tts):
@@ -590,17 +603,15 @@ class TextSegmentMap:
         """Advance the raw cursor to *new_pos* in *seg*, moving the semantic cursors.
 
         For an unchanged segment ``user_facing_pos`` tracks the consumed content
-        directly (its original side is byte-identical to its TTS side): a word
-        with alphanumeric content advances proportionally via
-        :func:`advance_by_alnums` (which also absorbs punctuation attached to the
-        word, e.g. the ``?`` in ``"you?"``); a word carrying no alnum budget -- a
-        punctuation token set off from its word by a space (French ``"va ?"``,
-        ``"Attention :"``) -- advances straight to the consumed end instead, so it
-        drains from the remaining text immediately rather than lagging a word
-        behind. Either way the cursor stops before trailing whitespace, which is
-        the separator owned by the following token. A transformed segment holds
-        these cursors until it fully completes, then jumps them to the end of its
-        original span in one step.
+        directly. A byte-identical segment takes the raw offset as the original
+        offset -- the identity mapping, exact for any token shape. A segment
+        whose sides differ only by case/accent folding advances proportionally
+        via :func:`advance_by_alnums` (which also absorbs punctuation attached
+        to the word, e.g. the ``?`` in ``"you?"``). Either way the cursor stops
+        before trailing whitespace, which is the separator owned by the
+        following token. A transformed segment holds these cursors until it
+        fully completes, then jumps them to the end of its original span in one
+        step.
         """
         if seg.is_transformed:
             # A trailing markup-only remainder (e.g. a closing tag) never arrives
@@ -612,19 +623,25 @@ class TextSegmentMap:
                 new_pos = len(seg.tts)
         else:
             n_alnum = len(normalize(seg.tts[self._seg_raw_pos : new_pos]))
-            if n_alnum:
+            if seg.original == seg.tts or not n_alnum:
+                # Byte-identical sides make the raw offset itself the exact
+                # original offset, for any token shape -- including a span that
+                # ends inside a tag, where an alnum walk would count the tag
+                # fragment's letters and drift. The zero-alnum case -- a
+                # whitespace-separated punctuation token (French " :", " ?") --
+                # takes the same identity offset so the mark drains immediately
+                # instead of lagging a word behind. Both stop before trailing
+                # whitespace, the separator owned by the following token. A
+                # worded commit also absorbs punctuation attached to the word
+                # (the "?" in "you?"), which the raw cursor leaves unconsumed.
+                rel = len(seg.tts[:new_pos].rstrip())
+                if n_alnum:
+                    rel = absorb_attached_punctuation(seg.tts, rel)
+                self._user_facing_pos = seg.original_start + rel
+            else:
                 self._user_facing_pos = advance_by_alnums(
                     self._original_text, self._user_facing_pos, n_alnum
                 )
-            else:
-                # Zero-alnum consumed span: a whitespace-separated punctuation
-                # token (French " :", " ?"). Advance straight to the consumed
-                # end so the mark drains immediately, stopping before any trailing
-                # whitespace -- the separator owned by the following token
-                # (e.g. the space after "is " in "Your balance is $42.50",
-                # held until the next segment absorbs it). original == tts
-                # here, so the offset is exact.
-                self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
             self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
 
         self._seg_raw_pos = new_pos
