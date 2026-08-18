@@ -35,7 +35,7 @@ stops producing it.
 
 That is why the map tracks a *third* text. The two it diffs are `tts_text` and
 `original_text` (the **segment text** — see
-[where the three texts come from](./README.md#where-the-three-texts-come-from));
+[how the three texts are produced](./README.md#3-how-the-three-texts-are-produced));
 `llm_text` rides along on its own cursor:
 
 | Cursor | Text | Indexes |

@@ -1,9 +1,9 @@
 # TTS Word Tracking Architecture
 
-How Pipecat keeps what the LLM wrote, what the user sees, and what the TTS speaks in
-sync — word by word, while audio is playing.
+How Pipecat keeps what the LLM wrote, what downstream consumers render, and what the TTS
+speaks in sync — word by word, while audio is playing.
 
-| Document | Layer |
+| Document | Contents |
 | --- | --- |
 | [TextSegmentMap](./text-segment-map.md) | Aligns the three texts |
 | [WordCompletionTracker](./word-completion-tracker.md) | Tracks one frame to completion |
@@ -18,7 +18,7 @@ sync — word by word, while audio is playing.
 One response from the LLM has to satisfy three consumers that want *different text*.
 
 Take a bot that has been prompted to wrap credit cards in `<card>` tags and code in
-`<code>` tags (this is the [`code-helper`](#5-the-code-helper-example) example):
+`<code>` tags (this is the [`code-helper`](#6-the-code-helper-example) example):
 
 **What the LLM produces:**
 
@@ -34,114 +34,16 @@ From that single output, three things must happen:
 | **The user's screen** *(the example used throughout — but any downstream consumer works the same way)* | `Your card is XXXX-XXXX-XXXX-3456.` + a syntax-highlighted code block, with each word bolded as it is spoken | The UI renders and redacts; the raw tags are noise |
 | **The TTS provider** | `Your card is <spell>1234-5678-9012-3456</spell>.` — and *nothing* for the code block | Digits must be spelled out; code must not be read aloud |
 
-### Where the three texts come from
-
-They are not authored separately — they are produced by **two split points** in the
-pipeline, one owned by an aggregator and one by the TTS service's transformers:
-
-```
-   LLM tokens
-        │
-        ▼
- ┌───────────────────────────────────────────────┐
- │  LLMTextProcessor  (or TTSService itself)     │   SPLIT 1 — the aggregator
- │  BaseTextAggregator, e.g.                     │   decides where segments end
- │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter
- └───────────────────────────────────────────────┘
-        │
-        ├──────── raw_text ─────────▶  ① LLM TEXT        → conversation context
-        │
-        └──────── text ─────────────▶  ② SEGMENT TEXT    → downstream consumers
-                                            │                (the AggregatedTextFrame)
-                                            ▼
-                                  ┌──────────────────────┐
-                                  │  TTSService          │   SPLIT 2 — filters and
-                                  │  text filters        │   per-type transformers
-                                  │  text transformers   │   rewrite for speech only
-                                  └──────────────────────┘
-                                            │
-                                            ▼
-                                       ③ TTS TEXT         → the provider
-```
-
-Both `text` and `raw_text` come off the same aggregation: `raw_text` is its `full_match`
-when the aggregator produced a `PatternMatch`, and identical to `text` otherwise.
-
-Three properties fall out of this shape:
-
-- **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
-  **segment text**, because that is what it is — `frame.text`, the segment as the
-  aggregator produced it. It is not defined by who reads it.
-- **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
-  the TTS; `frame.text` keeps what the aggregator produced.
-- **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
-  transformers, all three are the same string.
-
-### What that looks like for one LLM response
-
-Given the `code-helper` prompt, the LLM emits:
-
-```
-Your card is <card>1234-5678-9012-3456</card>. Thanks!
-```
-
-The `PatternPairAggregator` splits this into **four** frames — the tagged span becomes its
-own segment, with its own type — and only that one is touched by a transformer:
-
-| # | `aggregated_by` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
-| --- | --- | --- | --- | --- |
-| 1 | `sentence` | `Your card is ` | `Your card is` | `Your card is` |
-| 2 | **`credit_card`** | `<card>1234-5678-9012-3456</card>` | `1234-5678-9012-3456` | `<spell>1234-5678-9012-3456</spell>` |
-| 3 | `sentence` | `.` | `.` | `.` |
-| 4 | `sentence` | ` Thanks!` | `Thanks!` | `Thanks!` |
-
-Frame 2 is where all the work happens. The aggregator moved the delimiters into `raw_text`
-so the context keeps them; the `credit_card` transformer wrapped the digits in Cartesia's
-`<spell>` tags so they are read out one by one. The other three frames are identical in
-all three columns.
-
-`aggregated_by` is the routing key throughout: it selects which transformer applies
-(`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
-(`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
-(`bot_output_transforms=[("credit_card", …)]`).
-
-### The guarantee that makes it useful
-
-Whatever the aggregator put in `frame.text`, one rule always holds while that segment is
-being spoken:
-
-```
-progress.accumulated_text + progress.remaining_text  ==  AggregatedTextFrame.text
-```
-
-Exactly — character for character, after every single word. The two halves of a progress
-frame are always a clean split of the string the segment frame is already carrying: never
-a paraphrase of it, never a normalised copy, never off by a space.
-
-That is what makes the progress frames usable by anything, without coordination. A
-consumer that has the segment frame does not have to guess how the text was transformed on
-its way to the TTS, or re-derive positions itself — it can index straight into the string
-it already holds. Highlight the first half and leave the second plain, and you have word
-highlighting; redact both halves and you have redaction; concatenate them and you get the
-original back.
-
-**These documents use a UI highlighting spoken words as the running example**, because it
-makes the moving cursor easy to picture — but that is all it is, an example. A custom
-processor, a transcript writer, a redaction filter, or a logger consumes the same frames on
-exactly the same terms.
-
-> The API spells this channel `user_facing_*` (`user_facing_text`, `user_facing_pos`,
-> `get_accumulated_user_facing_text()`). These documents say **segment text** for the
-> concept and keep `user_facing_*` when naming actual API members — see
-> [possible improvements](./improvements.md#1-the-user_facing_-naming).
-
 The provider streams back word-timestamp events containing only the words it actually
-spoke. Those words are the *only* signal available, and they match none of the three
-texts exactly. Everything in these documents exists to answer, for each incoming word:
+spoke. Those words are the *only* signal available.
+Everything in these documents exists to answer, for each incoming word:
 
-1. **Where are we?** — which position in the segment text, so the UI can highlight it
-2. **What do we record?** — which span of the *LLM* text, so the context keeps the tags
+1. **Where are we?** — which position in the displayed text, so the UI can highlight it
+2. **What do we record?** — which span of the LLM's own text, so the context keeps the tags
 3. **When do we push it?** — in what order, relative to everything else in the turn
+
+[§2](#2-the-problems-this-solves) is what went wrong before those questions had answers;
+[§3](#3-how-the-three-texts-are-produced) is where the three texts actually come from.
 
 ---
 
@@ -150,9 +52,9 @@ texts exactly. Everything in these documents exists to answer, for each incoming
 ### 2.1 The context drifted from what the LLM wrote
 
 The text appended to the conversation context was the text that came *back from the TTS*,
-not the text the LLM produced. The aggregator had already moved the delimiters aside into
-`raw_text`, and the transformers rewrote what was left, so nothing the LLM actually wrote
-survived the round trip into the context.
+not the text the LLM produced. Everything that made the output speakable — the tags removed
+before synthesis, the values rewritten for pronunciation —, so what landed in the context 
+was never quite what the LLM had written.
 
 The failure mode was subtle and slow: the LLM is asked to wrap credit cards in `<card>`
 tags, does so on turn one, and then sees a context where its own tags are absent. After a
@@ -208,9 +110,20 @@ disconnected events.
 
 ### 2.6 And a feature: text transformations
 
-Once the three texts are tracked independently, the TTS text can be rewritten freely for
-better speech without the user or the context ever seeing the rewrite. These are the
-built-in transforms (`src/pipecat/utils/text/transforms/`, bundled by `VoiceFormatter`):
+TTS engines read what you give them, and written text is often not what you want spoken.
+`$42.50` may come out as "dollar forty two point five zero"; `1994` as "one thousand nine
+hundred ninety four" when the sentence means "nineteen ninety four"; markdown asterisks
+get read aloud; a URL becomes "h t t p s colon slash slash". The fix is to **rewrite the
+text before it reaches the TTS**, so the audio comes out right.
+
+The obstacle was that the rewritten text was also the text everything else saw. Expanding
+`$42.50` for the synthesizer meant the user read "forty-two dollars and fifty cents" on
+screen and the conversation context recorded it that way too — so a transform that
+improved the audio corrupted the transcript. Tracking the three texts separately is what
+makes the rewrite safe: it reaches the TTS and nothing else.
+
+These are the built-in transforms (`src/pipecat/utils/text/transforms/`, bundled by
+`VoiceFormatter`):
 
 | Transform | Input | Sent to TTS |
 | --- | --- | --- |
@@ -226,54 +139,148 @@ built-in transforms (`src/pipecat/utils/text/transforms/`, bundled by `VoiceForm
 
 Plus per-segment transformers registered on the service itself
 (`tts.add_text_transformer(fn, "credit_card")`), which is how the `code-helper` example
-wraps card numbers in Cartesia's `<spell>` tags and strips `https://` from links.
+wraps card numbers in `<spell>` tags and strips `https://` from links.
+
+Each one buys better audio at the cost of widening the gap between what is spoken and what
+is displayed — which is exactly the gap the three layers have to close. They are applied at
+[SPLIT 2](#3-how-the-three-texts-are-produced).
 
 ---
 
-## 3. The three layers
+## 3. How the three texts are produced
 
-```mermaid
-flowchart TD
-    TTS["TTS provider<br/><i>word-timestamp events</i>"] -->|word| SEQ
+They are not authored separately. Two **split points** create them, one owned by an
+aggregator and one by the TTS service's transformers:
 
-    subgraph SEQ["<b>AggregatedFrameSequencer</b> — one per TTS service"]
-        direction TB
-        Q["ordered slot queue<br/><i>spoken · skipped · buffered</i>"]
-        WCT1["WordCompletionTracker<br/><i>slot 1</i>"]
-        WCT2["WordCompletionTracker<br/><i>slot 2</i>"]
-        Q --- WCT1
-        Q --- WCT2
-    end
+```
+   LLM tokens
+        │
+        ▼
+ ┌───────────────────────────────────────────────┐
+ │  LLMTextProcessor  (or TTSService itself)     │   SPLIT 1 — the aggregator
+ │  BaseTextAggregator, e.g.                     │   decides where segments end
+ │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter
+ └───────────────────────────────────────────────┘
+        │
+        ├──────── raw_text ─────────▶  ① LLM TEXT        → conversation context
+        │
+        └──────── text ─────────────▶  ② SEGMENT TEXT    → downstream consumers
+                                            │                (the AggregatedTextFrame)
+                                            ▼
+                                  ┌──────────────────────┐
+                                  │  TTSService          │   SPLIT 2 — filters and
+                                  │  text filters        │   per-type transformers
+                                  │  text transformers   │   rewrite for speech only
+                                  └──────────────────────┘
+                                            │
+                                            ▼
+                                       ③ TTS TEXT         → the provider
+```
 
-    WCT1 --> TSM["<b>TextSegmentMap</b><br/><i>three-cursor alignment</i>"]
+Both `text` and `raw_text` come off the same aggregation: `raw_text` is its `full_match`
+when the aggregator produced a `PatternMatch`, and identical to `text` otherwise. SPLIT 2
+is where the transforms listed in [§2.6](#26-and-a-feature-text-transformations) run.
 
-    SEQ -->|TTSTextFrame| CTX["conversation context"]
-    SEQ -->|AggregatedTextProgressFrame| RTVI["RTVI → client"]
+Three properties fall out of this shape:
+
+- **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
+  **segment text**, because that is what it is — `frame.text`, the segment as the
+  aggregator produced it. It is not defined by who reads it.
+- **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
+  the TTS; `frame.text` keeps what the aggregator produced.
+- **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
+  transformers, all three are the same string.
+
+### What that looks like for the response above
+
+The `PatternPairAggregator` splits that one response into **six** frames — each tagged
+span becomes its own segment, with its own type:
+
+| # | `aggregated_by` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
+| --- | --- | --- | --- | --- |
+| 1 | `sentence` | `Your card is ` | `Your card is` | `Your card is` |
+| 2 | **`credit_card`** | `<card>1234-5678-9012-3456</card>` | `1234-5678-9012-3456` | `<spell>1234-5678-9012-3456</spell>` |
+| 3 | `sentence` | `.` | `.` | `.` |
+| 4 | `sentence` | ` Run ` | `Run` | `Run` |
+| 5 | **`code`** | `<code>npm install</code>` | `npm install` | *(never sent — skipped)* |
+| 6 | `sentence` | ` to start.` | `to start.` | `to start.` |
+
+Only the two tagged frames do anything interesting. Frame 2's delimiters moved into
+`raw_text` so the context keeps them, while its `credit_card` transformer wrapped the
+digits in Cartesia's `<spell>` tags so they are read out one by one. Frame 5 is never
+spoken at all — which is what creates the ordering problem in
+[§2.2](#22-skipped-frames-arrived-out-of-order). The four `sentence` frames are identical
+in all three columns.
+
+`aggregated_by` is the routing key throughout: it selects which transformer applies
+(`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
+(`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
+(`bot_output_transforms=[("credit_card", …)]`).
+
+### The guarantee that makes it useful
+
+Whatever the aggregator put in `frame.text`, one rule always holds while that segment is
+being spoken:
+
+```
+progress.accumulated_text + progress.remaining_text  ==  AggregatedTextFrame.text
+```
+
+Exactly — character for character, after every single word. The two halves of a progress
+frame are always a clean split of the string the segment frame is already carrying: never
+a paraphrase of it, never a normalised copy, never off by a space.
+
+That is what makes the progress frames usable by anything, without coordination. A
+consumer that has the segment frame does not have to guess how the text was transformed on
+its way to the TTS, or re-derive positions itself — it can index straight into the string
+it already holds. Highlight the first half and leave the second plain, and you have word
+highlighting; redact both halves and you have redaction; concatenate them and you get the
+original back.
+
+**These documents use a UI highlighting spoken words as the running example**, because it
+makes the moving cursor easy to picture — but that is all it is, an example. A custom
+processor, a transcript writer, a redaction filter, or a logger consumes the same frames on
+exactly the same terms.
+
+> The API spells this channel `user_facing_*` (`user_facing_text`, `user_facing_pos`,
+> `get_accumulated_user_facing_text()`). These documents say **segment text** for the
+> concept and keep `user_facing_*` when naming actual API members — see
+> [possible improvements](./improvements.md#1-the-user_facing_-naming).
+
+---
+
+## 4. The three layers
+
+```
+  TTS provider ── word-timestamp events ──┐
+                                          ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │  AggregatedFrameSequencer            one per TTS service       │
+ │                                                                │
+ │   ordered slot queue:  [ spoken ][ skipped ][ spoken ] …        │
+ │                            │                    │              │
+ │                    ┌───────▼────────┐   ┌───────▼────────┐     │
+ │                    │ WordCompletion │   │ WordCompletion │     │
+ │                    │ Tracker        │   │ Tracker        │     │
+ │                    │  ┌───────────┐ │   │  ┌───────────┐ │     │
+ │                    │  │ TextSeg   │ │   │  │ TextSeg   │ │     │
+ │                    │  │ mentMap   │ │   │  │ mentMap   │ │     │
+ │                    │  └───────────┘ │   │  └───────────┘ │     │
+ │                    └────────────────┘   └────────────────┘     │
+ └────────────────────────────────────────────────────────────────┘
+             │                                    │
+             ▼                                    ▼
+      TTSTextFrame                   AggregatedTextProgressFrame
+   → conversation context                → RTVI → the client
 ```
 
 Each layer owns one concern, and none of them knows about the layer above:
 
-| Layer | Scope | Question it answers |
-| --- | --- | --- |
-| `TextSegmentMap` | One sentence | Where in the original text are we, given this spoken word? |
-| `WordCompletionTracker` | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? |
-| `AggregatedFrameSequencer` | The whole turn | In what order do frames leave the TTS service? |
-
-**Why each one exists:**
-
-- **`TextSegmentMap`** exists because the text sent to TTS is not the text the user sees
-  or the LLM wrote, so something has to hold three cursors in alignment across transforms
-  and markup while matching noisy, provider-specific word tokens.
-
-- **`WordCompletionTracker`** exists because one aggregated frame needs a completion
-  verdict and an attributed span of LLM text per word even when the TTS provider
-  misbehaves — dropped events, straddling tokens — which is policy the pure alignment map
-  deliberately does not own.
-
-- **`AggregatedFrameSequencer`** exists because words arrive per-frame but the
-  conversation context is global and ordered, so spoken, skipped, buffered, and
-  concurrently-live-context frames must be serialized into one correct downstream
-  timeline.
+| Layer | Scope | Question it answers | Why it has to exist |
+| --- | --- | --- | --- |
+| [`TextSegmentMap`](./text-segment-map.md) | One segment | Where in the other two texts are we, given this spoken word? | The text sent to the TTS is not the text the LLM wrote or the segment carries, so something has to hold three cursors in alignment across transforms and markup while matching noisy, provider-specific tokens |
+| [`WordCompletionTracker`](./word-completion-tracker.md) | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? | One frame needs a completion verdict and an attributed LLM span per word even when the TTS provider misbehaves — policy the pure alignment map deliberately does not own |
+| [`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md) | The whole turn | In what order do frames leave the TTS service? | Words arrive per-frame but the conversation context is global and ordered, so spoken, skipped, buffered, and concurrent-context frames must be serialized into one timeline |
 
 Mapped back to the problems:
 
@@ -288,7 +295,7 @@ Mapped back to the problems:
 
 ---
 
-## 4. Where they are wired up
+## 5. Where they are wired up
 
 All three are driven from `TTSService` (`src/pipecat/services/tts_service.py`). The
 service owns one `AggregatedFrameSequencer`; the sequencer builds a
@@ -305,7 +312,7 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 
 ---
 
-## 5. The code-helper example
+## 6. The code-helper example
 
 `pipecat-examples/code-helper` exercises every part of this stack at once. Its bot
 prompts the LLM to tag its output, then routes each tag type differently:
@@ -329,20 +336,18 @@ rtvi_observer_params=RTVIObserverParams(
 )
 ```
 
-Result, for one sentence:
-
-| Channel | Text |
-| --- | --- |
-| LLM / context | `Your card is <card>1234-5678-9012-3456</card>` |
-| TTS | `Your card is <spell>1234-5678-9012-3456</spell>` |
-| Screen | `Your card is XXXX-XXXX-XXXX-3456`, bolded word by word as it is spoken |
+Those four settings produce the six frames tabulated in
+[§3](#what-that-looks-like-for-the-response-above), plus one thing that table does not
+show: the client renders `XXXX-XXXX-XXXX-3456` rather than the real digits, because step 4
+redacts the segment on its way out while the highlight keeps advancing over the redacted
+form.
 
 The client is only ~10 lines of rendering logic, because the hard part is already done
 server-side — see [RTVI integration](./rtvi-integration.md).
 
 ---
 
-## 6. Tests
+## 7. Tests
 
 | File | Tests | Covers |
 | --- | ---: | --- |
