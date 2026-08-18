@@ -168,7 +168,7 @@ Each layer owns one concern, and none of them knows about the layer above:
 | Layer | Scope | Question it answers |
 | --- | --- | --- |
 | `TextSegmentMap` | One sentence | Where in the original text are we, given this spoken word? |
-| `WordCompletionTracker` | One frame | Is this frame fully spoken, and what text does this word represent? |
+| `WordCompletionTracker` | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? |
 | `AggregatedFrameSequencer` | The whole turn | In what order do frames leave the TTS service? |
 
 **Why each one exists:**
@@ -178,9 +178,9 @@ Each layer owns one concern, and none of them knows about the layer above:
   and markup while matching noisy, provider-specific word tokens.
 
 - **`WordCompletionTracker`** exists because one aggregated frame needs a completion
-  verdict and an attributed span per word even when the provider misbehaves — dropped
-  events, straddling tokens — which is policy the pure alignment map deliberately does
-  not own.
+  verdict and an attributed span of LLM text per word even when the TTS provider
+  misbehaves — dropped events, straddling tokens — which is policy the pure alignment map
+  deliberately does not own.
 
 - **`AggregatedFrameSequencer`** exists because words arrive per-frame but the
   conversation context is global and ordered, so spoken, skipped, buffered, and
@@ -195,7 +195,7 @@ Mapped back to the problems:
 | 2.2 Out-of-order skipped frames | `AggregatedFrameSequencer`'s slot queue |
 | 2.3 Word ↔ sentence correspondence | `AggregatedTextProgressFrame`, built from the tracker's cursors |
 | 2.4 Useless RTVI transforms | `segment_id` + `accumulated_text` / `remaining_text` on every progress frame |
-| 2.5 Streaming / concurrency / provider quirks | Sequencer (streaming, contexts) + tracker (straddle, drops) |
+| 2.5 Streaming / concurrency / TTS provider quirks | Sequencer (streaming, contexts) + tracker (straddle, drops) |
 | 2.6 Text transformations | `TextSegmentMap`'s transformed-segment handling |
 
 ---
@@ -259,7 +259,7 @@ server-side — see [RTVI integration](./rtvi-integration.md).
 | File | Tests | Covers |
 | --- | ---: | --- |
 | `tests/test_text_segment_map.py` | 52 | Alignment, markup helpers, hop classification |
-| `tests/test_word_completion_tracker.py` | 199 | Completion, attribution, provider quirks |
+| `tests/test_word_completion_tracker.py` | 199 | Completion, span attribution, TTS provider quirks |
 | `tests/test_aggregated_frame_sequencer.py` | 134 | Slot ordering, streaming, concurrent contexts |
 | `tests/test_tts_frame_ordering.py` | 46 | End-to-end frame order through real services |
 | `tests/test_cartesia_tts.py` | 13 | Cartesia word-timestamp shapes |

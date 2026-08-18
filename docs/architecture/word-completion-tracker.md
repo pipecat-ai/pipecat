@@ -2,29 +2,33 @@
 
 `src/pipecat/utils/context/word_completion_tracker.py`
 
-> **Job:** decide what one spoken word means for the frame it belongs to.
+> **Job:** for each spoken word — how much of it is this frame's, which original text
+> does it stand for, and is the frame finished?
 
 ## 1. The problem
 
 [`TextSegmentMap`](./text-segment-map.md) will tell you where a spoken word lands. It
 will not tell you what to *do* about it, and it assumes the provider behaves.
 
-Providers do not behave. A tracker owns one `AggregatedTextFrame` from dispatch to
+TTS providers do not behave. A tracker owns one `AggregatedTextFrame` from dispatch to
 "fully spoken", and has to survive:
 
 - **Dropped events** — the provider silently never reports a word it spoke. Waiting
   forever would stall the frame and everything queued behind it.
 - **Straddling tokens** — one token spans two frames (`1111And` when one frame ends with
   `1111` and the next begins with `And`).
-- **Attribution drift** — the span of LLM text credited to a word has to actually contain
-  that word, or the conversation context silently fills with wrong text.
+- **Desynced texts** — the TTS text and the LLM text can fall out of alignment, so the
+  slice of LLM text credited to a word may not actually contain that word. Recording it
+  anyway fills the conversation context with wrong text.
 
 So the tracker is the *policy* layer: the map says where things are, the tracker decides
 what that means for this frame.
 
 ## 2. What it produces per word
 
-One call in, four answers out:
+One call in, several answers out — each one read back by
+[`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md) to build the frames it
+pushes downstream:
 
 ```python
 tracker = WordCompletionTracker(
@@ -35,13 +39,44 @@ tracker = WordCompletionTracker(
 complete = tracker.add_word_and_check_complete("4111")
 ```
 
-| Accessor                     | Answers                                              |
-| ---------------------------- | ---------------------------------------------------- |
-| return value / `is_complete` | Is this frame fully spoken?                          |
-| `get_word_for_frame()`       | What text belongs to *this* frame?                   |
-| `get_llm_consumed()`         | Which LLM span does it represent?                    |
-| `get_overflow_word()`        | What spilled into the next frame?                    |
-| `suppress_in_context()`      | Should this word be kept out of the context?         |
+| Accessor | Read by | Used for |
+| --- | --- | --- |
+| `word_belongs_here()` | `process_word` | Decide whether the provider dropped an event, and this slot must be force-completed |
+| `add_word_and_check_complete()` | `process_word` | Advance, and learn whether the slot is now done — which triggers `flush()` |
+| `get_word_for_frame()` | `process_word` | The **text** of the emitted `TTSTextFrame` |
+| `get_llm_consumed()` | `process_word` | The **`raw_text`** of that frame — what the conversation context records |
+| `suppress_in_context()` | `process_word` | Sets `append_to_context=False` and skips the progress frame |
+| `get_overflow_word()` | `process_word` | Re-entered as a new word against the *next* slot |
+| `get_accumulated_user_facing_text()` | `_build_progress_frame` | `accumulated_text` → the highlighted part on screen |
+| `get_remaining_user_facing_text(strip=False)` | `_build_progress_frame` | `remaining_text` → the not-yet-spoken part on screen |
+| `get_remaining_tts_text()` | `force_complete` | Text of the catch-up frame when a provider goes silent |
+| `get_remaining_llm_text()` | `force_complete` | `raw_text` of that catch-up frame |
+
+So a single `process_word` call reads six of these to build one `TTSTextFrame` plus one
+`AggregatedTextProgressFrame` — see [RTVI integration](./rtvi-integration.md).
+
+### What "span attribution" means
+
+A **span** is a contiguous slice of `llm_text`, identified by where the cursor was before
+the word and where it is after. **Attributing** it means declaring: *this slice is what
+that spoken word stands for.*
+
+It matters because the conversation context is rebuilt by concatenating the spans, not the
+spoken words. The provider says `4111`; the context needs `<card>4111`:
+
+```
+llm_text   Your │ card │ is │ <card>4111 │ 1111 │ </card> thanks
+spoken     Your   card   is         4111   1111           thanks
+```
+
+Each `│` is a span boundary. Note where the tags land: the opening `<card>` is attributed
+to the word that *follows* it, and the closing `</card>` to the word that *precedes* it —
+neither ever arrives as its own word-timestamp event, so each has to ride along with a
+real word.
+
+The spans cover `llm_text` in order and do not overlap, so reassembling them in the order
+the words were spoken reproduces the LLM's output — tags included. That is the mechanism
+that stops the context from drifting away from what the LLM wrote.
 
 ### Recovering the LLM structure
 
@@ -118,18 +153,19 @@ actually belongs to.
 
 ## 5. The attribution safeguard
 
-`_discard_llm_span_if_frame_word_missing` enforces one invariant: **the LLM span credited
-to a word must contain that word.** If it does not, the two texts have drifted and the
-span is dropped with a warning rather than corrupting the context.
+`_discard_llm_span_if_frame_word_missing` guards against that desync. It enforces one
+invariant: **the LLM span credited
+to a word must contain that word.** If it does not, the two texts have fallen out of
+alignment and the span is dropped with a warning rather than corrupting the context.
 
 The comparison is deliberately lenient — casefolded, with hyphens and spaces collapsed —
-so legitimate replacements are not mistaken for drift:
+so a legitimate replacement is not mistaken for a desync:
 
 | Case                  | LLM text     | Spoken   | Verdict            |
 | --------------------- | ------------ | -------- | ------------------ |
 | Case-only replacement | `SQL`        | `sql`    | Match              |
 | Joiner replacement    | `body-pump`  | `BODYPUMP` | Match            |
-| Genuine desync        | `hello`      | `goodbye` | **Discard**       |
+| Genuinely out of sync | `hello`      | `goodbye` | **Discard**       |
 
 One special case gets repaired instead of discarded. Punctuation is normally swept into
 the *preceding* word's span, so a provider that reports it with the *following* word
@@ -150,7 +186,7 @@ is never going to appear inside `$42.50`.
 | `get_llm_consumed()`                  | LLM span for the last word                          |
 | `suppress_in_context()`               | Mid-transform, keep out of the context              |
 | `get_accumulated_*` / `get_remaining_*` | Spoken and unspoken text, per channel             |
-| `is_complete`                         | Force-completed, or the map says done               |
+| `is_complete`                         | Force-completed, or the segment map says done       |
 | `reset()`                             | Rewind cursors, keep the texts                      |
 
 The paired accessors are what drive RTVI progress. Mid-sentence:
@@ -166,6 +202,23 @@ tracker.get_remaining_user_facing_text()     # 'there world'
 `get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so
 accumulated + remaining reconstructs the original exactly.
 
+### `is_complete` is delegated, not tracked
+
+The tracker keeps no completion bookkeeping of its own. It forwards the question to the
+segment map, which owns the only cursor that can answer it:
+
+```python
+@property
+def is_complete(self) -> bool:
+    return self._force_completed or self._segment_map.is_complete
+```
+
+The one exception is the force-completed slot. There the map was deliberately **never
+advanced** — the offending word was routed to the next slot instead — so its own
+`is_complete` stays stale and would keep reporting `False` forever. `_force_completed` is
+the override that makes the verdict stick, and from that point on it is the authoritative
+answer.
+
 ## 7. Tests
 
 `tests/test_word_completion_tracker.py` — 199 tests, the largest suite of the three.
@@ -175,7 +228,7 @@ Most of it is a regression corpus of real provider behaviour.
 | ------------------------ | -------------------------------------------------------------- |
 | Mechanics                | `Basic`, `Reset`, `EdgeCases`, `RemainingText`, `AccumulatedText`, `UserFacingText` |
 | Recovery                 | `MissingWord`, `Overflow`, `MultiFrameSimulation`               |
-| Provider quirks          | `UnicodeSymbolSubstitution`, `AddedTerminalPunctuation`, `CaseFolding`, `AccentFolding`, `SpaceBeforePunctuation`, `MultiAttributeSsmlTag`, `EmojiInSentence`, `CJK`, `StrayAngleBracket` |
+| TTS provider quirks      | `UnicodeSymbolSubstitution`, `AddedTerminalPunctuation`, `CaseFolding`, `AccentFolding`, `SpaceBeforePunctuation`, `MultiAttributeSsmlTag`, `EmojiInSentence`, `CJK`, `StrayAngleBracket` |
 | Transform interaction    | `WithTransforms`, `TokenChangingReplacements`, `TransformAtEndOfUtterance`, `LLMText`, `Normalization` |
 
 ## Related

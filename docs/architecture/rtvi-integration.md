@@ -3,62 +3,23 @@
 > **Job:** turn tracked words into something a client can render and redact.
 
 The three tracking layers exist to produce two frames per spoken word. This document
-covers what those frames are, how they become RTVI messages, and how the
-`pipecat-examples/code-helper` client uses them.
+covers how those frames become RTVI messages, and how the `pipecat-examples/code-helper`
+client uses them. For how the frames themselves are built, see
+[AggregatedFrameSequencer](./aggregated-frame-sequencer.md#1-the-output-two-frames-per-word).
 
-## 1. Two frames per word
+## 1. What arrives here
 
-Every call to `AggregatedFrameSequencer.process_word` builds up to two frames
-(`_build_word_frame` and `_build_progress_frame`):
+[`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md#1-the-output-two-frames-per-word)
+emits two frames for every spoken word. Only one of them concerns RTVI:
 
 | Frame | Destination | Carries |
 | --- | --- | --- |
-| `TTSTextFrame` | The **conversation context** | The word, plus `raw_text` — the LLM span it represents |
+| `TTSTextFrame` | The conversation context | The word, plus `raw_text` — the LLM span it represents |
 | `AggregatedTextProgressFrame` | **RTVI → the client** | `segment_id` + `accumulated_text` / `remaining_text` |
 
-```mermaid
-flowchart LR
-    PW["process_word('cents')"] --> TF["<b>TTSTextFrame</b><br/>text='cents'<br/>raw_text='$42.50'<br/>append_to_context=True"]
-    PW --> PF["<b>AggregatedTextProgressFrame</b><br/>segment_id=42<br/>accumulated='Your balance is $42.50'<br/>remaining=''"]
-    TF --> CTX["conversation context"]
-    PF --> OBS["RTVIObserver"] --> CLIENT["client"]
-```
-
-### The context frame
-
-`TTSTextFrame.raw_text` is the tracker's `get_llm_consumed()` — the LLM span attributed to
-this word. That is what keeps `<card>…</card>` in the context instead of bare digits.
-
-Two flags control whether a word is recorded at all:
-
-| Flag | Set when | Effect |
-| --- | --- | --- |
-| `append_to_context` | Per context, at registration | Whole context excluded from the transcript |
-| `suppress_in_context` | Tracker is mid-transformed-segment | This word excluded; only the completing word carries the original span |
-
-That second one is why `forty`, `two`, `dollars` never reach the context — only `cents`
-does, carrying `raw_text='$42.50'`.
-
-### The progress frame
-
-`AggregatedTextProgressFrame` is what made word highlighting possible. It solves the
-correspondence problem directly: `segment_id` is the **id of the sentence
-`AggregatedTextFrame`** the word belongs to, so a client can match a stream of words back
-to the sentence it already rendered.
-
-```python
-AggregatedTextProgressFrame(
-    segment_id=slot.frame.id,                              # ← the sentence's id
-    context_id=slot.context_id,
-    text=slot.frame.text,                                  # full sentence
-    aggregated_by=slot.frame.aggregated_by,
-    accumulated_text=tracker.get_accumulated_user_facing_text(),
-    remaining_text=tracker.get_remaining_user_facing_text(strip=False),
-)
-```
-
-`accumulated + remaining` reconstructs the sentence exactly (hence `strip=False`), so a
-client can render the split without ever losing a character.
+The progress frame is the one `RTVIObserver` turns into client messages, and
+`segment_id` — the id of the sentence `AggregatedTextFrame` the word belongs to — is what
+lets a client match a stream of words back to a sentence it already rendered.
 
 ## 2. The segment lifecycle over RTVI
 
