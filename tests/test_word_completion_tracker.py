@@ -2560,5 +2560,66 @@ class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
 
 
+class TestTextNoWordArrivesFor(unittest.TestCase):
+    """Markup occupies a segment of its own and no word-timestamp event names one,
+    so once everything speakable has been spoken the frame takes what is left --
+    otherwise a tag ending a frame is missing from the turn for good.
+    """
+
+    def test_tag_closing_the_frame_is_included(self):
+        text = 'Hello there <break time="1s"/>'
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ["Hello", "there"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+        self.assertEqual(tracker.get_remaining_user_facing_text(), "")
+
+    def test_tag_between_the_last_word_and_its_period_is_included(self):
+        text = 'Hello there <break time="1s"/>.'
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ["Hello", "there."]:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_tag_mid_frame_is_included(self):
+        text = "Hello <break/> there"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ["Hello", "there"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_a_word_still_to_come_holds_the_cursor(self):
+        """The frame only takes the rest once it is genuinely finished."""
+        text = 'Hello <break time="1s"/> there'
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        self.assertFalse(tracker.add_word_and_check_complete("Hello"))
+        self.assertNotEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_a_token_running_into_the_next_frame_still_splits(self):
+        """Taking the rest of the frame happens on completion, which is also when a
+        straddling token is split, so the two must not interfere: the frame keeps
+        its own part and the next frame still receives the remainder.
+        """
+        text = "Say <break/> ABC"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        tracker.add_word_and_check_complete("Say")
+        self.assertTrue(tracker.add_word_and_check_complete("ABCNext"))
+        self.assertEqual(tracker.get_word_for_frame(), "ABC")
+        self.assertEqual(tracker.get_overflow_word(), "Next")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+    def test_punctuation_the_text_sets_off_still_waits_for_its_token(self):
+        """French "va ?" is reported as its own token, so the frame is not finished
+        until it lands and must not sweep the mark up early.
+        """
+        text = "Comment ça va ?"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ["Comment", "ça", "va"]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertNotIn("?", tracker.get_accumulated_user_facing_text())
+        self.assertTrue(tracker.add_word_and_check_complete("?"))
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
 if __name__ == "__main__":
     unittest.main()

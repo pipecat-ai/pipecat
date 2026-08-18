@@ -489,5 +489,30 @@ class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
         self.assertTrue(smap.word_belongs_current_segment("database"))
 
 
+class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
+    """A provider may punctuate a tagged span more than the source text does."""
+
+    def test_hop_matches_a_word_whose_punctuation_the_span_lacks(self):
+        """Cartesia reports "1234." for "<spell>1234</spell>\\n\\nHow ...", turning the
+        line break into a sentence ending. The literal and folded strategies already
+        retry with the word's trailing punctuation removed; the markup-stripped one
+        has to as well, or the word matches nothing.
+        """
+        remaining = "<spell>1234</spell>\n\nHow can I help you today?"
+        hop = TextSegmentMap._classify_hop(remaining, "1234.")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        self.assertEqual(remaining[: hop.seg_chars], "<spell>1234")
+
+    def test_sentence_tracks_through_the_extra_punctuation(self):
+        text = "I love to count <spell>1234</spell>\n\nHow can I help you today?"
+        smap = TextSegmentMap(text, text)
+        for word in ["I", "love", "to", "count", "1234.", "How", "can", "I", "help", "you"]:
+            smap.advance_word(word)
+            self.assertIsNone(smap.last_overflow, f"{word!r} should not overflow")
+        smap.advance_word("today?")
+        self.assertTrue(smap.is_complete)
+        self.assertEqual(smap.user_facing_pos, len(text))
+
+
 if __name__ == "__main__":
     unittest.main()
