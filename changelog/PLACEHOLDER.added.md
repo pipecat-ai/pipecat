@@ -1,0 +1,1 @@
+- `GeminiLiveLLMService` now supports the Gemini 3.8 Live family: `gemini-3.8-live` and `gemini-3.8-live-extended-thinking`. Both use the Gemini 3.x session protocol, and both support `NON_BLOCKING` function declarations — unlike other Gemini 3.x models — so tools registered with `cancel_on_interruption=False` keep the conversation running while they execute.
