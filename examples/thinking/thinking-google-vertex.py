@@ -69,15 +69,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleVertexLLMService(
         credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
         project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
-        location=os.environ["GOOGLE_CLOUD_LOCATION"],
-        # location="global",  # Gemini 3.x may need "global" (comment out env location above)
+        # Defaults to location="global", which is where Vertex serves the
+        # Gemini 3 series.
         settings=GoogleVertexLLMService.Settings(
             # To use a more powerful (slower) reasoning model, uncomment the pro
-            # model below, plus the thinking_level and location="global" lines.
+            # model line below.
             # model="gemini-3.1-pro-preview",
             thinking=GoogleVertexLLMService.ThinkingConfig(
-                thinking_budget=-1,  # Dynamic thinking (default model, Gemini 2.5)
-                # thinking_level="low",  # Gemini 3.x (comment out thinking_budget above)
+                thinking_level="low",  # Gemini 3 models; the 2.5 series takes thinking_budget
                 include_thoughts=True,
             ),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
