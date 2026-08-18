@@ -28,7 +28,7 @@ def _make_bare_service() -> DeepgramSTTService:
     service = DeepgramSTTService.__new__(DeepgramSTTService)
     service._name = "DeepgramSTTService"
     service._connection = None
-    service._connection_ready = asyncio.Event()
+    service._connection_settled = asyncio.Event()
     service._quick_failure_tracker = QuickFailureTracker()
     service._build_connect_kwargs = MagicMock(return_value={})
     service.push_error = AsyncMock()
@@ -47,6 +47,21 @@ def _failing_connect_cm(exc: Exception):
     class _CM:
         async def __aenter__(self):
             raise exc
+
+        async def __aexit__(self, *args):
+            return False
+
+    return _CM()
+
+
+def _dropping_connect_cm(exc: Exception):
+    """A connect that completes the handshake and then loses the connection."""
+
+    class _CM:
+        async def __aenter__(self):
+            connection = MagicMock()
+            connection.start_listening = AsyncMock(side_effect=exc)
+            return connection
 
         async def __aexit__(self, *args):
             return False
@@ -186,19 +201,9 @@ async def test_connection_handler_resets_quick_failure_count_after_stable_connec
     )
 
     # Patch the module-level `time` name binding (not the real `time` module,
-    # which asyncio's own event loop clock relies on).
-    monotonic_values = iter(
-        [
-            0,
-            10,  # attempt 1: 10s elapsed -> stable, resets counter to 0
-            10,
-            10.1,  # attempt 2: quick failure -> count 1
-            10.1,
-            10.2,  # attempt 3: quick failure -> count 2
-            10.2,
-            10.3,  # attempt 4: quick failure -> count 3, give up
-        ]
-    )
+    # which asyncio's own event loop clock relies on). Only the attempt that
+    # connects is timed, from the handshake to the drop.
+    monotonic_values = iter([0, 10])
     fake_time = MagicMock()
     fake_time.monotonic.side_effect = lambda: next(monotonic_values)
     monkeypatch.setattr("pipecat.services.deepgram.stt.time", fake_time)
@@ -206,7 +211,7 @@ async def test_connection_handler_resets_quick_failure_count_after_stable_connec
     mock_client = MagicMock()
     mock_client.listen.v1.connect = MagicMock(
         side_effect=[
-            _failing_connect_cm(ConnectionError("stable then dropped")),
+            _dropping_connect_cm(ConnectionError("stable then dropped")),
             _failing_connect_cm(ConnectionError("quick 1")),
             _failing_connect_cm(ConnectionError("quick 2")),
             _failing_connect_cm(ConnectionError("quick 3")),
@@ -219,6 +224,50 @@ async def test_connection_handler_resets_quick_failure_count_after_stable_connec
     # If the counter had NOT been reset after the stable connection, giving up
     # would have happened after just 1 more quick failure (2 total attempts).
     assert mock_client.listen.v1.connect.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_connection_handler_gives_up_on_handshakes_that_fail_slowly(monkeypatch):
+    """A handshake that hangs before failing is a failure, however long it took.
+
+    Timing the attempt rather than the connection reads these as healthy and
+    retries them forever.
+    """
+    monkeypatch.setattr("pipecat.services.deepgram.stt.exponential_backoff_time", lambda attempt: 0)
+    service = _make_bare_service()
+    max_failures = service._quick_failure_tracker.max_consecutive_failures
+
+    # Every attempt takes far longer than min_stable_duration before failing.
+    ticks = iter([0, 10, 10, 20, 20, 30, 30, 40, 40, 50])
+    fake_time = MagicMock()
+    fake_time.monotonic.side_effect = lambda: next(ticks)
+    monkeypatch.setattr("pipecat.services.deepgram.stt.time", fake_time)
+
+    mock_client = MagicMock()
+    mock_client.listen.v1.connect = MagicMock(
+        side_effect=[_failing_connect_cm(ConnectionError("timed out")) for _ in range(8)]
+    )
+    service._client = mock_client
+
+    await service._connection_handler()
+
+    assert mock_client.listen.v1.connect.call_count == max_failures
+
+
+@pytest.mark.asyncio
+async def test_connect_returns_once_the_connection_is_given_up_on():
+    """Connecting happens while the service is set up, so a connection that is
+    never going to come up has to finish setting up rather than hold it open."""
+    service = _make_bare_service()
+    mock_client = MagicMock()
+    mock_client.listen.v1.connect = MagicMock(
+        return_value=_failing_connect_cm(ApiError(status_code=401, body="invalid credentials"))
+    )
+    service._client = mock_client
+
+    await asyncio.wait_for(service._connect(), timeout=5)
+
+    assert service._connection is None
 
 
 @pytest.mark.asyncio
