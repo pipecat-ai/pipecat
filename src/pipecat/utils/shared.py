@@ -32,6 +32,8 @@ class _SharedResource:
     def __init__(self):
         self.owners = 0
         self.lock = asyncio.Lock()
+        # What acquiring raised, if it did, so later owners fail the same way.
+        self.error: BaseException | None = None
 
 
 def _shared_resource(obj: Any, name: str) -> _SharedResource:
@@ -55,6 +57,12 @@ def acquires(
     so no caller continues against a half-built resource. Later owners return
     ``None`` without running the method again.
 
+    A method that raises leaves the resource unbuilt, and every owner of it is
+    told: the exception is re-raised to each one that arrives later, rather
+    than the method being attempted again. So the owners of a resource share
+    its verdict, and a pair of processors sharing a client either both come up
+    or both fail.
+
     Args:
         name: The resource being acquired. Names are per instance, so paired
             operations on the same object (e.g. ``setup``/``cleanup`` and
@@ -72,9 +80,18 @@ def acquires(
         async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T | None:
             resource = _shared_resource(args[0], name)
             async with resource.lock:
+                if resource.error is not None:
+                    raise resource.error
                 resource.owners += 1
                 if resource.owners == 1:
-                    return await func(*args, **kwargs)
+                    try:
+                        return await func(*args, **kwargs)
+                    except BaseException as e:
+                        # Nothing was built, so nothing is owned and nothing is
+                        # released later.
+                        resource.owners -= 1
+                        resource.error = e
+                        raise
             return None
 
         return wrapper

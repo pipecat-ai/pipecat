@@ -49,6 +49,24 @@ class _Client:
         self.seen_connected.append(self.connected)
 
 
+class _FailingClient:
+    """Stands in for a shared client that cannot be built."""
+
+    def __init__(self):
+        self.setups = 0
+        self.cleanups = 0
+
+    @acquires("client")
+    async def setup(self, delay: float = 0.05):
+        await asyncio.sleep(delay)
+        self.setups += 1
+        raise RuntimeError("could not connect")
+
+    @releases("client")
+    async def cleanup(self):
+        self.cleanups += 1
+
+
 class TestSharedResource(unittest.IsolatedAsyncioTestCase):
     async def test_only_the_first_owner_runs_the_body(self):
         client = _Client()
@@ -128,6 +146,42 @@ class TestSharedResource(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.setups, 2)
         self.assertTrue(client.connected)
+
+    async def test_every_owner_of_a_resource_that_failed_is_told(self):
+        """A sibling that carried on regardless would run against nothing."""
+        client = _FailingClient()
+
+        with self.assertRaises(RuntimeError):
+            await client.setup()
+        with self.assertRaises(RuntimeError):
+            await client.setup()
+
+    async def test_a_body_that_fails_is_not_attempted_again(self):
+        client = _FailingClient()
+
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                await client.setup()
+
+        self.assertEqual(client.setups, 1)
+
+    async def test_concurrent_owners_of_a_failed_resource_all_fail(self):
+        client = _FailingClient()
+
+        results = await asyncio.gather(client.setup(), client.setup(), return_exceptions=True)
+
+        self.assertEqual(client.setups, 1)
+        self.assertTrue(all(isinstance(r, RuntimeError) for r in results))
+
+    async def test_nothing_is_released_when_acquiring_failed(self):
+        """The undo would otherwise run against a resource that was never built."""
+        client = _FailingClient()
+
+        with self.assertRaises(RuntimeError):
+            await client.setup()
+        await client.cleanup()
+
+        self.assertEqual(client.cleanups, 0)
 
 
 if __name__ == "__main__":
