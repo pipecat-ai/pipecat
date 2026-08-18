@@ -196,8 +196,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "audio_in_sample_rate",
+      "message": "Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -207,8 +207,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "audio_out_sample_rate",
+      "message": "Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -218,8 +218,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "enable_metrics",
+      "message": "Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -229,8 +229,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "enable_tracing",
+      "message": "Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -240,8 +240,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "enable_usage_metrics",
+      "message": "Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -251,8 +251,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "report_only_initial_ttfb",
+      "message": "Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -262,8 +262,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "FrameProcessorSetup.setup()",
-      "message": "Use ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
+      "replacement": "tracing_context",
+      "message": "Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {

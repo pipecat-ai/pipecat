@@ -917,33 +917,46 @@ class StartFrame(SystemFrame):
 
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         audio_out_sample_rate: Output audio sample rate in Hz.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_metrics: Whether to enable performance metrics collection.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_tracing: Whether to enable OpenTelemetry tracing.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_usage_metrics: Whether to enable usage metrics collection.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
+
             .. deprecated:: 1.8.0
-                Use ``FrameProcessorSetup.setup()`` instead. Will be removed
-                in 2.0.0.
+                Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
     """
 
     audio_in_sample_rate: int = 16000
@@ -972,8 +985,9 @@ class StartFrame(SystemFrame):
                 with warnings.catch_warnings():
                     warnings.simplefilter("always")
                     warnings.warn(
-                        f"`StartFrame.{name}` is deprecated since 1.8.0; "
-                        "use `FrameProcessorSetup.setup()` instead.",
+                        f"`StartFrame.{name}` is deprecated since 1.8.0, "
+                        f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
+                        "Will be removed in 2.0.0.",
                         DeprecationWarning,
                         stacklevel=2,
                     )
