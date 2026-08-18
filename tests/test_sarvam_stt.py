@@ -41,6 +41,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -736,7 +737,7 @@ async def test_final_transcript_reports_usage(monkeypatch, final_text):
     session reports nothing at all.
     """
     service = SarvamRealtimeSTTService(api_key="test-key")
-    service._enable_usage_metrics = True
+    service._setup = frame_processor_setup(TaskManager(), enable_usage_metrics=True)
     service._stt_usage_pending_seconds = 2.5
     pushed = []
     monkeypatch.setattr(service, "push_frame", _capture(pushed))
