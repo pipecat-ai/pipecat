@@ -203,7 +203,7 @@ tracker.get_remaining_user_facing_text()     # 'there world'
 `get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so accumulated
 + remaining reconstructs the segment text exactly. That guarantee is what every consumer
 of a progress frame relies on (see
-[the guarantee](./README.md#the-guarantee-that-makes-it-useful)).
+[the guarantee](./README.md#33-the-guarantee-that-makes-it-useful)).
 
 ### `is_complete` is delegated, not tracked
 

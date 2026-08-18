@@ -75,7 +75,7 @@ AggregatedTextProgressFrame(
 `strip=False`), so any consumer holding the segment frame can position into the string it
 already has without ever losing a character. Highlighting text in a UI is the usual case
 and the example used throughout, but nothing here is UI- or RTVI-specific; see
-[the guarantee](./README.md#the-guarantee-that-makes-it-useful). What the client does with it
+[the guarantee](./README.md#33-the-guarantee-that-makes-it-useful). What the client does with it
 is covered in [RTVI integration](./rtvi-integration.md).
 
 A progress frame accompanies a word frame whenever the word was matched to a real slot and

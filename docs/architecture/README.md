@@ -3,14 +3,6 @@
 How Pipecat keeps what the LLM wrote, what downstream consumers render, and what the TTS
 speaks in sync — word by word, while audio is playing.
 
-| Document | Contents |
-| --- | --- |
-| [TextSegmentMap](./text-segment-map.md) | Aligns the three texts |
-| [WordCompletionTracker](./word-completion-tracker.md) | Tracks one frame to completion |
-| [AggregatedFrameSequencer](./aggregated-frame-sequencer.md) | Orders frames downstream |
-| [RTVI integration](./rtvi-integration.md) | How the frames reach the client |
-| [Possible improvements](./improvements.md) | Known rough edges, with reasoning |
-
 ---
 
 ## 1. The end goal
@@ -18,7 +10,7 @@ speaks in sync — word by word, while audio is playing.
 One response from the LLM has to satisfy three consumers that want *different text*.
 
 Take a bot that has been prompted to wrap credit cards in `<card>` tags and code in
-`<code>` tags (this is the [`code-helper`](#6-the-code-helper-example) example):
+`<code>` tags (this is the [`code-helper`](#36-end-to-end-the-code-helper-example) example):
 
 **What the LLM produces:**
 
@@ -39,15 +31,15 @@ spoke. Those words are the *only* signal available.
 Everything in these documents exists to answer, for each incoming word:
 
 1. **Where are we?** — which position in the displayed text, so the UI can highlight it
-2. **What do we record?** — which span of the LLM's own text, so the context keeps the tags
-3. **When do we push it?** — in what order, relative to everything else in the turn
+2. **What should I add to the context?** — which span of the LLM's own text, so the context keeps the tags
+3. **Is this frame ready to be pushed?** — in what order, relative to everything else in the turn
 
 [§2](#2-the-problems-this-solves) is what went wrong before those questions had answers;
-[§3](#3-how-the-three-texts-are-produced) is where the three texts actually come from.
+[§3](#3-how-the-problems-are-solved) is how they are solved.
 
 ---
 
-## 2. The problems this solves
+## 2. The original problems
 
 ### 2.1 The context drifted from what the LLM wrote
 
@@ -143,11 +135,26 @@ wraps card numbers in `<spell>` tags and strips `https://` from links.
 
 Each one buys better audio at the cost of widening the gap between what is spoken and what
 is displayed — which is exactly the gap the three layers have to close. They are applied at
-[SPLIT 2](#3-how-the-three-texts-are-produced).
+[SPLIT 2](#31-three-texts-produced-at-two-split-points).
 
 ---
 
-## 3. How the three texts are produced
+## 3. How the problems are solved
+
+The solution has two halves. First, the three texts are kept **distinct as they are
+produced**, so nothing has to be reconstructed later (3.1–3.3). Second, three layers keep
+them **aligned word by word** while the TTS speaks (3.4–3.5).
+
+| Problem | Solved by |
+| --- | --- |
+| [2.1](#21-the-context-drifted-from-what-the-llm-wrote) Context drift | `TextSegmentMap`'s `llm_pos` cursor + `WordCompletionTracker`'s span attribution |
+| [2.2](#22-skipped-frames-arrived-out-of-order) Out-of-order skipped frames | `AggregatedFrameSequencer`'s slot queue |
+| [2.3](#23-highlighting-spoken-words-was-not-possible) Word ↔ sentence correspondence | `AggregatedTextProgressFrame`, built from the tracker's cursors |
+| [2.4](#24-rtvi-bot_output_transforms-were-useless-word-by-word) Useless RTVI transforms | `segment_id` + `accumulated_text` / `remaining_text` on every progress frame |
+| [2.5](#25-problems-found-along-the-way) Streaming / concurrency / TTS provider quirks | Sequencer (streaming, contexts) + tracker (straddle, drops) |
+| [2.6](#26-and-a-feature-text-transformations) Text transformations | `TextSegmentMap`'s transformed-segment handling |
+
+### 3.1 Three texts, produced at two split points
 
 They are not authored separately. Two **split points** create them, one owned by an
 aggregator and one by the TTS service's transformers:
@@ -191,7 +198,7 @@ Three properties fall out of this shape:
 - **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
   transformers, all three are the same string.
 
-### What that looks like for the response above
+### 3.2 What that looks like for one response
 
 The `PatternPairAggregator` splits that one response into **six** frames — each tagged
 span becomes its own segment, with its own type:
@@ -217,7 +224,7 @@ in all three columns.
 (`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
 (`bot_output_transforms=[("credit_card", …)]`).
 
-### The guarantee that makes it useful
+### 3.3 The guarantee that makes it useful
 
 Whatever the aggregator put in `frame.text`, one rule always holds while that segment is
 being spoken:
@@ -247,9 +254,7 @@ exactly the same terms.
 > concept and keep `user_facing_*` when naming actual API members — see
 > [possible improvements](./improvements.md#1-the-user_facing_-naming).
 
----
-
-## 4. The three layers
+### 3.4 The three layers
 
 ```
   TTS provider ── word-timestamp events ──┐
@@ -282,20 +287,7 @@ Each layer owns one concern, and none of them knows about the layer above:
 | [`WordCompletionTracker`](./word-completion-tracker.md) | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? | One frame needs a completion verdict and an attributed LLM span per word even when the TTS provider misbehaves — policy the pure alignment map deliberately does not own |
 | [`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md) | The whole turn | In what order do frames leave the TTS service? | Words arrive per-frame but the conversation context is global and ordered, so spoken, skipped, buffered, and concurrent-context frames must be serialized into one timeline |
 
-Mapped back to the problems:
-
-| Problem | Solved by |
-| --- | --- |
-| 2.1 Context drift | `TextSegmentMap`'s `llm_pos` cursor + `WordCompletionTracker`'s span attribution |
-| 2.2 Out-of-order skipped frames | `AggregatedFrameSequencer`'s slot queue |
-| 2.3 Word ↔ sentence correspondence | `AggregatedTextProgressFrame`, built from the tracker's cursors |
-| 2.4 Useless RTVI transforms | `segment_id` + `accumulated_text` / `remaining_text` on every progress frame |
-| 2.5 Streaming / concurrency / TTS provider quirks | Sequencer (streaming, contexts) + tracker (straddle, drops) |
-| 2.6 Text transformations | `TextSegmentMap`'s transformed-segment handling |
-
----
-
-## 5. Where they are wired up
+### 3.5 Where they are wired up
 
 All three are driven from `TTSService` (`src/pipecat/services/tts_service.py`). The
 service owns one `AggregatedFrameSequencer`; the sequencer builds a
@@ -310,9 +302,7 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 | end of text input | `finalize` | No more tokens for this context |
 | interruption | `clear` | The turn is cancelled |
 
----
-
-## 6. The code-helper example
+### 3.6 End to end: the code-helper example
 
 `pipecat-examples/code-helper` exercises every part of this stack at once. Its bot
 prompts the LLM to tag its output, then routes each tag type differently:
@@ -337,17 +327,29 @@ rtvi_observer_params=RTVIObserverParams(
 ```
 
 Those four settings produce the six frames tabulated in
-[§3](#what-that-looks-like-for-the-response-above), plus one thing that table does not
+[§3.2](#32-what-that-looks-like-for-one-response), plus one thing that table does not
 show: the client renders `XXXX-XXXX-XXXX-3456` rather than the real digits, because step 4
 redacts the segment on its way out while the highlight keeps advancing over the redacted
 form.
 
 The client is only ~10 lines of rendering logic, because the hard part is already done
-server-side — see [RTVI integration](./rtvi-integration.md).
+server-side.
+
+### 3.7 Going deeper
+
+Each layer has its own document, with worked examples traced from the real code:
+
+| Document | Contents |
+| --- | --- |
+| [TextSegmentMap](./text-segment-map.md) | Aligns the three texts |
+| [WordCompletionTracker](./word-completion-tracker.md) | Tracks one frame to completion |
+| [AggregatedFrameSequencer](./aggregated-frame-sequencer.md) | Orders frames downstream |
+| [RTVI integration](./rtvi-integration.md) | How the frames reach the client |
+| [Possible improvements](./improvements.md) | Known rough edges, with reasoning |
 
 ---
 
-## 7. Tests
+## 4. Tests
 
 | File | Tests | Covers |
 | --- | ---: | --- |
