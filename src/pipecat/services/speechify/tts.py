@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
@@ -359,15 +358,6 @@ class SpeechifyHttpTTSService(TTSService):
             self.sample_rate
         )
         self._cumulative_time = 0.0
-
-    async def start(self, frame: StartFrame):
-        """Start the Speechify TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        pass
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.

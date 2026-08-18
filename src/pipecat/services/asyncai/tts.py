@@ -22,7 +22,6 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
@@ -250,15 +249,6 @@ class AsyncAITTSService(WebsocketTTSService):
         await super().setup(setup)
         self._output_sample_rate = self.sample_rate
         await self._connect()
-
-    async def start(self, frame: StartFrame):
-        """Start the Async TTS service.
-
-        Args:
-            frame: Start frame to begin processing.
-        """
-        await super().start(frame)
-        pass
 
     async def _connect(self):
         await super()._connect()
