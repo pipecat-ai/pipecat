@@ -245,7 +245,7 @@ flowchart TD
     S1 -->|hit| R
     S1 -->|miss| S2
 
-    S2{"<b>2 · case + accent folded</b><br/><i>both sides folded,<br/>word boundary required</i>"}
+    S2{"<b>2 · variation folded</b><br/><i>case · accents · typography,<br/>word boundary required</i>"}
     S2 -->|hit| R
     S2 -->|miss| S3
 
@@ -273,6 +273,7 @@ bookkeeping.
 | Provider added a terminal period | `account and more` | `account.` | 1 literal *(trailing trim)* | `PLACED` (7 chars) |
 | Provider lowercased the word | `SQL is great` | `sql` | 2 folded | `PLACED` (3 chars) |
 | Provider stripped a diacritic | `café open` | `cafe` | 2 folded | `PLACED` (4 chars) |
+| Provider normalized an apostrophe | `don’t worry` | `don't` | 2 folded | `PLACED` (5 chars) |
 | Token reported without its tags | `<spell>1234</spell> ok` | `1234` | 3 markup | `PLACED` (11 chars) |
 | Token straddles the frame boundary | `1111` | `1111And` | 1 literal | `CROSSES` (4 chars used) |
 | Foreign token (dropped event upstream) | `hello world` | `goodbye` | none | `NO_MATCH` |
