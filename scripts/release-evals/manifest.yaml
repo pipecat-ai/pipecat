@@ -58,6 +58,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-elevenlabs-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-elevenlabs-dialogue.py
+    scenarios: [capital_question]
   - bot: voice/voice-fal.py
     scenarios: [capital_question]
   - bot: voice/voice-fish.py
