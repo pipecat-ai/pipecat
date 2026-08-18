@@ -193,11 +193,14 @@ class TkOutputTransport(BaseOutputTransport):
 
     async def cleanup(self):
         """Stop and cleanup the audio output stream."""
-        await super().cleanup()
-        if self._out_stream:
-            self._out_stream.stop_stream()
-            self._out_stream.close()
-            self._out_stream = None
+        try:
+            await super().cleanup()
+            if self._out_stream:
+                self._out_stream.stop_stream()
+                self._out_stream.close()
+                self._out_stream = None
+        finally:
+            self._executor.shutdown(wait=False)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the output stream.

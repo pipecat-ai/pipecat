@@ -359,18 +359,23 @@ class VonageClient:
 
     async def cleanup(self) -> None:
         """Cleanup the client, disconnecting if necessary."""
-        if self._connected:
-            await self.disconnect()
+        try:
+            if self._connected:
+                await self.disconnect()
 
-        if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
-            self._event_task = None
-        if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
-            self._audio_task = None
-        if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
-            self._video_task = None
+            if self._event_task and self._task_manager:
+                await self._task_manager.cancel_task(self._event_task)
+                self._event_task = None
+            if self._audio_task and self._task_manager:
+                await self._task_manager.cancel_task(self._audio_task)
+                self._audio_task = None
+            if self._video_task and self._task_manager:
+                await self._task_manager.cancel_task(self._video_task)
+                self._video_task = None
+        finally:
+            # Disconnecting can time out and raise, and that is the case where
+            # the thread is most likely still blocked in the SDK.
+            self._executor.shutdown(wait=False)
 
     def add_listener(self, listener: VonageClientListener) -> int:
         """Add a listener to the Vonage client.
