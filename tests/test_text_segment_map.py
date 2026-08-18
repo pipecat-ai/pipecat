@@ -13,6 +13,7 @@ from pipecat.utils.context.text_segment_map import (
     strip_complete_markup,
     strip_markup,
 )
+from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 
 
 class TestStripMarkupHelpers(unittest.TestCase):
@@ -351,6 +352,69 @@ class TestTextSegmentMapSsmlPhonemeTag(unittest.TestCase):
         smap.advance_word("is")  # prior unchanged segment now fully consumed
         smap.advance_word("<phoneme")  # 0 alnum chars, but inside the transformed segment
         self.assertTrue(smap.in_transformed_segment)
+
+
+class TestTextSegmentMapMarkupKeptInBothChannels(unittest.TestCase):
+    """A tag kept verbatim in both channels (e.g. Cartesia's <spell>, which the
+    provider echoes back on the spoken token) makes the two sides byte-identical.
+    That is an equal diff opcode, not a transform: both cursors skip tags the
+    same way, so proportional advancement is exact. Flagging it transformed
+    holds user_facing_pos at 0 for the whole sentence, and any interruption
+    before the final word then drops every word already spoken."""
+
+    TEXT = "Your confirmation code is <spell>4917</spell>, please write it down now."
+
+    def test_identical_sides_with_markup_not_flagged_transformed(self):
+        smap = TextSegmentMap(self.TEXT, self.TEXT)
+        self.assertEqual(len(smap._segments), 1)
+        self.assertFalse(smap._segments[0].is_transformed)
+
+    def test_user_facing_pos_tracks_through_interruption(self):
+        # The spell span arrives as a single word-timestamp token carrying its
+        # tags; the listener interrupts two words later, before the final word.
+        smap = TextSegmentMap(self.TEXT, self.TEXT)
+        for word in [
+            "Your",
+            "confirmation",
+            "code",
+            "is",
+            "<spell>4917</spell>,",
+            "please",
+            "write",
+        ]:
+            smap.advance_word(word)
+        accumulated = self.TEXT[: smap.user_facing_pos]
+        self.assertEqual(
+            accumulated,
+            "Your confirmation code is <spell>4917</spell>, please write",
+        )
+
+    def test_phoneme_style_wrap_with_identical_sides_advances_word_by_word(self):
+        # Same shape with a paired tag split across word tokens: identity
+        # tracking stays exact at every commit, including the mid-tag one.
+        text = 'Please ask for <phoneme ph="x">Siobhan</phoneme> when you arrive.'
+        smap = TextSegmentMap(text, text)
+        for word in ["Please", "ask", "for", "<phoneme", 'ph="x">Siobhan</phoneme>']:
+            smap.advance_word(word)
+        self.assertEqual(text[: smap.user_facing_pos], text[: len(text) - len(" when you arrive.")])
+
+    def test_trailing_never_tokenized_tag_still_completes(self):
+        # A directive tag at the end of an equal-sided sentence gets no
+        # word-timestamp token; the sentence must still complete on its last
+        # spoken word rather than waiting for a token that never comes.
+        tracker = WordCompletionTracker(
+            "Hello there <break/>", user_facing_text="Hello there <break/>"
+        )
+        tracker.add_word_and_check_complete("Hello")
+        self.assertTrue(tracker.add_word_and_check_complete("there"))
+
+    def test_mid_sentence_never_tokenized_tag_is_skipped(self):
+        tracker = WordCompletionTracker(
+            "Hello <break/> world", user_facing_text="Hello <break/> world"
+        )
+        tracker.add_word_and_check_complete("Hello")
+        self.assertTrue(tracker.add_word_and_check_complete("world"))
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Hello <break/> world")
 
 
 class TestTextSegmentMapStrayAngleBracket(unittest.TestCase):

@@ -126,6 +126,16 @@ def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
         else:
             pos += 1
 
+    return absorb_attached_punctuation(text, pos)
+
+
+def absorb_attached_punctuation(text: str, pos: int) -> int:
+    """Advance *pos* past punctuation directly attached to the preceding word.
+
+    Consumes the ``?`` in ``"you?"`` but stops before the next space, alnum
+    char, or XML tag, so a mark separated from its word (French ``"va ?"``)
+    is left for its own token.
+    """
     while pos < len(text):
         if text[pos] == "<":
             break
