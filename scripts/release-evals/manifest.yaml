@@ -124,7 +124,11 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-sarvam.py
     scenarios: [capital_question]
-  - bot: voice/voice-sarvam-http.py
+  - bot: voice/voice-sarvam-vad-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam-realtime.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam-realtime-turn-detection.py
     scenarios: [capital_question]
   - bot: voice/voice-smallest.py
     scenarios: [capital_question]
