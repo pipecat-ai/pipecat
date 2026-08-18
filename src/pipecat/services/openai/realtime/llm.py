@@ -1305,6 +1305,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             )
 
     async def _send_user_audio(self, frame):
+        """Send user audio after the realtime session has been configured."""
+        if not self._api_session_ready:
+            return
+
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
