@@ -47,7 +47,7 @@ class BasePipeline(FrameProcessor):
                 await processor.setup(setup)
             except Exception as e:
                 await processor.push_error(
-                    f"Error setting up processor: {e}", exception=e, treat_as_permanent=True
+                    f"Error setting up processor: {e}", exception=e, force_treat_as_permanent=True
                 )
             if setup.observer:
                 await setup.observer.on_processor_setup(
