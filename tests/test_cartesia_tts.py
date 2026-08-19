@@ -4,7 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -253,3 +256,145 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         self.assertEqual(pushed, [])
         self.assertIsNone(service._flushed)
         self.assertEqual(service._turn_context_id, old_ctx)
+
+
+class _FakeWebSocket:
+    """Minimal stand-in for the Cartesia websocket that records sends."""
+
+    def __init__(self):
+        self.state = State.OPEN
+        self.sent: list[dict] = []
+
+    async def send(self, data: str):
+        self.sent.append(json.loads(data))
+
+    async def close(self):
+        self.state = State.CLOSED
+
+    async def ping(self):
+        pass
+
+
+def _make_ws_service() -> CartesiaTTSService:
+    return CartesiaTTSService(
+        api_key="test-key",
+        settings=CartesiaTTSService.Settings(voice="test-voice"),
+    )
+
+
+async def _drain_run_tts(service: CartesiaTTSService, text: str, context_id: str):
+    async for _ in service.run_tts(text, context_id):
+        pass
+
+
+class TestCartesiaReconnectReplaysLostUtterance(unittest.IsolatedAsyncioTestCase):
+    """A websocket drop AFTER a successful send but BEFORE any audio comes back
+    must not lose the utterance. The reconnect has to re-send the transcript of
+    every context that received zero audio, so the bot still speaks the reply
+    instead of staying silent until the next user turn.
+    """
+
+    def _service_with_socket(self) -> tuple[CartesiaTTSService, _FakeWebSocket]:
+        service = _make_ws_service()
+        ws = _FakeWebSocket()
+        service._websocket = ws
+        return service, ws
+
+    async def _reconnect(self, service: CartesiaTTSService) -> _FakeWebSocket:
+        """Run the real reconnect path with the network stubbed out."""
+        new_ws = _FakeWebSocket()
+
+        async def fake_connect(uri, **kwargs):
+            return new_ws
+
+        service._websocket_connect = fake_connect
+        await service._reconnect_websocket(1)
+        return new_ws
+
+    async def test_reconnect_replays_transcript_that_received_no_audio(self):
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+        await service.flush_audio("ctx-1")
+
+        new_ws = await self._reconnect(service)
+
+        transcripts = [(m["transcript"], m["continue"]) for m in new_ws.sent]
+        self.assertEqual(
+            transcripts,
+            [("The capital of Japan is Tokyo.", True), ("", False)],
+        )
+        self.assertTrue(all(m["context_id"] == "ctx-1" for m in new_ws.sent))
+
+    async def test_reconnect_does_not_replay_context_that_received_audio(self):
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        # An audio chunk arrives for the context: the user has started hearing
+        # it, so a replay would repeat words.
+        entry = service._in_flight_contexts["ctx-1"]
+        entry.received_audio = True
+        entry.transcripts.clear()
+
+        new_ws = await self._reconnect(service)
+
+        self.assertEqual(new_ws.sent, [])
+
+    async def test_interrupted_context_is_not_replayed(self):
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        await service.on_audio_context_interrupted("ctx-1")
+
+        new_ws = await self._reconnect(service)
+        self.assertEqual(new_ws.sent, [])
+
+    async def test_completed_context_is_not_replayed(self):
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        await service.on_audio_context_completed("ctx-1")
+
+        new_ws = await self._reconnect(service)
+        self.assertEqual(new_ws.sent, [])
+
+    async def test_reconnect_keeps_the_starved_audio_context_alive(self):
+        """The reconnect's own disconnect must not tear down the audio context
+        that is still owed audio: removing it is what turned a transient socket
+        drop into a silently lost utterance (its queue gets the end-of-context
+        sentinel and force_complete pushes the never-spoken text downstream).
+        """
+        service, _ = self._service_with_socket()
+        await service.create_audio_context("ctx-1")
+        service._playing_context_id = "ctx-1"
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        # Reconnect-style disconnect (not an intentional teardown).
+        await service._disconnect_websocket()
+
+        self.assertTrue(service.audio_context_available("ctx-1"))
+        self.assertEqual(service._playing_context_id, "ctx-1")
+        # No end-of-context sentinel was queued.
+        queued = []
+        queue = service._audio_contexts["ctx-1"]
+        while not queue.empty():
+            queued.append(queue.get_nowait())
+        self.assertNotIn(None, queued)
+
+    async def test_intentional_disconnect_still_removes_the_audio_context(self):
+        service, _ = self._service_with_socket()
+        await service.create_audio_context("ctx-1")
+        service._playing_context_id = "ctx-1"
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        # Intentional teardown (stop/cancel/cleanup) sets _disconnecting.
+        service._disconnecting = True
+        await service._disconnect_websocket()
+
+        self.assertIsNone(service._playing_context_id)
+        self.assertEqual(service._in_flight_contexts, {})
+        # The context queue got the end-of-context sentinel.
+        queue = service._audio_contexts["ctx-1"]
+        queued = []
+        while not queue.empty():
+            queued.append(queue.get_nowait())
+        self.assertIn(None, queued)
