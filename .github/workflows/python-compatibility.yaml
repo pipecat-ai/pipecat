@@ -25,19 +25,14 @@ jobs:
       - name: Install system dependencies
         timeout-minutes: 10
         run: |
-          # The runner's default mirror can stall mid-fetch; cap the wait so a
-          # dead connection fails fast and a fresh attempt can pick a new one.
-          for attempt in 1 2 3; do
-            sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 update \
-              && sudo apt-get install -y \
-                portaudio19-dev \
-                libcairo2-dev \
-                libgirepository1.0-dev \
-                pkg-config \
-              && exit 0
-            echo "apt attempt $attempt failed; retrying"
-          done
-          exit 1
+          # The runner's mirror can stall mid-fetch; cap the wait so a dead
+          # connection fails instead of hanging on a silent socket.
+          sudo apt-get -o Acquire::http::Timeout=20 update
+          sudo apt-get install -y \
+            portaudio19-dev \
+            libcairo2-dev \
+            libgirepository1.0-dev \
+            pkg-config
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
