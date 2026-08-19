@@ -403,6 +403,7 @@ class TextSegmentMap:
         self._llm_pos: int = 0
         self._last_completed: TextSegment | None = None
         self._last_overflow: str | None = None
+        self._last_leading_duplicate: int = 0
 
     @staticmethod
     def _literal_hop(
@@ -687,9 +688,47 @@ class TextSegmentMap:
         """
         self._last_completed = None
         self._last_overflow = None
+        self._last_leading_duplicate = 0
 
         if word:
+            self._last_leading_duplicate = self._leading_duplicate_len(word)
             self._advance_raw(word)
+
+    def _leading_duplicate_len(self, word: str) -> int:
+        """Length of *word*'s leading run that repeats punctuation already consumed.
+
+        The raw cursor stops *before* punctuation trailing a word, so the next
+        token can still match it; ``advance_by_alnums`` meanwhile sweeps that
+        same punctuation into the preceding word's ``llm_text`` span. The two
+        conventions differ by exactly that mark, so a provider that reports it
+        leading the *following* token (``", I"`` rather than ``"I"``) presents it
+        twice.
+
+        Returns the number of leading characters -- the mark plus the whitespace
+        separating it from the word -- to drop. Returns 0 when the token's
+        leading punctuation is content the LLM cursor has not passed yet (an
+        opening quote or bracket), and when the token carries no word at all
+        (a punctuation-only event stands for this position on its own). Called
+        before the cursors move, so ``llm_pos`` still marks the end of the
+        previous word's span.
+        """
+        i = 0
+        while i < len(word) and (
+            word[i].isspace() or unicodedata.category(word[i]).startswith("P")
+        ):
+            i += 1
+        # A token that is *only* punctuation is the mark itself arriving as its
+        # own event, not a mark leading a word: it still stands for this
+        # position and is reported as-is.
+        if i >= len(word):
+            return 0
+        mark = word[:i].strip()
+        if not mark:
+            return 0
+        start = self._llm_pos - len(mark)
+        if start < 0 or self._llm_text[start : self._llm_pos] != mark:
+            return 0
+        return i
 
     def word_belongs_current_segment(self, word: str) -> bool:
         """Return True if *word* plausibly continues the remaining TTS text.
@@ -798,6 +837,18 @@ class TextSegmentMap:
         ``word[: len(word) - len(last_overflow)]``.
         """
         return self._last_overflow
+
+    @property
+    def last_leading_duplicate(self) -> int:
+        """Leading chars of the last :meth:`advance_word` token already consumed.
+
+        The mirror of :attr:`last_overflow`: where that reports the token's tail
+        running past this text, this reports the token's head repeating
+        punctuation the previous word's span already carried. Callers slice both
+        ends off the token to get the part that is genuinely this frame's --
+        ``word[last_leading_duplicate : len(word) - len(last_overflow or "")]``.
+        """
+        return self._last_leading_duplicate
 
     @property
     def is_complete(self) -> bool:

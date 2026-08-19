@@ -6,13 +6,9 @@
 
 """Word completion tracker for TTS context ordering."""
 
-import re
-import unicodedata
-
 from loguru import logger
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
-from pipecat.utils.text.transforms._alnum_utils import fold_typography
 
 
 class WordCompletionTracker:
@@ -125,38 +121,6 @@ class WordCompletionTracker:
 
         self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
 
-    @staticmethod
-    def _fold_for_comparison(text: str) -> str:
-        """Fold text for lenient span-containment comparisons.
-
-        Applies typographic folding, casefolds, and collapses connector
-        characters (spaces and hyphens). This makes the comparison tolerant of
-        case-only replacements (``"SQL"`` vs ``"sql"``) and replacements that
-        only change how words are joined (``"BODYPUMP"`` vs ``"body-pump"``),
-        so :meth:`_dedupe_leading_punctuation` reads those as a match and leaves
-        the frame word alone.
-        """
-        folded = fold_typography(text).casefold()
-        return re.sub(r"[-\s]+", "", folded)
-
-    @staticmethod
-    def _remove_trailing_punctuation(text: str) -> str:
-        """Remove punctuation only at the very end of the given text."""
-        i = len(text)
-        while i > 0 and unicodedata.category(text[i - 1]).startswith("P"):
-            i -= 1
-        return text[:i]
-
-    @staticmethod
-    def _remove_leading_punctuation(text: str) -> str:
-        """Remove punctuation and whitespace only at the very start of the given text."""
-        i = 0
-        while i < len(text) and (
-            text[i].isspace() or unicodedata.category(text[i]).startswith("P")
-        ):
-            i += 1
-        return text[i:]
-
     def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
 
@@ -225,8 +189,13 @@ class WordCompletionTracker:
         prev_llm_pos = self._llm_pos
         self._segment_map.advance_word(word)
 
+        # The map reports both ends of the token that are not this frame's: a
+        # leading run repeating punctuation the previous word already carried,
+        # and a trailing run spilling into the next frame.
+        head = self._segment_map.last_leading_duplicate
         overflow = self._segment_map.last_overflow
-        self._frame_word = word[: len(word) - len(overflow)] if overflow else word
+        tail = len(word) - len(overflow) if overflow else len(word)
+        self._frame_word = word[head:tail]
         self._overflow_word = overflow
 
         self._user_facing_pos = self._segment_map.user_facing_pos
@@ -260,24 +229,15 @@ class WordCompletionTracker:
         - **Otherwise**: the span from *prev_llm_pos* to the new llm cursor
           (covers a normal word, or a zero-budget segment that completed via this
           word since ``llm_pos`` was already synced from its jump).
-
-        Except mid-transformed-segment, the frame word is then de-duplicated
-        against the span (see :meth:`_dedupe_leading_punctuation`). That is
-        skipped when the completing word finished a transformed segment, since
-        the spoken word (e.g. ``"dollars"``) won't appear verbatim in the
-        original (e.g. ``"$5"``).
         """
         assert self._llm_text is not None
-        completed = self._segment_map.last_completed_segment
 
         if self.is_complete:
             self._llm_consumed = self._llm_text[prev_llm_pos:]
             self._llm_pos = len(self._llm_text)
-            if completed is None or not completed.is_transformed:
-                self._dedupe_leading_punctuation()
         elif self._segment_map.in_transformed_segment:
             self._llm_consumed = None
-        elif self._llm_pos == prev_llm_pos and completed is None:
+        elif self._llm_pos == prev_llm_pos and self._segment_map.last_completed_segment is None:
             start = self._llm_pos
             while start < len(self._llm_text) and self._llm_text[start].isspace():
                 start += 1
@@ -286,32 +246,6 @@ class WordCompletionTracker:
             self._llm_pos = end
         else:
             self._llm_consumed = self._llm_text[prev_llm_pos : self._llm_pos]
-            if completed is None or not completed.is_transformed:
-                self._dedupe_leading_punctuation()
-
-    def _dedupe_leading_punctuation(self) -> None:
-        """Drop punctuation from the frame word that its own span already carries.
-
-        ``advance_by_alnums`` sweeps punctuation trailing a word into that word's
-        span, so a provider that instead reports it with the *following* word
-        (``", I"`` rather than ``"Yeah,"``) presents the same mark twice. When the
-        frame word only matches its span once that leading mark is removed, the
-        mark belongs to the previous word and is trimmed here, so it is emitted
-        once.
-
-        Comparison is case- and connector-insensitive (casefolded, hyphens and
-        spaces collapsed) so a case-only (``"SQL"`` vs ``"sql"``) or
-        hyphen-vs-space replacement still counts as a match.
-        """
-        frame_word = self._remove_trailing_punctuation(self._frame_word or "")
-        if not frame_word:
-            return
-        folded_span = self._fold_for_comparison(self._llm_consumed or "")
-        if self._fold_for_comparison(frame_word) in folded_span:
-            return
-        trimmed = self._remove_leading_punctuation(frame_word)
-        if trimmed and self._fold_for_comparison(trimmed) in folded_span:
-            self._frame_word = self._remove_leading_punctuation(self._frame_word or "")
 
     def word_belongs_here(self, word: str) -> bool:
         """Return True if this word plausibly belongs to the remaining TTS text.

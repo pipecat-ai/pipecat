@@ -490,6 +490,59 @@ class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
         self.assertTrue(smap.word_belongs_current_segment("database"))
 
 
+class TestLeadingDuplicatePunctuation(unittest.TestCase):
+    """A provider that reports a mark with the *following* word rather than the one
+    it trails.
+
+    The raw cursor stops before punctuation so the next token can still match it,
+    while the LLM cursor sweeps it into the preceding word's span. A token that
+    then leads with that same mark carries it a second time, and the map reports
+    how much of its head to drop.
+    """
+
+    SENTENCE = "Yeah, I can do that."
+
+    def _map_after_first_word(self):
+        smap = TextSegmentMap(self.SENTENCE, self.SENTENCE, self.SENTENCE)
+        smap.advance_word("Yeah")
+        return smap
+
+    def test_cursors_disagree_about_the_trailing_mark(self):
+        smap = self._map_after_first_word()
+        self.assertEqual(smap.raw_pos, 4, "raw cursor stops before the comma")
+        self.assertEqual(smap.llm_pos, 5, "llm cursor swept the comma into 'Yeah'")
+
+    def test_repeated_mark_is_reported_as_a_leading_duplicate(self):
+        smap = self._map_after_first_word()
+        smap.advance_word(", I")
+        self.assertEqual(smap.last_leading_duplicate, 2, "drop the comma and its space")
+
+    def test_word_without_the_mark_reports_nothing(self):
+        smap = self._map_after_first_word()
+        smap.advance_word("I")
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+    def test_punctuation_only_token_is_left_alone(self):
+        """The mark arriving as its own event stands for this position itself."""
+        smap = self._map_after_first_word()
+        smap.advance_word(", ")
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+    def test_unconsumed_opening_punctuation_is_not_a_duplicate(self):
+        sentence = 'He said "hello" today'
+        smap = TextSegmentMap(sentence, sentence, sentence)
+        smap.advance_word("He")
+        smap.advance_word("said")
+        smap.advance_word('"hello')
+        self.assertEqual(smap.last_leading_duplicate, 0, "the quote is new content")
+
+    def test_reset_clears_it(self):
+        smap = self._map_after_first_word()
+        smap.advance_word(", I")
+        smap.reset()
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+
 class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
     """A provider may punctuate a tagged span more than the source text does."""
 
