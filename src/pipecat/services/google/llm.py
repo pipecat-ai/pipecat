@@ -69,23 +69,23 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# Gemini 3 flash models that reject the "minimal" thinking level. They are given
-# "low" instead, the lowest level they accept. Any model not listed here is
-# assumed to accept "minimal", which is the fastest setting available.
-_MODELS_WITHOUT_MINIMAL_THINKING = ("gemini-3.7-flash",)
+# The lowest thinking level each model accepts, keyed by model name prefix. A
+# model that isn't listed is assumed to accept "minimal", the fastest setting.
+_LOWEST_MODEL_THINKING_LEVELS = {
+    "gemini-3.7-flash": "low",
+}
 
-# Model families whose thinking is controlled by thinking_level rather than
-# thinking_budget. Whether a budget set on one of these is honored, ignored, or
-# rejected varies by model and by backend, so none of them can be relied on.
-_MODELS_WITHOUT_THINKING_BUDGET = ("gemini-3",)
+# Models that take their thinking configuration from thinking_level, keyed by
+# model name prefix. Whether one of these honors a thinking_budget set alongside
+# it varies by model and by backend, so such a budget can't be relied on.
+_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3",)
 
 
 class GoogleThinkingConfig(BaseModel):
     """Configuration for controlling the model's internal "thinking" process used before generating a response.
 
     Gemini 2.5 and 3 series models have this thinking process. Set either
-    ``thinking_level`` or ``thinking_budget``, never both: a request carrying
-    both is rejected.
+    ``thinking_level`` or ``thinking_budget``, never both.
 
     Parameters:
         thinking_level: Thinking level, for Gemini 3 models.
@@ -101,9 +101,7 @@ class GoogleThinkingConfig(BaseModel):
             If not provided, most models today default to dynamic thinking.
             See https://ai.google.dev/gemini-api/docs/thinking#set-budget
             for default values and allowed ranges.
-            Note: Gemini 3 models take thinking_level instead. Whether one of
-            them honors a budget, quietly ignores it, or rejects the request
-            varies by model and by backend, so none of them can be relied on.
+            Note: Gemini 3 models must use thinking_level instead.
         include_thoughts: Whether to include thought summaries in the response.
             Today's models default to not including thoughts (False).
     """
@@ -470,11 +468,11 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             return
 
         model = assert_given(self._settings.model)
-        if not model or not model.startswith(_MODELS_WITHOUT_THINKING_BUDGET):
+        if not model or not model.startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
             return
 
         logger.warning(
-            f"{self}: thinking_budget is the Gemini 2.5 thinking control, and {model} may "
+            f"{self}: thinking_budget is the pre-Gemini 3 thinking control, and {model} may "
             "ignore it or reject the request outright. Use thinking_level instead."
         )
 
@@ -493,7 +491,14 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             if model.startswith("gemini-2.5-flash"):
                 generation_params["thinking_config"] = {"thinking_budget": 0}
             elif model.startswith("gemini-3") and "flash" in model:
-                level = "low" if model.startswith(_MODELS_WITHOUT_MINIMAL_THINKING) else "minimal"
+                level = next(
+                    (
+                        lowest
+                        for prefix, lowest in _LOWEST_MODEL_THINKING_LEVELS.items()
+                        if model.startswith(prefix)
+                    ),
+                    "minimal",
+                )
                 generation_params["thinking_config"] = {"thinking_level": level}
         except Exception as e:
             logger.error(f"Failed to unset thinking budget: {e}")
