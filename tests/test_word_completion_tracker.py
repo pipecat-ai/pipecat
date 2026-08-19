@@ -2581,6 +2581,37 @@ class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
             self.assertFalse(tracker.add_word_and_check_complete(word))
         self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
 
+    def test_accented_word_keeps_its_accent_in_the_attributed_span(self):
+        """The span carries the LLM's spelling, not the provider's folded one."""
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS[:2]:
+            tracker.add_word_and_check_complete(word)
+        tracker.add_word_and_check_complete("cafe")
+        self.assertEqual(tracker.get_llm_consumed(), "café")
+
+
+class TestForceCompleteAttributesTaggedRemainder(unittest.TestCase):
+    """A force-completed slot keeps the LLM tags on its unspoken remainder.
+
+    The remaining TTS text carries synthesis tags (``<spell>``) and the remaining
+    LLM text carries pattern delimiters (``<card>``). They differ by construction,
+    so the remainder must be attributed on position alone.
+    """
+
+    TTS_TEXT = "<spell>4111 1111 1111 1111</spell>"
+    LLM_TEXT = "<card>4111 1111 1111 1111</card>"
+    USER_FACING = "4111 1111 1111 1111"
+
+    def test_remainder_carries_the_llm_delimiters(self):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT, llm_text=self.LLM_TEXT, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("4111")
+        self.assertTrue(tracker.add_word_and_check_complete("WRONG"))
+        self.assertEqual(tracker.get_llm_consumed(), "1111 1111 1111</card>")
+
 
 class TestTextNoWordArrivesFor(unittest.TestCase):
     """Markup occupies a segment of its own and no word-timestamp event names one,
