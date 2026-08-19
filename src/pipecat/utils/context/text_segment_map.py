@@ -112,9 +112,9 @@ class _HopKind(Enum):
 class _Hop:
     """The outcome of offering one word to one segment.
 
-    Produced by :meth:`TextSegmentMap._classify_hop` and acted on by
-    :meth:`TextSegmentMap._consume_word` (and its read-only twin
-    :meth:`TextSegmentMap._can_consume_word`).
+    Produced by :meth:`TextSegmentMap._classify_hop`, collected by
+    :meth:`TextSegmentMap._plan_hops`, and acted on by
+    :meth:`TextSegmentMap._consume_word`.
 
     Parameters:
         kind: Which of the four outcomes applies.
@@ -559,44 +559,70 @@ class TextSegmentMap:
             self._seg_idx += 1
             self._seg_raw_pos = 0
 
-    def _consume_word(self, word: str) -> None:
-        """Offer *word* to each segment in turn until one places it.
+    def _plan_hops(self, word: str) -> tuple[list[_Hop], str]:
+        """Offer *word* to each segment from the cursor on, changing nothing.
 
-        Most words are placed by the first segment tried and the loop runs once.
-        It runs again when a segment cannot finish the job -- because the word
-        outruns it, or because it has nothing speakable to offer -- in which case
-        that segment is finished and whatever is left of the word moves on.
+        The decision half of consuming a word, kept separate from the cursor
+        movement so that :meth:`_consume_word` and :meth:`_can_consume_word`
+        cannot drift apart: a token one of them accepts is by construction a
+        token the other places.
 
-        Anything still unplaced after the last segment is the word running past
-        the end of this frame, and is left in ``last_overflow`` for the caller to
-        give to the next frame.
+        Most words are placed by the first segment tried and the walk stops
+        there. It continues when a segment cannot finish the job -- because the
+        word outruns it, or because it has nothing speakable to offer -- in which
+        case whatever is left of the word moves on to the next segment.
+
+        Returns:
+            The hop each segment produced, in walk order, and whatever is left of
+            the word after the last segment. A non-empty remainder is the word
+            running past the end of this frame.
         """
+        seg_idx = self._seg_idx
+        raw_pos = self._seg_raw_pos
         remaining_word = word
+        hops: list[_Hop] = []
 
-        while remaining_word and self._seg_idx < len(self._segments):
+        while remaining_word and seg_idx < len(self._segments):
+            hop = self._classify_hop(self._segments[seg_idx].tts[raw_pos:], remaining_word)
+            hops.append(hop)
+
+            # PLACED and NO_MATCH both end the walk; the other two carry on.
+            if hop.kind is _HopKind.PLACED or hop.kind is _HopKind.NO_MATCH:
+                return hops, ""
+
+            remaining_word = remaining_word[hop.word_chars :]
+            seg_idx += 1
+            raw_pos = 0
+
+        return hops, remaining_word
+
+    def _consume_word(self, word: str) -> None:
+        """Apply the hops *word* takes, moving the cursors as each one says.
+
+        Anything the walk could not place is the word running past the end of
+        this frame, and is left in ``last_overflow`` for the caller to give to
+        the next frame.
+        """
+        hops, overflow = self._plan_hops(word)
+
+        for hop in hops:
             seg = self._segments[self._seg_idx]
-            old_pos = self._seg_raw_pos
-            hop = self._classify_hop(seg.tts[old_pos:], remaining_word)
 
             if hop.kind is _HopKind.NO_MATCH:
                 # The word belongs somewhere else entirely (a provider swapping a
                 # symbol, say). Nudge the raw cursor past any leading punctuation
                 # so the next word is not blocked by it, but leave the cursors
                 # that mean something alone -- nothing was really spoken here.
-                self._seg_raw_pos = old_pos + hop.segment_chars
-                return
+                self._seg_raw_pos += hop.segment_chars
+            elif hop.kind is _HopKind.PLACED:
+                self._advance_cursors_to(seg, self._seg_raw_pos + hop.segment_chars)
+            else:
+                # CROSSES or EXHAUSTED: this segment is done either way, and the
+                # next hop was classified against the one after it.
+                self._advance_cursors_to(seg, len(seg.tts))
 
-            if hop.kind is _HopKind.PLACED:
-                self._advance_cursors_to(seg, old_pos + hop.segment_chars)
-                return
-
-            # CROSSES or EXHAUSTED: this segment is done either way. Finish it and
-            # offer the next one whatever part of the word it did not account for.
-            self._advance_cursors_to(seg, len(seg.tts))
-            remaining_word = remaining_word[hop.word_chars :]
-
-        if remaining_word:
-            self._last_overflow = remaining_word
+        if overflow:
+            self._last_overflow = overflow
 
     def advance_word(self, word: str) -> None:
         """Consume one spoken word, moving every cursor to where it leaves off.
@@ -665,13 +691,7 @@ class TextSegmentMap:
         return False
 
     def _can_consume_word(self, word: str) -> bool:
-        """Walk the segments exactly as :meth:`_consume_word` would, changing nothing.
-
-        Same loop, same order, against copies of the cursors -- it answers *would
-        this word be placed?* without placing it. Nothing enforces that the two
-        stay in step, so a change to how hops are classified or ordered has to be
-        made in both: a token this accepts but :meth:`_consume_word` then fails to
-        place leaves the cursor stuck.
+        """Answer *would this word be placed?* without placing it.
 
         True once some segment would place the word, or once it has run through
         every remaining segment. False if there is nothing left to offer, or a
@@ -680,24 +700,8 @@ class TextSegmentMap:
         if self._seg_idx >= len(self._segments):
             return False
 
-        seg_idx = self._seg_idx
-        raw_pos = self._seg_raw_pos
-        remaining_word = word
-
-        while remaining_word and seg_idx < len(self._segments):
-            hop = self._classify_hop(self._segments[seg_idx].tts[raw_pos:], remaining_word)
-
-            if hop.kind is _HopKind.PLACED:
-                return True
-            if hop.kind is _HopKind.NO_MATCH:
-                return False
-
-            # CROSSES or EXHAUSTED: try the next segment, as the real walk would.
-            remaining_word = remaining_word[hop.word_chars :]
-            seg_idx += 1
-            raw_pos = 0
-
-        return True
+        hops, _ = self._plan_hops(word)
+        return not hops or hops[-1].kind is not _HopKind.NO_MATCH
 
     def _symbol_belongs_here(self, word: str) -> bool:
         """Return True if a word of pure punctuation or symbols belongs here.
