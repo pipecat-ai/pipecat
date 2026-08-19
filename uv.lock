@@ -4148,27 +4148,26 @@ wheels = [
 
 [[package]]
 name = "moq-ffi"
-version = "0.2.33"
+version = "0.3.11"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1b/49/f8a28010b26ce6397d8a27d77182452c36f5946ab6c9ea704e23b9950bb7/moq_ffi-0.2.33.tar.gz", hash = "sha256:f05ca1ac72f24e041bdce7bf5e671850a670986e8f85dcc8b624cbad6a107de3", size = 1815208, upload-time = "2026-07-18T14:08:37.475Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/a0/a981454576b405b8b2654c84271bf08313b66a264dda2889273caed9ac8f/moq_ffi-0.3.11.tar.gz", hash = "sha256:1e2fba3984f5bdf95f1b4ad55942c621378e9432801fd1c5f0d85d4419d490ee", size = 2794249, upload-time = "2026-08-15T01:07:44.157Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/74/478759b0cb3f5f1b05304182ca786f072e35333c21c771bbfa5514ac81a5/moq_ffi-0.2.33-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:e8611aa05578c5167bec5a8f6bc4a2cdc093ef00d3abf0ea36b9e1d3e31f2678", size = 6654077, upload-time = "2026-07-18T14:08:29.694Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/4b/801796478a5e29d6a45fd13c333d548a2061578907ccb3a1e5d151b35741/moq_ffi-0.2.33-py3-none-macosx_11_0_arm64.whl", hash = "sha256:d882d799cb8af8598cb70063ade6dd5f8dadad79d197992217c6f70a7a00cc2d", size = 6248557, upload-time = "2026-07-18T14:08:31.351Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/c5/4b3c7c19f443464e164cc44af423a9db212b0552ef75f8990042441fe45c/moq_ffi-0.2.33-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f341f31c9bf3299b1b2de8a4cc15d248cc5494c628d74e510fd250afdbda2582", size = 7145816, upload-time = "2026-07-18T14:08:32.911Z" },
-    { url = "https://files.pythonhosted.org/packages/da/e4/83aad890088bc4fc10275e714b60b8fce66b09ce532a321a966b0a58acfb/moq_ffi-0.2.33-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:b734ced0cf0c8ae786b19d12f911635bfe8a10279d5528e46f9f9d71ed3f4f2d", size = 7451710, upload-time = "2026-07-18T14:08:34.413Z" },
-    { url = "https://files.pythonhosted.org/packages/78/53/03aa89be4a08b3befe58977d6c1deab91616088d540ba02dea9cce9ebfe4/moq_ffi-0.2.33-py3-none-win_amd64.whl", hash = "sha256:fafb24c57319b3fa15621cdb320fe0c4b7212129172fb033a3287aa8414a9e29", size = 5486230, upload-time = "2026-07-18T14:08:35.971Z" },
+    { url = "https://files.pythonhosted.org/packages/82/3c/7f628b2c8391325119bba6772546aabac138b47932f2e49ca6ae2505ce81/moq_ffi-0.3.11-py3-none-macosx_11_0_arm64.whl", hash = "sha256:63882cb264c99bfe791eecb6ff588b13c79a739dc5cd719271c91a2897ff5d1e", size = 7274205, upload-time = "2026-08-15T01:07:37.043Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/d9/c6979fb0088be298172a21ae3afbc0d4f2b29a0ff8ad13ecb4e8b0079e60/moq_ffi-0.3.11-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3b62450afb2db157a2b94804de512f8838ee66e6835a436bcf532546d4c74652", size = 8246416, upload-time = "2026-08-15T01:07:38.714Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/44/8b60b6b8a4cc3a70743dedb1ff810e09def1e817cfaebb9de20264701a38/moq_ffi-0.3.11-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:e214ea6da43332a120fe1bb843ed63d87c27ddd24969196d87a179f9b61da061", size = 8412148, upload-time = "2026-08-15T01:07:40.317Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/98/79254283add7d3d537d2fbbabbee5c4f0eb8ccf6e44ba6ff40c2f04e7f23/moq_ffi-0.3.11-py3-none-win_amd64.whl", hash = "sha256:1e94a2298f994be492d159e345fc02b289d9bea8a4892b8978857127f44fb1f2", size = 6300976, upload-time = "2026-08-15T01:07:42.681Z" },
 ]
 
 [[package]]
 name = "moq-rs"
-version = "0.3.3"
+version = "0.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "moq-ffi" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7d/ac/c921b16209513c4a8ecc32d316336d052e1697b821b58509a9ed6108434c/moq_rs-0.3.3.tar.gz", hash = "sha256:fc1a0b54fa5c4ba8a1883e9d79bc49f5cbfdbb0a95f49840b32b147011053f34", size = 17620, upload-time = "2026-07-15T20:51:17.435Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/a3/2896a9ee20180164c4ca6b9418f6a96a5693e76c98c62fff57f28af770ee/moq_rs-0.4.4.tar.gz", hash = "sha256:8395774af015b6b4e74fe75a6ddbc56b18f8497c10c35802c1fb2aee0c51651f", size = 30789, upload-time = "2026-08-15T01:17:05.447Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/5a/6beacaa5de3a15e4979087060fb5d4edbe3285f2493f6ae69dc0b4a89571/moq_rs-0.3.3-py3-none-any.whl", hash = "sha256:a6070b2774b38ba0b547c58ac79e90683d13f03c3ff7cb9aa5557dbcabcac2ee", size = 14298, upload-time = "2026-07-15T20:51:16.164Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/4e/e08280c5228627949c5268931f7bb703c948a802b448955ca44ac7934e66/moq_rs-0.4.4-py3-none-any.whl", hash = "sha256:7527ed1566ab37c59446b9b9d033a5cb39db5738b12ea9157b49472eee3f3899", size = 24731, upload-time = "2026-08-15T01:17:04.251Z" },
 ]
 
 [[package]]
@@ -5592,7 +5591,7 @@ requires-dist = [
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.0.0,<3" },
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "moonshine-voice", marker = "extra == 'moonshine'", specifier = ">=0.0.62" },
-    { name = "moq-rs", marker = "extra == 'moq'", specifier = "~=0.3.2" },
+    { name = "moq-rs", marker = "extra == 'moq'", specifier = "~=0.4.4" },
     { name = "nltk", specifier = ">=3.10.0,<4" },
     { name = "num2words", specifier = ">=0.5.14" },
     { name = "numba", specifier = ">=0.61.2,<1" },

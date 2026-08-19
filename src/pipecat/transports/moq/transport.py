@@ -26,13 +26,13 @@ single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
 track carried by moq's JSON stream helper (``publish_json_stream`` /
 ``subscribe_json_stream``). The stream is an ordered, lossless append-log
 of records — every message is delivered in order, unlike the JSON
-*snapshot* helper (``publish_json`` / ``subscribe_json``) which collapses
-to the latest value and would drop RTVI events a slow consumer fell
-behind on. Compression is enabled (hence the ``.z`` suffix). The
-transcript is a side-channel, like moq-boy's ``status``/``command``
-tracks: it deliberately bypasses the catalog (which only describes media
-renditions), so the browser reads it by the well-known name rather than
-by catalog discovery.
+*snapshot* helper (``publish_json_snapshot`` / ``subscribe_json_snapshot``)
+which collapses to the latest value and would drop RTVI events a slow
+consumer fell behind on. Compression is enabled (hence the ``.z``
+suffix). The transcript is a side-channel, like moq-boy's
+``status``/``command`` tracks: it deliberately bypasses the catalog
+(which only describes media renditions), so the browser reads it by the
+well-known name rather than by catalog discovery.
 
 Both directions carry the same shape: the bot publishes bot-side RTVI
 events on its own ``transcript`` track and subscribes to the client's
@@ -95,11 +95,11 @@ except ModuleNotFoundError as e:
     logger.error("In order to use MOQ transport, you need to `pip install pipecat-ai[moq]`.")
     raise Exception(f"Missing module: {e}")
 
-# UniFFI's generated bindings declare ``MoqError`` twice — the Exception
+# UniFFI's generated bindings declare ``Error`` twice — the Exception
 # subclass, then a plain namespace class for the variants — so static type
 # checkers resolve it as a non-Exception type even though the Exception
 # subclass is restored at runtime. Re-type it for use in ``except`` clauses.
-_MoqError = cast("type[BaseException]", moq.MoqError)
+_MoqError = cast("type[BaseException]", moq.Error)
 
 
 # Reset codes (moq-net ``Error::to_code``) that mean "the peer is gone",
@@ -115,16 +115,16 @@ def _is_normal_close(exc: BaseException) -> bool:
 
     A hangup surfaces at two levels, and both are the expected end of a
     session rather than a failure. The session itself reports a normal
-    WebTransport close (code=0) as a ``MoqError.Protocol`` whose message
+    WebTransport close (code=0) as a ``Error.Protocol`` whose message
     contains ``"webtransport error: closed"``. Separately, any track
     subscription still in flight is reset by the peer, surfacing as a
-    per-track ``MoqError`` carrying a numeric remote code — a browser
+    per-track ``Error`` carrying a numeric remote code — a browser
     that disconnects mid-call drops its microphone producer without
     finishing, so the bot's audio subscriber sees ``Dropped``. Callers
     log these at debug and skip the ``on_error`` handler instead of
     reporting ERROR + traceback.
     """
-    if not isinstance(exc, moq.MoqError):
+    if not isinstance(exc, moq.Error):
         return False
     msg = str(exc)
     if "webtransport error: closed" in msg or "session error" in msg and "closed" in msg:
@@ -143,7 +143,7 @@ def _is_peer_gone(exc: BaseException) -> bool:
     that's the normal end of every call — treat it like a disconnect,
     not a transport failure.
     """
-    if not isinstance(exc, moq.MoqError):
+    if not isinstance(exc, moq.Error):
         return False
     return "remote error" in str(exc) or _is_normal_close(exc)
 
@@ -156,7 +156,7 @@ def _install_moq_task_exception_filter() -> None:
 
     ``moq.Server`` spawns per-session tasks internally and doesn't await
     them; when the peer WebTransport closes those tasks exit with the
-    normal-close ``MoqError.Protocol`` and, on garbage collection, asyncio
+    normal-close ``Error.Protocol`` and, on garbage collection, asyncio
     prints a scary "Task exception was never retrieved" traceback. GC can
     fire well after our ``_run`` returns, so a scoped install/restore
     around ``_run`` misses it. Install once, permanently, on first
@@ -450,14 +450,32 @@ class MOQTransportClient:
         # setup() forwarding. Owns the serve-loop task in _run().
         self._task_manager: BaseTaskManager | None = None
 
+        # `<namespace>/<id>` is a convenience layer over the paths: it only
+        # works when both peers agree on a namespace up front. Callers whose
+        # paths are assigned externally set them directly instead.
+        self._broadcast_path = params.response_path or f"{params.namespace}/{params.participant_id}"
+        self._peer_broadcast_path = params.request_path or f"{params.namespace}/{params.peer_id}"
+
+        # Origins are local objects, so both are built here rather than in
+        # ``_run()``: a broadcast is created ON its origin, and the publish
+        # side has to exist before ``MOQOutputTransport.start()``. In serve
+        # mode the two are the SAME origin — that shared origin is what
+        # routes broadcasts between accepted sessions.
+        self._publish_origin: moq.OriginProducer = moq.OriginProducer()
+        self._subscribe_origin: moq.OriginProducer = (
+            self._publish_origin if params.serve else moq.OriginProducer()
+        )
+
         # Owned for the lifetime of this client. Created synchronously so
         # MOQOutputTransport.start() can publish_audio + write transcript
         # frames without racing with _run()'s async bring-up.
-        self._publish_broadcast: moq.BroadcastProducer = moq.BroadcastProducer()
+        self._publish_broadcast: moq.BroadcastProducer = self._publish_origin.create_broadcast(
+            self._broadcast_path
+        )
         # Lossless, ordered JSON append-log for RTVI (compression on). The
         # stream helper delivers every appended record in order — the
-        # snapshot helper (publish_json) would collapse to the latest value
-        # and drop events a slow consumer fell behind on.
+        # snapshot helper (publish_json_snapshot) would collapse to the
+        # latest value and drop events a slow consumer fell behind on.
         self._transcript_out: moq.JsonStreamProducer = self._publish_broadcast.publish_json_stream(
             params.transcript_track, compression=True
         )
@@ -484,11 +502,6 @@ class MOQTransportClient:
 
         self._cert_fingerprints: list[str] = []
 
-        # `<namespace>/<id>` is a convenience layer over the paths: it only
-        # works when both peers agree on a namespace up front. Callers whose
-        # paths are assigned externally set them directly instead.
-        self._broadcast_path = params.response_path or f"{params.namespace}/{params.participant_id}"
-        self._peer_broadcast_path = params.request_path or f"{params.namespace}/{params.peer_id}"
         self._cleaned_up = False
         # Number of input/output transports currently holding the session
         # open. Both call :meth:`connect` on start and :meth:`stop`/
@@ -690,8 +703,8 @@ class MOQTransportClient:
         # helper's docstring for why we can't scope it to _run.
         _install_moq_task_exception_filter()
 
-        publish_origin = moq.OriginProducer()
-        subscribe_origin = publish_origin if self._params.serve else moq.OriginProducer()
+        publish_origin = self._publish_origin
+        subscribe_origin = self._subscribe_origin
 
         if self._params.serve:
             ctx_label = f"serving {self._bind} as {self._broadcast_path}"
@@ -709,7 +722,6 @@ class MOQTransportClient:
                         f"(cert sha256: {self._cert_fingerprints})"
                     )
 
-                publish_origin.publish(self._broadcast_path, self._publish_broadcast)
                 logger.debug(
                     f"MOQ: published broadcast {self._broadcast_path!r} "
                     f"(transcript: {self._params.transcript_track!r}, "
@@ -852,7 +864,7 @@ class MOQTransportClient:
         """Read the catalog, subscribe to the first audio track, pump PCM."""
         if not self._params.audio_in_enabled:
             return
-        catalog_sub = self._track(peer_broadcast.subscribe_catalog())
+        catalog_sub = self._track(await peer_broadcast.subscribe_catalog())
 
         # @moq/publish.Broadcast publishes an initial catalog before the
         # mic permission resolves, so the first frame typically has no
@@ -919,7 +931,7 @@ class MOQTransportClient:
         )
 
         consumer = self._track(
-            peer_broadcast.subscribe_audio(
+            await peer_broadcast.subscribe_audio(
                 track_name,
                 audio,
                 moq.AudioDecoderOutput(
@@ -961,7 +973,9 @@ class MOQTransportClient:
         """
         track_name = self._params.transcript_track
         logger.debug(f"MOQ: subscribing to peer transcript {track_name!r}")
-        consumer = self._track(peer_broadcast.subscribe_json_stream(track_name, compression=True))
+        consumer = self._track(
+            await peer_broadcast.subscribe_json_stream(track_name, compression=True)
+        )
         try:
             async for message in consumer:
                 if not isinstance(message, dict):

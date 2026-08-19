@@ -204,14 +204,14 @@ class TestIsPeerGone(unittest.TestCase):
     def test_remote_error_code_is_peer_gone(self):
         """The peer hanging up surfaces as ``remote error: code=N`` on the
         audio/transcript subscription being consumed."""
-        self.assertTrue(_is_peer_gone(moq.MoqError.Audio("moq: remote error: code=4")))
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: remote error: code=4")))
 
     def test_normal_close_is_peer_gone(self):
         """Session-level normal close counts as the peer leaving too."""
-        self.assertTrue(_is_peer_gone(moq.MoqError.Protocol("webtransport error: closed")))
+        self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
 
     def test_other_moq_errors_propagate(self):
-        self.assertFalse(_is_peer_gone(moq.MoqError.Mux("json: cancelled")))
+        self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
 
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
@@ -474,18 +474,20 @@ class TestMOQTransportInit(unittest.TestCase):
     """
 
     def _make_transport(self):
-        """Construct a MOQTransport with the moq library's BroadcastProducer
-        mocked so we don't need a real QUIC stack just to check that the
-        producer methods got called."""
+        """Construct a MOQTransport with the moq library's origin mocked so we
+        don't need a real QUIC stack just to check that the producer methods
+        got called."""
         params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
 
-        # Patch ``moq.BroadcastProducer`` so we can observe what __init__
-        # calls on it without standing up an actual broadcast.
+        # A broadcast is created ON an origin, so patch the origin and observe
+        # what __init__ asks it for without standing up an actual broadcast.
         with patch("pipecat.transports.moq.transport.moq") as moq_mock:
             broadcast = MagicMock(name="broadcast")
             track = MagicMock(name="transcript_stream")
             broadcast.publish_json_stream.return_value = track
-            moq_mock.BroadcastProducer.return_value = broadcast
+            origin = MagicMock(name="publish_origin")
+            origin.create_broadcast.return_value = broadcast
+            moq_mock.OriginProducer.return_value = origin
 
             transport = MOQTransport(params=params, host="localhost", port=4080)
             return transport, broadcast, track, moq_mock
@@ -496,6 +498,11 @@ class TestMOQTransportInit(unittest.TestCase):
         transport, broadcast, _track, _moq = self._make_transport()
         self.assertIsNotNone(transport._client._publish_broadcast)
         self.assertIs(transport._client._publish_broadcast, broadcast)
+        # Created at its final path: the origin carries the broadcast into the
+        # session, so there is no later attach step to forget.
+        transport._client._publish_origin.create_broadcast.assert_called_once_with(
+            transport._client._broadcast_path
+        )
 
     def test_transcript_track_created_synchronously(self):
         """Same constraint for the transcript JSON stream: ``send_message``
@@ -661,7 +668,7 @@ class TestIsNormalClose(unittest.TestCase):
     def _audio_error(self, message):
         import moq
 
-        return moq.MoqError.Audio(message)
+        return moq.Error.Audio(message)
 
     def test_session_close_is_normal(self):
         self.assertTrue(_is_normal_close(self._audio_error("webtransport error: closed")))
