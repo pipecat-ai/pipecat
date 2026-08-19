@@ -32,12 +32,6 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install system packages
-        timeout-minutes: 10
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y portaudio19-dev
-
       - name: Install dependencies
         run: |
           uv sync --group dev \
