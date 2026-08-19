@@ -26,6 +26,8 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _google_chunk(text: str) -> GenerateContentResponse:
@@ -176,7 +178,7 @@ class TestTTFATServiceReporting:
     async def test_streamed_response_pushes_a_ttfat_frame(self):
         """The full path: a streamed response emits TTFAT alongside TTFB."""
         service = GoogleLLMService(api_key="test-key")
-        service._enable_metrics = True
+        await service.setup(frame_processor_setup(TaskManager(), enable_metrics=True))
 
         frames = []
 
