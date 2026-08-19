@@ -302,9 +302,18 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 | end of text input | `finalize` | No more tokens for this context |
 | interruption | `clear` | The turn is cancelled |
 
+Two ordering problems stay with the service rather than the sequencer, because both are
+about queues the sequencer cannot see:
+
+| `TTSService` | What it does                                                                            | Why |
+| --- |-----------------------------------------------------------------------------------------| --- |
+| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
+| `_push_sequencer_frames` | Routes all the frames received from the AggregatedFrameSequencer through the audio-context queue when streaming | Keeps a single consumer emitting anchors, words and audio in order, rather than racing the audio-context task |
+
 ### 3.6 End to end: the code-helper example
 
-`pipecat-examples/code-helper` exercises every part of this stack at once. Its bot
+[`code-helper`](https://github.com/pipecat-ai/pipecat-examples/tree/main/code-helper), in
+the `pipecat-examples` repository, exercises every part of this stack at once. Its bot
 prompts the LLM to tag its output, then routes each tag type differently:
 
 ```python
@@ -353,8 +362,8 @@ Each layer has its own document, with worked examples traced from the real code:
 
 | File | Tests | Covers |
 | --- | ---: | --- |
-| `tests/test_text_segment_map.py` | 52 | Alignment, markup helpers, hop classification |
-| `tests/test_word_completion_tracker.py` | 199 | Completion, span attribution, TTS provider quirks |
+| `tests/test_text_segment_map.py` | 60 | Alignment, markup helpers, hop classification |
+| `tests/test_word_completion_tracker.py` | 201 | Completion, span attribution, TTS provider quirks |
 | `tests/test_aggregated_frame_sequencer.py` | 134 | Slot ordering, streaming, concurrent contexts |
 | `tests/test_tts_frame_ordering.py` | 46 | End-to-end frame order through real services |
 | `tests/test_cartesia_tts.py` | 13 | Cartesia word-timestamp shapes |

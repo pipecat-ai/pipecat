@@ -35,20 +35,3 @@ rename needs the usual deprecation cycle.
 
 ---
 
-## 2. `_word_matches_remaining` duplicates the segment walk
-
-**Where:** `TextSegmentMap._advance_raw` and `TextSegmentMap._word_matches_remaining`.
-
-`word_belongs_current_segment()` needs to answer "would this token match?" without moving
-any cursor, so `_word_matches_remaining` replays the same hop-by-hop walk as
-`_advance_raw` against copies of the cursor state. The two loops classify hops in the same
-order and **must agree on every outcome, but they are separate code kept in sync by
-convention** — a new hop kind or a change in hop ordering has to be applied twice, and a
-divergence would show up as a token that passes the dry run and then fails to advance.
-
-**Candidate fix:** a single walk parameterised by whether it commits, so the dry run and
-the real advance cannot drift apart.
-
-**Cost:** contained to one file, but the committing path has side effects
-(`_commit_raw_span` moves three cursors and completes segments) that would need care to
-keep out of the dry run.

@@ -222,9 +222,27 @@ advanced** — the offending word was routed to the next slot instead — so its
 the override that makes the verdict stick, and from that point on it is the authoritative
 answer.
 
+### "Complete" and "no room left" are different questions
+
+`is_complete` is alphanumeric-based: a frame whose remainder is only punctuation or markup
+reports True before that remainder has been walked. That is the right question for
+releasing whatever is queued behind the slot, and the wrong one for deciding whether to
+accept another word — a frame ending in an emoji is already `is_complete` when the
+emoji's own event arrives.
+
+The guard that rejects a late word therefore asks the stricter question, whether every raw
+character of `tts_text` has been consumed:
+
+```python
+if self._force_completed or self._segment_map.raw_pos >= len(self._tts_text):
+```
+
+The gap between the two answers is exactly the trailing non-alphanumeric content, and it
+is the window in which a final emoji or a separated punctuation mark is still welcome.
+
 ## 7. Tests
 
-`tests/test_word_completion_tracker.py` — 199 tests, the largest suite of the three.
+`tests/test_word_completion_tracker.py` — 201 tests, the largest suite of the three.
 Most of it is a regression corpus of real provider behaviour.
 
 | Group                    | Classes                                                        |

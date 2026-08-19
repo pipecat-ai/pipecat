@@ -3,7 +3,7 @@
 > **Job:** turn tracked words into something a client can render and redact.
 
 The three tracking layers exist to produce two frames per spoken word. This document
-covers how those frames become RTVI messages, and how the `pipecat-examples/code-helper`
+covers how those frames become RTVI messages, and how the [`code-helper`](https://github.com/pipecat-ai/pipecat-examples/tree/main/code-helper)
 client uses them. For how the frames themselves are built, see
 [AggregatedFrameSequencer](./aggregated-frame-sequencer.md#1-the-output-two-frames-per-word).
 
@@ -128,8 +128,8 @@ any tags itself**.
 
 ## 5. Everything together: code-helper
 
-The bot (`pipecat-examples/code-helper/server/bot.py`) wires the whole stack in four
-steps:
+The bot ([`code-helper/server/bot.py`](https://github.com/pipecat-ai/pipecat-examples/tree/main/code-helper/server/bot.py)) wires the whole stack in
+four steps:
 
 ```python
 # 1. Aggregate the LLM's tagged segments into typed units

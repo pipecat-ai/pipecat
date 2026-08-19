@@ -179,6 +179,25 @@ the sequencer re-enters the overflow half against the next slot:
 Both halves are attributed to the frame they actually belong to, and both progress frames
 reference the right segment.
 
+### Where a word goes when it does not fit
+
+A word that fails the active slot's `word_belongs_here` is not automatically a dropped
+event. Before force-completing anything, `process_word` asks **the next** slot for this
+context whether the word fits *there*:
+
+| Fits current | Fits next | Outcome |
+| --- | --- | --- |
+| yes | — | Normal advance |
+| no | **yes** | The provider dropped an event: the current slot is force-completed and the word carries over |
+| no | **no** | Buffered (streaming) or emitted as passthrough (non-streaming) — **the active tracker is left untouched** |
+
+That third row is what keeps one unrecognisable token from destroying a healthy slot. A
+word matching nothing is far more likely to be a provider quirk than proof that the
+sentence in front of it was skipped, so the sequencer declines to draw that conclusion
+from a single token. In streaming mode it is not even necessarily foreign — the sentence
+it belongs to may simply not have been promoted yet, which is why it is parked rather
+than passed through (see [§4](#4-token-mode-streaming)).
+
 ### Example: a provider that drops events
 
 `force_complete` is the safety net. When an audio context ends with words still owed, it

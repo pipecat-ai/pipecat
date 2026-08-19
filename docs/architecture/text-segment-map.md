@@ -162,10 +162,30 @@ offset cuts both. The other kinds differ side to side, leaving no shared offset 
 There is exactly one real cursor — `raw_pos`, the position reached in the TTS text.
 `user_facing_pos` and `llm_pos` are derived from it:
 
-- **Unchanged segment** — they advance proportionally, word for word.
+- **Unchanged segment** — they advance by an **alphanumeric budget**: the number of
+  alnum characters the word consumed on the TTS side, spent against each of the other
+  two texts.
 - **Transformed segment** — they are *held* until the segment's entire TTS text is
   consumed, then **jump to the end of its original span in one step**. There is no
   meaningful position halfway through `$42.50`, so the map refuses to invent one.
+
+### The budget is what attributes tags
+
+`advance_by_alnums` spends the budget, and two of its rules are the whole reason the tag
+rule in [§1.2](#12-the-context-drifted-from-what-the-llm-wrote) holds:
+
+- **A `<...>` tag is stepped over without charging the budget.** The cursor ends up past
+  the tag with its count untouched, so an opening tag joins the span of the word that
+  follows it. This is why `llm_pos` reaches 23 rather than 17 in that section's table:
+  `<card>` cost nothing, and four digits cost four.
+- **Punctuation immediately after the budget runs out is swept up**, stopping before the
+  next space, alnum char, or `<`. So a trailing `,` or `.` joins the span of the word
+  *before* it — the provider reports `Yeah`, the context records `Yeah,`.
+
+Nothing attributes markup to words explicitly. One loop counts letters and digits and
+steps over everything that is not one; where the tags land follows from that. The
+closing tag is the exception the loop deliberately stops short of — it is swept by
+[`WordCompletionTracker`](./word-completion-tracker.md) when the frame completes.
 
 ### Worked example
 
@@ -330,6 +350,26 @@ tts='Hello world'   original='Hello there world'
 If a `CROSSES` remainder runs out of segments entirely, the leftover is exposed as
 `last_overflow` — that is the straddling-token case the frame above handles.
 
+### Symbol tokens: the dry run accepts what the walk will not place
+
+A token with no alphanumeric content at all — an emoji, a bare punctuation mark, or a
+symbol the provider substituted (ElevenLabs reports `→` as `-`) — cannot be matched by any
+of the three strategies, because there is nothing to compare. `word_belongs_current_segment`
+falls through to a separate check, `_symbol_word_belongs`, which accepts the token when
+either:
+
+1. it appears literally in the remaining TTS text (the search window backs up over
+   punctuation already swept past), or
+2. alnum content is still unconsumed **and** the next non-space character is itself
+   non-alnum — the substitution case, where the reported symbol will never match the
+   source character it stands for.
+
+`advance_word` does **not** consult this path. A substituted symbol therefore passes
+`word_belongs_here` — so the slot is not force-completed over it — and then classifies as
+`NO_MATCH`, nudging the raw cursor past leading punctuation and stopping. The token is
+accepted without being placed, which is the right outcome for a mark the source text
+spells differently.
+
 ### Why folding needs a word boundary
 
 Folding erases case, which can manufacture a false match: folded `account` is a prefix of
@@ -382,7 +422,7 @@ separate is what makes each one correct in its own place.
 | Member | Purpose |
 | --- | --- |
 | `advance_word(word)` | Consume one token, moving all cursors |
-| `word_belongs_current_segment(word)` | Non-mutating dry run of the same matching |
+| `word_belongs_current_segment(word)` | Non-mutating dry run, plus the symbol check `advance_word` skips |
 | `user_facing_pos` / `llm_pos` / `raw_pos` | The three cursors (`user_facing_pos` indexes the segment text) |
 | `is_complete` | All alphanumeric content accounted for |
 | `in_transformed_segment` | Cursor sits mid-transform (callers suppress context writes) |
