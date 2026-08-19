@@ -378,6 +378,12 @@ class CartesiaTTSService(WebsocketTTSService):
             pause_frame_processing=False,
             sample_rate=sample_rate,
             push_start_frame=True,
+            # The server's "done" message provides the TTSStoppedFrame on the
+            # happy path. This covers abandoned contexts (e.g. a context lost
+            # to a connection drop after partial audio): the audio context
+            # timeout then closes the turn with a TTSStoppedFrame instead of
+            # leaving it open.
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
