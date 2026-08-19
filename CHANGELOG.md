@@ -10725,8 +10725,8 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
   provide a mixer per destination. For example:
 
 ```python
-audio_out_mixer = (
-    {
+TransportParams(
+    audio_out_mixer={
         "track-1": SoundfileMixer(...),
         "track-2": SoundfileMixer(...),
         "track-N": SoundfileMixer(...),
