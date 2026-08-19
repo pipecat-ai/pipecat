@@ -515,10 +515,6 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
         self.assertEqual(smap.user_facing_pos, len(text))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestClassifyHopFoldsTypographicVariants(unittest.TestCase):
     """Strategy 2 folds typographic variants, not just case and accents.
 
@@ -577,3 +573,7 @@ class TestFoldPreservesLength(unittest.TestCase):
         """
         for char in ("\ufb01", "\u00bd", "\uff11", "\u4e09", "\u2032", "\u00a0"):
             self.assertEqual(fold_for_matching(char), char)
+
+
+if __name__ == "__main__":
+    unittest.main()
