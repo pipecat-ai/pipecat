@@ -349,14 +349,14 @@ class TextSegmentMap:
         return (word,) if trimmed == word else (word, trimmed)
 
     @staticmethod
-    def _prefix_hop(
+    def _literal_hop(
         candidates: list[tuple[str, int]],
         remaining_word: str,
         require_word_boundary: bool = False,
     ) -> "_Hop | None":
         """Try PLACED/CROSSES of *remaining_word* against *candidates*, literally.
 
-        Shared by :meth:`_literal_hop` and :meth:`_folded_hop` -- both compare
+        Also the engine of :meth:`_folded_hop`, which calls it on folded text -- both compare
         the same way, just on different (length-preserving) transforms of the
         text, so the offsets this returns are valid for whichever text produced
         *candidates* and *remaining_word*.
@@ -438,11 +438,6 @@ class TextSegmentMap:
         ]
 
     @staticmethod
-    def _literal_hop(candidates: list[tuple[str, int]], remaining_word: str) -> "_Hop | None":
-        """Match *remaining_word* against *candidates* exactly as written."""
-        return TextSegmentMap._prefix_hop(candidates, remaining_word)
-
-    @staticmethod
     def _folded_hop(candidates: list[tuple[str, int]], remaining_word: str) -> "_Hop | None":
         """Match *remaining_word* against *candidates* with surface variation folded away.
 
@@ -462,7 +457,7 @@ class TextSegmentMap:
         accepted here if it lands on a word boundary.
         """
         folded_candidates = [(fold_for_matching(c), offset) for c, offset in candidates]
-        return TextSegmentMap._prefix_hop(
+        return TextSegmentMap._literal_hop(
             folded_candidates, fold_for_matching(remaining_word), require_word_boundary=True
         )
 
@@ -564,36 +559,44 @@ class TextSegmentMap:
             if not has_alnum(seg.tts[new_pos:]):
                 new_pos = len(seg.tts)
         else:
-            n_alnum = len(alnum_only(seg.tts[self._seg_raw_pos : new_pos]))
-            if n_alnum:
-                self._user_facing_pos = advance_by_alnums(
-                    self._original_text, self._user_facing_pos, n_alnum
-                )
-            else:
-                # A token with no letters or digits to spend -- punctuation set
-                # off by a space, as French writes it ("va ?", "Attention :").
-                # There is no budget to advance by, so step straight to where the
-                # raw cursor got to, and the mark leaves the remaining text now
-                # rather than a word later. Both sides are identical here, so that
-                # offset is exact.
-                self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
-            self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
+            self._keep_derived_cursors_in_pace(seg, new_pos)
 
         self._seg_raw_pos = new_pos
 
-        # Reached the end of the segment: hand the derived cursors the jump they
-        # have been waiting for, and move on to the next segment.
         if new_pos >= len(seg.tts):
             if seg.is_transformed:
-                self._user_facing_pos = seg.original_end
-                # The original's count, not the TTS side's: llm_text holds
-                # "$42.50" (4 alnums), never the spoken "forty two dollars".
-                self._llm_pos = advance_by_alnums(
-                    self._llm_text, self._llm_pos, seg.original_alnum_count
-                )
-            self._last_completed = seg
-            self._seg_idx += 1
-            self._seg_raw_pos = 0
+                self._commit_transformed_span(seg)
+            self._finish_segment(seg)
+
+    def _keep_derived_cursors_in_pace(self, seg: TextSegment, new_pos: int) -> None:
+        """Spend this step's alphanumeric budget on the two derived cursors."""
+        n_alnum = len(alnum_only(seg.tts[self._seg_raw_pos : new_pos]))
+        if n_alnum:
+            self._user_facing_pos = advance_by_alnums(
+                self._original_text, self._user_facing_pos, n_alnum
+            )
+        else:
+            # A token with no letters or digits to spend -- punctuation set
+            # off by a space, as French writes it ("va ?", "Attention :").
+            # There is no budget to advance by, so step straight to where the
+            # raw cursor got to, and the mark leaves the remaining text now
+            # rather than a word later. Both sides are identical here, so that
+            # offset is exact.
+            self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
+        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
+
+    def _commit_transformed_span(self, seg: TextSegment) -> None:
+        """Give the derived cursors the jump they held for across *seg*."""
+        self._user_facing_pos = seg.original_end
+        # The original's count, not the TTS side's: llm_text holds "$42.50"
+        # (4 alnums), never the spoken "forty two dollars".
+        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, seg.original_alnum_count)
+
+    def _finish_segment(self, seg: TextSegment) -> None:
+        """Mark *seg* done and move the walk to the next one."""
+        self._last_completed = seg
+        self._seg_idx += 1
+        self._seg_raw_pos = 0
 
     def _plan_hops(self, word: str) -> tuple[list[_Hop], str]:
         """Offer *word* to each segment from the cursor on, changing nothing.
