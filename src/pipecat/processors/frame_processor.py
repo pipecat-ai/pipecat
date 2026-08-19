@@ -47,7 +47,7 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated_read
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
@@ -120,14 +120,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                        "read `setup.pipeline_worker.app_resources` instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated_read(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
+                    "read `setup.pipeline_worker.app_resources` instead."
+                )
             return value
         return object.__getattribute__(self, name)
 
