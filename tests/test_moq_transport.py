@@ -210,6 +210,22 @@ class TestIsPeerGone(unittest.TestCase):
         """Session-level normal close counts as the peer leaving too."""
         self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
 
+    def test_dropped_producer_is_peer_gone(self):
+        """A peer that vanishes mid-call drops its producer without finishing.
+
+        moq-rs 0.4 raises that locally with the reason as the message tail
+        rather than as a reset code, and ``Dropped`` is the one normal-close
+        reason with no typed binding. Both shapes observed against a real
+        stack: bare from an in-process track, prefixed through the audio path.
+        """
+        self.assertTrue(_is_peer_gone(moq.Error.JsonTrack("dropped")))
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: dropped")))
+
+    def test_shutdown_variants_are_peer_gone(self):
+        """``Cancelled``/``Closed`` are typed, so they need no message match."""
+        self.assertTrue(_is_peer_gone(moq.Error.Cancelled("cancelled")))
+        self.assertTrue(_is_peer_gone(moq.Error.Closed("closed")))
+
     def test_other_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
 

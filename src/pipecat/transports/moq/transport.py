@@ -107,27 +107,43 @@ _MoqError = cast("type[BaseException]", moq.Error)
 # mid-track without finishing, or the handle was already closed.
 _NORMAL_CLOSE_CODES = frozenset({0, 24, 25})  # Cancel, Dropped, Closed
 
+# ``Dropped`` is the one normal-close reason with no typed binding: ``Cancel``
+# and ``Closed`` arrive as ``Error.Cancelled``/``Error.Closed`` and are caught
+# by ``moq.is_shutdown``, while a dropped producer only ever shows up as this
+# reason on a subsystem error like ``Error.Audio``. Matching just this one
+# keeps errors that merely mention cancellation propagating.
+_NORMAL_CLOSE_REASONS = frozenset({"dropped"})
+
 _REMOTE_CODE_RE = re.compile(r"remote error: code=(\d+)")
 
 
 def _is_normal_close(exc: BaseException) -> bool:
     """Return True for the MoQ errors we see when the peer hangs up.
 
-    A hangup surfaces at two levels, and both are the expected end of a
+    A hangup surfaces at three levels, and all are the expected end of a
     session rather than a failure. The session itself reports a normal
-    WebTransport close (code=0) as a ``Error.Protocol`` whose message
-    contains ``"webtransport error: closed"``. Separately, any track
-    subscription still in flight is reset by the peer, surfacing as a
-    per-track ``Error`` carrying a numeric remote code — a browser
-    that disconnects mid-call drops its microphone producer without
-    finishing, so the bot's audio subscriber sees ``Dropped``. Callers
-    log these at debug and skip the ``on_error`` handler instead of
-    reporting ERROR + traceback.
+    WebTransport close (code=0) as an ``Error.Protocol`` whose message
+    contains ``"webtransport error: closed"``. A track subscription still
+    in flight is reset by the peer; ``Error::from_transport`` decodes only
+    code 0 into a typed ``Cancelled``, so every other received code stays
+    ``Remote(n)`` and reads as ``"remote error: code=n"``. Finally the
+    error can be raised locally, carrying the moq-net reason as its
+    message tail — a browser that disconnects mid-call drops its
+    microphone producer without finishing, and the bot's audio subscriber
+    sees ``Error.Audio("moq: dropped")``.
+
+    Callers log these at debug and skip the ``on_error`` handler instead
+    of reporting ERROR + traceback.
     """
     if not isinstance(exc, moq.Error):
         return False
+    # Cancelled and Closed have typed bindings; Dropped does not.
+    if moq.is_shutdown(exc):
+        return True
     msg = str(exc)
     if "webtransport error: closed" in msg or "session error" in msg and "closed" in msg:
+        return True
+    if msg.rsplit(":", 1)[-1].strip() in _NORMAL_CLOSE_REASONS:
         return True
     match = _REMOTE_CODE_RE.search(msg)
     return match is not None and int(match.group(1)) in _NORMAL_CLOSE_CODES
@@ -1239,8 +1255,10 @@ class MOQOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
         await self._client.setup(setup)
-        # Open the publish_audio track before connecting, so the broadcast
-        # carries its audio track by the time _run() publishes it to the origin.
+        # Open the publish_audio track before connecting: the broadcast is
+        # already on the origin, so this is what guarantees it carries audio
+        # before _run() attaches that origin to a session and anyone can
+        # subscribe.
         self._client.open_audio_track(self.sample_rate)
         logger.debug(
             f"MOQ output: sample_rate={self.sample_rate}, chunk_size={self.audio_chunk_size}"
