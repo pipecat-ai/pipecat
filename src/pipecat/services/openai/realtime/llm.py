@@ -289,7 +289,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gpt-realtime-2",
+            model="gpt-realtime-2.1",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -772,7 +772,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # match (rather than exact equality) so date-versioned variants of the same
     # base model also match without code changes. Extend this tuple as OpenAI
     # ships more reasoning-capable Realtime models.
-    _REASONING_CAPABLE_MODEL_SUBSTRINGS = ("gpt-realtime-2",)
+    _REASONING_CAPABLE_MODEL_SUBSTRINGS = ("gpt-realtime-2", "gpt-realtime-2.1")
 
     def _strip_unsupported_reasoning(
         self, settings: events.SessionProperties

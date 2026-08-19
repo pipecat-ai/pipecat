@@ -8,7 +8,8 @@
 
 from loguru import logger
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
+from pipecat.utils.context.text_segment_map import TextSegmentMap
+from pipecat.utils.text.markup_utils import strip_complete_markup
 
 
 class WordCompletionTracker:
@@ -27,13 +28,13 @@ class WordCompletionTracker:
     Three texts describe the same frame, and each answer above is phrased in one
     of them:
 
-    ================= ====================================== =====================
-    Text              Example                                Answers about
-    ================= ====================================== =====================
-    ``tts_text``      ``<spell>4111 1111</spell>``           what was spoken
-    ``user_facing``   ``4111 1111``                          what a UI displays
-    ``llm_text``      ``<card>4111 1111</card>``             what the context stores
-    ================= ====================================== =====================
+    ===================== ============================= =======================
+    Text                  Example                       Answers about
+    ===================== ============================= =======================
+    ``tts_text``          ``<spell>4111 1111</spell>``  what was spoken
+    ``user_facing_text``  ``4111 1111``                 what a UI displays
+    ``llm_text``          ``<card>4111 1111</card>``    what the context stores
+    ===================== ============================= =======================
 
     Keeping a position in all three is the job of
     :class:`~pipecat.utils.context.text_segment_map.TextSegmentMap`, which this

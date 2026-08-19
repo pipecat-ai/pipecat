@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxEventType,

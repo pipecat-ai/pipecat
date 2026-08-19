@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
 from pipecat.services.deepgram.flux.sagemaker.stt import DeepgramFluxSageMakerSTTService
-from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService
+from pipecat.services.deepgram.flux.sagemaker.tts import DeepgramFluxSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -70,15 +70,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Initialize Deepgram SageMaker TTS Service
+    # Initialize Deepgram Flux SageMaker TTS Service
     # This requires:
     # - AWS credentials configured (via environment variables or AWS CLI)
-    # - A deployed SageMaker endpoint with Deepgram TTS model
-    tts = DeepgramSageMakerTTSService(
+    # - A deployed SageMaker endpoint with Deepgram Flux TTS model
+    tts = DeepgramFluxSageMakerTTSService(
         endpoint_name=os.environ["SAGEMAKER_TTS_ENDPOINT_NAME"],
         region=os.environ["AWS_REGION"],
-        settings=DeepgramSageMakerTTSService.Settings(
-            voice="aura-2-andromeda-en",
+        settings=DeepgramFluxSageMakerTTSService.Settings(
+            voice="flux-cole-en",
         ),
     )
 

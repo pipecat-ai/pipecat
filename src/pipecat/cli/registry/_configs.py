@@ -389,6 +389,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "deepgram_flux_sagemaker_tts": (
+        "DeepgramFluxSageMakerTTSService(\n"
+        '        endpoint_name=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_ENDPOINT_NAME"),\n'
+        '        region=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_REGION"),\n'
+        "        settings=DeepgramFluxSageMakerTTSService.Settings(\n"
+        '            voice=os.getenv("DEEPGRAM_FLUX_SAGEMAKER_TTS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "deepgram_sagemaker_tts": (
         "DeepgramSageMakerTTSService(\n"
         '        endpoint_name=os.getenv("DEEPGRAM_SAGEMAKER_TTS_ENDPOINT_NAME"),\n'

@@ -7,7 +7,7 @@
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
-from pipecat.utils.text.transforms._alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import alnum_only
 
 
 class TestWordCompletionTrackerBasic(unittest.TestCase):
@@ -1857,7 +1857,7 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete(words[-1]))
 
     def test_korean_normalized_char_count_matches_raw_alnum(self):
-        """Each Hangul syllable must normalize to exactly one char.
+        """Each Hangul syllable must alnum_only to exactly one char.
 
         The NFKD decomposition would expand each syllable into 2-3 conjoining
         jamo, making the normalized length much larger than the raw alnum count
@@ -1867,11 +1867,11 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         samples = ["저는여러분의", "안녕하세요", "어시스턴트"]
         for text in samples:
             raw_count = sum(1 for c in text if c.isalnum())
-            norm_count = len(normalize(text))
+            norm_count = len(alnum_only(text))
             self.assertEqual(
                 norm_count,
                 raw_count,
-                f"normalize({text!r}): got {norm_count} chars, want {raw_count}",
+                f"alnum_only({text!r}): got {norm_count} chars, want {raw_count}",
             )
 
     def test_korean_force_complete_remaining_text_is_correct(self):
@@ -2327,7 +2327,7 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
 
     def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
         """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
-        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        to no alnum content on the TTS side, since alnum_only()'s tag-stripping
         regex treats the double angle brackets as a single (malformed) tag.
         That must not corrupt the word boundary of the following word."""
         sentence = "The leisure centre opens at six."
