@@ -321,6 +321,19 @@ class TextSegmentMap:
         self._last_leading_duplicate: int = 0
 
     @staticmethod
+    def _word_variants(word: str) -> tuple[str, ...]:
+        """Return *word* and, if it differs, *word* without its trailing punctuation.
+
+        The forms a provider's token may take against text that doesn't share its
+        punctuation: a TTS may add terminal punctuation the source lacks (reading a
+        list item -- ``"my account"`` -- as its own sentence, ``"account."``), or end
+        a tagged span with punctuation the source left to a following line break.
+        Matching tries each form in order, most literal first.
+        """
+        trimmed = strip_trailing_punctuation(word)
+        return (word,) if trimmed == word else (word, trimmed)
+
+    @staticmethod
     def _prefix_hop(
         candidates: list[tuple[str, int]],
         remaining_word: str,
@@ -328,17 +341,14 @@ class TextSegmentMap:
     ) -> "_Hop | None":
         """Try PLACED/CROSSES of *remaining_word* against *candidates*, literally.
 
-        Shared by the raw and folded passes in :meth:`_classify_hop`
-        -- both compare the same way, just on different (length-preserving)
-        transforms of the text, so the offsets this returns are valid for
-        whichever text produced *candidates* and *remaining_word*.
+        Shared by :meth:`_literal_hop` and :meth:`_folded_hop` -- both compare
+        the same way, just on different (length-preserving) transforms of the
+        text, so the offsets this returns are valid for whichever text produced
+        *candidates* and *remaining_word*.
 
-        Tries an as-is match first, then retries with the word's own trailing
-        punctuation removed (some TTS providers add terminal punctuation the
-        original text doesn't have, e.g. reading a list item -- ``"my
-        account"`` -- as its own sentence, ``"account."``). The segment's own
-        punctuation is untouched either way and is still picked up verbatim by
-        the next word.
+        Each of the word's :meth:`_word_variants` is tried in turn. The
+        segment's own punctuation is untouched either way and is still picked up
+        verbatim by the next word.
 
         Args:
             candidates: ``(text, offset)`` pairs to match *remaining_word*
@@ -358,16 +368,7 @@ class TextSegmentMap:
         Returns:
             A ``PLACED`` or ``CROSSES`` hop, or ``None`` if nothing matched.
         """
-        trimmed_word = strip_trailing_punctuation(remaining_word)
-        words = (
-            (remaining_word,)
-            if trimmed_word == remaining_word
-            else (
-                remaining_word,
-                trimmed_word,
-            )
-        )
-        for word in words:
+        for word in TextSegmentMap._word_variants(remaining_word):
             if not word:
                 continue
             for candidate, offset in candidates:
@@ -401,45 +402,89 @@ class TextSegmentMap:
         return i
 
     @staticmethod
+    def _skip_candidates(segment_remaining: str) -> list[tuple[str, int]]:
+        """Return the ``(text, offset)`` pairs a word may be matched against here.
+
+        Three progressively deeper skips into the segment: the text as-is (for
+        providers whose word tokens carry their own surrounding whitespace, e.g.
+        Inworld's ``" world"``), past leading whitespace, and past the whole
+        leading non-alphanumeric run -- the last covering punctuation a provider
+        leaves behind by not repeating it in its word-timestamp events (e.g. the
+        ``", "`` still pending in ``"Yeah, I can"`` when ``"I"`` arrives).
+
+        The offsets are non-decreasing, so the least aggressive skip is tried
+        first; duplicates are dropped.
+        """
+        lead_ws = len(segment_remaining) - len(segment_remaining.lstrip())
+        lead_nonalnum = TextSegmentMap._leading_nonalnum_len(segment_remaining, stop_at_markup=True)
+        return [
+            (segment_remaining[offset:], offset)
+            for offset in dict.fromkeys((0, lead_ws, lead_nonalnum))
+        ]
+
+    @staticmethod
+    def _literal_hop(candidates: list[tuple[str, int]], remaining_word: str) -> "_Hop | None":
+        """Match *remaining_word* against *candidates* exactly as written."""
+        return TextSegmentMap._prefix_hop(candidates, remaining_word)
+
+    @staticmethod
+    def _folded_hop(candidates: list[tuple[str, int]], remaining_word: str) -> "_Hop | None":
+        """Match *remaining_word* against *candidates* with surface variation folded away.
+
+        For a provider that lowercases a word, strips its diacritics, or
+        normalizes typographic punctuation in word-timestamp events (e.g.
+        ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``, ``"don’t"`` ->
+        ``"don't"``).
+
+        :func:`~pipecat.utils.text.transforms._alnum_utils.fold_for_matching` is
+        a length-preserving, per-character transform (unlike :func:`normalize`,
+        it never drops or merges characters), so an offset found against the
+        folded text applies unchanged to the original.
+
+        Folding erases case, which could otherwise turn a short word into a
+        spurious mid-word prefix match against a longer one (e.g. folded
+        ``"account"`` against ``"Accountant"``), so a ``PLACED`` match is only
+        accepted here if it lands on a word boundary.
+        """
+        folded_candidates = [(fold_for_matching(c), offset) for c, offset in candidates]
+        return TextSegmentMap._prefix_hop(
+            folded_candidates, fold_for_matching(remaining_word), require_word_boundary=True
+        )
+
+    @staticmethod
+    def _markup_hop(segment_remaining: str, remaining_word: str) -> "_Hop | None":
+        """Match *remaining_word* against the segment with markup stripped from both.
+
+        For a provider that wraps the word token in tags absent from ``tts_text``
+        (or vice versa). Recomputed fresh each call -- no persisted tag state.
+
+        The match is measured in markup-stripped space, so
+        :func:`~pipecat.utils.text.transforms._markup_utils.raw_offset_after_clean_chars`
+        converts it back to a raw offset. Only ``PLACED`` can come of this: a
+        word outrunning the segment is left to the literal passes, whose offsets
+        need no such conversion.
+        """
+        stripped = segment_remaining.lstrip()
+        lead_ws = len(segment_remaining) - len(stripped)
+        haystack = strip_markup(stripped)
+
+        for candidate in TextSegmentMap._word_variants(strip_markup(remaining_word)):
+            if candidate and haystack.startswith(candidate):
+                raw_len = raw_offset_after_clean_chars(stripped, len(candidate))
+                return _Hop(_HopKind.PLACED, segment_chars=lead_ws + raw_len)
+        return None
+
+    @staticmethod
     def _classify_hop(segment_remaining: str, remaining_word: str) -> _Hop:
         """Decide where *remaining_word* goes against this segment's remaining raw text.
 
-        Purely positional/textual -- no tag-name parsing or cross-call state. The
-        word is checked with three matching strategies, in order:
-
-        1. Literal, tried at three progressively deeper skip offsets into the
-           segment: as-is (for providers whose word tokens carry their own
-           surrounding whitespace, e.g. Inworld's ``" world"``), past leading
-           whitespace, and past the whole leading non-alphanumeric run -- the
-           last covering punctuation a provider leaves behind by not repeating it
-           in its word-timestamp events (e.g. the ``", "`` still pending in
-           ``"Yeah, I can"`` when ``"I"`` arrives). The word's own trailing
-           punctuation is also tried removed (see :meth:`_prefix_hop`).
-        2. Same as 1, with both sides folded by
-           :func:`~pipecat.utils.text.transforms._alnum_utils.fold_for_matching`:
-           for a provider that lowercases a word, strips its diacritics, or
-           normalizes typographic punctuation in word-timestamp events (e.g.
-           ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``, ``"don’t"`` ->
-           ``"don't"``).
-           Folding is a length-preserving, per-character transform (unlike
-           :func:`normalize`, it never drops or merges characters), so an
-           offset found against the folded text applies unchanged to the
-           original. Folding erases case, which could otherwise turn a short
-           word into a spurious mid-word prefix match against a longer one
-           (e.g. folded ``"account"`` against ``"Accountant"``); a
-           ``PLACED`` match is only accepted here if it lands on a word
-           boundary (see :meth:`_prefix_hop`'s ``require_word_boundary``).
-        3. Markup-stripped on both sides: for a provider that wraps the word
-           token in tags absent from ``tts_text`` (or vice versa). Recomputed
-           fresh each call -- no persisted tag state. As in 1 and 2, the word's
-           own trailing punctuation is also tried removed: a provider may end a
-           tagged span with punctuation the source text left to a following line
-           break.
-
-        Strategies 1 and 2 yield :attr:`_HopKind.PLACED` (word fits inside this
-        segment) or :attr:`_HopKind.CROSSES` (the segment's remaining text is
-        only a prefix of the word, which spills into the next segment). Strategy
-        3 only yields ``PLACED``.
+        Purely positional/textual -- no tag-name parsing or cross-call state. Three
+        matching strategies are tried in order, each more forgiving than the last:
+        :meth:`_literal_hop`, then :meth:`_folded_hop`, then :meth:`_markup_hop`.
+        The first two yield :attr:`_HopKind.PLACED` (the word fits inside this
+        segment) or :attr:`_HopKind.CROSSES` (the segment's remaining text is only
+        a prefix of the word, which spills into the next segment); the third only
+        yields ``PLACED``.
 
         If none match, the outcome is structural:
 
@@ -454,51 +499,24 @@ class TextSegmentMap:
           nudge past the segment's leading run of non-alphanumeric chars only --
           never past real spoken content.
         """
-        stripped = segment_remaining.lstrip()
-        lead_ws = len(segment_remaining) - len(stripped)
-        lead_nonalnum = TextSegmentMap._leading_nonalnum_len(segment_remaining, stop_at_markup=True)
+        candidates = TextSegmentMap._skip_candidates(segment_remaining)
 
-        # Strategy 1: literal match at progressively deeper skip offsets -- the
-        # text as-is, past leading whitespace, then past the whole leading
-        # non-alphanumeric run (punctuation the provider didn't repeat as its own
-        # token, e.g. the ", " left in "Yeah, I can" once "Yeah" is consumed).
-        # The offsets are non-decreasing, so this tries the least aggressive skip
-        # first; duplicates are dropped.
-        candidates = [
-            (segment_remaining[offset:], offset)
-            for offset in dict.fromkeys((0, lead_ws, lead_nonalnum))
-        ]
-        hop = TextSegmentMap._prefix_hop(candidates, remaining_word)
+        hop = TextSegmentMap._literal_hop(candidates, remaining_word)
+        if hop is None:
+            hop = TextSegmentMap._folded_hop(candidates, remaining_word)
+        if hop is None:
+            hop = TextSegmentMap._markup_hop(segment_remaining, remaining_word)
         if hop is not None:
             return hop
-
-        # Strategy 2: same candidates, variation-folded. require_word_boundary
-        # guards against folding turning a short word into a false mid-word
-        # prefix match against a longer one that only differs in case.
-        folded_word = fold_for_matching(remaining_word)
-        folded_candidates = [(fold_for_matching(c), offset) for c, offset in candidates]
-        hop = TextSegmentMap._prefix_hop(folded_candidates, folded_word, require_word_boundary=True)
-        if hop is not None:
-            return hop
-
-        # Strategy 3: markup-stripped match.
-        haystack = strip_markup(stripped)
-        clean_word = strip_markup(remaining_word)
-        trimmed_word = strip_trailing_punctuation(clean_word)
-        clean_words = (clean_word,) if trimmed_word == clean_word else (clean_word, trimmed_word)
-        for candidate in clean_words:
-            if candidate and haystack.startswith(candidate):
-                raw_len = raw_offset_after_clean_chars(stripped, len(candidate))
-                return _Hop(_HopKind.PLACED, segment_chars=lead_ws + raw_len)
 
         # Nothing spoken left here: drain so the word can try the next segment.
         if not normalize(segment_remaining):
             return _Hop(_HopKind.EXHAUSTED)
 
         # Foreign token: nudge past leading punctuation only, then stop. Unlike
-        # the strategy 1 candidates this does not stop at markup -- it moves the
-        # raw cursor rather than deciding a match, so there is no tag name it
-        # could mistake for spoken content.
+        # the skip candidates this does not stop at markup -- it moves the raw
+        # cursor rather than deciding a match, so there is no tag name it could
+        # mistake for spoken content.
         return _Hop(
             _HopKind.NO_MATCH, segment_chars=TextSegmentMap._leading_nonalnum_len(segment_remaining)
         )
