@@ -63,7 +63,7 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -262,6 +262,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             reasoning=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
+            tool_call_text_policy=ToolCallTextPolicy.PRESERVE,
             extra={},
         )
 
@@ -1103,6 +1104,7 @@ class OpenAIResponsesLLMService(
                     # call itself is what the caller gets and TTFAT ends here
                     # rather than going unmeasured.
                     await self.stop_ttfat_metrics()
+                    self._note_tool_call_detected()
                     item_id = item.get("id", "")
                     function_calls[item_id] = {
                         "name": item.get("name", ""),
@@ -1338,6 +1340,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
+                        self._note_tool_call_detected()
                         item_id = item.id or ""
                         function_calls[item_id] = {
                             "name": item.name,

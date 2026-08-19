@@ -39,6 +39,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from loguru import logger
@@ -55,6 +56,19 @@ if TYPE_CHECKING:
 # "this service doesn't support this field". Every delta field defaults to it so
 # deltas stay sparse and ``apply_update`` can skip untouched fields. It must
 # never appear in a store-mode object — see ``validate_complete()``.
+
+
+class ToolCallTextPolicy(StrEnum):
+    """Policy for text emitted in the same response as a tool call.
+
+    Parameters:
+        PRESERVE: Preserve streamed text before and after tool-call detection.
+        SUPPRESS_AFTER_TOOL_CALL: Preserve text before tool-call detection and suppress
+            subsequent text in the same response.
+    """
+
+    PRESERVE = "preserve"
+    SUPPRESS_AFTER_TOOL_CALL = "suppress_after_tool_call"
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +345,12 @@ class LLMSettings(ServiceSettings):
                 Pass the config to
                 ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will
                 be removed in 2.0.0.
+        tool_call_text_policy: Policy for text emitted in the same response as a
+            tool call. ``PRESERVE`` keeps streamed text before and after
+            tool-call detection; ``SUPPRESS_AFTER_TOOL_CALL`` keeps text before
+            the first tool call and suppresses subsequent text in the same
+            response. Set to ``None`` for services that don't stream
+            TTS-bound text (e.g. realtime speech-to-speech services).
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -343,6 +363,9 @@ class LLMSettings(ServiceSettings):
     seed: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_incomplete_user_turns: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     user_turn_completion_config: UserTurnCompletionConfig | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    tool_call_text_policy: ToolCallTextPolicy | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
