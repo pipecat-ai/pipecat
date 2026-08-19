@@ -25,10 +25,14 @@ jobs:
       - name: Install system dependencies
         timeout-minutes: 10
         run: |
-          # The runner's mirror can stall mid-fetch; cap the wait so a dead
-          # connection fails instead of hanging on a silent socket.
-          sudo apt-get -o Acquire::http::Timeout=20 update
-          sudo apt-get install -y \
+          # A stalled mirror keeps the connection alive well enough that apt's own
+          # timeout never fires, so bound each attempt from outside and retry on a
+          # fresh connection.
+          for attempt in 1 2 3; do
+            sudo timeout 90 apt-get update && break
+            echo "apt-get update attempt $attempt timed out; retrying"
+          done
+          sudo timeout 300 apt-get install -y \
             portaudio19-dev \
             libcairo2-dev \
             libgirepository1.0-dev \
