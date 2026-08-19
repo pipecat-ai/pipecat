@@ -32,6 +32,8 @@ dependencies = [
     "Pillow>=11.1.0,<13",
     "protobuf>=5.29.6,<7",
     "pydantic>=2.10.6,<3",
+    # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
+    "pydantic>=2.13; python_full_version >= '3.14'",
     "resampy~=0.4.3",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
