@@ -6,7 +6,7 @@
 
 """Deprecation marker conventions for the Pipecat framework.
 
-Every deprecation in Pipecat is emitted in one of two ways, both producing a
+Every deprecation in Pipecat is emitted in one of three ways, all producing a
 message that follows the same canonical template so it is machine-parseable
 (see ``DEPRECATION_MESSAGE_RE``) and consistent for readers:
 
@@ -42,6 +42,12 @@ decorator cannot mark these, so emit a ``DeprecationWarning`` by hand with
 ``warnings.warn(..., DeprecationWarning)``. These do not get static-checker
 detection, but the ``.. deprecated::`` directive (below) still records them for
 documentation and tooling.
+
+**Fields whose reads are intercepted:** a field that warns from
+``__getattribute__`` is read wherever its object travels, so warn through
+:func:`warn_deprecated_read` rather than by hand. A bare ``warnings.warn`` under
+the ``always`` filter repeats itself without bound; the helper warns once per
+call site.
 
 In all cases, add a ``.. deprecated:: X.Y.Z`` directive to the docstring (for a
 parameter, in its ``Args:`` / ``Parameters:`` entry). The directive is the

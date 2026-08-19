@@ -279,6 +279,11 @@ For the *runtime* warning, the mechanism depends on what is being deprecated:
 - **Parameters, module moves, behavior/value changes** → the decorator can't
   mark these, so call `warnings.warn(..., DeprecationWarning)` by hand. These
   don't get static-checker detection; the directive documents them.
+- **Fields whose reads are intercepted by `__getattribute__`** → call
+  `warn_deprecated_read()` (`from pipecat.utils.deprecation import
+  warn_deprecated_read`). Such a field is read wherever its object travels, so a
+  hand-rolled `warnings.warn` repeats itself on every read; the helper warns once
+  per call site, and reports the line that performed the read.
 
 ```python
 from pipecat.utils.deprecation import deprecated
