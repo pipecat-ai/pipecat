@@ -14,12 +14,14 @@ TTS providers do not behave. A tracker owns one `AggregatedTextFrame` from dispa
 "fully spoken", and has to survive:
 
 - **Dropped events** — the provider silently never reports a word it spoke. Waiting
-  forever would stall the frame and everything queued behind it.
-- **Straddling tokens** — one token spans two frames (`1111And` when one frame ends with
-  `1111` and the next begins with `And`).
-- **Desynced texts** — the TTS text and the LLM text can fall out of alignment, so the
-  slice of LLM text credited to a word may not actually contain that word. Recording it
-  anyway fills the conversation context with wrong text.
+  forever would stall the frame and everything queued behind it, so the frame ends early
+  and emits its own remainder.
+- **Text no word arrives for** — a closing `</card>`, or a tag between the last word and
+  its punctuation, is never spoken. Whatever is left once everything speakable is done
+  belongs to this frame, so the word that finishes it claims the rest.
+- **Tokens that overhang the frame** — a token can spill into the next frame (`1111And`)
+  or lead with punctuation the previous word already carried (`, I`). Only the middle is
+  this frame's.
 
 So the tracker is the *policy* layer: **the map says where things are, the tracker decides
 what that means for this frame**.
@@ -136,47 +138,53 @@ sentence; the foreign word is handed back as overflow for the next slot. From th
 `_force_completed` — not the map — is the authoritative completion signal, since the map
 was never advanced and its own `is_complete` stays stale.
 
-## 4. Recovery: straddling tokens
+## 4. Trimming a token to this frame's share
+
+Neither end of an incoming token necessarily belongs to this frame, and
+[`TextSegmentMap`](./text-segment-map.md#trimming-a-token-to-what-it-actually-covers)
+measures both:
+
+| Map output | The part that is not this frame's | Example |
+| --- | --- | --- |
+| `last_leading_duplicate` | Head repeating punctuation the previous word already carried | `, I` → drop 2 |
+| `last_overflow` | Tail spilling into the next frame | `1111And` → `And` |
+
+The tracker keeps what is between them:
+
+```python
+self._frame_word = word[head:tail]
+```
+
+**A tail example.** One token closes this frame and opens the next:
 
 ```python
 tracker = WordCompletionTracker("The code is 1111")
 ```
 
-| word      | complete | `get_word_for_frame()` | `get_overflow_word()` |
+| word | complete | `get_word_for_frame()` | `get_overflow_word()` |
 | --------- | -------- | ---------------------- | --------------------- |
 | `The`     | False    | `The`                  | `None`                |
 | `code`    | False    | `code`                 | `None`                |
 | `is`      | False    | `is`                   | `None`                |
 | `1111And` | **True** | **`1111`**             | **`And`**             |
 
-The token is split at the frame boundary. **Each half is attributed to the frame it
-actually belongs to.**
+The overflow is fed to the next frame's tracker, so each half is attributed to the frame
+it actually belongs to.
 
-## 5. The attribution safeguard
+**A head example.** The comma trailing `Yeah` is already part of its span, so a provider
+reporting it again on the next token would emit it twice:
 
-`_discard_llm_span_if_frame_word_missing` guards against that desync. It enforces one
-rule: **the LLM span credited to a
-word must contain that word.** If it does not, the two texts have fallen out of
-alignment and the span is dropped with a warning rather than corrupting the context.
+| after | token | `get_word_for_frame()` |
+| --- | --- | --- |
+| `Yeah` (span `Yeah,`) | `, I` | **`I`** |
 
-The comparison is **deliberately lenient** — casefolded, with hyphens and spaces
-collapsed — so a legitimate replacement is not mistaken for a desync:
+That is the whole of the tracker's word-text handling — both decisions are the map's,
+because both come from cursors it owns.
 
-| Case                  | LLM text     | Spoken   | Verdict            |
-| --------------------- | ------------ | -------- | ------------------ |
-| Case-only replacement | `SQL`        | `sql`    | Match              |
-| Joiner replacement    | `body-pump`  | `BODYPUMP` | Match            |
-| Genuinely out of sync | `hello`      | `goodbye` | **Discard**       |
+The attributed LLM span is used as given. The spans cover `llm_text` in order, so dropping
+one removes text from the transcript rather than protecting it.
 
-One special case gets repaired instead of discarded. Punctuation is normally swept into
-the *preceding* word's span, so a provider that reports it with the *following* word
-(`, I` rather than `Yeah,`) would emit it twice. The duplicate is trimmed from the frame
-word and the attribution is kept.
-
-Validation is skipped when the completing word finished a transformed segment — `dollars`
-is never going to appear inside `$42.50`.
-
-## 6. Public surface
+## 5. Public surface
 
 | Member                                | Purpose                                            |
 | ------------------------------------- | -------------------------------------------------- |
@@ -240,15 +248,15 @@ if self._force_completed or self._segment_map.raw_pos >= len(self._tts_text):
 The gap between the two answers is exactly the trailing non-alphanumeric content, and it
 is the window in which a final emoji or a separated punctuation mark is still welcome.
 
-## 7. Tests
+## 6. Tests
 
-`tests/test_word_completion_tracker.py` — 201 tests, the largest suite of the three.
+`tests/test_word_completion_tracker.py` — 203 tests, the largest suite of the three.
 Most of it is a regression corpus of real provider behaviour.
 
 | Group                    | Classes                                                        |
 | ------------------------ | -------------------------------------------------------------- |
 | Mechanics                | `Basic`, `Reset`, `EdgeCases`, `RemainingText`, `AccumulatedText`, `UserFacingText` |
-| Recovery                 | `MissingWord`, `Overflow`, `MultiFrameSimulation`               |
+| Recovery                 | `MissingWord`, `Overflow`, `MultiFrameSimulation`, `ForceCompleteAttributesTaggedRemainder` |
 | TTS provider quirks      | `UnicodeSymbolSubstitution`, `AddedTerminalPunctuation`, `CaseFolding`, `AccentFolding`, `SpaceBeforePunctuation`, `MultiAttributeSsmlTag`, `EmojiInSentence`, `CJK`, `StrayAngleBracket` |
 | Transform interaction    | `WithTransforms`, `TokenChangingReplacements`, `TransformAtEndOfUtterance`, `LLMText`, `Normalization` |
 

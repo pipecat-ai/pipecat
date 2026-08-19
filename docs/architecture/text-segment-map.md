@@ -370,6 +370,34 @@ either:
 accepted without being placed, which is the right outcome for a mark the source text
 spells differently.
 
+### Trimming a token to what it actually covers
+
+The raw cursor stops *before* punctuation trailing a word, so the next token can still
+match it. `advance_by_alnums` meanwhile sweeps that same mark into the preceding word's
+span. The two conventions differ by exactly one character:
+
+```
+"Yeah, I can do that."   after advance_word("Yeah")
+   raw_pos = 4    ← before the comma, so ", I" can still match here
+   llm_pos = 5    ← after it, swept into Yeah's span
+```
+
+Both are deliberate, and the gap is visible whenever a provider reports the mark leading
+the *following* token (`, I` rather than `I`) — it would then be carried twice.
+`last_leading_duplicate` reports how many of the token's leading characters to drop,
+positionally: the token's leading punctuation run, when `llm_pos` has just moved past
+exactly that mark.
+
+| after | token | `last_leading_duplicate` | |
+| --- | --- | ---: | --- |
+| `Yeah` (span `Yeah,`) | `, I` | **2** | the comma and its space |
+| `Yeah` (span `Yeah,`) | `I` | 0 | nothing repeated |
+| `Yeah` (span `Yeah,`) | `, ` | 0 | the mark as its own event stands for this position |
+| `He said` | `"hello` | 0 | the quote is content, not yet passed |
+
+It is the mirror of [`last_overflow`](#the-four-outcomes): one reports the head of the
+token that is not this frame's, the other the tail. Callers keep what is between them.
+
 ### Why folding needs a word boundary
 
 Folding erases case, which can manufacture a false match: folded `account` is a prefix of
@@ -428,6 +456,7 @@ separate is what makes each one correct in its own place.
 | `in_transformed_segment` | Cursor sits mid-transform (callers suppress context writes) |
 | `last_completed_segment` | Segment finished by the last `advance_word` |
 | `last_overflow` | Raw suffix that ran past the end of the TTS text |
+| `last_leading_duplicate` | Leading chars of the token already carried by the previous word |
 
 Two details in `is_complete` are worth knowing. A frame whose remainder is pure
 punctuation or markup is already complete — a closing tag never arrives as its own token.
@@ -436,7 +465,7 @@ emitted as its own token, so `_pending_separated_punctuation` holds completion o
 
 ## 7. Tests
 
-`tests/test_text_segment_map.py` — 52 tests.
+`tests/test_text_segment_map.py` — 66 tests.
 
 | Class | Covers |
 | --- | --- |
@@ -451,3 +480,4 @@ emitted as its own token, so `_pending_separated_punctuation` holds completion o
 | `TestClassifyHopCaseFoldRequiresWordBoundary` | The `account` / `Accountant` guard |
 | `TestProviderTokenShapes` | Leading-space tokens |
 | `TestWordCarriesItsOwnPunctuation` | Provider-added terminal punctuation |
+| `TestLeadingDuplicatePunctuation` | A mark reported with the following word |

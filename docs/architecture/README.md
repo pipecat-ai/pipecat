@@ -297,7 +297,7 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 | --- | --- | --- |
 | `_push_tts_frames` | `register_spoken` | A frame is dispatched to the TTS |
 | `_push_tts_frames` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
-| `_process_word_timestamps` | `process_word` | A word-timestamp event arrives |
+| `_add_word_timestamps` | `process_word` | A word-timestamp event arrives |
 | `_apply_force_complete` | `force_complete` | An audio context ends |
 | end of text input | `finalize` | No more tokens for this context |
 | interruption | `clear` | The turn is cancelled |
@@ -362,8 +362,8 @@ Each layer has its own document, with worked examples traced from the real code:
 
 | File | Tests | Covers |
 | --- | ---: | --- |
-| `tests/test_text_segment_map.py` | 60 | Alignment, markup helpers, hop classification |
-| `tests/test_word_completion_tracker.py` | 201 | Completion, span attribution, TTS provider quirks |
+| `tests/test_text_segment_map.py` | 66 | Alignment, markup helpers, hop classification |
+| `tests/test_word_completion_tracker.py` | 203 | Completion, span attribution, TTS provider quirks |
 | `tests/test_aggregated_frame_sequencer.py` | 134 | Slot ordering, streaming, concurrent contexts |
 | `tests/test_tts_frame_ordering.py` | 46 | End-to-end frame order through real services |
 | `tests/test_cartesia_tts.py` | 13 | Cartesia word-timestamp shapes |
