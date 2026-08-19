@@ -9,7 +9,7 @@ import unittest
 from pipecat.utils.context.text_segment_map import (
     TextSegmentMap,
     _HopKind,
-    _raw_len_for_clean_chars,
+    _raw_offset_after_clean_chars,
     strip_complete_markup,
     strip_markup,
 )
@@ -35,16 +35,16 @@ class TestStripMarkupHelpers(unittest.TestCase):
 
     def test_raw_len_maps_clean_prefix_to_raw_offset(self):
         # "hello" (5 clean chars) ends just before "</speak>" at raw index 12.
-        self.assertEqual(_raw_len_for_clean_chars("<speak>hello</speak>", 5), 12)
+        self.assertEqual(_raw_offset_after_clean_chars("<speak>hello</speak>", 5), 12)
 
     def test_raw_len_identity_without_markup(self):
-        self.assertEqual(_raw_len_for_clean_chars("1234-5678", 9), 9)
+        self.assertEqual(_raw_offset_after_clean_chars("1234-5678", 9), 9)
 
     def test_raw_len_zero_or_negative_is_zero(self):
-        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 0), 0)
+        self.assertEqual(_raw_offset_after_clean_chars("<b>x</b>", 0), 0)
 
     def test_raw_len_beyond_available_returns_full_length(self):
-        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
+        self.assertEqual(_raw_offset_after_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
 
     def test_raw_len_agrees_with_strip_markup(self):
         # Consuming len(strip_markup(t)) clean chars must land exactly at the raw
@@ -57,7 +57,7 @@ class TestStripMarkupHelpers(unittest.TestCase):
         # an over-sliced, still-unclosed tag the same way either way.
         for t in ["<speak>hello</speak>", "1234-5678", "<a>x</a><b>y</b>", "plain"]:
             clean = strip_markup(t)
-            pos = _raw_len_for_clean_chars(t, len(clean))
+            pos = _raw_offset_after_clean_chars(t, len(clean))
             self.assertEqual(strip_markup(t[:pos]), clean)
             self.assertTrue(pos == len(t) or t[pos] == "<")
 
@@ -377,10 +377,10 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
     def test_literal_angle_bracket_word_placed_via_literal_strategy(self):
         hop = TextSegmentMap._classify_hop("<3 always", "<3")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        # seg_chars == len(word) (offset 0 + len("<3")) is literal strategy's
+        # segment_chars == len(word) (offset 0 + len("<3")) is literal strategy's
         # formula; the markup-stripped strategy would compute this differently
-        # (via _raw_len_for_clean_chars), so this pins down *which* strategy matched.
-        self.assertEqual(hop.seg_chars, len("<3"))
+        # (via _raw_offset_after_clean_chars), so this pins down *which* strategy matched.
+        self.assertEqual(hop.segment_chars, len("<3"))
 
 
 class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
@@ -393,7 +393,7 @@ class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
     def test_word_after_comma_and_space_is_placed(self):
         hop = TextSegmentMap._classify_hop(", I can do that. ", "I")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(hop.seg_chars, len(", I"))
+        self.assertEqual(hop.segment_chars, len(", I"))
 
     def test_full_sentence_advances_word_by_word(self):
         smap = TextSegmentMap("Yeah, I can do that.", "Yeah, I can do that.")
@@ -555,7 +555,7 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
         remaining = "<spell>1234</spell>\n\nHow can I help you today?"
         hop = TextSegmentMap._classify_hop(remaining, "1234.")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(remaining[: hop.seg_chars], "<spell>1234")
+        self.assertEqual(remaining[: hop.segment_chars], "<spell>1234")
 
     def test_sentence_tracks_through_the_extra_punctuation(self):
         text = "I love to count <spell>1234</spell>\n\nHow can I help you today?"

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Segment-level mapping between original and TTS-transformed text."""
+"""Keeps a position in three versions of the same text as a TTS speaks it."""
 
 import difflib
 import re
@@ -26,7 +26,7 @@ def _iter_clean_chars(text: str) -> Iterator[tuple[int, str]]:
 
     The single definition of "what is markup" -- anything between '<' and '>',
     syntax-based and tag-name independent -- shared by :func:`strip_markup` and
-    :func:`_raw_len_for_clean_chars` so the two can't disagree. An unclosed '<'
+    :func:`_raw_offset_after_clean_chars` so the two can't disagree. An unclosed '<'
     swallows the rest of the string (matching how word-timestamp fragments can
     arrive mid-tag).
     """
@@ -85,7 +85,7 @@ def strip_complete_markup(text: str) -> str:
     return _COMPLETE_MARKUP_RE.sub("", text)
 
 
-def _raw_len_for_clean_chars(text: str, n: int) -> int:
+def _raw_offset_after_clean_chars(text: str, n: int) -> int:
     """Return the raw offset into *text* just past its *n*-th markup-stripped char.
 
     Inverse of :func:`strip_markup` for a prefix: where ``strip_markup`` collects
@@ -146,13 +146,19 @@ def _split_markup_runs(text: str) -> list[str]:
 
 @dataclass(frozen=True)
 class TextSegment:
-    """Immutable aligned chunk between original and TTS text.
+    """A piece of the utterance, paired with what the TTS was given in its place.
+
+    The map is a list of these, laid end to end over the whole utterance. In most
+    of them the two sides are identical; the interesting ones are where a
+    transform, a filter or a tag made them differ (see :attr:`is_transformed`).
 
     Parameters:
-        original: Chunk of the user-facing / LLM text.
-        tts: Corresponding chunk in the TTS-transformed text.
-        original_start: Byte offset in original_text where this chunk begins.
-        original_end: Byte offset in original_text where this chunk ends.
+        original: The piece as a client displays it.
+        tts: The same piece as it was sent to the TTS. Identical to *original*
+            unless something rewrote it, and empty if it was dropped entirely.
+        original_start: Where the piece starts in the full original text.
+        original_end: Where it ends. Cursors jump straight here once a rewritten
+            piece is finished, since no position inside one means anything.
     """
 
     original: str
@@ -162,14 +168,18 @@ class TextSegment:
 
     @property
     def is_transformed(self) -> bool:
-        """True when this segment cannot be tracked by proportional char advancement.
+        """True when the two sides cannot be walked together, character by character.
 
-        This holds when:
+        Such a segment is all-or-nothing: cursors into the original text wait at
+        its start until every spoken word of it has arrived, then jump to its end.
 
-        - alphanumeric content differs between original and TTS sides;
-        - a replacement changed word count / tokenization;
-        - the TTS side contains markup, even if the spoken alphanumeric content is
-          the same as the original.
+        Any of three things makes it so:
+
+        - the letters and digits differ (``"$42.50"`` against ``"forty two..."``);
+        - the two sides split into different numbers of words;
+        - the TTS side carries markup, even where the spoken words match. The raw
+          cursor has to travel through the tag characters while the original
+          cursor has nothing to travel through.
 
         The markup check is syntax-based and tag-name independent. For example,
         ``<phoneme ...>Siobhan</phoneme>`` is transformed because the TTS segment
@@ -194,85 +204,100 @@ class TextSegment:
 
 
 class _HopKind(Enum):
-    """How an incoming word relates to the current segment's remaining raw text."""
+    """Where an incoming word sits relative to the segment being offered it.
 
-    PLACED = auto()  # word fits within this segment; stop here
-    CROSSES = auto()  # word runs past this segment; drain it and carry the remainder
-    EXHAUSTED = auto()  # no spoken content left here; drain it, keep the whole word
-    NO_MATCH = auto()  # word doesn't belong here; nudge past leading punctuation, stop
+    A "hop" is one attempt to place a word in one segment. Two outcomes end the
+    walk, and two send it on to the next segment.
+    """
+
+    PLACED = auto()
+    """The word fits here. Advance to the end of the match and stop."""
+
+    CROSSES = auto()
+    """The segment only covers the start of the word. Finish the segment and
+    carry the unmatched rest to the next one."""
+
+    EXHAUSTED = auto()
+    """Nothing speakable is left here, so no word will ever match it -- an empty
+    diff side, or a lone ``<break/>``. Finish it and retry the whole word next."""
+
+    NO_MATCH = auto()
+    """The word does not belong here at all. Step past any leading punctuation
+    and stop, leaving the semantic cursors alone."""
 
 
 @dataclass(frozen=True)
 class _Hop:
-    """Result of matching one word against one segment.
+    """The outcome of offering one word to one segment.
 
-    Produced by :meth:`TextSegmentMap._classify_hop` and consumed by the segment
-    walk in :meth:`TextSegmentMap._advance_raw` (and its read-only twin
-    :meth:`TextSegmentMap._word_matches_remaining`).
+    Produced by :meth:`TextSegmentMap._classify_hop` and acted on by
+    :meth:`TextSegmentMap._consume_word` (and its read-only twin
+    :meth:`TextSegmentMap._can_consume_word`).
 
     Parameters:
-        kind: Which relationship holds.
-        seg_chars: Raw chars consumed within this segment -- the matched span for
-            ``PLACED``, the leading non-alphanumeric nudge for ``NO_MATCH``; 0 for
-            the draining kinds (``CROSSES``/``EXHAUSTED``), which always drain the
-            whole segment.
-        word_chars: Chars trimmed off the front of the word before continuing to
-            the next segment. Meaningful for ``CROSSES``; 0 otherwise.
+        kind: Which of the four outcomes applies.
+        segment_chars: How far into this segment to move. The matched span for
+            ``PLACED``, or a nudge past leading punctuation for ``NO_MATCH``. The
+            two draining outcomes leave it 0, since they consume the segment whole.
+        word_chars: How much of the word this segment accounted for, and so how
+            much to drop before offering the rest to the next segment. Only
+            ``CROSSES`` sets it; ``EXHAUSTED`` passes the word on untouched.
     """
 
     kind: _HopKind
-    seg_chars: int = 0
+    segment_chars: int = 0
     word_chars: int = 0
 
 
 class TextSegmentMap:
-    """Maps cursor positions across three parallel texts as TTS words stream in.
+    """Answers "where are we?" in three versions of one utterance, word by word.
 
-    The three texts describe the same utterance at different stages:
+    A TTS provider reports the words it speaks. Each report has to be turned into
+    a position -- but into a position in *three* different strings, because the
+    same utterance exists in three forms at once:
 
-    - ``tts_text``: what was sent to the TTS service (may carry SSML markup and
-      text transforms, e.g. ``"forty two dollars and fifty cents"``).
-    - ``original_text``: the user-facing string (no markup/transforms, e.g.
-      ``"$42.50"``).
-    - ``llm_text``: the LLM-produced string, which may add delimiters (e.g.
-      ``<card>$42.50</card>``); defaults to ``original_text``.
+    - ``tts_text`` -- what was actually spoken, tags and all:
+      ``"Your balance is forty two dollars"``
+    - ``original_text`` -- what a client displays: ``"Your balance is $42.50"``
+    - ``llm_text`` -- what the LLM wrote, so what the transcript should keep:
+      ``"Your balance is <b>$42.50</b>"``. Defaults to ``original_text``.
 
-    Built once by diffing ``tts_text`` against ``original_text`` into aligned
-    :class:`TextSegment` chunks. A single cursor drives everything -- ``raw_pos``,
-    the position reached in ``tts_text`` as words are consumed. The
-    ``user_facing_pos`` and ``llm_pos`` cursors are derived from it:
+    For a frame nothing rewrote, all three are the same string and every position
+    is the same.
 
-    - Across an **unchanged** segment they advance proportionally, char for char.
-    - Across a **transformed** segment (alnum content, tokenization, or markup
-      differs) they are held until the segment's entire raw text is consumed,
-      then jump to the end of its original span in one step -- the transform is
-      atomic, so there is no meaningful mid-segment original position.
+    **The hard part is that a spoken word need not appear in the other two.** The
+    provider says ``"dollars"``; nothing in ``"$42.50"`` matches it. So the map is
+    built once, by diffing ``tts_text`` against ``original_text`` into aligned
+    :class:`TextSegment` pieces -- each either survived unchanged or was rewritten
+    whole.
 
-    Callers drive the map word-by-word: :meth:`word_belongs_current_segment`
-    asks whether a raw word-timestamp token plausibly continues the remaining
-    TTS text, and :meth:`advance_word` consumes it. Both match the token against
-    the segment's remaining raw text directly -- literally, then (as stateless
-    fallbacks, recomputed fresh each call) with the word's own trailing
-    punctuation stripped, with both sides variation-folded, or with markup
-    stripped from both sides -- so a token that adds punctuation or changes
-    case/diacritics the source text doesn't have, or is a fragment of a still-
-    open SSML tag (e.g. an attribute-only word from a multi-attribute tag some
-    TTS providers split across several word-timestamp events), needs no special
-    handling from the caller. See :meth:`_classify_hop` for the full ordered
-    list of fallbacks.
+    From then on one real cursor moves: ``raw_pos``, how far into ``tts_text`` the
+    provider has got. ``user_facing_pos`` and ``llm_pos`` follow it:
+
+    - Through an **unchanged** segment they keep pace, word for word.
+    - Through a **rewritten** one they wait. There is no honest position halfway
+      through ``"$42.50"`` while ``"forty two dollars"`` is being spoken, so they
+      hold and then jump to the end of the span in one step when the last of its
+      words lands.
+
+    Callers ask two things. :meth:`word_belongs_current_segment` -- does this token
+    plausibly continue what is left to speak? -- and :meth:`advance_word`, which
+    consumes it. Both tolerate the ways providers mangle tokens (added punctuation,
+    changed case or diacritics, a fragment of a half-open SSML tag) without the
+    caller knowing anything about it; :meth:`_classify_hop` holds that logic.
 
     Example::
 
-        # "$42.50" was expanded to "forty two dollars and fifty cents"
+        # "$42.50" was sent to the TTS as "forty two dollars and fifty cents"
         smap = TextSegmentMap(
             "Your balance is forty two dollars and fifty cents",
             "Your balance is $42.50",
         )
         for word in ["Your", "balance", "is"]:
-            smap.advance_word(word)   # unchanged segment
+            smap.advance_word(word)   # unchanged: every cursor keeps pace
         for word in ["forty", "two", "dollars", "and", "fifty"]:
-            smap.advance_word(word)   # transformed segment, cursors held
-        smap.advance_word("cents")    # segment completes, cursors jump
+            smap.advance_word(word)   # rewritten: the other two cursors wait
+        smap.advance_word("cents")    # the span is done, so they jump to its end
         assert smap.last_completed_segment.original == "$42.50"
         assert not smap.in_transformed_segment
     """
@@ -283,13 +308,18 @@ class TextSegmentMap:
         original_text: str,
         llm_text: str | None = None,
     ):
-        """Initialize the segment map.
+        """Build the alignment between the three texts.
+
+        The diff happens once, here; everything after this is cursor movement.
 
         Args:
-            tts_text: Post-transform text sent to TTS.
-            original_text: User-facing pre-transform text.
-            llm_text: LLM-produced text, which may have surrounding tags. Defaults
-                to ``original_text`` when not provided.
+            tts_text: What was sent to the TTS, and so what incoming words are
+                matched against. May carry synthesis tags and rewritten values.
+            original_text: The same content as a client displays it, before any
+                rewriting. Diffed against *tts_text* to build the segments.
+            llm_text: The same content as the LLM wrote it, which may add
+                delimiters the other two never see. Rides its own cursor rather
+                than being diffed. Defaults to *original_text*.
         """
         self._tts_text = tts_text
         self._original_text = original_text
@@ -299,13 +329,16 @@ class TextSegmentMap:
 
     @staticmethod
     def _build(tts_text: str, original_text: str) -> list[TextSegment]:
-        """Build aligned TextSegments from a word-level SequenceMatcher diff.
+        """Diff the two texts into the list of segments the map walks.
 
-        Each diff opcode (equal, replace, insert, delete) becomes a segment, except
-        that an ``equal`` opcode is further split around any markup it carries (see
-        the ``parts`` comment below). Segments whose normalized alphanumeric content
-        differs are later treated as transformed/atomic units during cursor
-        advancement.
+        ``difflib`` compares them a word at a time (whitespace is kept as its own
+        token so offsets stay exact) and reports each piece as equal, replaced,
+        inserted or deleted. Every piece becomes one :class:`TextSegment`.
+
+        The one refinement: an ``equal`` piece is cut around any markup inside it,
+        so a single tag does not make the whole sentence all-or-nothing.
+
+        Called once, from ``__init__``.
         """
 
         def tokenize(text: str) -> list[str]:
@@ -406,7 +439,7 @@ class TextSegmentMap:
         self._last_leading_duplicate: int = 0
 
     @staticmethod
-    def _literal_hop(
+    def _prefix_hop(
         candidates: list[tuple[str, int]],
         remaining_word: str,
         require_word_boundary: bool = False,
@@ -463,13 +496,13 @@ class TextSegmentMap:
                         and candidate[len(word)].isalnum()
                     )
                     if not lands_mid_word:
-                        return _Hop(_HopKind.PLACED, seg_chars=offset + len(word))
+                        return _Hop(_HopKind.PLACED, segment_chars=offset + len(word))
                 elif candidate and word.startswith(candidate):
                     return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
         return None
 
     @staticmethod
-    def _leading_nonalnum(text: str, stop_at_markup: bool = False) -> int:
+    def _leading_nonalnum_len(text: str, stop_at_markup: bool = False) -> int:
         """Length of *text*'s leading run of non-alphanumeric characters.
 
         With *stop_at_markup*, the run also stops at a ``'<'``. A tag's letters
@@ -499,7 +532,7 @@ class TextSegmentMap:
            last covering punctuation a provider leaves behind by not repeating it
            in its word-timestamp events (e.g. the ``", "`` still pending in
            ``"Yeah, I can"`` when ``"I"`` arrives). The word's own trailing
-           punctuation is also tried removed (see :meth:`_literal_hop`).
+           punctuation is also tried removed (see :meth:`_prefix_hop`).
         2. Same as 1, with both sides folded by
            :func:`~pipecat.utils.text.transforms._alnum_utils.fold_for_matching`:
            for a provider that lowercases a word, strips its diacritics, or
@@ -513,7 +546,7 @@ class TextSegmentMap:
            word into a spurious mid-word prefix match against a longer one
            (e.g. folded ``"account"`` against ``"Accountant"``); a
            ``PLACED`` match is only accepted here if it lands on a word
-           boundary (see :meth:`_literal_hop`'s ``require_word_boundary``).
+           boundary (see :meth:`_prefix_hop`'s ``require_word_boundary``).
         3. Markup-stripped on both sides: for a provider that wraps the word
            token in tags absent from ``tts_text`` (or vice versa). Recomputed
            fresh each call -- no persisted tag state. As in 1 and 2, the word's
@@ -535,13 +568,13 @@ class TextSegmentMap:
           literally match trailing non-alnum content (e.g. an emoji) is still
           found here rather than skipped over.
         - :attr:`_HopKind.NO_MATCH` otherwise (e.g. a provider symbol
-          substitution): the word doesn't belong here, so ``seg_chars`` carries a
+          substitution): the word doesn't belong here, so ``segment_chars`` carries a
           nudge past the segment's leading run of non-alphanumeric chars only --
           never past real spoken content.
         """
         stripped = segment_remaining.lstrip()
         lead_ws = len(segment_remaining) - len(stripped)
-        lead_nonalnum = TextSegmentMap._leading_nonalnum(segment_remaining, stop_at_markup=True)
+        lead_nonalnum = TextSegmentMap._leading_nonalnum_len(segment_remaining, stop_at_markup=True)
 
         # Strategy 1: literal match at progressively deeper skip offsets -- the
         # text as-is, past leading whitespace, then past the whole leading
@@ -553,7 +586,7 @@ class TextSegmentMap:
             (segment_remaining[offset:], offset)
             for offset in dict.fromkeys((0, lead_ws, lead_nonalnum))
         ]
-        hop = TextSegmentMap._literal_hop(candidates, remaining_word)
+        hop = TextSegmentMap._prefix_hop(candidates, remaining_word)
         if hop is not None:
             return hop
 
@@ -562,9 +595,7 @@ class TextSegmentMap:
         # prefix match against a longer one that only differs in case.
         folded_word = fold_for_matching(remaining_word)
         folded_candidates = [(fold_for_matching(c), offset) for c, offset in candidates]
-        hop = TextSegmentMap._literal_hop(
-            folded_candidates, folded_word, require_word_boundary=True
-        )
+        hop = TextSegmentMap._prefix_hop(folded_candidates, folded_word, require_word_boundary=True)
         if hop is not None:
             return hop
 
@@ -575,8 +606,8 @@ class TextSegmentMap:
         clean_words = (clean_word,) if trimmed_word == clean_word else (clean_word, trimmed_word)
         for candidate in clean_words:
             if candidate and haystack.startswith(candidate):
-                raw_len = _raw_len_for_clean_chars(stripped, len(candidate))
-                return _Hop(_HopKind.PLACED, seg_chars=lead_ws + raw_len)
+                raw_len = _raw_offset_after_clean_chars(stripped, len(candidate))
+                return _Hop(_HopKind.PLACED, segment_chars=lead_ws + raw_len)
 
         # Nothing spoken left here: drain so the word can try the next segment.
         if not normalize(segment_remaining):
@@ -587,31 +618,33 @@ class TextSegmentMap:
         # raw cursor rather than deciding a match, so there is no tag name it
         # could mistake for spoken content.
         return _Hop(
-            _HopKind.NO_MATCH, seg_chars=TextSegmentMap._leading_nonalnum(segment_remaining)
+            _HopKind.NO_MATCH, segment_chars=TextSegmentMap._leading_nonalnum_len(segment_remaining)
         )
 
-    def _commit_raw_span(self, seg: TextSegment, new_pos: int) -> None:
-        """Advance the raw cursor to *new_pos* in *seg*, moving the semantic cursors.
+    def _advance_cursors_to(self, seg: TextSegment, new_pos: int) -> None:
+        """Move every cursor to *new_pos* within *seg*, and finish *seg* if reached.
 
-        For an unchanged segment ``user_facing_pos`` tracks the consumed content
-        directly (its original side is byte-identical to its TTS side): a word
-        with alphanumeric content advances proportionally via
-        :func:`advance_by_alnums` (which also absorbs punctuation attached to the
-        word, e.g. the ``?`` in ``"you?"``); a word carrying no alnum budget -- a
-        punctuation token set off from its word by a space (French ``"va ?"``,
-        ``"Attention :"``) -- advances straight to the consumed end instead, so it
-        drains from the remaining text immediately rather than lagging a word
-        behind. Either way the cursor stops before trailing whitespace, which is
-        the separator owned by the following token. A transformed segment holds
-        these cursors until it fully completes, then jumps them to the end of its
-        original span in one step.
+        This is where the "keep pace or wait" rule from the class docstring is
+        actually applied, and the only place the two derived cursors move.
+
+        **Unchanged segment** -- both sides hold the same text, so the derived
+        cursors keep pace. They are spent an *alphanumeric budget*: however many
+        letters and digits this step consumed on the TTS side is how many they
+        advance by. :func:`advance_by_alnums` spends it, stepping over markup for
+        free (which is how a tag joins the word next to it) and sweeping up
+        punctuation trailing the word (``"you?"`` moves as one).
+
+        **Rewritten segment** -- the derived cursors do not move at all, until the
+        segment is finished; then they jump to the end of its span.
+
+        Either way the cursor stops short of trailing whitespace, which belongs to
+        the token that follows.
         """
         if seg.is_transformed:
-            # A trailing markup-only remainder (e.g. a closing tag) never arrives
-            # as its own word-timestamp event, so once no spoken content is left
-            # after *new_pos*, fold it in and let the segment complete. (Unchanged
-            # segments don't get this: a trailing symbol/emoji there is a real
-            # output position that IS expected to arrive as its own word.)
+            # Whatever is left is only a closing tag or the like, which no word
+            # event will ever name. Take it now so the segment can finish.
+            # Unchanged segments are not given this: a trailing emoji there is
+            # real output, and its own event is still coming.
             if not normalize(seg.tts[new_pos:]):
                 new_pos = len(seg.tts)
         else:
@@ -621,18 +654,19 @@ class TextSegmentMap:
                     self._original_text, self._user_facing_pos, n_alnum
                 )
             else:
-                # Zero-alnum consumed span: a whitespace-separated punctuation
-                # token (French " :", " ?"). Advance straight to the consumed
-                # end so the mark drains immediately, stopping before any trailing
-                # whitespace -- the separator owned by the following token
-                # (e.g. the space after "is " in "Your balance is $42.50",
-                # held until the next segment absorbs it). original == tts
-                # here, so the offset is exact.
+                # A token with no letters or digits to spend -- punctuation set
+                # off by a space, as French writes it ("va ?", "Attention :").
+                # There is no budget to advance by, so step straight to where the
+                # raw cursor got to, and the mark leaves the remaining text now
+                # rather than a word later. Both sides are identical here, so that
+                # offset is exact.
                 self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
             self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
 
         self._seg_raw_pos = new_pos
 
+        # Reached the end of the segment: hand the derived cursors the jump they
+        # have been waiting for, and move on to the next segment.
         if new_pos >= len(seg.tts):
             if seg.is_transformed:
                 self._user_facing_pos = seg.original_end
@@ -643,13 +677,17 @@ class TextSegmentMap:
             self._seg_idx += 1
             self._seg_raw_pos = 0
 
-    def _advance_raw(self, word: str) -> None:
-        """Match *word* against the remaining raw TTS text, advancing cursors.
+    def _consume_word(self, word: str) -> None:
+        """Offer *word* to each segment in turn until one places it.
 
-        Hops across segments as needed for a word that straddles a segment
-        boundary. If the word runs past the end of ``tts_text`` (no segments
-        left to carry the remainder into), the unconsumed raw suffix is stored
-        in ``last_overflow``.
+        Most words are placed by the first segment tried and the loop runs once.
+        It runs again when a segment cannot finish the job -- because the word
+        outruns it, or because it has nothing speakable to offer -- in which case
+        that segment is finished and whatever is left of the word moves on.
+
+        Anything still unplaced after the last segment is the word running past
+        the end of this frame, and is left in ``last_overflow`` for the caller to
+        give to the next frame.
         """
         remaining_word = word
 
@@ -659,32 +697,37 @@ class TextSegmentMap:
             hop = self._classify_hop(seg.tts[old_pos:], remaining_word)
 
             if hop.kind is _HopKind.NO_MATCH:
-                # Foreign token (e.g. a provider symbol substitution): move the
-                # raw cursor past the leading punctuation only -- never the
-                # semantic cursors -- and stop.
-                self._seg_raw_pos = old_pos + hop.seg_chars
+                # The word belongs somewhere else entirely (a provider swapping a
+                # symbol, say). Nudge the raw cursor past any leading punctuation
+                # so the next word is not blocked by it, but leave the cursors
+                # that mean something alone -- nothing was really spoken here.
+                self._seg_raw_pos = old_pos + hop.segment_chars
                 return
 
             if hop.kind is _HopKind.PLACED:
-                # Word sits inside this segment; advance to the matched end and stop.
-                self._commit_raw_span(seg, old_pos + hop.seg_chars)
+                self._advance_cursors_to(seg, old_pos + hop.segment_chars)
                 return
 
-            # CROSSES or EXHAUSTED: drain the whole segment and carry whatever
-            # part of the word it didn't account for into the next one.
-            self._commit_raw_span(seg, len(seg.tts))
+            # CROSSES or EXHAUSTED: this segment is done either way. Finish it and
+            # offer the next one whatever part of the word it did not account for.
+            self._advance_cursors_to(seg, len(seg.tts))
             remaining_word = remaining_word[hop.word_chars :]
 
         if remaining_word:
             self._last_overflow = remaining_word
 
     def advance_word(self, word: str) -> None:
-        """Match *word* against the remaining TTS text and advance cursors.
+        """Consume one spoken word, moving every cursor to where it leaves off.
+
+        Afterwards :attr:`last_completed_segment`, :attr:`last_overflow` and
+        :attr:`last_leading_duplicate` describe what this particular word did;
+        each is cleared at the start of the next call.
 
         Args:
-            word: Raw TTS word-timestamp token. May be a fragment of a tag, a
-                spoken word, or a mix -- the matching is purely textual, no
-                tag parsing is required from callers.
+            word: One token from the provider's word-timestamp stream. It may be
+                a plain word, a word carrying its own spacing or punctuation, or a
+                fragment of a half-open tag -- matching is textual, so the caller
+                does not have to know which.
         """
         self._last_completed = None
         self._last_overflow = None
@@ -692,7 +735,7 @@ class TextSegmentMap:
 
         if word:
             self._last_leading_duplicate = self._leading_duplicate_len(word)
-            self._advance_raw(word)
+            self._consume_word(word)
 
     def _leading_duplicate_len(self, word: str) -> int:
         """How many leading chars of *word* repeat punctuation already consumed.
@@ -722,28 +765,35 @@ class TextSegmentMap:
         return i
 
     def word_belongs_current_segment(self, word: str) -> bool:
-        """Return True if *word* plausibly continues the remaining TTS text.
+        """Return True if *word* could plausibly be the next thing spoken here.
 
-        A non-mutating dry run of the same matching :meth:`advance_word` uses.
-        Used to detect when a TTS provider silently dropped a word-timestamp
-        event: if the incoming word does not match, the caller should
-        force-complete this slot and route the word to the next.
+        :meth:`advance_word` without the advancing, so callers can look before
+        they leap. A False answer means the provider skipped something, and the
+        caller should give this word to the next frame instead.
+
+        A word with no letters or digits gets a second chance through
+        :meth:`_symbol_belongs_here`, since there is nothing in it to match on.
         """
         if not word:
             return True
-        if self._word_matches_remaining(word):
+        if self._can_consume_word(word):
             return True
         if not normalize(word):
-            return self._symbol_word_belongs(word)
+            return self._symbol_belongs_here(word)
         return False
 
-    def _word_matches_remaining(self, word: str) -> bool:
-        """Read-only replay of :meth:`_advance_raw`'s segment walk; mutates nothing.
+    def _can_consume_word(self, word: str) -> bool:
+        """Walk the segments exactly as :meth:`_consume_word` would, changing nothing.
 
-        Returns True once the word is PLACED (fits within the current segment, or
-        CROSSES through fully-drained segments into one that places it), or once a
-        straddle drains every remaining segment. Returns False when the map is
-        already exhausted, or a hop is NO_MATCH (no recognizable match at all).
+        Same loop, same order, against copies of the cursors -- it answers *would
+        this word be placed?* without placing it. Nothing enforces that the two
+        stay in step, so a change to how hops are classified or ordered has to be
+        made in both: a token this accepts but :meth:`_consume_word` then fails to
+        place leaves the cursor stuck.
+
+        True once some segment would place the word, or once it has run through
+        every remaining segment. False if there is nothing left to offer, or a
+        segment rejects the word outright.
         """
         if self._seg_idx >= len(self._segments):
             return False
@@ -760,15 +810,15 @@ class TextSegmentMap:
             if hop.kind is _HopKind.NO_MATCH:
                 return False
 
-            # CROSSES or EXHAUSTED: keep hopping into the next segment.
+            # CROSSES or EXHAUSTED: try the next segment, as the real walk would.
             remaining_word = remaining_word[hop.word_chars :]
             seg_idx += 1
             raw_pos = 0
 
         return True
 
-    def _symbol_word_belongs(self, word: str) -> bool:
-        """Return True if a non-alnum word (emoji, punctuation, symbol) belongs here.
+    def _symbol_belongs_here(self, word: str) -> bool:
+        """Return True if a word of pure punctuation or symbols belongs here.
 
         Two checks are applied in order:
 
