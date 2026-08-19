@@ -159,10 +159,10 @@ cli = [
     "questionary>=2.0.0,<3",
     "ruff>=0.12.1,<1",
     # Mounts as `pipecat context-hub`, the live Pipecat context the guides written
-    # by `pipecat init` tell coding agents to query. The 0.5.1 floor is load-bearing:
-    # `init` reads `install`'s exit code to tell "configured a coding agent" from
-    # "printed the config to paste", and earlier releases collapse both into 0.
-    "pipecat-ai-context-hub>=0.5.1,<1",
+    # by `pipecat init` tell coding agents to query. The 0.5.3 floor is load-bearing:
+    # the refresh those guides prescribe passes `--framework-version latest`, so the
+    # index matches the release the project runs, and earlier versions reject it.
+    "pipecat-ai-context-hub>=0.5.3,<1",
 ]
 
 [dependency-groups]
