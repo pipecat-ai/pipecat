@@ -124,8 +124,8 @@ SERVICE_CONFIGS = {
     ),
     "azure_llm": (
         "AzureLLMService(\n"
-        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         '        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),\n'
+        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         "        settings=AzureLLMService.Settings(\n"
         '            model=os.getenv("AZURE_CHATGPT_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
