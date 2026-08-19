@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import base64
+import contextlib
 import json
 import unittest
 
@@ -15,7 +18,7 @@ from pipecat.frames.frames import (
     AggregationType,
     TTSTextFrame,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import _IN_FLIGHT_MAX_AGE_S, CartesiaTTSService
 from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
@@ -348,12 +351,26 @@ class TestCartesiaReconnectReplaysLostUtterance(unittest.IsolatedAsyncioTestCase
         new_ws = await self._reconnect(service)
         self.assertEqual(new_ws.sent, [])
 
-    async def test_completed_context_is_not_replayed(self):
-        service, _ = self._service_with_socket()
+    async def test_context_finished_by_server_done_is_not_replayed(self):
+        service = _make_ws_service()
+        ws = _StreamingFakeWebSocket()
+        service._websocket = ws
+        await service.create_audio_context("ctx-1")
         await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
 
-        await service.on_audio_context_completed("ctx-1")
+        # The server finishes the context with its "done" message: the
+        # utterance was fully delivered, so there is nothing to replay.
+        await ws.messages.put(json.dumps({"type": "done", "context_id": "ctx-1"}))
+        receive_task = asyncio.create_task(service._process_messages())
+        try:
+            for _ in range(10):
+                await asyncio.sleep(0)
+        finally:
+            receive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await receive_task
 
+        self.assertNotIn("ctx-1", service._in_flight_contexts)
         new_ws = await self._reconnect(service)
         self.assertEqual(new_ws.sent, [])
 
@@ -398,3 +415,171 @@ class TestCartesiaReconnectReplaysLostUtterance(unittest.IsolatedAsyncioTestCase
         while not queue.empty():
             queued.append(queue.get_nowait())
         self.assertIn(None, queued)
+
+
+class _StreamingFakeWebSocket(_FakeWebSocket):
+    """Fake websocket whose messages can be consumed by a real receive loop.
+
+    ``deliver_during_send`` simulates the race the receive task creates: the
+    server's first message arrives (and is fully processed) while ``send`` is
+    still being awaited by run_tts.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.messages: asyncio.Queue = asyncio.Queue()
+        self.deliver_during_send: str | None = None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self.messages.get()
+
+    async def send(self, data: str):
+        await super().send(data)
+        if self.deliver_during_send is not None:
+            await self.messages.put(self.deliver_during_send)
+            self.deliver_during_send = None
+            # Yield until the concurrent receive task has processed the
+            # message, so it lands before this send returns.
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+
+class TestCartesiaInFlightTrackingRaces(unittest.IsolatedAsyncioTestCase):
+    """Lifetime edges of the retained-transcript tracking.
+
+    Two hazards from review: (1) audio arriving concurrently with the send must
+    not be missed, or a reconnect replays speech the user already heard; and
+    (2) a dead socket can go undetected past the audio-context idle timeout,
+    so the retained transcript must survive the timeout-driven completion or
+    there is nothing left to replay when the reconnect finally happens.
+    """
+
+    def _service_with_socket(self) -> tuple[CartesiaTTSService, _FakeWebSocket]:
+        service = _make_ws_service()
+        ws = _FakeWebSocket()
+        service._websocket = ws
+        return service, ws
+
+    async def _reconnect(self, service: CartesiaTTSService) -> _FakeWebSocket:
+        new_ws = _FakeWebSocket()
+
+        async def fake_connect(uri, **kwargs):
+            return new_ws
+
+        service._websocket_connect = fake_connect
+        await service._reconnect_websocket(1)
+        return new_ws
+
+    async def test_chunk_arriving_during_send_marks_context_as_heard(self):
+        """The receive loop runs in its own task, so the first audio chunk can
+        arrive while run_tts is still awaiting the send. The context must
+        count as having produced audio; treating it as zero-audio would make
+        a later reconnect replay speech the user already heard.
+        """
+        service = _make_ws_service()
+        ws = _StreamingFakeWebSocket()
+        service._websocket = ws
+        await service.create_audio_context("ctx-1")
+
+        receive_task = asyncio.create_task(service._process_messages())
+        try:
+            ws.deliver_during_send = json.dumps(
+                {
+                    "type": "chunk",
+                    "context_id": "ctx-1",
+                    "data": base64.b64encode(b"\x00\x00").decode(),
+                }
+            )
+            await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+        finally:
+            receive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await receive_task
+
+        entry = service._in_flight_contexts["ctx-1"]
+        self.assertTrue(entry.received_audio)
+        self.assertEqual(entry.transcripts, [])
+
+        new_ws = await self._reconnect(service)
+        self.assertEqual(new_ws.sent, [])
+
+    async def test_failed_send_does_not_retain_the_transcript(self):
+        """A transcript that never made it onto the wire must not be replayed."""
+
+        class _FailingSendWebSocket(_FakeWebSocket):
+            async def send(self, data: str):
+                raise ConnectionError("boom")
+
+        service = _make_ws_service()
+        service._websocket = _FailingSendWebSocket()
+
+        async def noop():
+            pass
+
+        # run_tts recovers from a failed send with a disconnect/connect cycle;
+        # stub those so the test stays off the network.
+        service._disconnect = noop
+        service._connect = noop
+
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+
+        self.assertNotIn("ctx-1", service._in_flight_contexts)
+
+    async def test_slowly_detected_drop_survives_context_timeout_and_replays(self):
+        """A dead socket can go undetected well past stop_frame_timeout_s. The
+        base class then completes and deletes the starved audio context (its
+        frames are exactly what stopped flowing) BEFORE any reconnect happens.
+        The retained transcript must survive that completion, and the replay
+        must recreate the audio context so the late audio still has somewhere
+        to land.
+        """
+        service, _ = self._service_with_socket()
+        await service.create_audio_context("ctx-1")
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+        await service.flush_audio("ctx-1")
+
+        # Idle-timeout completion, as _audio_context_task_handler does it: the
+        # context is deleted, then the completion hook fires.
+        del service._audio_contexts["ctx-1"]
+        await service.on_audio_context_completed("ctx-1")
+
+        new_ws = await self._reconnect(service)
+
+        transcripts = [(m["transcript"], m["continue"]) for m in new_ws.sent]
+        self.assertEqual(
+            transcripts,
+            [("The capital of Japan is Tokyo.", True), ("", False)],
+        )
+        # The replay recreated the audio context for the incoming audio.
+        self.assertTrue(service.audio_context_available("ctx-1"))
+
+    async def test_timeout_completion_still_drops_contexts_that_produced_audio(self):
+        """Only zero-audio entries survive a timeout completion. A context that
+        already produced audio is dropped there: it is never replayed, so
+        keeping it would only accumulate state.
+        """
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+        entry = service._in_flight_contexts["ctx-1"]
+        entry.received_audio = True
+        entry.transcripts.clear()
+
+        await service.on_audio_context_completed("ctx-1")
+
+        self.assertNotIn("ctx-1", service._in_flight_contexts)
+
+    async def test_entries_older_than_the_age_bound_are_not_replayed(self):
+        """Retention is bounded: entries past the age bound are pruned instead
+        of replayed, so they cannot accumulate for the life of the process.
+        """
+        service, _ = self._service_with_socket()
+        await _drain_run_tts(service, "The capital of Japan is Tokyo.", "ctx-1")
+        service._in_flight_contexts["ctx-1"].created_at -= _IN_FLIGHT_MAX_AGE_S + 1.0
+
+        new_ws = await self._reconnect(service)
+
+        self.assertEqual(new_ws.sent, [])
+        self.assertEqual(service._in_flight_contexts, {})

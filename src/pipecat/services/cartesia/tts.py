@@ -9,6 +9,7 @@
 import base64
 import json
 import re
+import time
 import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -216,6 +217,16 @@ class CartesiaTTSSettings(TTSSettings):
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+# Upper bound, in seconds, on how long a zero-audio transcript is retained for
+# replay. A dead socket can go undetected well past the audio-context idle
+# timeout (TCP half-open connections have surfaced after ~20s in the wild), so
+# the bound has to comfortably exceed that, while still guaranteeing entries
+# cannot accumulate for the life of the process. A user turn in the meantime
+# drops the entry anyway (interruption), so a replay this old only happens
+# into ongoing silence.
+_IN_FLIGHT_MAX_AGE_S = 60.0
+
+
 @dataclass
 class _InFlightContext:
     """Synthesis input sent for a context that has produced no audio yet.
@@ -229,6 +240,7 @@ class _InFlightContext:
     transcripts: list[str] = field(default_factory=list)
     flushed: bool = False
     received_audio: bool = False
+    created_at: float = field(default_factory=time.monotonic)
 
 
 class CartesiaTTSService(WebsocketTTSService):
@@ -672,6 +684,18 @@ class CartesiaTTSService(WebsocketTTSService):
         entry = self._in_flight_contexts.get(context_id)
         return entry is not None and not entry.received_audio and bool(entry.transcripts)
 
+    def _prune_stale_in_flight_contexts(self):
+        """Drop retained transcripts older than the replay age bound.
+
+        Bounds retention so entries cannot accumulate for the life of the
+        process (e.g. a context whose server-side ``done`` never arrives and
+        that is never interrupted or replayed).
+        """
+        now = time.monotonic()
+        for context_id, entry in list(self._in_flight_contexts.items()):
+            if now - entry.created_at > _IN_FLIGHT_MAX_AGE_S:
+                self._in_flight_contexts.pop(context_id, None)
+
     async def _replay_in_flight_contexts(self):
         """Re-send transcripts whose audio was lost to a websocket drop.
 
@@ -683,6 +707,7 @@ class CartesiaTTSService(WebsocketTTSService):
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
+        self._prune_stale_in_flight_contexts()
         for context_id, entry in list(self._in_flight_contexts.items()):
             if entry.received_audio or not entry.transcripts:
                 continue
@@ -690,6 +715,16 @@ class CartesiaTTSService(WebsocketTTSService):
                 f"{self} re-sending {len(entry.transcripts)} transcript(s) for context "
                 f"{context_id}, which received no audio before the connection dropped"
             )
+            # When the socket stays undetectably dead past the audio-context
+            # idle timeout, the base class completes and deletes the context
+            # (its frames are exactly what stopped flowing). Recreate it, or
+            # the replayed audio would be dropped in _process_messages. The
+            # sequencer force-completed the context's text slots at that
+            # timeout, so replayed word timestamps are dropped as stale rather
+            # than duplicated; the audio itself plays normally.
+            if not self.audio_context_available(context_id):
+                logger.debug(f"{self} recreating audio context {context_id} for replay")
+                await self.create_audio_context(context_id)
             for text in entry.transcripts:
                 await self._websocket.send(self._build_msg(text=text, context_id=context_id))
             if entry.flushed:
@@ -736,8 +771,17 @@ class CartesiaTTSService(WebsocketTTSService):
         done once it has sent its ``done`` message, which is handled in
         ``_process_messages``.
         """
-        # The context played out (or timed out); nothing left to replay.
-        self._in_flight_contexts.pop(context_id, None)
+        # A context completes two ways: the server's "done" message (which
+        # already dropped its retained entry in _process_messages), or the
+        # base class's idle timeout. The timeout also fires when the socket is
+        # dead but the drop has not been detected yet, which can take far
+        # longer than the timeout itself. A zero-audio entry is therefore kept
+        # here: it is the only copy of the utterance a later reconnect can
+        # still replay. Entries that already produced audio are dropped; they
+        # are never replayed.
+        entry = self._in_flight_contexts.get(context_id)
+        if entry is not None and (entry.received_audio or not entry.transcripts):
+            self._in_flight_contexts.pop(context_id, None)
         await super().on_audio_context_completed(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
@@ -875,22 +919,33 @@ class CartesiaTTSService(WebsocketTTSService):
 
             msg = self._build_msg(text=text, context_id=context_id)
 
+            # Retain the transcript BEFORE the send: the receive loop runs in a
+            # separate task, so the first audio chunk can arrive between the
+            # send and any bookkeeping after it. Registering late would let
+            # that chunk slip by unrecorded, wrongly leaving the context marked
+            # as zero-audio, and a later reconnect would replay speech the user
+            # already heard (see _replay_in_flight_contexts).
+            self._prune_stale_in_flight_contexts()
+            entry = self._in_flight_contexts.setdefault(context_id, _InFlightContext())
+            if not entry.received_audio:
+                entry.transcripts.append(text)
+
             try:
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
+                # This transcript never made it onto the wire, so it must not
+                # be replayed. Transcripts sent earlier for the same context
+                # keep their entry.
+                if text in entry.transcripts:
+                    entry.transcripts.remove(text)
+                if not entry.transcripts and not entry.received_audio:
+                    self._in_flight_contexts.pop(context_id, None)
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
-
-            # The send succeeded, but the socket can still die before any
-            # audio comes back. Retain the transcript so a reconnect can
-            # re-send it (see _replay_in_flight_contexts).
-            entry = self._in_flight_contexts.setdefault(context_id, _InFlightContext())
-            if not entry.received_audio:
-                entry.transcripts.append(text)
 
             yield None
         except Exception as e:
