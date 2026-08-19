@@ -285,8 +285,7 @@ from pipecat.utils.deprecation import deprecated
 
 
 @deprecated(
-    "`OldService` is deprecated since 1.3.0 and will be removed in 2.0.0. "
-    "Use `NewService` instead."
+    "`OldService` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `NewService` instead."
 )
 class OldService(NewService):
     """Deprecated alias for :class:`NewService`.
@@ -328,6 +327,7 @@ class MyService(BaseService):
         """
         if old_param is not None:
             import warnings
+
             warnings.warn(
                 "`old_param` is deprecated since 1.2.0 and will be removed in 2.0.0. "
                 "No replacement.",
@@ -355,6 +355,7 @@ class MyService(BaseService):
         """
         pass
 
+
 # Dataclass with code examples
 @dataclass
 class MessageFrame:
@@ -374,6 +375,7 @@ class MessageFrame:
     """
 
     messages: List[dict]
+
 
 # Enum class
 class Status(Enum):
