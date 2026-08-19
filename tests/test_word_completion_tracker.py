@@ -184,22 +184,44 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("hello"))
 
     def test_curly_apostrophe_in_llm_text_matches_straight_apostrophe_in_tts_word(self):
-        """LLM curly apostrophe must not trigger the safeguard when TTS uses straight."""
-        llm = "you’re welcome"  # LLM: RIGHT SINGLE QUOTATION MARK
+        """LLM curly apostrophe must still match when the TTS reports a straight one."""
+        llm = "you’re welcome"  # U+2019 RIGHT SINGLE QUOTATION MARK
         tracker = WordCompletionTracker(llm, llm_text=llm)
-        tracker.add_word_and_check_complete("you’re")  # TTS: straight apostrophe
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.word_belongs_here("you're"))  # ASCII apostrophe
+        tracker.add_word_and_check_complete("you're")
+        # The frame word is the token the provider reported; the LLM span keeps the
+        # original typography, which is what reaches the conversation context.
+        self.assertEqual(tracker.get_word_for_frame(), "you're")
+        self.assertEqual(tracker.get_llm_consumed(), "you’re")
         tracker.add_word_and_check_complete("welcome")
         self.assertTrue(tracker.is_complete)
 
     def test_curly_apostrophe_in_tts_word_matches_straight_apostrophe_in_llm_text(self):
-        """TTS curly apostrophe must not trigger the safeguard when LLM uses straight."""
-        llm = "you’re welcome"  # LLM: straight apostrophe
+        """LLM straight apostrophe must still match when the TTS reports a curly one."""
+        llm = "you're welcome"  # ASCII apostrophe
         tracker = WordCompletionTracker(llm, llm_text=llm)
-        tracker.add_word_and_check_complete("you’re")  # TTS: RIGHT SINGLE QUOTATION MARK
-        self.assertIsNotNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.word_belongs_here("you’re"))  # U+2019
+        tracker.add_word_and_check_complete("you’re")
+        self.assertEqual(tracker.get_word_for_frame(), "you’re")
+        self.assertEqual(tracker.get_llm_consumed(), "you're")
         tracker.add_word_and_check_complete("welcome")
         self.assertTrue(tracker.is_complete)
+
+    def test_typographic_mismatch_does_not_collapse_the_rest_of_the_sentence(self):
+        """A normalized apostrophe must not force-complete the slot mid-sentence."""
+        text = "I don’t think so"
+        tracker = WordCompletionTracker(text, user_facing_text=text)
+        for word in ["I", "don't", "think"]:
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("so"))
+        self.assertEqual(tracker.get_word_for_frame(), "so")
+
+    def test_en_dash_reported_as_hyphen(self):
+        """A provider reporting an ASCII hyphen matches an en dash in the source."""
+        text = "the 2020–2021 report"
+        tracker = WordCompletionTracker(text, user_facing_text=text)
+        tracker.add_word_and_check_complete("the")
+        self.assertTrue(tracker.word_belongs_here("2020-2021"))
 
 
 class TestWordCompletionTrackerReset(unittest.TestCase):

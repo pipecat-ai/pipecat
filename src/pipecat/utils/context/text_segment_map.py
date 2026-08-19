@@ -15,7 +15,7 @@ from enum import Enum, auto
 
 from pipecat.utils.text.transforms._alnum_utils import (
     advance_by_alnums,
-    fold_case_and_accents,
+    fold_for_matching,
     normalize,
     strip_trailing_punctuation,
 )
@@ -253,7 +253,7 @@ class TextSegmentMap:
     TTS text, and :meth:`advance_word` consumes it. Both match the token against
     the segment's remaining raw text directly -- literally, then (as stateless
     fallbacks, recomputed fresh each call) with the word's own trailing
-    punctuation stripped, with both sides case/accent-folded, or with markup
+    punctuation stripped, with both sides variation-folded, or with markup
     stripped from both sides -- so a token that adds punctuation or changes
     case/diacritics the source text doesn't have, or is a fragment of a still-
     open SSML tag (e.g. an attribute-only word from a multi-attribute tag some
@@ -412,7 +412,7 @@ class TextSegmentMap:
     ) -> "_Hop | None":
         """Try PLACED/CROSSES of *remaining_word* against *candidates*, literally.
 
-        Shared by the raw and case/accent-folded passes in :meth:`_classify_hop`
+        Shared by the raw and folded passes in :meth:`_classify_hop`
         -- both compare the same way, just on different (length-preserving)
         transforms of the text, so the offsets this returns are valid for
         whichever text produced *candidates* and *remaining_word*.
@@ -434,7 +434,7 @@ class TextSegmentMap:
                 candidate is fully consumed, or the next character is not
                 alphanumeric) -- rejecting a short word that only happens to
                 be a prefix of a longer one (e.g. ``"account"`` inside
-                ``"Accountant"``). Used by the case/accent-folded pass, where
+                ``"Accountant"``). Used by the folded pass, where
                 folding can otherwise turn a same-case mismatch into a
                 spurious mid-word prefix match; the raw pass leaves this off
                 to preserve its existing case-sensitive matching.
@@ -499,9 +499,12 @@ class TextSegmentMap:
            in its word-timestamp events (e.g. the ``", "`` still pending in
            ``"Yeah, I can"`` when ``"I"`` arrives). The word's own trailing
            punctuation is also tried removed (see :meth:`_literal_hop`).
-        2. Same as 1, with both sides case- and accent-folded: for a provider
-           that lowercases a word or strips its diacritics in word-timestamp
-           events (e.g. ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``).
+        2. Same as 1, with both sides folded by
+           :func:`~pipecat.utils.text.transforms._alnum_utils.fold_for_matching`:
+           for a provider that lowercases a word, strips its diacritics, or
+           normalizes typographic punctuation in word-timestamp events (e.g.
+           ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``, ``"don’t"`` ->
+           ``"don't"``).
            Folding is a length-preserving, per-character transform (unlike
            :func:`normalize`, it never drops or merges characters), so an
            offset found against the folded text applies unchanged to the
@@ -553,11 +556,11 @@ class TextSegmentMap:
         if hop is not None:
             return hop
 
-        # Strategy 2: same candidates, case/accent-folded. require_word_boundary
+        # Strategy 2: same candidates, variation-folded. require_word_boundary
         # guards against folding turning a short word into a false mid-word
         # prefix match against a longer one that only differs in case.
-        folded_word = fold_case_and_accents(remaining_word)
-        folded_candidates = [(fold_case_and_accents(c), offset) for c, offset in candidates]
+        folded_word = fold_for_matching(remaining_word)
+        folded_candidates = [(fold_for_matching(c), offset) for c, offset in candidates]
         hop = TextSegmentMap._literal_hop(
             folded_candidates, folded_word, require_word_boundary=True
         )

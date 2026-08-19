@@ -25,6 +25,39 @@ def strip_trailing_punctuation(text: str) -> str:
     return text[:i]
 
 
+_TYPOGRAPHIC_FOLD = str.maketrans(
+    {
+        "‘": "'",  # ‘ LEFT SINGLE QUOTATION MARK
+        "’": "'",  # ’ RIGHT SINGLE QUOTATION MARK
+        "ʼ": "'",  # ʼ MODIFIER LETTER APOSTROPHE
+        "“": '"',  # “ LEFT DOUBLE QUOTATION MARK
+        "”": '"',  # ” RIGHT DOUBLE QUOTATION MARK
+        "–": "-",  # – EN DASH
+        "—": "-",  # — EM DASH
+    }
+)
+"""Typographic punctuation variants mapped to their ASCII equivalents.
+
+LLMs emit the typographic forms and TTS services may report the ASCII ones in
+word-timestamp events (or the reverse). Every entry is a single character mapped
+to a single character, which is what lets :func:`fold_for_matching` keep its
+1:1 length contract.
+"""
+
+
+def fold_typography(text: str) -> str:
+    """Replace typographic punctuation variants with their ASCII equivalents.
+
+    Args:
+        text: Input text to fold.
+
+    Returns:
+        *text* with typographic quotes and dashes replaced by ASCII; same
+        length as *text*.
+    """
+    return text.translate(_TYPOGRAPHIC_FOLD)
+
+
 def _fold_accented_char(char: str) -> str:
     """Lowercase *char*, reduced to its base letter if it carries a combining accent.
 
@@ -39,8 +72,8 @@ def _fold_accented_char(char: str) -> str:
     return char.lower()
 
 
-def fold_case_and_accents(text: str) -> str:
-    """Lowercase letters and strip accents, preserving every other character 1:1.
+def fold_for_matching(text: str) -> str:
+    """Fold away surface variation between two spellings of the same text, 1:1.
 
     Unlike :func:`normalize`, this never removes or merges characters --
     punctuation, spaces, and markup are passed through unchanged, and each
@@ -51,13 +84,22 @@ def fold_case_and_accents(text: str) -> str:
     (whitespace/punctuation-stripped) comparison matching across a boundary
     that wasn't already a candidate in the untransformed comparison.
 
+    Folds case, accents, and typographic punctuation (``\u2019`` -> ``'``, ``\u2013`` -> ``-``) --
+    the variations a TTS service may introduce between the text it was sent and the
+    words it reports back. Deliberately narrow: each folded character is listed in
+    :data:`_TYPOGRAPHIC_FOLD`, rather than applying a blanket Unicode compatibility
+    normalization, which would silently fold thousands of characters (CJK compatibility
+    ideographs, halfwidth katakana, math alphanumerics) that no service is known to
+    substitute.
+
     Args:
         text: Input text to fold.
 
     Returns:
-        *text* with letters case- and accent-folded; same length as *text*.
+        *text* with those variations folded away; same length as *text*.
     """
-    return "".join(_fold_accented_char(ch) if ch.isalpha() else ch for ch in text)
+    folded = "".join(_fold_accented_char(ch) if ch.isalpha() else ch for ch in text)
+    return fold_typography(folded)
 
 
 def normalize(text: str) -> str:

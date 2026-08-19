@@ -12,6 +12,7 @@ import unicodedata
 from loguru import logger
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
+from pipecat.utils.text.transforms._alnum_utils import fold_typography
 
 
 class WordCompletionTracker:
@@ -124,24 +125,6 @@ class WordCompletionTracker:
 
         self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
 
-    # Typographic variants that LLMs commonly emit but TTS services normalize away.
-    _TYPOGRAPHY_FOLD = str.maketrans(
-        {
-            "‘": "'",  # ' LEFT SINGLE QUOTATION MARK
-            "’": "'",  # ' RIGHT SINGLE QUOTATION MARK
-            "ʼ": "'",  # ʼ MODIFIER LETTER APOSTROPHE
-            "“": '"',  # " LEFT DOUBLE QUOTATION MARK
-            "”": '"',  # " RIGHT DOUBLE QUOTATION MARK
-            "–": "-",  # – EN DASH
-            "—": "-",  # — EM DASH
-        }
-    )
-
-    @staticmethod
-    def _fold_typography(text: str) -> str:
-        """Replace typographic punctuation variants with their ASCII equivalents."""
-        return text.translate(WordCompletionTracker._TYPOGRAPHY_FOLD)
-
     @staticmethod
     def _fold_for_comparison(text: str) -> str:
         """Fold text for lenient span-containment comparisons.
@@ -153,7 +136,7 @@ class WordCompletionTracker:
         while still preserving other content (digits, emoji, punctuation) so
         the safeguard can detect a genuinely missing/mismatched word.
         """
-        folded = WordCompletionTracker._fold_typography(text).casefold()
+        folded = fold_typography(text).casefold()
         return re.sub(r"[-\s]+", "", folded)
 
     @staticmethod
