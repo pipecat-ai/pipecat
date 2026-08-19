@@ -6,6 +6,7 @@
 
 """Deepgram Flux speech-to-text service implementation (WebSocket transport)."""
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -65,6 +66,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
     Settings = DeepgramFluxSTTSettings
     _settings: Settings
+    # Maximum time to receive final TurnInfo messages after CloseStream before
+    # forcing receiver cancellation.
+    _CLOSE_STREAM_DRAIN_TIMEOUT = 2.0
 
     @deprecated(
         "`DeepgramFluxSTTService.InputParams` is deprecated since 0.0.105 and will be removed in "
@@ -350,18 +354,19 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
-        """Close WebSocket connection and clean up state.
+        """Drain final Flux responses, close the WebSocket, and clean up state.
 
-        Closes the WebSocket connection to the Deepgram Flux API and stops all
-        metrics collection. Handles disconnection errors gracefully.
+        Sends CloseStream while the receiver is active, waits a bounded time for
+        final TurnInfo messages, and then closes the connection.
         """
+        receive_task = self._receive_task
+        watchdog_task = self._watchdog_task
+        websocket = self._websocket
+        was_disconnecting = self._disconnecting
+        self._disconnecting = True
         try:
-            # Cancel background tasks BEFORE closing websocket
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=2.0)
-                self._receive_task = None
-            if self._watchdog_task:
-                await self.cancel_task(self._watchdog_task, timeout=2.0)
+            if watchdog_task and not watchdog_task.done():
+                await self.cancel_task(watchdog_task, timeout=2.0)
                 self._watchdog_task = None
                 self._last_stt_time = None
 
@@ -372,15 +377,41 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             self._reset_configure_state()
             await self.stop_all_metrics()
 
-            if self._websocket:
+            should_drain = websocket is not None and websocket.state is State.OPEN
+            if websocket:
                 await self._send_close_stream()
-                logger.debug("Disconnecting from Deepgram Flux Websocket")
-                await self._websocket.close()
+
+            if should_drain and receive_task and not receive_task.done():
+                done, _ = await asyncio.wait(
+                    {receive_task}, timeout=self._CLOSE_STREAM_DRAIN_TIMEOUT
+                )
+                if not done:
+                    logger.debug(
+                        "Timed out waiting for Deepgram Flux to close; cancelling receive task"
+                    )
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._websocket = None
-            await self._call_event_handler("on_disconnected")
+            try:
+                if watchdog_task and not watchdog_task.done():
+                    await self.cancel_task(watchdog_task, timeout=2.0)
+                if receive_task and not receive_task.done():
+                    await self.cancel_task(receive_task, timeout=2.0)
+                if websocket:
+                    logger.debug("Disconnecting from Deepgram Flux Websocket")
+                    try:
+                        await websocket.close()
+                    except Exception as e:
+                        await self.push_error(
+                            error_msg=f"Error closing websocket: {e}", exception=e
+                        )
+            finally:
+                self._watchdog_task = None
+                self._last_stt_time = None
+                self._receive_task = None
+                self._websocket = None
+                self._disconnecting = was_disconnecting
+                await self._call_event_handler("on_disconnected")
 
     # ------------------------------------------------------------------
     # Audio sending and receiving
