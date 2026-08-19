@@ -6,8 +6,9 @@
 
 """Shared alphanumeric utilities for text normalization and cursor advancement."""
 
-import re
 import unicodedata
+
+from pipecat.utils.text.transforms._markup_utils import strip_complete_markup
 
 
 def strip_trailing_punctuation(text: str) -> str:
@@ -117,7 +118,7 @@ def normalize(text: str) -> str:
     Returns:
         Lowercase alphanumeric-only string with tags stripped.
     """
-    text = re.sub(r"<[^>]+>", "", text)
+    text = strip_complete_markup(text)
     result = []
     for char in text:
         # Ignore punctuation, spaces, emojis, etc.

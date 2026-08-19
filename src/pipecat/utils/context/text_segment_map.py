@@ -9,7 +9,6 @@
 import difflib
 import re
 import unicodedata
-from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -19,129 +18,12 @@ from pipecat.utils.text.transforms._alnum_utils import (
     normalize,
     strip_trailing_punctuation,
 )
-
-
-def _iter_clean_chars(text: str) -> Iterator[tuple[int, str]]:
-    """Yield ``(raw_index, char)`` for each character of *text* outside markup.
-
-    The single definition of "what is markup" -- anything between '<' and '>',
-    syntax-based and tag-name independent -- shared by :func:`strip_markup` and
-    :func:`_raw_offset_after_clean_chars` so the two can't disagree. An unclosed '<'
-    swallows the rest of the string (matching how word-timestamp fragments can
-    arrive mid-tag).
-    """
-    in_tag = False
-    for i, ch in enumerate(text):
-        if in_tag:
-            if ch == ">":
-                in_tag = False
-        elif ch == "<":
-            in_tag = True
-        else:
-            yield i, ch
-
-
-def strip_markup(text: str) -> str:
-    """Remove XML/SSML-like markup from a word-timestamp fragment.
-
-    Syntax-based, not tag-name based: treats anything between '<' and '>' as
-    markup and preserves text outside it. An unclosed '<' swallows the rest of
-    *text*, matching how a raw word-timestamp token can arrive mid-tag (see
-    :func:`_iter_clean_chars`).
-
-    For a *complete* text (not a possibly-truncated fragment), use
-    :func:`strip_complete_markup` instead -- swallowing the rest of the string
-    past a lone '<' is only correct for a genuinely truncated tag; in a
-    complete text a lone '<' is real content (e.g. ``"5 < 10"`` or ``"<3"``).
-
-    Used by :meth:`TextSegmentMap._classify_hop`'s markup-stripped matching,
-    where the incoming word may be a fragment of a still-open tag.
-    """
-    return "".join(ch for _, ch in _iter_clean_chars(text))
-
-
-_COMPLETE_MARKUP_RE = re.compile(r"<[^>]+>")
-"""Matched '<...>' pairs in a complete text.
-
-The single definition of "what is markup" for a static text, shared by
-:func:`strip_complete_markup` and :func:`_split_markup_runs` so the two can't
-disagree about which characters a segment split may treat as a tag.
-"""
-
-
-def strip_complete_markup(text: str) -> str:
-    """Remove well-formed '<...>' markup from a complete, static text.
-
-    Unlike :func:`strip_markup`, only strips matched '<...>' pairs -- a lone
-    '<' with no later '>' is left in place as real content rather than
-    swallowing the rest of *text*, since there is no streamed fragment here
-    that could be mid-tag. Mirrors the tag-stripping regex in
-    :func:`pipecat.utils.text.transforms._alnum_utils.normalize`.
-
-    Used by :attr:`TextSegment.is_transformed` and by
-    :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
-    to default ``user_facing_text`` to a tag-free string.
-    """
-    return _COMPLETE_MARKUP_RE.sub("", text)
-
-
-def _raw_offset_after_clean_chars(text: str, n: int) -> int:
-    """Return the raw offset into *text* just past its *n*-th markup-stripped char.
-
-    Inverse of :func:`strip_markup` for a prefix: where ``strip_markup`` collects
-    every non-markup char, this finds the raw index one past the *n*-th of them --
-    converting a match measured in markup-stripped space back to a raw offset.
-    Returns ``len(text)`` when *text* has fewer than *n* non-markup chars.
-    """
-    if n <= 0:
-        return 0
-    seen = 0
-    for i, _ in _iter_clean_chars(text):
-        seen += 1
-        if seen == n:
-            return i + 1
-    return len(text)
-
-
-def _split_markup_runs(text: str) -> list[str]:
-    """Split *text* into alternating runs of tagged and untagged words.
-
-    A word is considered tagged if it overlaps a complete ``'<...>'`` pair. A lone
-    ``'<'`` is treated as content, not as the start of a tag (see
-    :func:`strip_complete_markup`). Consecutive words with the same classification
-    form a single run, so whitespace inside a tag such as
-    ``<phoneme alphabet="ipa">`` never splits the words it spans across runs.
-
-    Example::
-
-        _split_markup_runs("I love to count <spell>1234</spell>.")
-        # -> ["I love to count ", "<spell>1234</spell>."]
-
-    Text with no markup yields a single run, unchanged.
-
-    Used by :meth:`TextSegmentMap._build` to give a tag its own segment.
-    """
-    tag_spans = [m.span() for m in _COMPLETE_MARKUP_RE.finditer(text)]
-    if not tag_spans:
-        return [text] if text else []
-
-    runs: list[str] = []
-    run_is_tagged: bool | None = None
-    pos = 0
-
-    for token in re.split(r"(\s+)", text):
-        if not token:
-            continue
-        start, end = pos, pos + len(token)
-        pos = end
-        is_tagged = any(tag_start < end and start < tag_end for tag_start, tag_end in tag_spans)
-        if is_tagged == run_is_tagged:
-            runs[-1] += token
-        else:
-            runs.append(token)
-            run_is_tagged = is_tagged
-
-    return runs
+from pipecat.utils.text.transforms._markup_utils import (
+    raw_offset_after_clean_chars,
+    split_markup_runs,
+    strip_complete_markup,
+    strip_markup,
+)
 
 
 @dataclass(frozen=True)
@@ -410,7 +292,7 @@ class TextSegmentMap:
             # one offset cuts both. The other kinds differ side to side, leaving no
             # shared offset to cut at.
             parts = (
-                [(part, part) for part in _split_markup_runs(orig_chunk)]
+                [(part, part) for part in split_markup_runs(orig_chunk)]
                 if tag == "equal"
                 else [(orig_chunk, tts_chunk)]
             )
@@ -606,7 +488,7 @@ class TextSegmentMap:
         clean_words = (clean_word,) if trimmed_word == clean_word else (clean_word, trimmed_word)
         for candidate in clean_words:
             if candidate and haystack.startswith(candidate):
-                raw_len = _raw_offset_after_clean_chars(stripped, len(candidate))
+                raw_len = raw_offset_after_clean_chars(stripped, len(candidate))
                 return _Hop(_HopKind.PLACED, segment_chars=lead_ws + raw_len)
 
         # Nothing spoken left here: drain so the word can try the next segment.
