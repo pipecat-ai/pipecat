@@ -76,12 +76,21 @@ class TextSegment:
 
     @property
     def tts_alnum_count(self) -> int:
-        """Number of alphanumeric characters in the spoken TTS content."""
+        """Number of alphanumeric characters in the spoken TTS content.
+
+        The budget for walking this segment, which is what the provider's words
+        are spending. On a rewritten segment it is unrelated to
+        :attr:`original_alnum_count` -- "forty two dollars" against "$42.50".
+        """
         return len(normalize(self.tts))
 
     @property
     def original_alnum_count(self) -> int:
-        """Number of alphanumeric characters in the original side of this segment."""
+        """Number of alphanumeric characters in the original side of this segment.
+
+        The budget for the cursors into ``original_text`` and ``llm_text``, which
+        hold that side's characters rather than the spoken ones.
+        """
         return len(normalize(self.original))
 
 
@@ -152,6 +161,11 @@ class TextSegmentMap:
     built once, by diffing ``tts_text`` against ``original_text`` into aligned
     :class:`TextSegment` pieces -- each either survived unchanged or was rewritten
     whole.
+
+    ``llm_text`` is never diffed. It doesn't have to be: it holds the same
+    alphanumeric characters as ``original_text``, in the same order, differing
+    only in decoration (tags, delimiters, punctuation). So counting letters and
+    digits is enough to stay in step, and its cursor rides that count.
 
     From then on one real cursor moves: ``raw_pos``, how far into ``tts_text`` the
     provider has got. ``user_facing_pos`` and ``llm_pos`` follow it:
@@ -570,6 +584,8 @@ class TextSegmentMap:
         if new_pos >= len(seg.tts):
             if seg.is_transformed:
                 self._user_facing_pos = seg.original_end
+                # The original's count, not the TTS side's: llm_text holds
+                # "$42.50" (4 alnums), never the spoken "forty two dollars".
                 self._llm_pos = advance_by_alnums(
                     self._llm_text, self._llm_pos, seg.original_alnum_count
                 )
