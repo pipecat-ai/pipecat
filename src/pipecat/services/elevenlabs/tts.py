@@ -1247,7 +1247,7 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
         self._enable_logging = enable_logging
         self._seed = seed
 
-        self._output_format = ""  # initialized in start()
+        self._output_format = ""  # initialized in setup()
         self._voice_settings = self._set_voice_settings()
 
         self._cumulative_time = 0
@@ -1323,13 +1323,13 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the ElevenLabs Text-to-Dialogue TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
