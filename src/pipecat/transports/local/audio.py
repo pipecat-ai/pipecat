@@ -162,11 +162,14 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
     async def cleanup(self):
         """Stop and cleanup the audio output stream."""
-        await super().cleanup()
-        if self._out_stream:
-            self._out_stream.stop_stream()
-            self._out_stream.close()
-            self._out_stream = None
+        try:
+            await super().cleanup()
+            if self._out_stream:
+                self._out_stream.stop_stream()
+                self._out_stream.close()
+                self._out_stream = None
+        finally:
+            self._executor.shutdown(wait=False)
 
     async def start(self, frame: StartFrame):
         """Start the audio output stream.

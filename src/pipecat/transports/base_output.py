@@ -551,14 +551,17 @@ class BaseOutputTransport(FrameProcessor):
 
         async def cleanup(self):
             """Release media sender resources at teardown."""
-            # Since we are cancelling everything it doesn't matter what task we cancel first.
-            await self._cancel_audio_task()
-            await self._cancel_clock_task()
-            await self._cancel_video_task()
+            try:
+                # Since we are cancelling everything it doesn't matter what task we cancel first.
+                await self._cancel_audio_task()
+                await self._cancel_clock_task()
+                await self._cancel_video_task()
 
-            # Stop audio mixer so it doesn't keep generating frames after cancellation.
-            if self._mixer:
-                await self._mixer.stop()
+                # Stop audio mixer so it doesn't keep generating frames after cancellation.
+                if self._mixer:
+                    await self._mixer.stop()
+            finally:
+                self._executor.shutdown(wait=False)
 
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
