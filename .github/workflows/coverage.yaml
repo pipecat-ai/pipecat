@@ -15,6 +15,7 @@ jobs:
   coverage:
     name: "Coverage"
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -28,6 +29,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install system packages
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y portaudio19-dev
