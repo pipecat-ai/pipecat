@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.utils.text.transforms._markup_utils import (
+from pipecat.utils.text.markup_utils import (
     raw_offset_after_clean_chars,
     split_markup_runs,
     strip_complete_markup,

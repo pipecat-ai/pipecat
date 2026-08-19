@@ -8,7 +8,7 @@
 
 import unicodedata
 
-from pipecat.utils.text.transforms._markup_utils import strip_complete_markup
+from pipecat.utils.text.markup_utils import strip_complete_markup
 
 
 def strip_trailing_punctuation(text: str) -> str:

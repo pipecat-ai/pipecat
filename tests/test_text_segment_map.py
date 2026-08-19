@@ -7,7 +7,7 @@
 import unittest
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap, _HopKind
-from pipecat.utils.text.transforms._alnum_utils import fold_for_matching
+from pipecat.utils.text.alnum_utils import fold_for_matching
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):

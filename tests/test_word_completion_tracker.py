@@ -7,7 +7,7 @@
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
-from pipecat.utils.text.transforms._alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import normalize
 
 
 class TestWordCompletionTrackerBasic(unittest.TestCase):

@@ -15,8 +15,8 @@ a ``'<'`` with no later ``'>'``:
 - :func:`strip_complete_markup` treats it as content. Correct for a *complete*
   text, where a lone ``'<'`` is real (``"5 < 10"``, ``"<3"``).
 
-Every markup decision in this package routes through one of the two, so the
-callers can't disagree about which characters are a tag.
+Every markup decision in the word-timestamp path routes through one of the two,
+so the callers can't disagree about which characters are a tag.
 """
 
 import re
@@ -52,9 +52,9 @@ def strip_markup(text: str) -> str:
 
     For a *complete* text, use :func:`strip_complete_markup` instead.
 
-    Used by
-    :meth:`~pipecat.utils.context.text_segment_map.TextSegmentMap._markup_hop`,
-    where the incoming word may be a fragment of a still-open tag.
+    Used by :class:`~pipecat.utils.context.text_segment_map.TextSegmentMap` to
+    match a word against a segment, where the incoming word may be a fragment of
+    a still-open tag.
     """
     return "".join(ch for _, ch in _iter_clean_chars(text))
 
@@ -78,7 +78,7 @@ def strip_complete_markup(text: str) -> str:
 
     Used by
     :attr:`~pipecat.utils.context.text_segment_map.TextSegment.is_transformed`,
-    by :func:`~pipecat.utils.text.transforms._alnum_utils.normalize`, and by
+    by :func:`~pipecat.utils.text.alnum_utils.normalize`, and by
     :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
     to default ``user_facing_text`` to a tag-free string.
     """
@@ -119,8 +119,8 @@ def split_markup_runs(text: str) -> list[str]:
 
     Text with no markup yields a single run, unchanged.
 
-    Used by :meth:`~pipecat.utils.context.text_segment_map.TextSegmentMap._build`
-    to give a tag its own segment.
+    Used by :class:`~pipecat.utils.context.text_segment_map.TextSegmentMap` when
+    it builds its segments, to give a tag one of its own.
     """
     tag_spans = [m.span() for m in _COMPLETE_MARKUP_RE.finditer(text)]
     if not tag_spans:

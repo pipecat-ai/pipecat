@@ -9,7 +9,7 @@
 from loguru import logger
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap
-from pipecat.utils.text.transforms._markup_utils import strip_complete_markup
+from pipecat.utils.text.markup_utils import strip_complete_markup
 
 
 class WordCompletionTracker:

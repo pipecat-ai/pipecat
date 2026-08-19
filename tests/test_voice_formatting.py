@@ -7,7 +7,7 @@
 import locale
 import unittest
 
-from pipecat.utils.text.transforms._alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import normalize
 from pipecat.utils.text.transforms.acronyms import normalize_acronyms
 from pipecat.utils.text.transforms.currency import expand_currency
 from pipecat.utils.text.transforms.dates import normalize_dates

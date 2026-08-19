@@ -12,13 +12,13 @@ import unicodedata
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from pipecat.utils.text.transforms._alnum_utils import (
+from pipecat.utils.text.alnum_utils import (
     advance_by_alnums,
     fold_for_matching,
     normalize,
     strip_trailing_punctuation,
 )
-from pipecat.utils.text.transforms._markup_utils import (
+from pipecat.utils.text.markup_utils import (
     raw_offset_after_clean_chars,
     split_markup_runs,
     strip_complete_markup,
@@ -436,7 +436,7 @@ class TextSegmentMap:
         ``"SQL"`` -> ``"sql"``, ``"café"`` -> ``"cafe"``, ``"don’t"`` ->
         ``"don't"``).
 
-        :func:`~pipecat.utils.text.transforms._alnum_utils.fold_for_matching` is
+        :func:`~pipecat.utils.text.alnum_utils.fold_for_matching` is
         a length-preserving, per-character transform (unlike :func:`normalize`,
         it never drops or merges characters), so an offset found against the
         folded text applies unchanged to the original.
@@ -459,7 +459,7 @@ class TextSegmentMap:
         (or vice versa). Recomputed fresh each call -- no persisted tag state.
 
         The match is measured in markup-stripped space, so
-        :func:`~pipecat.utils.text.transforms._markup_utils.raw_offset_after_clean_chars`
+        :func:`~pipecat.utils.text.markup_utils.raw_offset_after_clean_chars`
         converts it back to a raw offset. Only ``PLACED`` can come of this: a
         word outrunning the segment is left to the literal passes, whose offsets
         need no such conversion.
