@@ -422,6 +422,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 "top_p": self._settings.top_p,
                 "top_k": self._settings.top_k,
                 "max_output_tokens": self._settings.max_tokens,
+                "seed": self._settings.seed,
                 "safety_settings": assert_given(self._settings.safety_settings),
                 "tools": tools,
                 "tool_config": tool_config,
