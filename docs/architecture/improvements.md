@@ -33,5 +33,3 @@ already used on `AggregatedTextProgressFrame` and in the RTVI protocol.
 references the name, so a bot author never types it — but the members are public, so a
 rename needs the usual deprecation cycle.
 
----
-

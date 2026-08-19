@@ -283,7 +283,7 @@ Each layer owns one concern, and none of them knows about the layer above:
 
 | Layer | Scope | Question it answers | Why it has to exist |
 | --- | --- | --- | --- |
-| [`TextSegmentMap`](./text-segment-map.md) | One segment | Where in the other two texts are we, given this spoken word? | The text sent to the TTS is not the text the LLM wrote or the segment carries, so something has to hold three cursors in alignment across transforms and markup while matching noisy, provider-specific tokens |
+| [`TextSegmentMap`](./text-segment-map.md) | One frame, segment by segment | Where in the other two texts are we, given this spoken word? | The text sent to the TTS is not the text the LLM wrote or the segment carries, so something has to hold three cursors in alignment across transforms and markup while matching noisy, provider-specific tokens |
 | [`WordCompletionTracker`](./word-completion-tracker.md) | One frame | How much of this word is this frame's, which original text does it stand for, and is the frame finished? | One frame needs a completion verdict and an attributed LLM span per word even when the TTS provider misbehaves |
 | [`AggregatedFrameSequencer`](./aggregated-frame-sequencer.md) | The whole turn | In what order do frames leave the TTS service? | Words arrive per-frame but the conversation context is global and ordered, so spoken, skipped, buffered, and concurrent-context frames must be serialized into one timeline |
 

@@ -355,7 +355,7 @@ If a `CROSSES` remainder runs out of segments entirely, the leftover is exposed 
 A token with no alphanumeric content at all — an emoji, a bare punctuation mark, or a
 symbol the provider substituted (ElevenLabs reports `→` as `-`) — cannot be matched by any
 of the three strategies, because there is nothing to compare. `word_belongs_current_segment`
-falls through to a separate check, `_symbol_word_belongs`, which accepts the token when
+falls through to a separate check, `_symbol_belongs_here`, which accepts the token when
 either:
 
 1. it appears literally in the remaining TTS text (the search window backs up over
@@ -457,6 +457,7 @@ separate is what makes each one correct in its own place.
 | `last_completed_segment` | Segment finished by the last `advance_word` |
 | `last_overflow` | Raw suffix that ran past the end of the TTS text |
 | `last_leading_duplicate` | Leading chars of the token already carried by the previous word |
+| `reset()` | Rewind every cursor, keep the segments |
 
 Two details in `is_complete` are worth knowing. A frame whose remainder is pure
 punctuation or markup is already complete — a closing tag never arrives as its own token.
@@ -469,7 +470,7 @@ emitted as its own token, so `_pending_separated_punctuation` holds completion o
 
 | Class | Covers |
 | --- | --- |
-| `TestStripMarkupHelpers` | `strip_markup`, `_raw_len_for_clean_chars` round-trip |
+| `TestStripMarkupHelpers` | `strip_markup`, `_raw_offset_after_clean_chars` round-trip |
 | `TestStripCompleteMarkupHelper` | Lone `<` kept as content |
 | `TestTextSegmentMapBuild` | Segment construction and spans |
 | `TestTextSegmentMapAdvance` | Cursor hold/jump behaviour |

@@ -54,6 +54,11 @@ Word- and token-level `bot-output` events are **suppressed** for v2 clients — 
 covered entirely by `spoken_status` / `spoken_progress`, so the client sees one clean
 stream of sentence-scoped updates rather than two overlapping ones.
 
+That lifecycle belongs to the word-timestamp path. A `push_text_frames=True` service has
+no word events to drive it, so its `TTSTextFrame` arrives only once synthesis is done and
+the observer emits a single `"completed"` with the whole segment already accumulated. A
+client that assumes it will always see `"new"` first has to handle that.
+
 ## 3. Bot output transforms
 
 `bot_output_transforms` let the application rewrite text before it reaches the client —
