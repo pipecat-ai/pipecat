@@ -44,7 +44,7 @@ complete = tracker.add_word_and_check_complete("4111")
 | Accessor | Read by | Used for |
 | --- | --- | --- |
 | `word_belongs_here()` | `process_word` | Decide whether the provider dropped an event, and this slot must be force-completed |
-| `add_word_and_check_complete()` | `process_word` | Advance, and learn whether the slot is now done — which triggers `flush()` |
+| `add_word_and_check_complete()` | `process_word` | Advance, and learn whether the slot is now done |
 | `get_word_for_frame()` | `process_word` | The **text** of the emitted `TTSTextFrame` |
 | `get_llm_consumed()` | `process_word` | The **`raw_text`** of that frame — what the conversation context records |
 | `suppress_in_context()` | `process_word` | Sets `append_to_context=False` and skips the progress frame |
@@ -56,29 +56,6 @@ complete = tracker.add_word_and_check_complete("4111")
 
 So a single `process_word` call reads six of these to build one `TTSTextFrame` plus one
 `AggregatedTextProgressFrame` — see [RTVI integration](./rtvi-integration.md).
-
-### What "span attribution" means
-
-A **span** is a contiguous slice of `llm_text`, identified by where the cursor was before
-the word and where it is after. **Attributing** it means declaring: *this slice is what
-that spoken word stands for.*
-
-It matters because **the conversation context is rebuilt by concatenating the spans, not
-the spoken words**. The provider says `4111`; the context needs `<card>4111`:
-
-```
-llm_text   Your │ card │ is │ <card>4111 │ 1111 │ </card> thanks
-spoken     Your   card   is         4111   1111           thanks
-```
-
-Each `│` is a span boundary. Note where the tags land: the opening `<card>` is attributed
-to the word that *follows* it, and the closing `</card>` to the word that *precedes* it —
-neither ever arrives as its own word-timestamp event, so each has to ride along with a
-real word.
-
-The spans cover `llm_text` in order and do not overlap, so **reassembling them reproduces
-the LLM's output — tags included**. That is the mechanism
-that stops the context from drifting away from what the LLM wrote.
 
 ### Recovering the LLM structure
 
