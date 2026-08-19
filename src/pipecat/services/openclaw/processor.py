@@ -177,7 +177,14 @@ class OpenClawGatewayProcessor(FrameProcessor):
                 await self._end(OpenClawRunFailedFrame(run_id=run.run_id, error=event.text))
 
     async def _end(self, frame: Frame):
-        """Push a run's terminal frame."""
+        """Push a run's terminal frame and let go of the run.
+
+        The processor stops holding a finished run so that a steer or an abort
+        arriving afterwards has nothing to act on. Steering a run the Gateway
+        has already finished would start a replacement nobody is streaming.
+        """
+        self._run = None
+        self._stream_task = None
         self._run_ended = True
         await self.push_frame(frame)
 

@@ -79,12 +79,7 @@ EventKind = Literal["text_delta", "completed", "cancelled", "failed"]
 
 
 class OpenClawError(Exception):
-    """An error returned by the Gateway, or raised while talking to it.
-
-    Parameters:
-        message: Human-readable description.
-        code: The Gateway's error code, when it sent one.
-    """
+    """An error returned by the Gateway, or raised while talking to it."""
 
     def __init__(self, message: str, code: str | int | None = None):
         """Initialize the error.
@@ -390,15 +385,24 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         await self.connect()
 
         previous = run.run_id
+        previous_ids = set(run.ids)
         self._rekey(run, uuid.uuid4().hex)
-        payload = await self._request(
-            "sessions.steer",
-            {
-                "key": run.session_key,
-                "message": message,
-                "idempotencyKey": run.run_id,
-            },
-        )
+        try:
+            payload = await self._request(
+                "sessions.steer",
+                {
+                    "key": run.session_key,
+                    "message": message,
+                    "idempotencyKey": run.run_id,
+                },
+            )
+        except BaseException:
+            # The steer never reached the Gateway, so the run the caller has is
+            # still the one running there. It has to answer to its own ids
+            # again or its terminal event would arrive for nobody.
+            self._restore(run, previous, previous_ids)
+            raise
+
         self._adopt_id(run, payload)
         interrupted = payload.get("interruptedActiveRun") if isinstance(payload, dict) else None
         logger.debug(
@@ -442,7 +446,7 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         await super()._connect()
         await self._connect_websocket()
         if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+            self._receive_task = self.create_task(self._read_until_closed(), name=f"{self}::read")
         try:
             await self._wait_ready()
         except BaseException:
@@ -506,6 +510,24 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         async for raw in self._websocket:
             self._dispatch(json.loads(raw))
 
+    async def _read_until_closed(self):
+        """Read frames until the receive loop ends, then settle what waited on it.
+
+        The base class's loop has exit paths that never reach
+        :meth:`_disconnect_websocket`: reconnection disabled, or a handshake
+        that keeps succeeding onto a socket that closes immediately. However it
+        ends, nothing is reading the socket any more, so the socket is closed
+        and runs in flight are failed here rather than left waiting for events
+        that cannot arrive. An intentional disconnect does this itself.
+        """
+        try:
+            await self._receive_task_handler(self._report_error)
+        finally:
+            self._receive_task = None
+
+        if not self._disconnecting:
+            await self._disconnect_websocket()
+
     async def _report_error(self, error: ErrorFrame):
         """Hand a connection failure to whoever is driving the client."""
         await self._call_event_handler("on_connection_error", error.error)
@@ -525,13 +547,13 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
-        await self._websocket.send(
-            json.dumps(
-                {"type": "req", "id": request_id, "method": method, "params": params},
-                separators=(",", ":"),
-            )
-        )
         try:
+            await self._websocket.send(
+                json.dumps(
+                    {"type": "req", "id": request_id, "method": method, "params": params},
+                    separators=(",", ":"),
+                )
+            )
             return await asyncio.wait_for(future, timeout=self._request_timeout)
         finally:
             self._pending.pop(request_id, None)
@@ -677,6 +699,14 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         run.ids = {run_id}
         run.run_id = run_id
         self._runs[run_id] = run
+
+    def _restore(self, run: OpenClawRun, run_id: str, ids: set[str]):
+        """Put a run back on the ids it answered to before a failed rekey."""
+        self._runs.pop(run.run_id, None)
+        run.ids = set(ids)
+        run.run_id = run_id
+        for old in run.ids:
+            self._runs[old] = run
 
     def _replay(self):
         """Re-route buffered frames now that a run has a new id.

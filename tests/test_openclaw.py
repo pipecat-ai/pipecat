@@ -9,6 +9,8 @@
 import asyncio
 import unittest
 
+from websockets.protocol import State
+
 from pipecat.frames.frames import ErrorFrame
 from pipecat.services.openclaw.client import (
     OpenClawError,
@@ -201,6 +203,28 @@ class TestOpenClawGatewayClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed.kind, "completed")
         self.assertEqual(completed.text, "FP8 wins on throughput")
 
+    async def test_a_failed_steer_leaves_the_run_reachable(self):
+        """The run keeps answering to its own ids when a steer does not land.
+
+        The steer rekeys the run onto the replacement before asking for it. If
+        the request fails, the run the Gateway is still executing has to be
+        routable again, or its terminal event would arrive for nobody and the
+        stream would never end.
+        """
+        run = await self.client.start("research NVFP4")
+        first_run_id = run.run_id
+        events = self.client.events(run)
+        self.gateway.errors["sessions.steer"] = {"code": "busy", "message": "session is busy"}
+
+        with self.assertRaises(OpenClawError):
+            await self.client.steer(run, "actually, compare it to FP8")
+        self.assertEqual(run.run_id, first_run_id)
+
+        await self.gateway.chat(first_run_id, "final", "NVFP4 halves the footprint")
+        completed = await self._next(events)
+        self.assertEqual(completed.kind, "completed")
+        self.assertEqual(completed.text, "NVFP4 halves the footprint")
+
     #
     # Aborting
     #
@@ -256,6 +280,55 @@ class TestOpenClawGatewayClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.gateway.count("connect"), 1)
         self.assertEqual(self.gateway.count("chat.send"), 3)
+
+    async def test_a_run_fails_when_the_reader_gives_up(self):
+        """A client that will not reconnect still ends its runs.
+
+        The receive loop stops without closing the socket itself when
+        reconnection is disabled, so the runs waiting on it are failed as the
+        loop exits rather than left waiting for events that cannot arrive.
+        """
+        client = OpenClawGatewayClient(url=self.gateway.url, reconnect_on_error=False)
+        self.addAsyncCleanup(client.disconnect)
+        run = await client.start("hello")
+        events = client.events(run)
+
+        await self.gateway.drop()
+
+        self.assertEqual((await self._next(events)).kind, "failed")
+
+    async def test_the_connection_comes_back_after_the_reader_gives_up(self):
+        """The dead reader is not left in place, so the next run reconnects."""
+        client = OpenClawGatewayClient(url=self.gateway.url, reconnect_on_error=False)
+        self.addAsyncCleanup(client.disconnect)
+        run = await client.start("hello")
+        events = client.events(run)
+        await self.gateway.drop()
+        await self._next(events)
+
+        run = await asyncio.wait_for(client.start("again"), timeout=2)
+        events = client.events(run)
+        await self.gateway.chat(run.run_id, "final", "back")
+        self.assertEqual((await self._next(events)).text, "back")
+
+    async def test_a_request_that_never_leaves_is_not_left_waiting(self):
+        """A send that fails settles the request instead of stranding it."""
+
+        class _BrokenSocket:
+            state = State.OPEN
+
+            async def send(self, _):
+                raise ConnectionError("the socket is gone")
+
+            async def close(self):
+                pass
+
+        await self.client.connect()
+        self.client._websocket = _BrokenSocket()
+
+        with self.assertRaises(ConnectionError):
+            await self.client.start("hello")
+        self.assertFalse(self.client._pending)
 
 
 class TestOpenClawGatewayProcessor(unittest.IsolatedAsyncioTestCase):
@@ -378,6 +451,35 @@ class TestOpenClawGatewayProcessor(unittest.IsolatedAsyncioTestCase):
                 OpenClawRunCompletedFrame,
             ],
         )
+
+    async def test_a_steer_after_the_run_finished_is_ignored(self):
+        """A finished run is not steered.
+
+        Steering a run the Gateway has already completed would start a
+        replacement with nothing streaming it, so its output would never
+        reach the pipeline.
+        """
+
+        async def answer(method, params):
+            if method == "chat.send":
+                await self.gateway.chat(params["idempotencyKey"], "final", "done")
+
+        self._stream(answer)
+
+        await run_test(
+            self.processor,
+            frames_to_send=[
+                OpenClawSendFrame(message="hello"),
+                SleepFrame(),
+                OpenClawSteerFrame(message="actually, do this instead"),
+                SleepFrame(),
+            ],
+            expected_down_frames=[
+                OpenClawRunStartedFrame,
+                OpenClawRunCompletedFrame,
+            ],
+        )
+        self.assertEqual(self.gateway.count("sessions.steer"), 0)
 
     async def test_an_unreachable_gateway_is_reported_upstream(self):
         await self.gateway.__aexit__(None, None, None)
