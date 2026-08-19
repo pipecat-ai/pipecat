@@ -66,7 +66,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         credentials: str | None = None,
         credentials_path: str | None = None,
         model: str | None = None,
-        location: str = "global",
+        location: str = "us-east4",
         project_id: str,
         params: GoogleLLMService.InputParams | None = None,
         settings: Settings | None = None,
@@ -81,15 +81,13 @@ class GoogleVertexLLMService(GoogleLLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            model: Model identifier (e.g., "gemini-3.6-flash").
+            model: Model identifier (e.g., "gemini-2.5-flash").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
                     Will be removed in 2.0.0.
 
-            location: Location for the Vertex AI endpoint. Defaults to "global",
-                the only location that serves the Gemini 3 series; the regional
-                endpoints serve the 2.5 series.
+            location: GCP region for Vertex AI endpoint. Defaults to "us-east4".
             project_id: Google Cloud project ID.
             params: Input parameters for the model.
 
@@ -130,7 +128,7 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gemini-3.6-flash",
+            model="gemini-2.5-flash",
             system_instruction=None,
             max_tokens=4096,
             temperature=None,
