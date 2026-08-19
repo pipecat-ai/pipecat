@@ -1147,6 +1147,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     frequency_penalty=assert_given(self._settings.frequency_penalty),
                     max_output_tokens=assert_given(self._settings.max_tokens),
                     presence_penalty=assert_given(self._settings.presence_penalty),
+                    seed=assert_given(self._settings.seed),
                     temperature=assert_given(self._settings.temperature),
                     top_k=assert_given(self._settings.top_k),
                     top_p=assert_given(self._settings.top_p),
