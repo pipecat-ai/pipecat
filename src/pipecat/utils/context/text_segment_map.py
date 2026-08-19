@@ -14,8 +14,9 @@ from enum import Enum, auto
 
 from pipecat.utils.text.alnum_utils import (
     advance_by_alnums,
+    alnum_only,
     fold_for_matching,
-    normalize,
+    has_alnum,
     strip_trailing_punctuation,
 )
 from pipecat.utils.text.markup_utils import (
@@ -70,7 +71,7 @@ class TextSegment:
         """
         if self.tts != strip_complete_markup(self.tts):
             return True
-        if normalize(self.original) != normalize(self.tts):
+        if alnum_only(self.original) != alnum_only(self.tts):
             return True
         return len(self.original.split()) != len(self.tts.split())
 
@@ -82,7 +83,7 @@ class TextSegment:
         are spending. On a rewritten segment it is unrelated to
         :attr:`original_alnum_count` -- "forty two dollars" against "$42.50".
         """
-        return len(normalize(self.tts))
+        return len(alnum_only(self.tts))
 
     @property
     def original_alnum_count(self) -> int:
@@ -91,7 +92,7 @@ class TextSegment:
         The budget for the cursors into ``original_text`` and ``llm_text``, which
         hold that side's characters rather than the spoken ones.
         """
-        return len(normalize(self.original))
+        return len(alnum_only(self.original))
 
 
 class _HopKind(Enum):
@@ -127,17 +128,17 @@ class _Hop:
 
     Parameters:
         kind: Which of the four outcomes applies.
-        segment_chars: How far into this segment to move. The matched span for
+        segment_advance: How far into this segment to move. The matched span for
             ``PLACED``, or a nudge past leading punctuation for ``NO_MATCH``. The
             two draining outcomes leave it 0, since they consume the segment whole.
-        word_chars: How much of the word this segment accounted for, and so how
+        word_consumed: How much of the word this segment accounted for, and so how
             much to drop before offering the rest to the next segment. Only
             ``CROSSES`` sets it; ``EXHAUSTED`` passes the word on untouched.
     """
 
     kind: _HopKind
-    segment_chars: int = 0
-    word_chars: int = 0
+    segment_advance: int = 0
+    word_consumed: int = 0
 
 
 class TextSegmentMap:
@@ -220,11 +221,11 @@ class TextSegmentMap:
         self._tts_text = tts_text
         self._original_text = original_text
         self._llm_text = llm_text if llm_text is not None else original_text
-        self._segments: list[TextSegment] = self._build(tts_text, original_text)
+        self._segments: list[TextSegment] = self._build_segments(tts_text, original_text)
         self._reset_state()
 
     @staticmethod
-    def _build(tts_text: str, original_text: str) -> list[TextSegment]:
+    def _build_segments(tts_text: str, original_text: str) -> list[TextSegment]:
         """Diff the two texts into the list of segments the map walks.
 
         ``difflib`` compares them a word at a time (whitespace is kept as its own
@@ -393,9 +394,9 @@ class TextSegmentMap:
                         and candidate[len(word)].isalnum()
                     )
                     if not lands_mid_word:
-                        return _Hop(_HopKind.PLACED, segment_chars=offset + len(word))
+                        return _Hop(_HopKind.PLACED, segment_advance=offset + len(word))
                 elif candidate and word.startswith(candidate):
-                    return _Hop(_HopKind.CROSSES, word_chars=len(candidate))
+                    return _Hop(_HopKind.CROSSES, word_consumed=len(candidate))
         return None
 
     @staticmethod
@@ -416,7 +417,7 @@ class TextSegmentMap:
         return i
 
     @staticmethod
-    def _skip_candidates(segment_remaining: str) -> list[tuple[str, int]]:
+    def _match_candidates(segment_remaining: str) -> list[tuple[str, int]]:
         """Return the ``(text, offset)`` pairs a word may be matched against here.
 
         Three progressively deeper skips into the segment: the text as-is (for
@@ -451,7 +452,7 @@ class TextSegmentMap:
         ``"don't"``).
 
         :func:`~pipecat.utils.text.alnum_utils.fold_for_matching` is
-        a length-preserving, per-character transform (unlike :func:`normalize`,
+        a length-preserving, per-character transform (unlike :func:`alnum_only`,
         it never drops or merges characters), so an offset found against the
         folded text applies unchanged to the original.
 
@@ -485,7 +486,7 @@ class TextSegmentMap:
         for candidate in TextSegmentMap._word_variants(strip_markup(remaining_word)):
             if candidate and haystack.startswith(candidate):
                 raw_len = raw_offset_after_clean_chars(stripped, len(candidate))
-                return _Hop(_HopKind.PLACED, segment_chars=lead_ws + raw_len)
+                return _Hop(_HopKind.PLACED, segment_advance=lead_ws + raw_len)
         return None
 
     @staticmethod
@@ -509,11 +510,11 @@ class TextSegmentMap:
           literally match trailing non-alnum content (e.g. an emoji) is still
           found here rather than skipped over.
         - :attr:`_HopKind.NO_MATCH` otherwise (e.g. a provider symbol
-          substitution): the word doesn't belong here, so ``segment_chars`` carries a
+          substitution): the word doesn't belong here, so ``segment_advance`` carries a
           nudge past the segment's leading run of non-alphanumeric chars only --
           never past real spoken content.
         """
-        candidates = TextSegmentMap._skip_candidates(segment_remaining)
+        candidates = TextSegmentMap._match_candidates(segment_remaining)
 
         hop = TextSegmentMap._literal_hop(candidates, remaining_word)
         if hop is None:
@@ -524,7 +525,7 @@ class TextSegmentMap:
             return hop
 
         # Nothing spoken left here: drain so the word can try the next segment.
-        if not normalize(segment_remaining):
+        if not has_alnum(segment_remaining):
             return _Hop(_HopKind.EXHAUSTED)
 
         # Foreign token: nudge past leading punctuation only, then stop. Unlike
@@ -532,7 +533,8 @@ class TextSegmentMap:
         # cursor rather than deciding a match, so there is no tag name it could
         # mistake for spoken content.
         return _Hop(
-            _HopKind.NO_MATCH, segment_chars=TextSegmentMap._leading_nonalnum_len(segment_remaining)
+            _HopKind.NO_MATCH,
+            segment_advance=TextSegmentMap._leading_nonalnum_len(segment_remaining),
         )
 
     def _advance_cursors_to(self, seg: TextSegment, new_pos: int) -> None:
@@ -559,10 +561,10 @@ class TextSegmentMap:
             # event will ever name. Take it now so the segment can finish.
             # Unchanged segments are not given this: a trailing emoji there is
             # real output, and its own event is still coming.
-            if not normalize(seg.tts[new_pos:]):
+            if not has_alnum(seg.tts[new_pos:]):
                 new_pos = len(seg.tts)
         else:
-            n_alnum = len(normalize(seg.tts[self._seg_raw_pos : new_pos]))
+            n_alnum = len(alnum_only(seg.tts[self._seg_raw_pos : new_pos]))
             if n_alnum:
                 self._user_facing_pos = advance_by_alnums(
                     self._original_text, self._user_facing_pos, n_alnum
@@ -624,7 +626,7 @@ class TextSegmentMap:
             if hop.kind is _HopKind.PLACED or hop.kind is _HopKind.NO_MATCH:
                 return hops, ""
 
-            remaining_word = remaining_word[hop.word_chars :]
+            remaining_word = remaining_word[hop.word_consumed :]
             seg_idx += 1
             raw_pos = 0
 
@@ -647,9 +649,9 @@ class TextSegmentMap:
                 # symbol, say). Nudge the raw cursor past any leading punctuation
                 # so the next word is not blocked by it, but leave the cursors
                 # that mean something alone -- nothing was really spoken here.
-                self._seg_raw_pos += hop.segment_chars
+                self._seg_raw_pos += hop.segment_advance
             elif hop.kind is _HopKind.PLACED:
-                self._advance_cursors_to(seg, self._seg_raw_pos + hop.segment_chars)
+                self._advance_cursors_to(seg, self._seg_raw_pos + hop.segment_advance)
             else:
                 # CROSSES or EXHAUSTED: this segment is done either way, and the
                 # next hop was classified against the one after it.
@@ -720,7 +722,7 @@ class TextSegmentMap:
             return True
         if self._can_consume_word(word):
             return True
-        if not normalize(word):
+        if not has_alnum(word):
             return self._symbol_belongs_here(word)
         return False
 
@@ -829,11 +831,11 @@ class TextSegmentMap:
         if self._seg_idx >= len(self._segments):
             return True
         seg = self._segments[self._seg_idx]
-        if normalize(seg.tts[self._seg_raw_pos :]):
+        if has_alnum(seg.tts[self._seg_raw_pos :]):
             return False
         if self._pending_separated_punctuation(seg.tts[self._seg_raw_pos :]):
             return False
-        return all(not normalize(s.tts) for s in self._segments[self._seg_idx + 1 :])
+        return all(not has_alnum(s.tts) for s in self._segments[self._seg_idx + 1 :])
 
     @staticmethod
     def _pending_separated_punctuation(remaining: str) -> bool:

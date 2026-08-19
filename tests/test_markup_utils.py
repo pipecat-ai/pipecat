@@ -6,6 +6,7 @@
 
 import unittest
 
+from pipecat.utils.text.alnum_utils import alnum_only, has_alnum
 from pipecat.utils.text.markup_utils import (
     raw_offset_after_clean_chars,
     split_markup_runs,
@@ -107,6 +108,17 @@ class TestSplitMarkupRuns(unittest.TestCase):
             "plain",
         ]:
             self.assertEqual("".join(split_markup_runs(text)), text)
+
+
+class TestHasAlnum(unittest.TestCase):
+    """has_alnum() is the predicate form of alnum_only(), markup included."""
+
+    def test_agrees_with_alnum_only(self):
+        for text in ["hello", "", "   ", "<break/>", "<b>hi</b>", "!!!", "😊", "5 < 10", "1234"]:
+            self.assertEqual(has_alnum(text), bool(alnum_only(text)), text)
+
+    def test_tag_name_is_not_content(self):
+        self.assertFalse(has_alnum("<break/>"))
 
 
 if __name__ == "__main__":

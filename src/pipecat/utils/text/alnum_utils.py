@@ -76,7 +76,7 @@ def _fold_accented_char(char: str) -> str:
 def fold_for_matching(text: str) -> str:
     """Fold away surface variation between two spellings of the same text, 1:1.
 
-    Unlike :func:`normalize`, this never removes or merges characters --
+    Unlike :func:`alnum_only`, this never removes or merges characters --
     punctuation, spaces, and markup are passed through unchanged, and each
     output character corresponds to exactly the same-index input character. A
     raw offset computed against the folded text therefore applies unchanged to
@@ -103,7 +103,7 @@ def fold_for_matching(text: str) -> str:
     return fold_typography(folded)
 
 
-def normalize(text: str) -> str:
+def alnum_only(text: str) -> str:
     """Strip XML/HTML tags then keep only lowercase alphanumeric characters.
 
     Accented letters (e.g. ã, é) are reduced to their base letter so TTS output
@@ -113,7 +113,7 @@ def normalize(text: str) -> str:
     with raw alnum counts used by advance_by_alnums.
 
     Args:
-        text: Input text to normalize.
+        text: Input text to reduce.
 
     Returns:
         Lowercase alphanumeric-only string with tags stripped.
@@ -134,6 +134,16 @@ def normalize(text: str) -> str:
             # accent to fold, so keep as-is (lowercase conversion is a no-op).
             result.append(char.lower())
     return "".join(result)
+
+
+def has_alnum(text: str) -> bool:
+    """Return True if *text* holds anything alphanumeric once markup is stripped.
+
+    The predicate form of :func:`alnum_only`, for the question the callers
+    actually ask: is there anything left to speak here? A tag's letters do not
+    count -- ``"<break/>"`` is empty by this measure.
+    """
+    return bool(alnum_only(text))
 
 
 def advance_by_alnums(text: str, start_pos: int, n: int) -> int:

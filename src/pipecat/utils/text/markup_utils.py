@@ -78,7 +78,7 @@ def strip_complete_markup(text: str) -> str:
 
     Used by
     :attr:`~pipecat.utils.context.text_segment_map.TextSegment.is_transformed`,
-    by :func:`~pipecat.utils.text.alnum_utils.normalize`, and by
+    by :func:`~pipecat.utils.text.alnum_utils.alnum_only`, and by
     :class:`~pipecat.utils.context.word_completion_tracker.WordCompletionTracker`
     to default ``user_facing_text`` to a tag-free string.
     """

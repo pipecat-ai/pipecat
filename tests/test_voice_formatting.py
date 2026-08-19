@@ -7,7 +7,7 @@
 import locale
 import unittest
 
-from pipecat.utils.text.alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import alnum_only
 from pipecat.utils.text.transforms.acronyms import normalize_acronyms
 from pipecat.utils.text.transforms.currency import expand_currency
 from pipecat.utils.text.transforms.dates import normalize_dates
@@ -46,7 +46,7 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
     async def test_alnum_preserving(self):
         text = "**Hello** and _world_"
         result = await strip_markdown(text, "*")
-        self.assertEqual(normalize(result), normalize(text))
+        self.assertEqual(alnum_only(result), alnum_only(text))
 
     async def test_no_change_to_plain_text(self):
         text = "Hello world"
@@ -66,7 +66,7 @@ class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
     async def test_alnum_preserving(self):
         text = "123-456-7890"
         result = await expand_phone_numbers(text, "*")
-        self.assertEqual(normalize(result), normalize(text))
+        self.assertEqual(alnum_only(result), alnum_only(text))
 
     async def test_no_change_to_non_phone(self):
         text = "Hello world"
@@ -92,7 +92,7 @@ class TestNormalizeAcronyms(unittest.IsolatedAsyncioTestCase):
     async def test_alnum_preserving(self):
         text = "NASA and HTTP"
         result = await normalize_acronyms(text, "*")
-        self.assertEqual(normalize(result), normalize(text))
+        self.assertEqual(alnum_only(result), alnum_only(text))
 
     async def test_does_not_split_camelcase(self):
         text = "iPhone"
@@ -145,8 +145,8 @@ class TestReplaceText(unittest.IsolatedAsyncioTestCase):
 
 
 class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTestCase):
-    """Whether normalize() treats a case-only or word-splitting replacement as
-    unchanged. normalize() lowercases text and drops whitespace/punctuation, so a
+    """Whether alnum_only() treats a case-only or word-splitting replacement as
+    unchanged. alnum_only() lowercases text and drops whitespace/punctuation, so a
     replacement that only changes case, or that splits one word into several,
     normalizes identically on both sides even though the original text cannot be
     recovered by simple proportional advancement.
@@ -155,30 +155,30 @@ class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTes
     async def test_word_split_normalizes_the_same_as_original(self):
         transform = replace_text([(r"\bBODYPUMP\b", "body pump")])
         result = await transform("BODYPUMP", "*")
-        self.assertEqual(normalize(result), normalize("BODYPUMP"))
+        self.assertEqual(alnum_only(result), alnum_only("BODYPUMP"))
 
     async def test_case_change_normalizes_the_same_as_original(self):
         transform = replace_text([(r"\bSQL\b", "sql")])
         result = await transform("SQL", "*")
-        self.assertEqual(normalize(result), normalize("SQL"))
+        self.assertEqual(alnum_only(result), alnum_only("SQL"))
 
     async def test_pronunciation_respelling_does_not_normalize_the_same(self):
         """Contrast case: a genuine 1-to-1 respelling ("leisure" -> "lezher") does
         change the normalized alnum content, so it is correctly flagged as transformed."""
         transform = replace_text([(r"\bleisure\b", "lezher")])
         result = await transform("leisure", "*")
-        self.assertNotEqual(normalize(result), normalize("leisure"))
+        self.assertNotEqual(alnum_only(result), alnum_only("leisure"))
 
     async def test_ssml_phoneme_tag_normalizes_the_same_as_original(self):
         """An SSML phoneme tag wraps the word without altering it, so tag-stripped
         normalization matches the original — unlike a respelling. (The wrapping
         markup itself is still picked up as a transformed segment by
-        TextSegmentMap, not by normalize() here.)"""
+        TextSegmentMap, not by alnum_only() here.)"""
         transform = replace_text(
             [(r"\bSiobhan\b", '<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>')]
         )
         result = await transform("Siobhan", "*")
-        self.assertEqual(normalize(result), normalize("Siobhan"))
+        self.assertEqual(alnum_only(result), alnum_only("Siobhan"))
 
 
 class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
@@ -194,7 +194,7 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
     async def test_alnum_changes(self):
         text = "50%"
         result = await expand_percentages(text, "*")
-        self.assertNotEqual(normalize(result), normalize(text))
+        self.assertNotEqual(alnum_only(result), alnum_only(text))
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):

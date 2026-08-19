@@ -310,10 +310,10 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
     def test_literal_angle_bracket_word_placed_via_literal_strategy(self):
         hop = TextSegmentMap._classify_hop("<3 always", "<3")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        # segment_chars == len(word) (offset 0 + len("<3")) is literal strategy's
+        # segment_advance == len(word) (offset 0 + len("<3")) is literal strategy's
         # formula; the markup-stripped strategy would compute this differently
         # (via raw_offset_after_clean_chars), so this pins down *which* strategy matched.
-        self.assertEqual(hop.segment_chars, len("<3"))
+        self.assertEqual(hop.segment_advance, len("<3"))
 
 
 class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
@@ -326,7 +326,7 @@ class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
     def test_word_after_comma_and_space_is_placed(self):
         hop = TextSegmentMap._classify_hop(", I can do that. ", "I")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(hop.segment_chars, len(", I"))
+        self.assertEqual(hop.segment_advance, len(", I"))
 
     def test_full_sentence_advances_word_by_word(self):
         smap = TextSegmentMap("Yeah, I can do that.", "Yeah, I can do that.")
@@ -488,7 +488,7 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
         remaining = "<spell>1234</spell>\n\nHow can I help you today?"
         hop = TextSegmentMap._classify_hop(remaining, "1234.")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(remaining[: hop.segment_chars], "<spell>1234")
+        self.assertEqual(remaining[: hop.segment_advance], "<spell>1234")
 
     def test_sentence_tracks_through_the_extra_punctuation(self):
         text = "I love to count <spell>1234</spell>\n\nHow can I help you today?"
