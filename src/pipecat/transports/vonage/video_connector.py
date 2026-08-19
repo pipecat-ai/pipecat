@@ -97,7 +97,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             except Exception as exc:
                 logger.error(f"Error connecting to Vonage session: {exc}")
                 await self.push_error(
-                    "Vonage video connector connection error", treat_as_permanent=True
+                    "Vonage video connector connection error", force_treat_as_permanent=True
                 )
 
     async def cleanup(self) -> None:
@@ -169,7 +169,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             f"Vonage input transport error session={session.id} code={code} description={description}"
         )
         if self._connected:
-            await self.push_error("Vonage video connector error", treat_as_permanent=True)
+            await self.push_error("Vonage video connector error", force_treat_as_permanent=True)
 
     async def _stop_client(self) -> None:
         if self._connected:
@@ -231,7 +231,7 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             except Exception as exc:
                 logger.error(f"Error connecting to Vonage session: {exc}")
                 await self.push_error(
-                    "Vonage video connector connection error", treat_as_permanent=True
+                    "Vonage video connector connection error", force_treat_as_permanent=True
                 )
 
     async def cleanup(self) -> None:
@@ -323,7 +323,7 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             f"Vonage output transport error session={session.id} code={code} description={description}"
         )
         if self._connected:
-            await self.push_error("Vonage video connector error", treat_as_permanent=True)
+            await self.push_error("Vonage video connector error", force_treat_as_permanent=True)
 
 
 class VonageVideoConnectorTransport(BaseTransport):

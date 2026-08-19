@@ -146,7 +146,7 @@ class ProcessorUnusablePolicy(Enum):
     An unusable processor keeps failing for as long as the pipeline keeps
     using it, so the pipeline has to decide whether it is still worth running.
     A processor becomes unusable through a permanent error category or through
-    :meth:`FrameProcessor.push_error` with ``treat_as_permanent=True``.
+    :meth:`FrameProcessor.push_error` with ``force_treat_as_permanent=True``.
 
     Parameters:
         CONTINUE: Report the error and keep running. The application can decide

@@ -1025,8 +1025,8 @@ class ErrorFrame(SystemFrame):
 
             .. deprecated:: 1.8.0
                 Use :meth:`FrameProcessor.push_error` with
-                ``treat_as_permanent=True`` instead, when the error leaves the
-                processor that reported it unable to do its job: it marks the
+                ``force_treat_as_permanent=True`` instead, when the error leaves
+                its originating processor unable to do its job: it marks that
                 processor unusable and the pipeline worker applies its
                 :class:`ProcessorUnusablePolicy`. For an error that isn't about
                 a processor's state, push an :class:`EndWorkerFrame` after the
@@ -1057,9 +1057,9 @@ class ErrorFrame(SystemFrame):
                 warnings.simplefilter("always")
                 warnings.warn(
                     "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
-                    "2.0.0. If the error leaves the processor that reported it unable to do "
-                    "its job, report it with `push_error(..., treat_as_permanent=True)`: that "
-                    "marks the processor unusable, and the PipelineWorker acts on it "
+                    "2.0.0. If the error leaves its originating processor unable to do its "
+                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
+                    "that marks the processor unusable, and the PipelineWorker acts on it "
                     "according to its `processor_unusable_policy` "
                     "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
                     "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
@@ -1079,7 +1079,8 @@ class ErrorFrame(SystemFrame):
 
 @deprecated(
     "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. "
-    "Use `ErrorFrame` instead."
+    "Use `ErrorFrame` instead. See the `ErrorFrame.fatal` docstring for how to "
+    "report an error that used to be fatal."
 )
 @dataclass
 class FatalErrorFrame(ErrorFrame):
@@ -1087,12 +1088,12 @@ class FatalErrorFrame(ErrorFrame):
 
     .. deprecated:: 1.8.0
         Use :class:`ErrorFrame` instead. Report the error with
-        :meth:`FrameProcessor.push_error` and ``treat_as_permanent=True`` when it
-        leaves the reporting processor unable to do its job — the pipeline worker
-        then applies its :class:`ProcessorUnusablePolicy`, of which ``CANCEL``
-        shuts the bot down. For an error that isn't about a processor's state,
-        push an :class:`EndWorkerFrame` after the error instead. Will be removed
-        in 2.0.0.
+        :meth:`FrameProcessor.push_error` and ``force_treat_as_permanent=True``
+        when it leaves its originating processor unable to do its job — the
+        pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of
+        which ``CANCEL`` shuts the bot down. For an error that isn't about a
+        processor's state, push an :class:`EndWorkerFrame` after the error
+        instead. Will be removed in 2.0.0.
 
     Parameters:
         fatal: Always True for fatal errors.

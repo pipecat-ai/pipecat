@@ -841,7 +841,7 @@ class FrameProcessor(BaseObject):
         exception: Exception | None = None,
         fatal: bool = False,
         category: ErrorCategory | None = None,
-        treat_as_permanent: bool = False,
+        force_treat_as_permanent: bool = False,
     ):
         """Creates and pushes an ErrorFrame upstream.
 
@@ -858,11 +858,12 @@ class FrameProcessor(BaseObject):
                 Defaults to False for non-fatal errors.
 
                 .. deprecated:: 1.8.0
-                    Use ``treat_as_permanent=True`` instead, when the error
-                    leaves this processor unable to do its job: the pipeline
-                    worker then applies its :class:`ProcessorUnusablePolicy`, of
-                    which ``CANCEL`` matches what ``fatal=True`` did. For an
-                    error that isn't about this processor's state, push an
+                    Use ``force_treat_as_permanent=True`` instead, when the
+                    error leaves its originating processor unable to do its
+                    job: the pipeline worker then applies its
+                    :class:`ProcessorUnusablePolicy`, of which ``CANCEL``
+                    matches what ``fatal=True`` did. For an error that isn't
+                    about that processor's state, push an
                     :class:`EndWorkerFrame` after the error to end the pipeline.
                     Will be removed in 2.0.0.
 
@@ -872,7 +873,7 @@ class FrameProcessor(BaseObject):
                 can't be attributed — an unexpected one caught by a broad
                 ``except``, say, which may not have come from this processor at
                 all.
-            treat_as_permanent: Whether to treat this error as one that will
+            force_treat_as_permanent: Whether to treat this error as one that will
                 keep recurring, leaving the processor unable to do any more
                 work — having failed too many times to keep trying, say. Only
                 needed for a failure the category doesn't already convey:
@@ -894,7 +895,7 @@ class FrameProcessor(BaseObject):
                 result = some_critical_operation()
             except Exception as e:
                 await self.push_error(
-                    "Critical operation failed", exception=e, treat_as_permanent=True
+                    "Critical operation failed", exception=e, force_treat_as_permanent=True
                 )
             ```
         """
@@ -903,9 +904,9 @@ class FrameProcessor(BaseObject):
                 warnings.simplefilter("always")
                 warnings.warn(
                     "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
-                    "in 2.0.0. If the error leaves this processor unable to do its job, pass "
-                    "`treat_as_permanent=True` instead: that marks the processor unusable, "
-                    "and the PipelineWorker acts on it according to its "
+                    "in 2.0.0. If the error leaves its originating processor unable to do "
+                    "its job, pass `force_treat_as_permanent=True` instead: that marks the "
+                    "processor unusable, and the PipelineWorker acts on it according to its "
                     "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
                     "`fatal=True` did). Otherwise, drop `fatal` and push an "
                     "`EndWorkerFrame` after the error to end the pipeline.",
@@ -925,18 +926,18 @@ class FrameProcessor(BaseObject):
 
         # Subclasses may override `push_error_frame` with its original
         # one-argument signature, so only pass the flag when it is set.
-        if treat_as_permanent:
-            await self.push_error_frame(error=error_frame, treat_as_permanent=True)
+        if force_treat_as_permanent:
+            await self.push_error_frame(error=error_frame, force_treat_as_permanent=True)
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, treat_as_permanent: bool = False):
+    async def push_error_frame(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         """Push an error frame upstream.
 
         Args:
             error: The error frame to push. Its deprecated ``fatal`` flag still
-                cancels the pipeline; ``treat_as_permanent`` is the replacement.
-            treat_as_permanent: Whether to treat this error as one that will
+                cancels the pipeline; ``force_treat_as_permanent`` is the replacement.
+            force_treat_as_permanent: Whether to treat this error as one that will
                 keep recurring, leaving the processor unable to do any more
                 work. Leaving it False doesn't keep the processor usable — a
                 permanent category costs it its usability either way. See
@@ -955,7 +956,7 @@ class FrameProcessor(BaseObject):
 
         # Before anything sees the error, so that handlers reading
         # `frame.processor.is_usable` get the verdict that came with it.
-        if treat_as_permanent or error.category.is_permanent:
+        if force_treat_as_permanent or error.category.is_permanent:
             await self.set_usable(False)
 
         await self._call_event_handler("on_error", error)

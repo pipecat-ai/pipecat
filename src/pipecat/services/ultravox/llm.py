@@ -302,7 +302,7 @@ class UltravoxRealtimeLLMService(LLMService):
             self._socket = await websocket_client.connect(join_url)
             self._receive_task = self.create_task(self._receive_messages())
         except Exception as e:
-            await self.push_error("Failed to connect to Ultravox", e, treat_as_permanent=True)
+            await self.push_error("Failed to connect to Ultravox", e, force_treat_as_permanent=True)
 
     @staticmethod
     def _output_medium_to_api(medium: Literal["text", "voice"] | None) -> str | None:
@@ -614,7 +614,7 @@ class UltravoxRealtimeLLMService(LLMService):
         except Exception as e:
             if self._disconnecting or not self._socket:
                 return
-            await self.push_error("Ultravox websocket send error", e, treat_as_permanent=True)
+            await self.push_error("Ultravox websocket send error", e, force_treat_as_permanent=True)
 
     #
     # response handling
@@ -680,7 +680,7 @@ class UltravoxRealtimeLLMService(LLMService):
                     if self._disconnecting or not self._socket:
                         return
                     await self.push_error(
-                        "Ultravox websocket receive error", e, treat_as_permanent=True
+                        "Ultravox websocket receive error", e, force_treat_as_permanent=True
                     )
         except ConnectionClosed:
             if self._disconnecting or not self._socket:

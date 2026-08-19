@@ -51,7 +51,9 @@ class PermanentlyFailingProcessor(FrameProcessor):
 
         if isinstance(frame, TextFrame):
             await self.push_error(
-                "service failed for good", category=ErrorCategory.SERVER, treat_as_permanent=True
+                "service failed for good",
+                category=ErrorCategory.SERVER,
+                force_treat_as_permanent=True,
             )
 
         await self.push_frame(frame, direction)
@@ -218,7 +220,7 @@ class TestDeprecatedFatalFlag(UnusableProcessorTestCase):
         message = str(warnings_raised[0].message)
         self.assertIs(warnings_raised[0].category, DeprecationWarning)
         self.assertIn(subject, message)
-        self.assertIn("treat_as_permanent=True", message)
+        self.assertIn("force_treat_as_permanent=True", message)
         self.assertIn("EndWorkerFrame", message)
 
     def test_error_frame_warns_when_fatal(self):

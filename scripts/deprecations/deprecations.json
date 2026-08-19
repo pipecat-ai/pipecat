@@ -175,7 +175,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "FrameProcessor.push_error",
-      "message": "Use :meth:`FrameProcessor.push_error` with ``treat_as_permanent=True`` instead, when the error leaves the processor that reported it unable to do its job: it marks the processor unusable and the pipeline worker applies its :class:`ProcessorUnusablePolicy`. For an error that isn't about a processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
+      "message": "Use :meth:`FrameProcessor.push_error` with ``force_treat_as_permanent=True`` instead, when the error leaves its originating processor unable to do its job: it marks that processor unusable and the pipeline worker applies its :class:`ProcessorUnusablePolicy`. For an error that isn't about a processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -186,7 +186,7 @@
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "ErrorFrame",
-      "message": "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `ErrorFrame` instead.",
+      "message": "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `ErrorFrame` instead. See the `ErrorFrame.fatal` docstring for how to report an error that used to be fatal.",
       "location": "pipecat/frames/frames.py"
     },
     {
@@ -504,8 +504,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "treat_as_permanent=True",
-      "message": "Use ``treat_as_permanent=True`` instead, when the error leaves this processor unable to do its job: the pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of which ``CANCEL`` matches what ``fatal=True`` did. For an error that isn't about this processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
+      "replacement": "force_treat_as_permanent=True",
+      "message": "Use ``force_treat_as_permanent=True`` instead, when the error leaves its originating processor unable to do its job: the pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of which ``CANCEL`` matches what ``fatal=True`` did. For an error that isn't about that processor's state, push an :class:`EndWorkerFrame` after the error to end the pipeline. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frame_processor.py"
     },
     {
