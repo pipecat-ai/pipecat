@@ -9,11 +9,13 @@
 import io
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from loguru import logger
 
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.vertex.llm import GoogleVertexLLMService
 
 
 def _applied_thinking_config(model: str) -> dict[str, Any] | None:
@@ -155,3 +157,32 @@ async def test_switching_to_a_gemini_3_model_at_runtime_warns():
         logger.remove(handler_id)
 
     assert "thinking_budget" in sink.getvalue()
+
+
+# --- Vertex defaults --------------------------------------------------------
+
+
+def test_vertex_defaults_to_gemini_3_on_the_global_endpoint():
+    """Vertex serves the Gemini 3 series only from global, so both defaults pair."""
+    with (
+        patch.object(GoogleVertexLLMService, "_get_credentials", return_value=None),
+        patch.object(GoogleVertexLLMService, "create_client"),
+    ):
+        service = GoogleVertexLLMService(project_id="test-project")
+
+    assert service._settings.model == "gemini-3.6-flash"
+    assert service._location == "global"
+
+
+def test_vertex_shares_the_thinking_defaults():
+    """The Vertex service inherits the same per-model thinking defaults."""
+    with (
+        patch.object(GoogleVertexLLMService, "_get_credentials", return_value=None),
+        patch.object(GoogleVertexLLMService, "create_client"),
+    ):
+        service = GoogleVertexLLMService(project_id="test-project")
+
+    params = service._build_generation_params()
+    service._maybe_unset_thinking_budget(params)
+
+    assert params["thinking_config"] == {"thinking_level": "minimal"}
