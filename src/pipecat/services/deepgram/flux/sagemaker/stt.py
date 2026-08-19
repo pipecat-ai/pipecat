@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     Frame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )

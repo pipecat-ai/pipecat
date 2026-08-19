@@ -9,7 +9,7 @@ import unittest
 
 import pytest
 
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )
