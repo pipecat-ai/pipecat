@@ -8,12 +8,15 @@
 
 import io
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from google.genai.types import ThinkingLevel
 from loguru import logger
 
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.vertex.llm import GoogleVertexLLMService
 
@@ -23,7 +26,6 @@ def _applied_thinking_config(model: str) -> dict[str, Any] | None:
     service = GoogleLLMService(api_key="test-key", settings=GoogleLLMService.Settings(model=model))
 
     params = service._build_generation_params()
-    service._maybe_unset_thinking_budget(params)
 
     return params.get("thinking_config")
 
@@ -83,9 +85,31 @@ def test_a_configured_thinking_config_is_left_alone():
     )
 
     params = service._build_generation_params()
-    service._maybe_unset_thinking_budget(params)
 
     assert params["thinking_config"] == {"thinking_level": "high"}
+
+
+# --- every inference path ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_inference_applies_the_thinking_default():
+    """Out-of-band inference gets the same default as the in-pipeline path."""
+    service = GoogleLLMService(
+        api_key="test-key",
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.6-flash", system_instruction="You are helpful."
+        ),
+    )
+    response = SimpleNamespace(candidates=[])
+
+    with patch.object(
+        service._client.aio.models, "generate_content", return_value=response
+    ) as generate:
+        await service.run_inference(LLMContext(messages=[{"role": "user", "content": "hi"}]))
+
+    config = generate.call_args.kwargs["config"]
+    assert config.thinking_config.thinking_level == ThinkingLevel.MINIMAL
 
 
 # --- warning on a budget that may not control thinking ----------------------
@@ -183,7 +207,6 @@ def test_vertex_shares_the_thinking_defaults():
     service = _vertex_service(settings=GoogleVertexLLMService.Settings(model="gemini-3.7-flash"))
 
     params = service._build_generation_params()
-    service._maybe_unset_thinking_budget(params)
 
     assert params["thinking_config"] == {"thinking_level": "low"}
 

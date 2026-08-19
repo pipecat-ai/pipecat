@@ -411,7 +411,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             tool_config: Optional tool configuration.
 
         Returns:
-            Dictionary of generation parameters with None values filtered out.
+            Dictionary of generation parameters with None values filtered out,
+            carrying the low-latency thinking default when none is configured.
         """
         # Filter out None values and create GenerationContentConfig
         generation_params = {
@@ -437,6 +438,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         if self._settings.extra:
             generation_params.update(self._settings.extra)
+
+        # Applied last, so an explicit thinking config from the settings or from
+        # extra wins over the low-latency default.
+        self._maybe_unset_thinking_budget(generation_params)
 
         return generation_params
 
@@ -534,9 +539,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             tools=tools,
             tool_config=tool_config,
         )
-
-        # possibly modify generation_params (in place) to set thinking to off by default
-        self._maybe_unset_thinking_budget(generation_params)
 
         generation_config = GenerateContentConfig(**generation_params)
 
