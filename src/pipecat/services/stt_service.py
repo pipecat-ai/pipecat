@@ -1025,6 +1025,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         # counts toward usage.
         self._record_stt_audio_usage(silence)
 
-    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
+    async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

@@ -383,7 +383,6 @@ async def test_flux_tts_configure_failure_pushes_error():
     errors = [frame for frame in down_frames + up_frames if isinstance(frame, ErrorFrame)]
     assert errors, "ConfigureFailure should surface as an ErrorFrame"
     assert "SPEED_OUT_OF_RANGE" in errors[0].error
-    assert not errors[0].fatal
 
 
 @pytest.mark.asyncio

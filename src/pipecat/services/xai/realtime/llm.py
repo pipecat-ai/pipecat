@@ -885,10 +885,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """Handle MCP discovery / call lifecycle events."""
         await self._call_event_handler("on_mcp_event", evt.type, evt)
         if evt.type.endswith(".failed"):
-            await self.push_error(
-                error_msg=f"Grok Realtime MCP failure: {evt.type}",
-                fatal=False,
-            )
+            await self.push_error(error_msg=f"Grok Realtime MCP failure: {evt.type}")
 
     async def _handle_evt_audio_delta(self, evt):
         """Handle audio delta event - streaming audio from assistant."""

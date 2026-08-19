@@ -669,7 +669,9 @@ class DeepgramSTTService(STTService):
                 except ApiError as e:
                     if e.status_code is not None and 400 <= e.status_code < 500:
                         msg = f"Deepgram rejected the connection (status {e.status_code}): {e}"
-                        await self.push_error(error_msg=msg, exception=e, treat_as_permanent=True)
+                        await self.push_error(
+                            error_msg=msg, exception=e, force_treat_as_permanent=True
+                        )
                         return
                     logger.warning(f"{self}: Connection lost, will retry: {e}")
                     await self.push_error(error_msg=f"connection error: {e}", exception=e)
@@ -691,7 +693,7 @@ class DeepgramSTTService(STTService):
                         "connection failed to stay up "
                         f"{self._quick_failure_tracker.max_consecutive_failures} times in a row"
                     )
-                    await self.push_error(error_msg=msg, treat_as_permanent=True)
+                    await self.push_error(error_msg=msg, force_treat_as_permanent=True)
                     return
                 await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
         finally:
