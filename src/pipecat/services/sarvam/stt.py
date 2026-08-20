@@ -149,6 +149,16 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         use_translate_endpoint=False,
         use_translate_method=False,
     ),
+    "saaras:v4": ModelConfig(
+        supports_prompt=False,
+        supports_mode=True,
+        supports_language=True,
+        supports_vad_params=True,
+        default_language="unknown",
+        default_mode="transcribe",
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
 }
 
 
@@ -162,25 +172,35 @@ class SarvamSTTSettings(STTSettings):
         vad_signals: Enable VAD signals in response.
         high_vad_sensitivity: Enable high VAD sensitivity.
         positive_speech_threshold: VAD probability threshold (0.0-1.0) above which
-            a frame is considered speech. Only for saaras:v3.
+            a frame is considered speech. Only for models that support VAD
+            parameters (e.g., saaras:v3, saaras:v4).
         negative_speech_threshold: VAD probability threshold (0.0-1.0) below which
-            a frame is considered silence. Only for saaras:v3.
+            a frame is considered silence. Only for models that support VAD
+            parameters (e.g., saaras:v3, saaras:v4).
         min_speech_frames: Minimum consecutive speech frames to start a speech
-            segment. Only for saaras:v3.
+            segment. Only for models that support VAD parameters (e.g., saaras:v3,
+            saaras:v4).
         first_turn_min_speech_frames: Minimum speech frames for the first user
-            turn. Only for saaras:v3.
+            turn. Only for models that support VAD parameters (e.g., saaras:v3,
+            saaras:v4).
         negative_frames_count: Number of silence frames within the window to end
-            a speech segment. Only for saaras:v3.
+            a speech segment. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
         negative_frames_window: Sliding window size (in frames) for counting
-            negative frames. Only for saaras:v3.
+            negative frames. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
         start_speech_volume_threshold: Volume level (dB) below which audio is
-            too quiet to be speech. Only for saaras:v3.
+            too quiet to be speech. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
         interrupt_min_speech_frames: Minimum speech frames to register a
-            barge-in/interruption. Only for saaras:v3.
+            barge-in/interruption. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
         pre_speech_pad_frames: Number of audio frames to prepend before detected
-            speech onset. Only for saaras:v3.
+            speech onset. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
         num_initial_ignored_frames: Number of leading audio frames to skip at
-            connection start. Only for saaras:v3.
+            connection start. Only for models that support VAD parameters
+            (e.g., saaras:v3, saaras:v4).
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -237,10 +257,12 @@ class SarvamSTTService(STTService):
                 - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
                 - saaras:v2.5: Not used (auto-detects language)
                 - saaras:v3: Defaults to "unknown" (auto-detect supported)
+                - saaras:v4: Defaults to "unknown" (auto-detect supported)
             prompt: Optional prompt to guide transcription/translation style/context.
                 Only applicable to saaras:v2.5. Defaults to None.
-            mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
-                verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
+            mode: Mode of operation for models that support it (saaras:v3, saaras:v4).
+                Options: transcribe, translate, verbatim, translit, codemix.
+                Defaults to "transcribe".
             vad_signals: Enable VAD signals in response. Defaults to None.
             high_vad_sensitivity: Enable high VAD sensitivity. Defaults to None.
         """
@@ -278,7 +300,7 @@ class SarvamSTTService(STTService):
 
             mode: Mode of operation. Options: transcribe, translate, verbatim,
                 translit, codemix. Only applicable to models that support it
-                (e.g., saaras:v3). Defaults to the model's default mode.
+                (e.g., saaras:v3, saaras:v4). Defaults to the model's default mode.
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
@@ -298,7 +320,7 @@ class SarvamSTTService(STTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="saaras:v3",
+            model="saaras:v4",
             language=None,
             prompt=None,
             vad_signals=None,
@@ -370,7 +392,8 @@ class SarvamSTTService(STTService):
                 if getattr(default_settings, param_name) is not None:
                     raise ValueError(
                         f"Model '{resolved_model}' does not support {param_name} parameter. "
-                        f"Fine-grained VAD parameters are only supported by saaras:v3."
+                        f"Fine-grained VAD parameters are only supported by models "
+                        f"that support VAD parameters (e.g., saaras:v3, saaras:v4)."
                     )
 
         # Resolve mode default from model config
@@ -510,7 +533,8 @@ class SarvamSTTService(STTService):
                 if is_given(val) and val is not None:
                     raise ValueError(
                         f"Model '{self._settings.model}' does not support {param_name} "
-                        f"parameter. Fine-grained VAD parameters are only supported by saaras:v3."
+                        f"parameter. Fine-grained VAD parameters are only supported by models "
+                        f"that support VAD parameters (e.g., saaras:v3, saaras:v4)."
                     )
 
         changed = await super()._update_settings(delta)
@@ -665,7 +689,7 @@ class SarvamSTTService(STTService):
                     "true" if self._settings.high_vad_sensitivity else "false"
                 )
 
-            # Fine-grained VAD parameters (saaras:v3 only, sent as strings per SDK spec)
+            # Fine-grained VAD parameters (models with supports_vad_params, sent as strings per SDK spec)
             if self._config.supports_vad_params:
                 _vad_params = {
                     "positive_speech_threshold": self._settings.positive_speech_threshold,
