@@ -576,6 +576,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockStart"]
                         content_block_start = block["start"]
                         if "toolUse" in content_block_start:
+                            # A turn that only calls tools produces no answer text,
+                            # so the call itself is what the caller gets and TTFAT
+                            # ends here rather than going unmeasured.
+                            await self.stop_ttfat_metrics()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),
