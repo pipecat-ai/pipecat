@@ -6,6 +6,7 @@
 
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
+import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -25,6 +26,13 @@ Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
 V1_ENDPOINT_PATH = "/openai/v1"
 """Endpoint path suffix identifying Azure's v1 API surface."""
 
+DATED_API_VERSION = "2025-04-01-preview"
+"""Dated API version used for endpoints outside the v1 API surface.
+
+Azure stopped issuing dated versions after this one; the v1 surface tracks new
+features in its place.
+"""
+
 
 @dataclass
 class AzureLLMSettings(BaseOpenAILLMService.Settings):
@@ -41,8 +49,8 @@ class AzureLLMService(OpenAILLMService):
 
     The shape of ``endpoint`` selects the API surface. An endpoint ending in
     ``/openai/v1`` uses Azure's v1 API, which tracks new features without a dated
-    ``api_version``; any other endpoint routes through ``api_version``. Both key-based
-    and Microsoft Entra ID authentication work on either surface.
+    ``api_version``; any other endpoint routes through a dated version of the API.
+    Both key-based and Microsoft Entra ID authentication work on either surface.
 
     Example::
 
@@ -62,7 +70,7 @@ class AzureLLMService(OpenAILLMService):
         api_key: str | None = None,
         token_provider: AzureTokenProvider | None = None,
         model: str | None = None,
-        api_version: str = "2025-04-01-preview",
+        api_version: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -83,8 +91,13 @@ class AzureLLMService(OpenAILLMService):
                     Use ``settings=AzureLLMService.Settings(model=...)`` instead.
                     Will be removed in 2.0.0.
 
-            api_version: Azure API version. Defaults to "2025-04-01-preview". Ignored
-                when ``endpoint`` selects the v1 API surface.
+            api_version: Azure API version applied to endpoints outside the v1 API
+                surface. Defaults to :data:`DATED_API_VERSION`.
+
+                .. deprecated:: 1.8.0
+                    Use an ``endpoint`` ending in ``/openai/v1`` instead.
+                    Will be removed in 2.0.0.
+
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
@@ -94,6 +107,16 @@ class AzureLLMService(OpenAILLMService):
         """
         if api_key is None and token_provider is None:
             raise ValueError("Either `api_key` or `token_provider` is required.")
+
+        if api_version is not None:
+            warnings.warn(
+                "`api_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+                "Use an `endpoint` ending in `/openai/v1` instead. Azure issued no dated "
+                "version after 2025-04-01-preview, and new features reach only the v1 "
+                "API surface.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(model="gpt-4.1")
@@ -112,7 +135,7 @@ class AzureLLMService(OpenAILLMService):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
-        self._api_version = api_version
+        self._api_version = api_version or DATED_API_VERSION
         self._token_provider = token_provider
         self._use_v1_api = endpoint.rstrip("/").endswith(V1_ENDPOINT_PATH)
         super().__init__(api_key=api_key, settings=default_settings, **kwargs)
