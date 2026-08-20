@@ -101,14 +101,12 @@ class ModelConfig:
     Parameters:
         supports_mode: Whether the model accepts mode parameter.
         supports_language: Whether the model accepts language parameter.
-        supports_vad_params: Whether the model accepts fine-grained VAD parameters.
         default_language: Default language code (None = auto-detect).
         default_mode: Default mode (None = not applicable).
     """
 
     supports_mode: bool
     supports_language: bool
-    supports_vad_params: bool
     default_language: str | None
     default_mode: SarvamMode | None
 
@@ -117,14 +115,12 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
     "saaras:v3": ModelConfig(
         supports_mode=True,
         supports_language=True,
-        supports_vad_params=True,
         default_language="unknown",
         default_mode="transcribe",
     ),
     "saaras:v4": ModelConfig(
         supports_mode=True,
         supports_language=True,
-        supports_vad_params=True,
         default_language="unknown",
         default_mode="transcribe",
     ),
