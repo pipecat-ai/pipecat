@@ -282,6 +282,12 @@ class MOQParams(TransportParams):
             ``subscribe_json_stream``, compression on), discovered by
             convention rather than via the catalog.
         verify_ssl: Verify the relay's TLS certificate. Client mode only.
+        client_tls_cert: Path to a PEM-encoded client certificate chain to
+            present when dialing. Client mode only, and only needed by a
+            relay that authenticates its peers with mTLS. Independent of
+            ``verify_ssl``, which verifies the relay's cert to us.
+        client_tls_key: Path to the PEM-encoded private key matching
+            ``client_tls_cert``. Both must be set for either to apply.
         connection_timeout: Seconds to wait for the peer broadcast to be
             announced before giving up.
         serve: When ``True``, the bot binds its own UDP socket and accepts
@@ -344,6 +350,8 @@ class MOQParams(TransportParams):
     audio_out_track: str = DEFAULT_AUDIO_OUT_TRACK
     transcript_track: str = DEFAULT_TRANSCRIPT_TRACK
     verify_ssl: bool = True
+    client_tls_cert: str | None = None
+    client_tls_key: str | None = None
     connection_timeout: float = 30.0
     serve: bool = False
     bind: str | None = None
@@ -789,12 +797,17 @@ class MOQTransportClient:
 
         # ``bind`` is optional here: unset dials from an ephemeral source
         # port; set pins a specific local address/port.
+        client_tls: dict = {}
+        if self._params.client_tls_cert and self._params.client_tls_key:
+            client_tls["tls_cert"] = self._params.client_tls_cert
+            client_tls["tls_key"] = self._params.client_tls_key
         return moq.Client(
             self._url,
             tls_verify=self._params.verify_ssl,
             bind=self._bind,
             publish=publish_origin,
             subscribe=subscribe_origin,
+            **client_tls,
         )
 
     async def _consume_peer(self, origin: "moq.OriginProducer"):

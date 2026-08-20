@@ -568,6 +568,35 @@ class TestMOQTransportInit(unittest.TestCase):
         relay — it isn't ignored."""
         self.assertEqual(self._bind_for(serve=False, bind="[::]:9000"), "[::]:9000")
 
+    def _client_kwargs(self, **params):
+        """The kwargs ``_make_transport`` hands ``moq.Client`` in client mode."""
+        p = MOQParams(audio_in_enabled=True, audio_out_enabled=True, serve=False, **params)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(params=p, host="localhost", port=4080)
+            client = transport._client
+            client._make_transport(MagicMock(), MagicMock())
+            return moq_mock.Client.call_args.kwargs
+
+    def test_client_cert_is_presented_when_both_halves_are_set(self):
+        """A relay that authenticates its peers with mTLS needs the client
+        cert; without it the dial is anonymous and the relay tiers it as an
+        ordinary connection."""
+        kwargs = self._client_kwargs(client_tls_cert="/c.pem", client_tls_key="/k.pem")
+        self.assertEqual(kwargs["tls_cert"], "/c.pem")
+        self.assertEqual(kwargs["tls_key"], "/k.pem")
+
+    def test_no_client_cert_by_default(self):
+        kwargs = self._client_kwargs()
+        self.assertNotIn("tls_cert", kwargs)
+        self.assertNotIn("tls_key", kwargs)
+
+    def test_half_a_client_cert_is_ignored(self):
+        """A cert without its key can't be loaded, so passing one alone would
+        fail the dial rather than degrade to anonymous."""
+        self.assertNotIn("tls_cert", self._client_kwargs(client_tls_cert="/c.pem"))
+        self.assertNotIn("tls_key", self._client_kwargs(client_tls_key="/k.pem"))
+
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
         pinned the pre-1.8.0 ``serve_bind`` would silently listen on the
