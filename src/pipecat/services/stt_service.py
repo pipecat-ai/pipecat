@@ -592,6 +592,7 @@ class STTService(AIService):
         while user is still speaking.
         """
         await self._cancel_ttfb_timeout()
+        await self.cancel_ttfb_metrics()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
@@ -656,12 +657,21 @@ class STTService(AIService):
         This timeout allows the final transcription to arrive before we calculate
         and report TTFB. Uses _last_transcript_time as the end time so we measure
         to when the transcript actually arrived, not when the timeout fired.
-        If no transcription arrived, no TTFB is reported.
+
+        A transcript that predates the end of speech belongs to an earlier
+        segment the service finalized on its own endpointing; the metrics
+        collector refuses it rather than report the negative interval it would
+        produce.
         """
         try:
             await asyncio.sleep(self._stt_ttfb_timeout)
             if self._last_transcript_time > 0:
                 await self.stop_ttfb_metrics(end_time=self._last_transcript_time)
+            else:
+                # No transcript at all, so there is no end time to measure to.
+                # Close the measurement rather than leave it open for the next
+                # transcript to be measured against.
+                await self.cancel_ttfb_metrics()
         except asyncio.CancelledError:
             # Task was cancelled (new utterance or interruption), which is expected behavior
             pass

@@ -500,6 +500,11 @@ class FrameProcessor(BaseObject):
                 start_time=start_time, report_only_initial_ttfb=self.report_only_initial_ttfb
             )
 
+    async def cancel_ttfb_metrics(self):
+        """Abandon the current time-to-first-byte measurement without reporting it."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.cancel_ttfb_metrics()
+
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop time-to-first-byte metrics collection and push results.
 
