@@ -352,6 +352,11 @@ class BlandTTSService(WebsocketTTSService):
                 await self._websocket.send(json.dumps({"type": "cancel", "context_id": context_id}))
             except Exception as e:
                 logger.error(f"{self} error sending cancel message: {e}")
+        # A cancelled turn is over locally straight away, without waiting for the
+        # server's `utterance_end`: a socket dying before that arrives would
+        # otherwise report the turn as one the connection lost mid-flight.
+        if context_id:
+            self._abandon_turn(context_id)
         await super().on_audio_context_interrupted(context_id)
 
     async def flush_audio(self, context_id: str | None = None):

@@ -327,6 +327,27 @@ async def test_bland_tts_interruption_cancels_without_reconnecting():
 
 
 @pytest.mark.asyncio
+async def test_bland_tts_interruption_abandons_the_turn_locally():
+    """A cancelled turn stops taking deltas without waiting for `utterance_end`."""
+    tts = BlandTTSService(api_key="test-key", sample_rate=24000)
+
+    websocket = AsyncMock()
+    tts._websocket = websocket
+    tts._sent_context_id = "turn-17"
+
+    await tts.on_audio_context_interrupted("turn-17")
+    websocket.send.reset_mock()
+
+    async for _ in tts.run_tts("the tail nobody asked for", "turn-17"):
+        pass
+
+    # Feeding a cancelled turn has Bland admit and bill it afresh, and leaving it
+    # in flight has a dying socket report it as a turn lost mid-sentence.
+    assert not websocket.send.called
+    assert tts._sent_context_id is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("code", ["insufficient_credits", "rate_limited"])
 async def test_bland_tts_turn_error_surfaces(code):
     """A turn-scoped error frame becomes an ErrorFrame carrying code and message."""
