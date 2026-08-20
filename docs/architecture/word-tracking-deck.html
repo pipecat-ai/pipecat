@@ -945,12 +945,12 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
           <th class="c-seg">② text</th>
           <th class="c-tts">③ tts text</th>
         </tr>
-        <tr><td class="num">1</td><td class="m">sentence</td><td class="m">Your card is ␣</td><td class="m">Your card is</td><td class="m">Your card is</td></tr>
+        <tr><td class="num">1</td><td class="m">sentence</td><td class="m">Your card is </td><td class="m">Your card is</td><td class="m">Your card is</td></tr>
         <tr class="hi"><td class="num">2</td><td class="m"><strong>credit_card</strong></td><td class="m">&lt;card&gt;1234-5678-9012-3456&lt;/card&gt;</td><td class="m">1234-5678-9012-3456</td><td class="m">&lt;spell&gt;1234-5678-9012-3456&lt;/spell&gt;</td></tr>
         <tr><td class="num">3</td><td class="m">sentence</td><td class="m">.</td><td class="m">.</td><td class="m">.</td></tr>
-        <tr><td class="num">4</td><td class="m">sentence</td><td class="m">␣Run␣</td><td class="m">Run</td><td class="m">Run</td></tr>
+        <tr><td class="num">4</td><td class="m">sentence</td><td class="m">Run</td><td class="m">Run</td><td class="m">Run</td></tr>
         <tr class="hi"><td class="num">5</td><td class="m"><strong>code</strong></td><td class="m">&lt;code&gt;npm install&lt;/code&gt;</td><td class="m">npm install</td><td class="m" style="color:var(--warn)">never sent — skipped</td></tr>
-        <tr><td class="num">6</td><td class="m">sentence</td><td class="m">␣to start.</td><td class="m">to start.</td><td class="m">to start.</td></tr>
+        <tr><td class="num">6</td><td class="m">sentence</td><td class="m">to start.</td><td class="m">to start.</td><td class="m">to start.</td></tr>
       </table>
     </div>
     <p class="note"><strong>Only the two tagged frames do anything interesting.</strong> Frame 2's delimiters moved into <code class="inl">raw_text</code>; its transformer wrapped the digits in <code class="inl">&lt;spell&gt;</code>. Frame 5 is never spoken — which is what creates the ordering problem in 2.2. <code class="inl">aggregated_by</code> is the routing key throughout: it picks the transformer, decides whether the frame is spoken at all, and selects the RTVI redaction.</p>
@@ -973,7 +973,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
       <li>Redact both halves → <strong>redaction that keeps advancing</strong></li>
       <li>Concatenate them → <strong>the original back, exactly</strong></li>
     </ul>
-    <p class="note">That is what makes progress frames usable by <strong>anything, without coordination</strong>. A consumer holding the segment frame never has to guess how the text was transformed on its way to the TTS — it indexes straight into the string it already holds. <em>The API spells this channel</em> <code class="inl">user_facing_*</code>; these slides say "segment text" for the concept.</p>
+    <p class="note">That is what makes progress frames usable by <strong>anything, without coordination</strong>. A consumer holding the segment frame never has to guess how the text was transformed on its way to the TTS.</p>
   </div>
 </section>
 
