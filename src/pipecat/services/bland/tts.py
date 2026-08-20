@@ -24,10 +24,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -191,13 +191,13 @@ class BlandTTSService(WebsocketTTSService):
     def _bland_sample_rate(self) -> int:
         return self.sample_rate if self.sample_rate in _SAMPLE_RATES else _DEFAULT_SAMPLE_RATE
 
-    async def start(self, frame: StartFrame):
-        """Start the service and open the Bland session.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and open the Bland session.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def _connect(self):
@@ -590,9 +590,13 @@ class BlandHttpTTSService(TTSService):
         """
         return True
 
-    async def start(self, frame):
-        """Start the service, creating an aiohttp session if one was not provided."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service, creating an aiohttp session if one was not provided.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             self._session_owner = True
