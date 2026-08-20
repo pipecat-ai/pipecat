@@ -16,7 +16,7 @@ import dataclasses
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from loguru import logger
 
@@ -61,6 +61,9 @@ from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerErrorData, WorkerReadyData
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+if TYPE_CHECKING:
+    from pipecat.workers.runner import WorkerRunner
 
 
 @dataclass
@@ -190,6 +193,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         # before ``attach()`` raises.
         self._bus: WorkerBus | None = None
         self._registry: WorkerRegistry | None = None
+        self._worker_runner: WorkerRunner | None = None
 
         # Activation. Pending activation is deferred until the worker
         # starts, then on_activated fires.
@@ -277,6 +281,21 @@ class BaseWorker(BaseObject, BusSubscriber):
         return self._registry
 
     @property
+    def worker_runner(self) -> "WorkerRunner":
+        """The runner this worker is attached to.
+
+        Use it to reach another worker on the same runner by name, e.g.
+        ``self.worker_runner.get_worker("ui-jobs")``.
+
+        Raises:
+            RuntimeError: If accessed before :meth:`attach` has been called,
+                or if the worker was attached without a runner.
+        """
+        if self._worker_runner is None:
+            raise RuntimeError(f"Worker '{self}': runner is not set; call attach() first.")
+        return self._worker_runner
+
+    @property
     def started_at(self) -> float | None:
         """Unix timestamp when this worker became ready, or None if not yet started."""
         return self._started_at
@@ -305,7 +324,13 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Active job groups launched by this worker, keyed by job_id."""
         return self._job_groups
 
-    async def attach(self, *, registry: WorkerRegistry, bus: WorkerBus) -> None:
+    async def attach(
+        self,
+        *,
+        registry: WorkerRegistry,
+        bus: WorkerBus,
+        worker_runner: "WorkerRunner | None" = None,
+    ) -> None:
         """Attach the worker to a runner-provided registry and bus.
 
         Called by the runner (typically from ``add_workers()``) before
@@ -317,9 +342,14 @@ class BaseWorker(BaseObject, BusSubscriber):
         Args:
             registry: The shared worker registry.
             bus: The shared worker bus.
+            worker_runner: The runner hosting the worker, reachable
+                afterwards as :attr:`worker_runner`. Omitting it attaches the
+                worker to a bus and registry alone, with no way to reach its
+                peers by name.
         """
         self._registry = registry
         self._bus = bus
+        self._worker_runner = worker_runner
         await self._bus.subscribe(self)
 
     async def cleanup(self) -> None:

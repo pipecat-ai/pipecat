@@ -180,6 +180,22 @@ class WorkerRunner(BaseObject, BusSubscriber):
         """The worker registry this runner owns."""
         return self._registry
 
+    def get_worker(self, name: str) -> BaseWorker | None:
+        """Look up a worker running on this runner by name.
+
+        Only workers added to this runner have a local instance to return.
+        A worker on another runner is addressable over the bus by name but
+        has no object here, so it looks the same as an unknown name.
+
+        Args:
+            name: The name the worker was created with.
+
+        Returns:
+            The worker, or None if this runner has no worker by that name.
+        """
+        entry = self._entries.get(name)
+        return entry.worker if entry else None
+
     async def add_workers(self, *workers: BaseWorker) -> None:
         """Add one or more workers to the runner.
 
@@ -206,7 +222,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
             # to the bus — eager subscription is required so workers
             # added later are listening before earlier workers emit
             # their first messages.
-            await worker.attach(registry=self._registry, bus=self._bus)
+            await worker.attach(registry=self._registry, bus=self._bus, worker_runner=self)
             await self._registry.watch(worker.name, self._on_local_worker_ready)
             entry = _WorkerEntry(worker=worker)
             self._entries[worker.name] = entry
