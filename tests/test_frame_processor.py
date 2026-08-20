@@ -8,6 +8,7 @@ import asyncio
 import io
 import unittest
 from dataclasses import dataclass, field
+from unittest.mock import AsyncMock, patch
 
 from loguru import logger
 
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     UninterruptibleFrame,
     UserStartedSpeakingFrame,
 )
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import (
@@ -88,6 +90,126 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         assert after_process_called
         assert before_push_called
         assert after_push_called
+
+    async def test_skips_empty_before_after_event_dispatch(self):
+        """Empty hooks should not allocate and await event-dispatch coroutines."""
+        processor = FrameProcessor()
+        call_event_handler = AsyncMock()
+        frame = TextFrame(text="test")
+
+        with patch.object(processor, "_call_event_handler", call_event_handler):
+            await processor.push_frame(frame)
+            await processor._FrameProcessor__process_frame(
+                frame, FrameDirection.DOWNSTREAM, callback=None
+            )
+
+        call_event_handler.assert_not_awaited()
+
+    async def test_push_trace_defers_stringification_without_trace_sink(self):
+        """Disabled TRACE logging must not stringify every frame on the hot path."""
+
+        class CountingFrame(DataFrame):
+            def __post_init__(self):
+                super().__post_init__()
+                self.stringifications = 0
+
+            def __str__(self):
+                self.stringifications += 1
+                return super().__str__()
+
+        class CapturingProcessor(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.received = []
+
+            async def queue_frame(self, frame, direction, callback=None):
+                self.received.append((frame, direction, callback))
+
+        source = FrameProcessor()
+        destination = CapturingProcessor()
+        source.link(destination)
+        source._setup = frame_processor_setup()
+        frame = CountingFrame()
+
+        logger.disable("pipecat.processors.frame_processor")
+        try:
+            await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
+        finally:
+            logger.enable("pipecat.processors.frame_processor")
+
+        self.assertEqual(frame.stringifications, 0)
+        self.assertEqual(destination.received, [(frame, FrameDirection.DOWNSTREAM, None)])
+
+        output = io.StringIO()
+        handler_id = logger.add(output, level="TRACE", format="{message}")
+        try:
+            await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
+        finally:
+            logger.remove(handler_id)
+
+        self.assertEqual(frame.stringifications, 1)
+        self.assertIn(
+            f"Pushing {frame.name} downstream from {source} to {destination}",
+            output.getvalue(),
+        )
+
+    async def test_push_observer_reads_clock_only_when_attached(self):
+        """Observer events retain direction and timestamps without idle clock reads."""
+
+        class CountingClock:
+            def __init__(self):
+                self.reads = 0
+
+            def get_time(self):
+                self.reads += 1
+                return self.reads
+
+        class RecordingObserver(BaseObserver):
+            def __init__(self):
+                super().__init__()
+                self.pushed = []
+
+            async def on_push_frame(self, data):
+                self.pushed.append(data)
+
+        class CapturingProcessor(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.received = []
+
+            async def queue_frame(self, frame, direction, callback=None):
+                self.received.append((frame, direction, callback))
+
+        previous = CapturingProcessor()
+        source = FrameProcessor()
+        destination = CapturingProcessor()
+        previous.link(source)
+        source.link(destination)
+        clock = CountingClock()
+        frame = TextFrame(text="test")
+
+        source._setup = frame_processor_setup(clock=clock)
+        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
+        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.UPSTREAM)
+        self.assertEqual(clock.reads, 0)
+
+        observer = RecordingObserver()
+        source._setup = frame_processor_setup(clock=clock, observer=observer)
+        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
+        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.UPSTREAM)
+
+        self.assertEqual(clock.reads, 2)
+        self.assertEqual([event.timestamp for event in observer.pushed], [1, 2])
+        self.assertEqual(
+            [event.direction for event in observer.pushed],
+            [FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM],
+        )
+        self.assertEqual(
+            [event.destination for event in observer.pushed],
+            [destination, previous],
+        )
+        self.assertTrue(all(event.source is source for event in observer.pushed))
+        self.assertTrue(all(event.frame is frame for event in observer.pushed))
 
     async def test_broadcast_interruption(self):
         """Test that broadcast_interruption() pushes InterruptionFrame both
