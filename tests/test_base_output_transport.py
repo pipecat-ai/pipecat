@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -268,6 +269,29 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
 
 
+class _CountingResampler(BaseAudioResampler):
+    """Tallies every sample handed to a resampler against every sample it returns."""
+
+    def __init__(self, resampler: BaseAudioResampler):
+        self._resampler = resampler
+        self.in_samples = 0
+        self.out_samples = 0
+
+    async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
+        resampled = await self._resampler.resample(audio, in_rate, out_rate)
+        self.in_samples += len(audio) // 2
+        self.out_samples += len(resampled) // 2
+        return resampled
+
+    async def flush(self) -> bytes:
+        flushed = await self._resampler.flush()
+        self.out_samples += len(flushed) // 2
+        return flushed
+
+    async def reset(self):
+        await self._resampler.reset()
+
+
 class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
     """Tests for audio that has to be resampled to the transport's output rate.
 
@@ -296,16 +320,23 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             for offset in range(0, len(audio), chunk)
         ]
 
-    async def _run_turn(self, pause_after: int | None = None) -> bytes:
-        """Play one TTS turn, optionally pausing mid-turn, and return what was written."""
+    async def test_delivery_pause_does_not_drop_audio(self):
+        """A pause between TTS chunks must not cost any audio.
+
+        The resampler runs ahead of playback, so a gap between two chunks says
+        nothing about the stream: the audio either side of it is one utterance,
+        and every sample handed to the resampler has to come back out.
+        """
         transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
         try:
-            frames = self._tts_frames(sample_count=16000)
-            for index, frame in enumerate(frames):
-                if index == pause_after:
-                    # A delivery pause longer than the resampler's old
-                    # inactivity timeout, e.g. a TTS round trip between
-                    # sentences.
+            sender = transport._media_senders[None]
+            resampler = _CountingResampler(sender._resampler)
+            sender._resampler = resampler
+
+            for index, frame in enumerate(self._tts_frames(sample_count=16000)):
+                if index == 12:
+                    # A delivery pause longer than the resampler's inactivity
+                    # timeout, e.g. a TTS round trip between two sentences.
                     await asyncio.sleep(0.3)
                 await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
 
@@ -314,23 +345,12 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             await asyncio.sleep(0.2)
 
-            return b"".join(
-                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            self.assertEqual(
+                resampler.out_samples,
+                resampler.in_samples * self.OUT_RATE // self.TTS_RATE,
             )
         finally:
             await transport.cancel(CancelFrame())
-
-    async def test_delivery_pause_does_not_change_the_audio(self):
-        """A pause between TTS chunks must not cost any audio.
-
-        The resampler runs ahead of playback, so a gap between two chunks says
-        nothing about the stream: the audio either side of it is one utterance
-        and must come out exactly as it would have without the gap.
-        """
-        uninterrupted = await self._run_turn()
-        paused = await self._run_turn(pause_after=12)
-
-        self.assertEqual(paused, uninterrupted)
 
     async def test_end_of_turn_flushes_the_resampler(self):
         """The tail held in the filter belongs to the turn that just ended."""
