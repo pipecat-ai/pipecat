@@ -24,6 +24,7 @@ from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
+from pipecat.workers.runner import WorkerRunner
 
 
 class StubTask(BaseWorker):
@@ -118,7 +119,9 @@ async def create_test_env():
 
 async def setup_task(bus, registry, task):
     """Subscribe a task to the bus and register it as ready."""
-    await task.attach(registry=registry, bus=bus)
+    await task.attach(
+        registry=registry, bus=bus, worker_runner=WorkerRunner(bus=bus, handle_sigint=False)
+    )
     await task.setup(bus.task_manager)
     await bus.subscribe(task)
     await registry.register(WorkerReadyData(worker_name=task.name, runner="test-runner"))

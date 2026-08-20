@@ -288,8 +288,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         ``self.worker_runner.get_worker("ui-jobs")``.
 
         Raises:
-            RuntimeError: If accessed before :meth:`attach` has been called,
-                or if the worker was attached without a runner.
+            RuntimeError: If accessed before :meth:`attach` has been called.
         """
         if self._worker_runner is None:
             raise RuntimeError(f"Worker '{self}': runner is not set; call attach() first.")
@@ -329,7 +328,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         *,
         registry: WorkerRegistry,
         bus: WorkerBus,
-        worker_runner: "WorkerRunner | None" = None,
+        worker_runner: "WorkerRunner",
     ) -> None:
         """Attach the worker to a runner-provided registry and bus.
 
@@ -343,9 +342,7 @@ class BaseWorker(BaseObject, BusSubscriber):
             registry: The shared worker registry.
             bus: The shared worker bus.
             worker_runner: The runner hosting the worker, reachable
-                afterwards as :attr:`worker_runner`. Omitting it attaches the
-                worker to a bus and registry alone, with no way to reach its
-                peers by name.
+                afterwards as :attr:`worker_runner`.
         """
         self._registry = registry
         self._bus = bus
