@@ -162,6 +162,11 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
 }
 
 
+def _vad_param_models() -> str:
+    """Name the models that accept fine-grained VAD parameters, for error messages."""
+    return ", ".join(sorted(m for m, c in MODEL_CONFIGS.items() if c.supports_vad_params))
+
+
 @dataclass
 class SarvamSTTSettings(STTSettings):
     """Settings for SarvamSTTService.
@@ -392,8 +397,8 @@ class SarvamSTTService(STTService):
                 if getattr(default_settings, param_name) is not None:
                     raise ValueError(
                         f"Model '{resolved_model}' does not support {param_name} parameter. "
-                        f"Fine-grained VAD parameters are only supported by models "
-                        f"that support VAD parameters (e.g., saaras:v3, saaras:v4)."
+                        f"Fine-grained VAD parameters are only supported by: "
+                        f"{_vad_param_models()}."
                     )
 
         # Resolve mode default from model config
@@ -533,8 +538,8 @@ class SarvamSTTService(STTService):
                 if is_given(val) and val is not None:
                     raise ValueError(
                         f"Model '{self._settings.model}' does not support {param_name} "
-                        f"parameter. Fine-grained VAD parameters are only supported by models "
-                        f"that support VAD parameters (e.g., saaras:v3, saaras:v4)."
+                        f"parameter. Fine-grained VAD parameters are only supported by: "
+                        f"{_vad_param_models()}."
                     )
 
         changed = await super()._update_settings(delta)
