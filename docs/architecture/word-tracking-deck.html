@@ -507,6 +507,16 @@ code.inl {
 }
 .wguarantee b { color: var(--seg); }
 
+/* Names the frame text a worked example is walking. */
+.fcap {
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  margin: 0 0 .55rem;
+}
+.fcap b { color: var(--ink); font-weight: 700; }
+
 /* ============================================================
    MISC BLOCKS
    ============================================================ */
@@ -1337,6 +1347,7 @@ token <span class="s">'Hello five'</span>
       <div class="stack">
         <div>
           <h3 class="sub">Dropped event → force-complete</h3>
+          <p class="fcap">frame <b>"Hello there world", next frame "Goodbye"</b><br>the provider reports <b>"Hello"</b>, never reports <b>"there world"</b>, and the next thing to arrive is the following frame's first word</p>
           <div class="scroll">
             <table class="tbl compact">
               <tr><th>word</th><th>belongs</th><th>complete</th><th class="c-seg">for frame</th><th>overflow</th></tr>
@@ -1350,19 +1361,16 @@ token <span class="s">'Hello five'</span>
       <div class="stack">
         <div>
           <h3 class="sub">Straddling token → split at both ends</h3>
+          <p class="fcap">frame <b>"Your card is 1111"</b>, next frame <b>"And that's it."</b><br>the provider merges across the boundary into one token</p>
           <div class="scroll">
             <table class="tbl compact">
               <tr><th>word</th><th>complete</th><th class="c-seg">for frame</th><th>overflow</th></tr>
+              <tr><td class="m">Your … card</td><td class="m">False</td><td class="m">…</td><td class="m">None</td></tr>
               <tr><td class="m">is</td><td class="m">False</td><td class="m">is</td><td class="m">None</td></tr>
               <tr class="hi"><td class="m">1111And</td><td class="m"><strong>True</strong></td><td class="m"><strong>1111</strong></td><td class="m"><strong>And</strong></td></tr>
             </table>
           </div>
         </div>
-        <pre class="code">head = last_leading_duplicate  <span class="c"># ", I" → 2</span>
-tail = last_overflow           <span class="c"># "1111And" → "And"</span>
-
-self._frame_word = word[<b>head</b>:<b>tail</b>]</pre>
-        <p class="note" style="margin:0">Neither end of a token is necessarily this frame's. The map measures both; the tracker keeps what is between them.</p>
       </div>
     </div>
   </div>
