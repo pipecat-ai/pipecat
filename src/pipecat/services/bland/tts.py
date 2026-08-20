@@ -71,6 +71,23 @@ def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
     return defaults
 
 
+def _resolve_sample_rate(service: TTSService) -> int:
+    """Pick the rate Bland will synthesize at.
+
+    Bland renders a fixed set of rates. A pipeline running at any other rate is
+    served at 48 kHz and resampled by the output transport: audio frames carry
+    the rate Bland actually produced, so the substitution costs a resample
+    rather than fidelity.
+    """
+    if service.sample_rate in _SAMPLE_RATES:
+        return service.sample_rate
+    logger.warning(
+        f"{service}: Bland cannot render {service.sample_rate} Hz; synthesizing at "
+        f"{_DEFAULT_SAMPLE_RATE} Hz and resampling on output"
+    )
+    return _DEFAULT_SAMPLE_RATE
+
+
 def _controls(settings: BlandTTSSettings) -> dict[str, float]:
     controls: dict[str, float] = {}
     expressiveness = assert_given(settings.expressiveness)
@@ -116,6 +133,8 @@ class BlandTTSService(WebsocketTTSService):
 
     Settings = BlandTTSSettings
     _settings: Settings
+    # The rate Bland synthesizes at, resolved in setup() from the pipeline's.
+    _bland_sample_rate: int
 
     def __init__(
         self,
@@ -187,10 +206,6 @@ class BlandTTSService(WebsocketTTSService):
         """
         return True
 
-    @property
-    def _bland_sample_rate(self) -> int:
-        return self.sample_rate if self.sample_rate in _SAMPLE_RATES else _DEFAULT_SAMPLE_RATE
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service and open the Bland session.
 
@@ -198,6 +213,7 @@ class BlandTTSService(WebsocketTTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._bland_sample_rate = _resolve_sample_rate(self)
         await self._connect()
 
     async def _connect(self):
@@ -543,6 +559,8 @@ class BlandHttpTTSService(TTSService):
 
     Settings = BlandTTSSettings
     _settings: Settings
+    # The rate Bland synthesizes at, resolved in setup() from the pipeline's.
+    _bland_sample_rate: int
 
     def __init__(
         self,
@@ -597,6 +615,7 @@ class BlandHttpTTSService(TTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._bland_sample_rate = _resolve_sample_rate(self)
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             self._session_owner = True
@@ -621,10 +640,6 @@ class BlandHttpTTSService(TTSService):
             await self._session.close()
         if self._session_owner:
             self._session = None
-
-    @property
-    def _bland_sample_rate(self) -> int:
-        return self.sample_rate if self.sample_rate in _SAMPLE_RATES else _DEFAULT_SAMPLE_RATE
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

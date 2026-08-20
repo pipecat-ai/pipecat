@@ -7,6 +7,7 @@
 """Tests for BlandTTSService and BlandHttpTTSService."""
 
 import asyncio
+import io
 import json
 import struct
 import unittest
@@ -16,6 +17,7 @@ import aiohttp
 import pytest
 import websockets
 from aiohttp import web
+from loguru import logger
 from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
@@ -290,20 +292,28 @@ async def test_bland_tts_partial_controls():
 async def test_bland_tts_unsupported_pipeline_rate_falls_back():
     """A rate Bland cannot render is replaced by its native 48 kHz."""
     captured: dict = {"messages": []}
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
 
-    async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
-        host, port = next(iter(server.sockets)).getsockname()[:2]
+    try:
+        async with serve(_ws_server_handler(captured), "127.0.0.1", 0) as server:
+            host, port = next(iter(server.sockets)).getsockname()[:2]
 
-        tts = BlandTTSService(
-            api_key="test-key",
-            url=f"ws://{host}:{port}/v2/tts/ws",
-            sample_rate=22050,
-        )
+            tts = BlandTTSService(
+                api_key="test-key",
+                url=f"ws://{host}:{port}/v2/tts/ws",
+                sample_rate=22050,
+            )
 
-        down_frames, _ = await run_test(
-            tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
-        )
+            down_frames, _ = await run_test(
+                tts, frames_to_send=[TTSSpeakFrame(text="Hi."), SleepFrame(sleep=0.3)]
+            )
+    finally:
+        logger.remove(handler_id)
 
+    # The substitution is never silent: a pipeline running at a rate Bland
+    # cannot render pays a resample, and the log says so.
+    assert "22050" in sink.getvalue() and "48000" in sink.getvalue(), sink.getvalue()
     assert _of_type(captured, "init")[0]["audio"]["sample_rate"] == 48000
     audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
     # frames are tagged with the rate Bland actually rendered; the output
@@ -464,6 +474,8 @@ async def test_bland_tts_init_timeout_closes_provisional_connection():
 async def test_bland_tts_cancelled_init_closes_provisional_connection():
     """Task cancellation during init must not leak the upgraded socket."""
     tts = BlandTTSService(api_key="test-key")
+    # Connecting reads the rate setup() resolves; this one goes straight there.
+    tts._bland_sample_rate = 48000
     websocket = AsyncMock()
     websocket.recv.side_effect = asyncio.CancelledError
     tts._websocket_connect = AsyncMock(return_value=websocket)
