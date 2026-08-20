@@ -1006,13 +1006,13 @@ async def test_bland_tts_reports_a_failed_turn_with_no_error_frame():
 
 @pytest.mark.asyncio
 async def test_bland_tts_idle_close_is_not_a_pipeline_error():
-    """Bland reaps an idle session itself; tearing down after that is routine."""
-    captured: dict = {"messages": []}
+    """Bland reaps an idle session itself; the replacement session is routine."""
+    captured: dict = {"messages": [], "reaped": False}
 
     async def handler(ws):
         async for raw in ws:
-            captured["messages"].append(json.loads(raw))
             message = json.loads(raw)
+            captured["messages"].append(message)
             if message["type"] == "init":
                 await ws.send(
                     json.dumps(
@@ -1024,18 +1024,21 @@ async def test_bland_tts_idle_close_is_not_a_pipeline_error():
                         }
                     )
                 )
-                # Reap it the way the 60s idle timeout does.
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "code": "idle_timeout",
-                            "message": "Session idle for 60s.",
-                        }
+                # Reap the first session the way the 60s idle timeout does, and
+                # hold the one that replaces it open.
+                if not captured["reaped"]:
+                    captured["reaped"] = True
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "code": "idle_timeout",
+                                "message": "Session idle for 60s.",
+                            }
+                        )
                     )
-                )
-                await ws.close(code=1011, reason="idle")
-                return
+                    await ws.close(code=1011, reason="idle")
+                    return
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
@@ -1044,10 +1047,12 @@ async def test_bland_tts_idle_close_is_not_a_pipeline_error():
         )
         down, up = await run_test(tts, frames_to_send=[SleepFrame(sleep=0.4)])
 
-    # The server's own idle_timeout error is legitimate; teardown must not add a
-    # second frame complaining that it could not send `close` down a dead socket.
+    # A reaped session is replaced, and nothing about that is the application's
+    # problem to hear about.
+    inits = [m for m in captured["messages"] if m["type"] == "init"]
+    assert len(inits) == 2, captured["messages"]
     errors = [f.error for f in down + up if isinstance(f, ErrorFrame)]
-    assert not [e for e in errors if "error:" in e and "idle_timeout" not in e], errors
+    assert not errors, errors
 
 
 if __name__ == "__main__":

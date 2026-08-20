@@ -449,9 +449,16 @@ class BlandTTSService(WebsocketTTSService):
                         )
                         await self.remove_audio_context(context_id)
             elif msg_type == "error":
-                await self.push_error(
-                    error_msg=f"{self} error {msg.get('code')}: {msg.get('message', msg)}"
-                )
+                code = msg.get("code")
+                if code == "idle_timeout":
+                    # Bland reaps a session after 60s without a client message,
+                    # which any conversational pause reaches. Reconnecting is
+                    # routine housekeeping, not something the app can act on.
+                    logger.debug(f"{self}: session reaped after idle timeout")
+                else:
+                    await self.push_error(
+                        error_msg=f"{self} error {code}: {msg.get('message', msg)}"
+                    )
                 # Every error carrying a context_id ends that turn, in one of two
                 # shapes. An admission refusal — turn admission happens on the
                 # first `speak` — never creates the turn, so no `utterance_end`
