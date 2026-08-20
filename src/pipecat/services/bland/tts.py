@@ -456,15 +456,14 @@ class BlandTTSService(WebsocketTTSService):
                     await self.remove_audio_context(context_id)
                 else:
                     logger.trace(f"{self}: turn {context_id} ended as {reason}")
-                    # Preempted or cancelled: over for good either way. Without
-                    # this the turn's remaining deltas keep being sent, and the
-                    # server admits and BILLS a fresh turn under the same
-                    # context_id, speaking a sentence tail nobody asked for.
+                    # Preempted or cancelled: over for good either way. Deltas
+                    # still arriving under that context_id have the server admit
+                    # and bill a fresh turn, speaking a sentence tail nobody
+                    # asked for.
                     self._abandon_turn(context_id)
                     # An explicit Pipecat interruption normally removed this
-                    # context already. A server-side preemption can also arrive
-                    # first, so retain the guard and close whichever side still
-                    # owns it.
+                    # context already, but a server-side preemption can arrive
+                    # first, so the guard closes whichever side still owns it.
                     if context_id and self.audio_context_available(context_id):
                         await self.append_to_audio_context(
                             context_id, TTSStoppedFrame(context_id=context_id)

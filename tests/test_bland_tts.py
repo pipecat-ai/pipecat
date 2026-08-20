@@ -474,7 +474,7 @@ async def test_bland_tts_init_timeout_closes_provisional_connection():
 async def test_bland_tts_cancelled_init_closes_provisional_connection():
     """Task cancellation during init must not leak the upgraded socket."""
     tts = BlandTTSService(api_key="test-key")
-    # Connecting reads the rate setup() resolves; this one goes straight there.
+    # Connecting reads the rate setup() resolves, and this test has no setup.
     tts._bland_sample_rate = 48000
     websocket = AsyncMock()
     websocket.recv.side_effect = asyncio.CancelledError
