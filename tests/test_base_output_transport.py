@@ -11,8 +11,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import numpy as np
+
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -269,29 +270,6 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
 
 
-class _CountingResampler(BaseAudioResampler):
-    """Tallies every sample handed to a resampler against every sample it returns."""
-
-    def __init__(self, resampler: BaseAudioResampler):
-        self._resampler = resampler
-        self.in_samples = 0
-        self.out_samples = 0
-
-    async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
-        resampled = await self._resampler.resample(audio, in_rate, out_rate)
-        self.in_samples += len(audio) // 2
-        self.out_samples += len(resampled) // 2
-        return resampled
-
-    async def flush(self) -> bytes:
-        flushed = await self._resampler.flush()
-        self.out_samples += len(flushed) // 2
-        return flushed
-
-    async def reset(self):
-        await self._resampler.reset()
-
-
 class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
     """Tests for audio that has to be resampled to the transport's output rate.
 
@@ -320,20 +298,36 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             for offset in range(0, len(audio), chunk)
         ]
 
+    def _constant_frames(self, value: int, sample_count: int, chunk_samples: int = 640):
+        """TTS frames holding a constant level, so leftovers are easy to spot."""
+        audio = int(value).to_bytes(2, "little", signed=True) * sample_count
+        chunk = chunk_samples * 2
+        return [
+            TTSAudioRawFrame(
+                audio=audio[offset : offset + chunk],
+                sample_rate=self.TTS_RATE,
+                num_channels=1,
+                context_id="ctx1",
+            )
+            for offset in range(0, len(audio), chunk)
+        ]
+
+    def _written(self, transport) -> bytes:
+        return b"".join(call.args[0].audio for call in transport.write_audio_frame.call_args_list)
+
     async def test_delivery_pause_does_not_drop_audio(self):
         """A pause between TTS chunks must not cost any audio.
 
         The resampler runs ahead of playback, so a gap between two chunks says
         nothing about the stream: the audio either side of it is one utterance,
-        and every sample handed to the resampler has to come back out.
+        and all of it has to reach the transport.
         """
         transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
         try:
             sender = transport._media_senders[None]
-            resampler = _CountingResampler(sender._resampler)
-            sender._resampler = resampler
+            in_samples = 16000
 
-            for index, frame in enumerate(self._tts_frames(sample_count=16000)):
+            for index, frame in enumerate(self._tts_frames(sample_count=in_samples)):
                 if index == 12:
                     # A delivery pause longer than the resampler's inactivity
                     # timeout, e.g. a TTS round trip between two sentences.
@@ -345,51 +339,45 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             await asyncio.sleep(0.2)
 
-            self.assertEqual(
-                resampler.out_samples,
-                resampler.in_samples * self.OUT_RATE // self.TTS_RATE,
-            )
+            # Every input sample reaches the transport, give or take the
+            # silence the last partial chunk is padded with.
+            expected = in_samples * self.OUT_RATE // self.TTS_RATE
+            written = len(self._written(transport)) // 2
+            self.assertGreaterEqual(written, expected)
+            self.assertLess(written, expected + sender.audio_chunk_size // 2)
         finally:
             await transport.cancel(CancelFrame())
 
-    async def test_end_of_turn_flushes_the_resampler(self):
-        """The tail held in the filter belongs to the turn that just ended."""
-        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
-        try:
-            sender = transport._media_senders[None]
-            frames = self._tts_frames(sample_count=16000)
-            for frame in frames:
-                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
-            await asyncio.sleep(0.1)
-
-            # Mid-turn the filter is still holding audio back.
-            self.assertGreater(len(await sender._resampler.flush()), 0)
-
-            for frame in frames:
-                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
-            await transport.process_frame(
-                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
-            )
-            await asyncio.sleep(0.2)
-
-            # Ending the turn hands that audio over, leaving nothing behind.
-            self.assertEqual(await sender._resampler.flush(), b"")
-        finally:
-            await transport.cancel(CancelFrame())
-
-    async def test_interruption_discards_the_resampler_tail(self):
+    async def test_interruption_does_not_replay_aborted_audio(self):
         """Audio cut short is dropped, not carried into what the bot says next."""
         transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
         try:
             sender = transport._media_senders[None]
-            for frame in self._tts_frames(sample_count=16000):
+
+            for frame in self._constant_frames(8000, 8000):
                 await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
             await asyncio.sleep(0.1)
             self.assertTrue(sender._bot_speaking)
 
             await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
             await asyncio.sleep(0.1)
+            already_written = len(transport.write_audio_frame.call_args_list)
 
-            self.assertEqual(await sender._resampler.flush(), b"")
+            # The next turn is entirely negative, so anything positive in it is
+            # left over from the turn that was cut short.
+            for frame in self._constant_frames(-8000, 8000):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            after = b"".join(
+                call.args[0].audio
+                for call in transport.write_audio_frame.call_args_list[already_written:]
+            )
+            samples = np.frombuffer(after, dtype=np.int16)
+            self.assertGreater(len(samples), 0)
+            self.assertLessEqual(int(samples.max()), 0)
         finally:
             await transport.cancel(CancelFrame())
