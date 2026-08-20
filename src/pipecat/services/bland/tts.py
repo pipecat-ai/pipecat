@@ -71,19 +71,25 @@ def _default_settings(settings: BlandTTSSettings | None) -> BlandTTSSettings:
     return defaults
 
 
-def _resolve_sample_rate(service: TTSService) -> int:
+def _resolve_sample_rate(sample_rate: int) -> int:
     """Pick the rate Bland will synthesize at.
 
     Bland renders a fixed set of rates. A pipeline running at any other rate is
-    served at 48 kHz and resampled by the output transport: audio frames carry
-    the rate Bland actually produced, so the substitution costs a resample
-    rather than fidelity.
+    served at 48 kHz and resampled by the output transport, which costs a
+    resample rather than fidelity: the audio frames carry the rate Bland
+    actually produced, not the pipeline's.
+
+    Args:
+        sample_rate: The pipeline's output rate.
+
+    Returns:
+        The rate Bland will synthesize at.
     """
-    if service.sample_rate in _SAMPLE_RATES:
-        return service.sample_rate
+    if sample_rate in _SAMPLE_RATES:
+        return sample_rate
     logger.warning(
-        f"{service}: Bland cannot render {service.sample_rate} Hz; synthesizing at "
-        f"{_DEFAULT_SAMPLE_RATE} Hz and resampling on output"
+        f"Bland cannot render {sample_rate} Hz (supports {list(_SAMPLE_RATES)}); "
+        f"synthesizing at {_DEFAULT_SAMPLE_RATE} Hz and resampling on output"
     )
     return _DEFAULT_SAMPLE_RATE
 
@@ -213,7 +219,7 @@ class BlandTTSService(WebsocketTTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._bland_sample_rate = _resolve_sample_rate(self)
+        self._bland_sample_rate = _resolve_sample_rate(self.sample_rate)
         await self._connect()
 
     async def _connect(self):
@@ -614,7 +620,7 @@ class BlandHttpTTSService(TTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._bland_sample_rate = _resolve_sample_rate(self)
+        self._bland_sample_rate = _resolve_sample_rate(self.sample_rate)
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             self._session_owner = True
