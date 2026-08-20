@@ -669,14 +669,14 @@ ul.pts strong { color: var(--ink); font-weight: 650; }
   <div>
     <p class="kicker">II</p>
     <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">What was broken</h1>
-    <p class="lede">Four failures, four provider quirks, and one feature that made all of them worse.</p>
+    <p class="lede">Four failures, four provider quirks — and one capability that only works once they are solved.</p>
     <div class="legend">
       <span class="tag t-warn">2.1 Context drift</span>
       <span class="tag t-warn">2.2 Out-of-order frames</span>
       <span class="tag t-warn">2.3 No word ↔ sentence link</span>
       <span class="tag t-warn">2.4 Useless RTVI transforms</span>
       <span class="tag">2.5 Provider reality</span>
-      <span class="tag">2.6 Text transformations</span>
+      <span class="tag t-seg">2.6 Text transformations — the feature</span>
     </div>
   </div>
 </section>
@@ -791,8 +791,8 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
 <section class="slide" data-sec="II · What was broken">
   <div>
     <p class="eyebrow"><span class="num">2.6</span> <span class="rule"></span> <span>And a feature: text transformations</span></p>
-    <h2 class="headline">Every fix for the audio corrupted the transcript.</h2>
-    <p class="lede tight">TTS engines read what you give them. <code class="inl">$42.50</code> comes out "dollar forty two point five zero"; a URL becomes "h t t p s colon slash slash". The fix is to rewrite the text before synthesis — but the rewritten text was also the text <em>everything else</em> saw.</p>
+    <h2 class="headline">Fix the audio without touching the transcript.</h2>
+    <p class="lede tight">TTS engines read what you give them, and written text is often not what you want spoken. <code class="inl">$42.50</code> can come out "dollar forty two point five zero"; <code class="inl">1994</code> as "one thousand nine hundred ninety four" when the sentence means a year. So Pipecat ships a bundle of transforms that <strong>rewrite the text on its way to the provider</strong> — and nowhere else.</p>
     <div class="grid g2-wide">
       <div class="scroll">
         <table class="tbl compact">
@@ -809,15 +809,14 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         </table>
       </div>
       <div class="stack">
-        <div class="panel accent-warn">
-          <h3 class="sub">The obstacle</h3>
-          <p style="margin:0;font-size:.9rem;color:var(--ink-dim)">Expanding <code class="inl">$42.50</code> for the synthesizer meant the user <em>read</em> "forty-two dollars and fifty cents" on screen, and the context recorded it that way too.</p>
+        <div class="panel accent-tts">
+          <h3 class="sub">Which ones you need depends on the provider</h3>
+          <p style="margin:0 0 .55rem;font-size:.89rem;color:var(--ink-dim)">This is <strong style="color:var(--ink)">not a fix for a bug</strong> — it's a way to make sure all TTS providers are going to work the same way.</p>
         </div>
         <div class="panel accent-seg">
-          <h3 class="sub">The resolution</h3>
-          <p style="margin:0;font-size:.9rem;color:var(--ink-dim)">Tracking the three texts separately is what makes the rewrite safe: <strong style="color:var(--ink)">it reaches the TTS and nothing else.</strong></p>
+          <h3 class="sub">So it's opt-in, transform by transform</h3>
+          <p style="margin:0;font-size:.89rem;color:var(--ink-dim)"><code class="inl">expand_numbers</code> ships <strong style="color:var(--ink)">off</strong> — digits are often better read as digits. You enable what <em>your</em> provider gets wrong, per segment type if needed: <code class="inl">tts.add_text_transformer(fn, "credit_card")</code>.</p>
         </div>
-        <p class="note" style="margin:0">Plus per-segment transformers registered on the service — <code class="inl">tts.add_text_transformer(fn, "credit_card")</code>.</p>
       </div>
     </div>
   </div>
@@ -836,7 +835,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <tr><td class="k">2.3 Word ↔ sentence correspondence</td><td><code class="inl">AggregatedTextProgressFrame</code>, built from the tracker's cursors</td></tr>
         <tr><td class="k">2.4 Useless RTVI transforms</td><td><code class="inl">segment_id</code> + <code class="inl">accumulated_text</code> / <code class="inl">remaining_text</code> on every progress frame</td></tr>
         <tr><td class="k">2.5 Streaming / concurrency / quirks</td><td>Sequencer (streaming, contexts) + tracker (straddle, drops)</td></tr>
-        <tr><td class="k">2.6 Text transformations</td><td><code class="inl">TextSegmentMap</code>'s transformed-segment handling</td></tr>
+        <tr><td class="k ch-seg">2.6 Text transformations <span style="color:var(--ink-faint);font-weight:400">— the feature</span></td><td><strong>Made safe by</strong> <code class="inl">TextSegmentMap</code>'s transformed-segment handling</td></tr>
       </table>
     </div>
     <p class="note">Two halves: the three texts are kept <strong>distinct as they are produced</strong>, so nothing is reconstructed later — then three layers keep them <strong>aligned word by word</strong> while the TTS speaks.</p>
