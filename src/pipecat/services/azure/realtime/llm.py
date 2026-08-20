@@ -36,6 +36,11 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
     using Azure's authentication headers and endpoint format. Provides the same
     real-time audio and text communication capabilities as the base OpenAI service.
 
+    Reaches Azure over its v1 API surface, whose realtime protocol is the one the
+    base service speaks. Endpoints carrying a dated ``api-version`` serve the
+    superseded preview protocol, which rejects the session configuration and
+    names its events differently, so they aren't usable here.
+
     Supports both key-based and Microsoft Entra ID authentication.
 
     Example::
@@ -61,16 +66,14 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         """Initialize Azure Realtime LLM service.
 
         Args:
-            base_url: The Azure Realtime WebSocket endpoint URL. Without a query
-                string, the deployment is appended as ``?model=<Settings.model>``,
+            base_url: The Azure Realtime WebSocket endpoint URL, on Azure's v1 API
+                surface. The deployment is appended as ``?model=<Settings.model>``,
                 so ``Settings.model`` must name the deployment::
 
                     wss://my-resource.openai.azure.com/openai/v1/realtime
 
-                A URL that already carries a query string is used verbatim, which
-                covers the dated API surface::
-
-                    wss://my-resource.openai.azure.com/openai/realtime?api-version=2025-04-01-preview&deployment=my-deployment
+                A URL that already carries a query string is used verbatim, leaving
+                the deployment for the caller to name.
 
             api_key: The API key for the Azure OpenAI service. Required unless
                 ``token_provider`` is given.
@@ -89,10 +92,19 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         super().__init__(base_url=base_url, api_key=api_key or "", **kwargs)
         self._token_provider = token_provider
 
-        # A caller-supplied query string already routes to a deployment, so keep the
-        # URL as given rather than letting the base class append `?model=`.
+        # A caller-supplied query string already names a deployment, so keep the URL
+        # as given rather than letting the base class append a second `?model=`.
         if "?" in base_url:
             self.base_url = base_url
+
+        # The preview surface rejects the session configuration and names its events
+        # differently, so it fails partway through a connection that opens cleanly.
+        # Say so up front, where the URL that caused it is still in view.
+        if "api-version=" in base_url:
+            logger.warning(
+                f"{self}: `base_url` selects Azure's preview realtime API, whose protocol "
+                "this service doesn't implement. Use an `/openai/v1/realtime` URL instead."
+            )
 
     async def _connect(self):
         try:
