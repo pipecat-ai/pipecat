@@ -156,12 +156,15 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_push_observer_reads_clock_only_when_attached(self):
         """Observer events retain direction and timestamps without idle clock reads."""
 
+        ordering = []
+
         class CountingClock:
             def __init__(self):
                 self.reads = 0
 
             def get_time(self):
                 self.reads += 1
+                ordering.append("clock")
                 return self.reads
 
         class RecordingObserver(BaseObserver):
@@ -170,6 +173,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                 self.pushed = []
 
             async def on_push_frame(self, data):
+                ordering.append("observer")
                 self.pushed.append(data)
 
         class CapturingProcessor(FrameProcessor):
@@ -180,23 +184,38 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             async def queue_frame(self, frame, direction, callback=None):
                 self.received.append((frame, direction, callback))
 
+        class OrderingFrame(DataFrame):
+            def __str__(self):
+                ordering.append("frame_string")
+                return super().__str__()
+
         previous = CapturingProcessor()
         source = FrameProcessor()
         destination = CapturingProcessor()
         previous.link(source)
         source.link(destination)
         clock = CountingClock()
-        frame = TextFrame(text="test")
+        frame = OrderingFrame()
 
         source._setup = frame_processor_setup(clock=clock)
         await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
         await source._FrameProcessor__internal_push_frame(frame, FrameDirection.UPSTREAM)
         self.assertEqual(clock.reads, 0)
+        self.assertEqual(ordering, [])
 
         observer = RecordingObserver()
         source._setup = frame_processor_setup(clock=clock, observer=observer)
-        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.DOWNSTREAM)
-        await source._FrameProcessor__internal_push_frame(frame, FrameDirection.UPSTREAM)
+        handler_id = logger.add(lambda _: ordering.append("trace_sink"), level="TRACE")
+        try:
+            for direction in (FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM):
+                ordering.clear()
+                await source._FrameProcessor__internal_push_frame(frame, direction)
+                self.assertEqual(
+                    ordering,
+                    ["clock", "frame_string", "trace_sink", "observer"],
+                )
+        finally:
+            logger.remove(handler_id)
 
         self.assertEqual(clock.reads, 2)
         self.assertEqual([event.timestamp for event in observer.pushed], [1, 2])
