@@ -916,6 +916,17 @@
       "location": "pipecat/services/azure/image.py"
     },
     {
+      "subject": "AzureLLMService.api_version",
+      "module": "pipecat.services.azure.llm",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "endpoint",
+      "message": "Use an ``endpoint`` ending in ``/openai/v1`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/azure/llm.py"
+    },
+    {
       "subject": "AzureLLMService.model",
       "module": "pipecat.services.azure.llm",
       "kind": "parameter",
