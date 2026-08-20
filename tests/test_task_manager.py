@@ -238,6 +238,29 @@ class TestTaskManagerCancelTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steps, ["cancel_task returned", "cleanup finished"])
         self.assertTrue(caller_task.cancelled())
 
+    async def test_cancelling_the_running_task_is_ignored(self):
+        """A task that asks to cancel itself carries on instead of dying.
+
+        Awaiting your own task never completes, and the self-cancel raises the
+        caller's own ``cancelling()`` count, so propagating it would kill the
+        caller at that line and abandon whatever it still had to do.
+        """
+        task_manager = self._create_task_manager()
+        steps = []
+
+        async def handler():
+            steps.append("before")
+            task = asyncio.current_task()
+            assert task is not None
+            await task_manager.cancel_task(task)
+            steps.append("after")
+
+        task = task_manager.create_task(handler(), "self_canceller")
+        await task
+
+        self.assertEqual(steps, ["before", "after"])
+        self.assertFalse(task.cancelled())
+
 
 if __name__ == "__main__":
     unittest.main()

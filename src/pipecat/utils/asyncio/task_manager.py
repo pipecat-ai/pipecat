@@ -86,6 +86,9 @@ class BaseTaskManager(ABC):
         This function removes the task from the set of registered tasks upon
         completion or failure.
 
+        Cancelling the task this call runs on is logged and ignored, since
+        awaiting your own task never completes.
+
         Args:
             task: The task to be cancelled.
             timeout: The optional timeout in seconds to wait for the task to cancel.
@@ -222,6 +225,9 @@ class TaskManager(BaseTaskManager):
         This function removes the task from the set of registered tasks upon
         completion or failure.
 
+        Cancelling the task this call runs on is logged and ignored, since
+        awaiting your own task never completes.
+
         Args:
             task: The task to be cancelled.
             timeout: The optional timeout in seconds to wait for the task to cancel.
@@ -232,6 +238,11 @@ class TaskManager(BaseTaskManager):
         """
         name = task.get_name()
         current = asyncio.current_task()
+
+        if task is current:
+            logger.warning(f"{name}: ignoring attempt to cancel the running task")
+            return
+
         cancels_requested = current.cancelling() if current else 0
         task.cancel()
         try:
