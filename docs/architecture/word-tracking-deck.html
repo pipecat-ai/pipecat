@@ -1466,8 +1466,9 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
     <p class="lede">Where the three layers are wired together, what a client builds on top of them, and where to look in the code.</p>
     <div class="legend">
       <span class="tag">6.1 Where they're wired up</span>
-      <span class="tag">6.2 code-helper</span>
-      <span class="tag">6.3 Where to look</span>
+      <span class="tag">6.2 One sentence, end to end</span>
+      <span class="tag">6.3 code-helper</span>
+      <span class="tag">6.4 Where to look</span>
     </div>
   </div>
 </section>
@@ -1493,10 +1494,64 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
   </div>
 </section>
 
-<!-- ══════════════════════════ 33 · PAYOFF ══════════════════════════ -->
+<!-- ══════════════════════════ 33 · TRACE ══════════════════════════ -->
 <section class="slide" data-sec="VI · In practice">
   <div>
-    <p class="eyebrow"><span class="num">6.2</span> <span class="rule"></span> <span>code-helper</span></p>
+    <p class="eyebrow"><span class="num">6.2</span> <span class="rule"></span> <span>One sentence, end to end</span></p>
+    <h2 class="headline">Every call the three layers make, in order.</h2>
+    <p class="fcap">the LLM wrote <b>"Your card is &lt;card&gt;4111&lt;/card&gt;"</b> · the aggregator split the delimiters into <code class="inl">raw_text</code>, so <b>"Your card is 4111"</b> is what reaches the TTS</p>
+    <div class="grid g2-wide">
+      <pre class="code"><span class="c"># one frame is dispatched → the layers are built</span>
+<span class="ch-tts">register_spoken</span>(frame, <span class="s">"ctx1"</span>, tts_text, append_to_context=<span class="kw">True</span>)
+    <span class="c">→ slot → WordCompletionTracker → TextSegmentMap</span>
+
+<span class="c"># then one word-timestamp event at a time</span>
+<span class="ch-tts">process_word</span>(<span class="s">"Your"</span>, pts=1000, context_id=<span class="s">"ctx1"</span>)
+  <span class="ch-llm">word_belongs_here</span>(<span class="s">"Your"</span>)                <span class="c"># route it</span>
+    <span class="ch-seg">word_belongs_current_segment</span>(<span class="s">"Your"</span>)
+  <span class="ch-llm">add_word_and_check_complete</span>(<span class="s">"Your"</span>)
+    <span class="ch-llm">word_belongs_here</span>(<span class="s">"Your"</span>)              <span class="c"># or force-complete</span>
+      <span class="ch-seg">word_belongs_current_segment</span>(<span class="s">"Your"</span>)
+    <span class="ch-seg">advance_word</span>(<span class="s">"Your"</span>)                 <b># the only cursor move</b>
+  <span class="ch-llm">get_overflow_word</span>()                     <span class="c">┐</span>
+  <span class="ch-llm">get_word_for_frame</span>()                    <span class="c">│</span>
+  <span class="ch-llm">get_llm_consumed</span>()                      <span class="c">│ six reads</span>
+  <span class="ch-llm">suppress_in_context</span>()                   <span class="c">│ build the</span>
+  <span class="ch-llm">get_accumulated_user_facing_text</span>()      <span class="c">│ two frames</span>
+  <span class="ch-llm">get_remaining_user_facing_text</span>(strip=<span class="kw">False</span>) <span class="c">┘</span>
+
+<span class="ch-tts">process_word</span>(<span class="s">"card"</span>, pts=2000, …)   <span class="c">⟳ the same 9 calls</span>
+<span class="ch-tts">process_word</span>(<span class="s">"is"</span>,   pts=3000, …)   <span class="c">⟳</span>
+<span class="ch-tts">process_word</span>(<span class="s">"4111"</span>, pts=4000, …)   <span class="c">⟳ + </span><span class="ch-tts">flush</span>(<span class="c">…</span>)</pre>
+      <div class="stack">
+        <div class="scroll">
+          <table class="tbl compact">
+            <tr><th>word</th><th class="c-seg">TTSTextFrame.text</th><th class="c-llm">.raw_text</th></tr>
+            <tr><td class="m">Your</td><td class="m">Your</td><td class="m">Your</td></tr>
+            <tr><td class="m">card</td><td class="m">card</td><td class="m">card</td></tr>
+            <tr><td class="m">is</td><td class="m">is</td><td class="m">is</td></tr>
+            <tr class="hi"><td class="m">4111</td><td class="m"><strong>4111</strong></td><td class="m"><strong>&lt;card&gt;4111&lt;/card&gt;</strong></td></tr>
+          </table>
+        </div>
+        <div class="scroll">
+          <table class="tbl compact">
+            <tr><th class="c-seg">progress accumulated</th><th>remaining</th></tr>
+            <tr><td class="m">"Your"</td><td class="m">" card is 4111"</td></tr>
+            <tr><td class="m">"Your card"</td><td class="m">" is 4111"</td></tr>
+            <tr><td class="m">"Your card is"</td><td class="m">" 4111"</td></tr>
+            <tr class="hi"><td class="m"><strong>"Your card is 4111"</strong></td><td class="m">""</td></tr>
+          </table>
+        </div>
+        <p class="note" style="margin:0">Each word yields <strong>one</strong> <code class="inl">TTSTextFrame</code> and <strong>one</strong> <code class="inl">AggregatedTextProgressFrame</code>. Only the last word's <code class="inl">raw_text</code> differs from its text — that is where the delimiters the TTS never saw re-enter the conversation context. The two columns on the right always concatenate back to the frame's own text.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 34 · PAYOFF ══════════════════════════ -->
+<section class="slide" data-sec="VI · In practice">
+  <div>
+    <p class="eyebrow"><span class="num">6.3</span> <span class="rule"></span> <span>code-helper</span></p>
     <h2 class="headline">Four settings. Four independent channels.</h2>
     <div class="grid g2-wide">
       <pre class="code"><span class="c"># 1. Aggregate tagged segments separately</span>
@@ -1538,11 +1593,11 @@ cur.innerHTML =
   </div>
 </section>
 
-<!-- ══════════════════════════ 34 · TESTS ══════════════════════════ -->
+<!-- ══════════════════════════ 35 · TESTS ══════════════════════════ -->
 <section class="slide" data-sec="VI · In practice">
   <div>
-    <p class="eyebrow"><span class="num">6.3</span> <span class="rule"></span> <span>Where to look</span></p>
-    <h2 class="headline">The map of the code.</h2>
+    <p class="eyebrow"><span class="num">6.4</span> <span class="rule"></span> <span>Where to look</span></p>
+    <h2 class="headline">Code coverage.</h2>
     <div class="grid g2">
       <div class="scroll">
         <h3 class="sub">Source</h3>
@@ -1582,7 +1637,7 @@ cur.innerHTML =
   <span class="sec" id="railSec">TTS word tracking</span>
   <span class="spacer"></span>
   <span class="keys">← → slides · ↑ ↓ step · T theme · F full</span>
-  <span class="count"><b id="railNum">1</b> / <span id="railTot">34</span></span>
+  <span class="count"><b id="railNum">1</b> / <span id="railTot">35</span></span>
 </div>
 
 <script>
