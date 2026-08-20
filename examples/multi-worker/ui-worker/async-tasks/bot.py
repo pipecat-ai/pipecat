@@ -25,7 +25,7 @@ Architecture::
     Main worker (PipelineWorker, owns transport + RTVI):
       transport.in → STT → user_agg → LLM → TTS → transport.out → assistant_agg
         └── research(query) tool
-              └── ui_jobs.request_job_group(          # via app_resources
+              └── ui_jobs.request_job_group(          # found by name on the runner
                       "wikipedia", "news", "scholar",
                       payload={"query": query}, ui=UIJobGroupOptions(label=...))
 
@@ -210,7 +210,7 @@ async def research(params: FunctionCallParams, query: str):
         query (str): The topic to research, e.g. "Mariana Trench".
     """
     logger.info(f"research('{query}')")
-    ui_jobs: BaseUIWorker = params.app_resources
+    ui_jobs: BaseUIWorker = params.worker_runner.get_worker("ui-jobs")
     job_id = await ui_jobs.request_job_group(
         "wikipedia",
         "news",
@@ -261,7 +261,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # The dispatcher for client-visible job groups: a plain BaseUIWorker on
-    # the bus (no LLM). Tools reach it through ``app_resources``; its
+    # the bus (no LLM). Tools reach it by name through the runner; its
     # envelopes reach the client through the main worker's RTVI bridge.
     ui_jobs = BaseUIWorker("ui-jobs")
 
@@ -270,7 +270,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         name=MAIN_NAME,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        app_resources=ui_jobs,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

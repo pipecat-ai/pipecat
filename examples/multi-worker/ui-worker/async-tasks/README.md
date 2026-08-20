@@ -13,7 +13,8 @@ page, and lets the user cancel mid-flight — with a single LLM and no
   event is forwarded to the client automatically. The voice LLM's
   `research` tool calls `ui_jobs.request_job_group("wikipedia", "news",
   "scholar", payload=..., ui=UIJobGroupOptions(label=...))` on the
-  dispatcher it gets via `app_resources`, and the worker does the rest.
+  dispatcher it looks up with `params.worker_runner.get_worker("ui-jobs")`,
+  and the worker does the rest.
 - The four **`ui-job-group` envelopes** the worker forwards (`group_started`,
   `job_update`, `job_completed`, `group_completed`) and the
   client-side `RTVIEvent.UIJobGroup` event for consuming them. The client
