@@ -128,7 +128,7 @@ IMPORTS = {
     ],
     "elevenlabs_tts": ["from pipecat.services.elevenlabs.tts import ElevenLabsTTSService"],
     "elevenlabs_dialogue_tts": [
-        "from pipecat.services.elevenlabs.tts import ElevenLabsDialogueTTSService"
+        "from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService"
     ],
     "fish_tts": ["from pipecat.services.fish.tts import FishAudioTTSService"],
     "gemini_tts": ["from pipecat.services.google.tts import GeminiTTSService"],
