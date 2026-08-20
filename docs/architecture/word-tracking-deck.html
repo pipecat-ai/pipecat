@@ -916,9 +916,9 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <div class="d">PatternPairAggregator / SimpleTextAggregator decide where segments end and what counts as a delimiter.</div>
       </div>
       <div class="flow-arrow">├─▶</div>
-      <div class="flow-out o-llm"><span class="who">① raw_text</span><span class="dest">LLM TEXT → conversation context</span></div>
+      <div class="flow-out o-llm"><span class="who">① raw_text</span><span class="dest">LLM TEXT (&lt;card&gt;1234-5678-9012-3456&lt;/card&gt;) → conversation context</span></div>
       <div class="flow-arrow">└─▶</div>
-      <div class="flow-out o-seg"><span class="who">② text</span><span class="dest">SEGMENT TEXT → downstream consumers (the AggregatedTextFrame)</span></div>
+      <div class="flow-out o-seg"><span class="who">② text</span><span class="dest">SEGMENT TEXT (1234-5678-9012-3456) → downstream consumers (the AggregatedTextFrame)</span></div>
       <div class="flow-arrow" style="padding-left:3rem">▼</div>
       <div class="flow-node split" style="margin-left:2rem">
         <div class="t">Split 2 — the TTS service</div>
@@ -926,7 +926,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <div class="d">Rewrite for speech only — operating on a <em>copy</em> on its way out.</div>
       </div>
       <div class="flow-arrow" style="padding-left:3rem">▼</div>
-      <div class="flow-out o-tts" style="margin-left:2rem"><span class="who">③ tts text</span><span class="dest">TTS TEXT → the provider</span></div>
+      <div class="flow-out o-tts" style="margin-left:2rem"><span class="who">③ tts text</span><span class="dest">TTS TEXT (&lt;spell&gt;1234-5678-9012-3456&lt;/spell&gt;) → the provider</span></div>
     </div>
     <p class="note"><strong>The middle channel is the <code class="inl">AggregatedTextFrame</code> itself</strong> — and it is never rewritten. With a <code class="inl">SimpleTextAggregator</code> and no transformers, all three are the same string; they diverge only where something acted.</p>
   </div>
