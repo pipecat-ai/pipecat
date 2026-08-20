@@ -517,6 +517,39 @@ code.inl {
 }
 .fcap b { color: var(--ink); font-weight: 700; }
 
+/* ---- the call-trace instrument ---- */
+.callstack {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  line-height: 1.55;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: .5rem .35rem;
+}
+.crow { padding: .05rem .5rem; border-radius: 3px; white-space: pre; color: var(--ink-faint); opacity: .45; }
+.crow.seen { opacity: 1; color: var(--ink-dim); }
+.crow.on { background: var(--tts-soft); opacity: 1; color: var(--ink); }
+.crow .ret { color: var(--ink-faint); }
+.crow.on .ret { color: var(--tts); }
+.framelog { display: flex; flex-direction: column; gap: .3rem; min-height: 6.5rem; }
+.frow {
+  font-family: var(--font-mono);
+  font-size: .73rem;
+  padding: .3rem .55rem;
+  border-radius: 4px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+  color: var(--ink-dim);
+}
+.frow.tts { border-left: 3px solid var(--llm); }
+.frow.prog { border-left: 3px solid var(--seg); }
+.frow b { color: var(--ink); font-weight: 700; }
+.frow .tag-raw { color: var(--llm); }
+.framelog .empty { font-family: var(--font-mono); font-size: .73rem; color: var(--ink-faint); }
+
 /* ============================================================
    MISC BLOCKS
    ============================================================ */
@@ -1495,56 +1528,43 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
 </section>
 
 <!-- ══════════════════════════ 33 · TRACE ══════════════════════════ -->
-<section class="slide" data-sec="VI · In practice">
+<section class="slide" data-sec="VI · In practice" id="slide-trace">
   <div>
     <p class="eyebrow"><span class="num">6.2</span> <span class="rule"></span> <span>One sentence, end to end</span></p>
-    <h2 class="headline">Every call the three layers make, in order.</h2>
+    <h2 class="headline" style="margin-bottom:.6rem">Step through every call the three layers make.</h2>
     <p class="fcap">the LLM wrote <b>"Your card is &lt;card&gt;4111&lt;/card&gt;"</b> · the aggregator split the delimiters into <code class="inl">raw_text</code>, so <b>"Your card is 4111"</b> is what reaches the TTS</p>
     <div class="grid g2-wide">
-      <pre class="code"><span class="c"># one frame is dispatched → the layers are built</span>
-<span class="ch-tts">register_spoken</span>(frame, <span class="s">"ctx1"</span>, tts_text, append_to_context=<span class="kw">True</span>)
-    <span class="c">→ slot → WordCompletionTracker → TextSegmentMap</span>
-
-<span class="c"># then one word-timestamp event at a time</span>
-<span class="ch-tts">process_word</span>(<span class="s">"Your"</span>, pts=1000, context_id=<span class="s">"ctx1"</span>)
-  <span class="ch-llm">word_belongs_here</span>(<span class="s">"Your"</span>)                <span class="c"># route it</span>
-    <span class="ch-seg">word_belongs_current_segment</span>(<span class="s">"Your"</span>)
-  <span class="ch-llm">add_word_and_check_complete</span>(<span class="s">"Your"</span>)
-    <span class="ch-llm">word_belongs_here</span>(<span class="s">"Your"</span>)              <span class="c"># or force-complete</span>
-      <span class="ch-seg">word_belongs_current_segment</span>(<span class="s">"Your"</span>)
-    <span class="ch-seg">advance_word</span>(<span class="s">"Your"</span>)                 <b># the only cursor move</b>
-  <span class="ch-llm">get_overflow_word</span>()                     <span class="c">┐</span>
-  <span class="ch-llm">get_word_for_frame</span>()                    <span class="c">│</span>
-  <span class="ch-llm">get_llm_consumed</span>()                      <span class="c">│ six reads</span>
-  <span class="ch-llm">suppress_in_context</span>()                   <span class="c">│ build the</span>
-  <span class="ch-llm">get_accumulated_user_facing_text</span>()      <span class="c">│ two frames</span>
-  <span class="ch-llm">get_remaining_user_facing_text</span>(strip=<span class="kw">False</span>) <span class="c">┘</span>
-
-<span class="ch-tts">process_word</span>(<span class="s">"card"</span>, pts=2000, …)   <span class="c">⟳ the same 9 calls</span>
-<span class="ch-tts">process_word</span>(<span class="s">"is"</span>,   pts=3000, …)   <span class="c">⟳</span>
-<span class="ch-tts">process_word</span>(<span class="s">"4111"</span>, pts=4000, …)   <span class="c">⟳ + </span><span class="ch-tts">flush</span>(<span class="c">…</span>)</pre>
+      <div class="callstack" id="callStack"></div>
       <div class="stack">
-        <div class="scroll">
-          <table class="tbl compact">
-            <tr><th>word</th><th class="c-seg">TTSTextFrame.text</th><th class="c-llm">.raw_text</th></tr>
-            <tr><td class="m">Your</td><td class="m">Your</td><td class="m">Your</td></tr>
-            <tr><td class="m">card</td><td class="m">card</td><td class="m">card</td></tr>
-            <tr><td class="m">is</td><td class="m">is</td><td class="m">is</td></tr>
-            <tr class="hi"><td class="m">4111</td><td class="m"><strong>4111</strong></td><td class="m"><strong>&lt;card&gt;4111&lt;/card&gt;</strong></td></tr>
-          </table>
+        <div class="tracks">
+          <div class="track t-tts">
+            <div class="lbl">③ tts text</div>
+            <div class="body" id="body-xtts"></div>
+            <div class="pos">raw_pos <b id="pos-xtts">0</b></div>
+          </div>
+          <div class="track t-seg">
+            <div class="lbl">② segment text</div>
+            <div class="body" id="body-xseg"></div>
+            <div class="pos">user_facing <b id="pos-xseg">0</b></div>
+          </div>
+          <div class="track t-llm">
+            <div class="lbl">① llm text</div>
+            <div class="body" id="body-xllm"></div>
+            <div class="pos">llm_pos <b id="pos-xllm">0</b></div>
+          </div>
         </div>
-        <div class="scroll">
-          <table class="tbl compact">
-            <tr><th class="c-seg">progress accumulated</th><th>remaining</th></tr>
-            <tr><td class="m">"Your"</td><td class="m">" card is 4111"</td></tr>
-            <tr><td class="m">"Your card"</td><td class="m">" is 4111"</td></tr>
-            <tr><td class="m">"Your card is"</td><td class="m">" 4111"</td></tr>
-            <tr class="hi"><td class="m"><strong>"Your card is 4111"</strong></td><td class="m">""</td></tr>
-          </table>
-        </div>
-        <p class="note" style="margin:0">Each word yields <strong>one</strong> <code class="inl">TTSTextFrame</code> and <strong>one</strong> <code class="inl">AggregatedTextProgressFrame</code>. Only the last word's <code class="inl">raw_text</code> differs from its text — that is where the delimiters the TTS never saw re-enter the conversation context. The two columns on the right always concatenate back to the frame's own text.</p>
+        <div class="framelog" id="frameLog"></div>
       </div>
     </div>
+    <div class="walk-bar" style="margin-top:.9rem">
+      <button class="wbtn" id="tPrev">◀ prev</button>
+      <button class="wbtn" id="tNext">next call ▶</button>
+      <button class="wbtn" id="tWord">next word ⏭</button>
+      <button class="wbtn" id="tReset">reset</button>
+      <div class="wfeed" id="tFeed">—</div>
+      <div class="wstate" id="tStep">0 / 0</div>
+    </div>
+    <p class="note" style="margin-top:.7rem">Captured from a real run. Note <code class="inl">word_belongs_here</code> runs <strong>twice</strong> per word — once for the sequencer to pick the slot, once inside <code class="inl">add_word_and_check_complete</code> to decide force-completion — and that <code class="inl">advance_word</code> is the <strong>only</strong> call that moves a cursor. Everything after it reads back what it left. <em>(↑ / ↓ also step.)</em></p>
   </div>
 </section>
 
@@ -1794,6 +1814,111 @@ cur.innerHTML =
     return slides[idx].id === 'slide-walk';
   }
 
+  /* ---------------- the call-trace instrument ---------------- */
+  /* Captured from a real run: one entry per call, with the cursor state as the
+     call was entered and any frames that had been emitted by the time it ended. */
+  var TRACE_STEPS = [{"d":0,"l":"seq","n":"register_spoken","a":"frame, 'ctx1', 'Your card is 4111', True","s":[0,0,0,0,0],"r":"","f":[],"after":[0,0,0,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'Your', pts=1000, context_id='ctx1'","s":[0,0,0,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'Your'","s":[0,0,0,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'Your'","s":[0,0,0,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'Your'","s":[0,0,0,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[4,4,4,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[4,4,4,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[4,4,4,0,0],"r":"'Your'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[4,4,4,0,0],"r":"' card is 4111'","f":[],"emit":[["tts","Your","Your",1],["prog","Your"," card is 4111",0]],"after":[4,4,4,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'card', pts=2000, context_id='ctx1'","s":[4,4,4,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'card'","s":[4,4,4,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'card'","s":[4,4,4,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'card'","s":[4,4,4,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[9,9,9,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[9,9,9,0,0],"r":"'card'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[9,9,9,0,0],"r":"'card'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[9,9,9,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[9,9,9,0,0],"r":"'Your card'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[9,9,9,0,0],"r":"' is 4111'","f":[],"emit":[["tts","card","card",1],["prog","Your card"," is 4111",0]],"after":[9,9,9,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'is', pts=3000, context_id='ctx1'","s":[9,9,9,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'is'","s":[9,9,9,0,0],"r":"False","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'is'","s":[9,9,9,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'is'","s":[9,9,9,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[12,12,12,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[12,12,12,0,0],"r":"'is'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[12,12,12,0,0],"r":"'is'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[12,12,12,0,0],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[12,12,12,0,0],"r":"'Your card is'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[12,12,12,0,0],"r":"' 4111'","f":[],"emit":[["tts","is","is",1],["prog","Your card is"," 4111",0]],"after":[12,12,12,0,0]},{"d":0,"l":"seq","n":"process_word","a":"'4111', pts=4000, context_id='ctx1'","s":[12,12,12,0,0],"r":"","f":[]},{"d":1,"l":"trk","n":"word_belongs_here","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"word_belongs_current_segment","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":1,"l":"trk","n":"add_word_and_check_complete","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"trk","n":"word_belongs_here","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":3,"l":"map","n":"word_belongs_current_segment","a":"'4111'","s":[12,12,12,0,0],"r":"True","f":[]},{"d":2,"l":"map","n":"advance_word","a":"'4111'","s":[12,12,12,0,0],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_overflow_word","a":"","s":[17,17,23,0,1],"r":"None","f":[]},{"d":1,"l":"trk","n":"get_word_for_frame","a":"","s":[17,17,23,0,1],"r":"'4111'","f":[]},{"d":1,"l":"trk","n":"get_llm_consumed","a":"","s":[17,17,23,0,1],"r":"'<card>4111</card>'","f":[]},{"d":1,"l":"trk","n":"suppress_in_context","a":"","s":[17,17,23,0,1],"r":"False","f":[]},{"d":1,"l":"trk","n":"get_accumulated_user_facing_text","a":"","s":[17,17,23,0,1],"r":"'Your card is 4111'","f":[]},{"d":1,"l":"trk","n":"get_remaining_user_facing_text","a":"strip=False","s":[17,17,23,0,1],"r":"''","f":[]},{"d":1,"l":"seq","n":"flush","a":"last_word_pts=4000","s":[17,17,23,0,1],"r":"","f":[],"emit":[["tts","4111","<card>4111</card>",1],["prog","Your card is 4111","",0]],"after":[17,17,23,0,1]}];
+
+  var TRACE_TEXT = {
+    xtts: 'Your card is 4111',
+    xseg: 'Your card is 4111',
+    xllm: 'Your card is <card>4111</card>'
+  };
+  var LAYER_CLASS = { seq: 'ch-tts', trk: 'ch-llm', map: 'ch-seg' };
+  var tStep = 0;
+
+  var tEl = {
+    stack: document.getElementById('callStack'),
+    log: document.getElementById('frameLog'),
+    feed: document.getElementById('tFeed'),
+    stepN: document.getElementById('tStep'),
+    prev: document.getElementById('tPrev'),
+    next: document.getElementById('tNext'),
+    word: document.getElementById('tWord'),
+    reset: document.getElementById('tReset')
+  };
+
+  function buildTraceStack() {
+    tEl.stack.innerHTML = TRACE_STEPS.map(function (st, i) {
+      var pad = new Array(st.d + 1).join('  ');
+      var ret = st.r ? ' <span class="ret">→ ' + esc(st.r) + '</span>' : '';
+      return '<div class="crow" data-i="' + i + '">' + pad +
+        '<span class="' + LAYER_CLASS[st.l] + '">' + esc(st.n) + '</span>(' +
+        esc(st.a) + ')' + ret + '</div>';
+    }).join('');
+  }
+
+  function renderTrace() {
+    var st = tStep > 0 ? TRACE_STEPS[tStep - 1] : null;
+    // Cursors are shown as the highlighted call was *entered*, so a step lands on
+    // the state that call is about to act on rather than the one it produced.
+    var pos = st ? st.s : [0, 0, 0, 0, 0];
+
+    paint('xtts', TRACE_TEXT.xtts, pos[0]);
+    paint('xseg', TRACE_TEXT.xseg, pos[1]);
+    paint('xllm', TRACE_TEXT.xllm, pos[2]);
+
+    var rows = tEl.stack.querySelectorAll('.crow');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle('seen', i < tStep);
+      rows[i].classList.toggle('on', i === tStep - 1);
+    }
+    if (st) {
+      var on = tEl.stack.querySelector('.crow.on');
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+    } else {
+      tEl.stack.scrollTop = 0;
+    }
+
+    var emitted = [];
+    for (var j = 0; j < tStep; j++) {
+      if (TRACE_STEPS[j].emit) emitted = emitted.concat(TRACE_STEPS[j].emit);
+    }
+    tEl.log.innerHTML = emitted.length
+      ? emitted.map(function (f) {
+          if (f[0] === 'tts') {
+            var raw = f[2] !== f[1]
+              ? ' <span class="tag-raw">raw_text=<b>"' + esc(f[2]) + '"</b></span>'
+              : ' raw_text="' + esc(f[2]) + '"';
+            return '<div class="frow tts">TTSTextFrame <b>"' + esc(f[1]) + '"</b>' + raw + '</div>';
+          }
+          return '<div class="frow prog">Progress acc=<b>"' + esc(f[1]) +
+            '"</b> rem="' + esc(f[2]) + '"</div>';
+        }).join('')
+      : '<div class="empty">no frames emitted yet</div>';
+
+    tEl.feed.innerHTML = st
+      ? '<span class="' + LAYER_CLASS[st.l] + '">' + esc(st.n) + '</span>' +
+        (st.r ? ' → <b>' + esc(st.r) + '</b>' : '')
+      : '—';
+    tEl.stepN.textContent = tStep + ' / ' + TRACE_STEPS.length;
+    tEl.prev.disabled = tStep === 0;
+    tEl.next.disabled = tStep === TRACE_STEPS.length;
+    tEl.word.disabled = tStep === TRACE_STEPS.length;
+  }
+
+  function stepTrace(d) {
+    tStep = Math.max(0, Math.min(TRACE_STEPS.length, tStep + d));
+    renderTrace();
+  }
+
+  function traceNextWord() {
+    for (var i = tStep; i < TRACE_STEPS.length; i++) {
+      if (TRACE_STEPS[i].n === 'process_word') { tStep = i + 1; renderTrace(); return; }
+    }
+    tStep = TRACE_STEPS.length;
+    renderTrace();
+  }
+
+  tEl.prev.addEventListener('click', function () { stepTrace(-1); });
+  tEl.next.addEventListener('click', function () { stepTrace(1); });
+  tEl.word.addEventListener('click', traceNextWord);
+  tEl.reset.addEventListener('click', function () { tStep = 0; renderTrace(); });
+
+  function onTraceSlide() {
+    return slides[idx].id === 'slide-trace';
+  }
+
   /* ---------------- keyboard ---------------- */
   document.addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1803,8 +1928,14 @@ cur.innerHTML =
       case ' ':          show(idx + 1); e.preventDefault(); break;
       case 'Home':       show(0); e.preventDefault(); break;
       case 'End':        show(slides.length - 1); e.preventDefault(); break;
-      case 'ArrowDown':  if (onWalkSlide()) { stepWalk(1); e.preventDefault(); } break;
-      case 'ArrowUp':    if (onWalkSlide()) { stepWalk(-1); e.preventDefault(); } break;
+      case 'ArrowDown':
+        if (onWalkSlide()) { stepWalk(1); e.preventDefault(); }
+        else if (onTraceSlide()) { stepTrace(1); e.preventDefault(); }
+        break;
+      case 'ArrowUp':
+        if (onWalkSlide()) { stepWalk(-1); e.preventDefault(); }
+        else if (onTraceSlide()) { stepTrace(-1); e.preventDefault(); }
+        break;
       case 't': case 'T':
         document.documentElement.setAttribute(
           'data-theme',
@@ -1820,7 +1951,7 @@ cur.innerHTML =
 
   /* ---------------- click-to-advance (ignore controls) ---------------- */
   document.addEventListener('click', function (e) {
-    if (e.target.closest('button, a, .scroll, pre, .track')) return;
+    if (e.target.closest('button, a, .scroll, pre, .track, .callstack, .framelog')) return;
     if (e.clientX > window.innerWidth * 0.75) show(idx + 1);
     else if (e.clientX < window.innerWidth * 0.25) show(idx - 1);
   });
@@ -1828,6 +1959,8 @@ cur.innerHTML =
   /* ---------------- boot ---------------- */
   var start = parseInt((location.hash || '').slice(1), 10);
   render();
+  buildTraceStack();
+  renderTrace();
   show(isNaN(start) ? 0 : start - 1);
 })();
 </script>
