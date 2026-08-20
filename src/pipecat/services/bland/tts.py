@@ -337,8 +337,9 @@ class BlandTTSService(WebsocketTTSService):
         """
         changed = await super()._update_settings(delta)
 
-        # `init` fixes the voice and controls for the life of a session.
-        if changed:
+        # `init` fixes the voice and controls for the life of a session. Nothing
+        # else in TTSSettings reaches Bland, so nothing else earns a reconnect.
+        if changed.keys() & {"voice", "expressiveness", "stability"}:
             await self._disconnect()
             await self._connect()
 
