@@ -86,6 +86,9 @@ class BaseTaskManager(ABC):
         This function removes the task from the set of registered tasks upon
         completion or failure.
 
+        Cancelling the task this call runs on is logged and ignored, since
+        awaiting your own task never completes.
+
         Args:
             task: The task to be cancelled.
             timeout: The optional timeout in seconds to wait for the task to cancel.
@@ -222,11 +225,25 @@ class TaskManager(BaseTaskManager):
         This function removes the task from the set of registered tasks upon
         completion or failure.
 
+        Cancelling the task this call runs on is logged and ignored, since
+        awaiting your own task never completes.
+
         Args:
             task: The task to be cancelled.
             timeout: The optional timeout in seconds to wait for the task to cancel.
+
+        Raises:
+            asyncio.CancelledError: If the calling task is itself cancelled while
+                waiting for ``task`` to finish cancelling.
         """
         name = task.get_name()
+        current = asyncio.current_task()
+
+        if task is current:
+            logger.warning(f"{name}: ignoring attempt to cancel the running task")
+            return
+
+        cancels_requested = current.cancelling() if current else 0
         task.cancel()
         try:
             if timeout:
@@ -236,8 +253,18 @@ class TaskManager(BaseTaskManager):
         except TimeoutError:
             logger.warning(f"{name}: timed out waiting for task to cancel")
         except asyncio.CancelledError:
-            # Here are sure the task is cancelled properly.
-            pass
+            # Either `task` finished cancelling, or the calling task was
+            # cancelled while we waited. Only the latter may propagate:
+            # swallowing it would let the caller outlive its own cancellation,
+            # and a caller that is a reconnect loop would go on reconnecting
+            # unsupervised.
+            #
+            # cancelling() is a running count cleared only by uncancel(), so a
+            # caller already winding down carries a non-zero count throughout
+            # its teardown. Only a rise above the count on entry means a fresh
+            # cancellation arrived here.
+            if current is not None and current.cancelling() > cancels_requested:
+                raise
         except Exception as e:
             tb = traceback.extract_tb(e.__traceback__)
             last = tb[-1]

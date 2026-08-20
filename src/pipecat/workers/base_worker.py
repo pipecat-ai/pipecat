@@ -844,7 +844,10 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         group = self._job_groups.pop(job_id, None)
         if group:
-            if group.timeout_task:
+            # On the timeout path this runs on the timeout task itself, which is
+            # already on its last statement. Cancelling it here would abandon the
+            # rest of this method, leaving the group's waiter blocked forever.
+            if group.timeout_task and group.timeout_task is not asyncio.current_task():
                 await self.cancel_task(group.timeout_task)
             for worker_name in group.worker_names:
                 await self.send_bus_message(
