@@ -469,9 +469,9 @@ class BlandTTSService(WebsocketTTSService):
                 # shapes. An admission refusal — turn admission happens on the
                 # first `speak` — never creates the turn, so no `utterance_end`
                 # arrives to release Pipecat's pre-created audio context; that is
-                # released here. A mid-turn rejection such as an oversized pause
-                # marker is followed by `utterance_end(failed)`. Abandoning covers
-                # both: either way the remaining deltas must stop.
+                # released here. A mid-turn rejection such as `context_overflow`
+                # is followed by `utterance_end(failed)`. Abandoning covers both:
+                # either way the remaining deltas must stop.
                 if context_id:
                     self._abandon_turn(context_id)
                     if self.audio_context_available(context_id):
@@ -618,6 +618,7 @@ class BlandHttpTTSService(TTSService):
         if self._session_owner:
             self._session = None
 
+    @property
     def _bland_sample_rate(self) -> int:
         return self.sample_rate if self.sample_rate in _SAMPLE_RATES else _DEFAULT_SAMPLE_RATE
 
@@ -636,7 +637,7 @@ class BlandHttpTTSService(TTSService):
             self._session = aiohttp.ClientSession()
             self._session_owner = True
 
-        bland_sample_rate = self._bland_sample_rate()
+        bland_sample_rate = self._bland_sample_rate
 
         payload: dict[str, Any] = {
             "text": text,
