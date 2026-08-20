@@ -81,6 +81,7 @@ from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
+    from pipecat.workers.runner import WorkerRunner
 
 
 # Type alias for a callable that handles LLM function calls.
@@ -128,6 +129,9 @@ class FunctionCallParams:
             ``PipelineWorker(..., app_resources=...)``. Same object — passed by
             reference, not a copy. Use it to share DB handles, clients, state,
             feature flags, etc. across all of a session's tool handlers.
+        worker_runner: The runner hosting ``pipeline_worker``. Use it to reach
+            another worker on the runner by name, e.g.
+            ``params.worker_runner.get_worker("ui-jobs")``.
     """
 
     function_name: str
@@ -143,6 +147,11 @@ class FunctionCallParams:
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
+
+    @property
+    def worker_runner(self) -> WorkerRunner:
+        """The runner hosting :attr:`pipeline_worker`."""
+        return self.pipeline_worker.worker_runner
 
     @property
     @deprecated(

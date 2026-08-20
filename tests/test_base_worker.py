@@ -93,6 +93,79 @@ def make_stub_pipeline_task(name, *, bridged=None, active=True):
     )
 
 
+class _RunnerProbe(FrameProcessor):
+    """Records the peer worker it can reach through its runner."""
+
+    def __init__(self, peer_name: str):
+        super().__init__()
+        self._peer_name = peer_name
+        self.peer = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if self.peer is None:
+            self.peer = self.worker_runner.get_worker(self._peer_name)
+        await self.push_frame(frame, direction)
+
+
+class TestWorkerRunnerAccess(unittest.IsolatedAsyncioTestCase):
+    """Reaching a runner's workers by name."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    async def test_get_worker_returns_added_worker(self):
+        helper = BaseWorker("helper")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(helper)
+
+        self.assertIs(runner.get_worker("helper"), helper)
+
+    async def test_get_worker_is_none_for_unknown_name(self):
+        """A worker on another runner has no local instance, same as an unknown name."""
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+
+        self.assertIsNone(runner.get_worker("elsewhere"))
+
+    async def test_added_worker_reaches_its_runner(self):
+        helper = BaseWorker("helper")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(helper)
+
+        self.assertIs(helper.worker_runner, runner)
+
+    async def test_worker_runner_raises_before_attach(self):
+        with self.assertRaises(RuntimeError):
+            _ = BaseWorker("helper").worker_runner
+
+    async def test_worker_runner_raises_when_attached_without_one(self):
+        """A worker attached to a bus and registry alone cannot reach peers."""
+        helper = BaseWorker("helper")
+        await helper.attach(registry=create_test_registry(), bus=self.bus)
+
+        with self.assertRaises(RuntimeError):
+            _ = helper.worker_runner
+
+    async def test_processor_reaches_a_peer_worker(self):
+        """A processor finds a peer by name without the app handing it over."""
+        helper = BaseWorker("helper")
+        probe = _RunnerProbe("helper")
+        worker = PipelineWorker(Pipeline([probe]), name="main", cancel_on_idle_timeout=False)
+
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker, helper)
+
+        async def end_after_start():
+            await asyncio.sleep(0.05)
+            await worker.queue_frame(EndFrame())
+            await asyncio.sleep(0.05)
+            await runner.end()
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), end_after_start()), timeout=10.0)
+
+        self.assertIs(probe.peer, helper)
+
+
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()

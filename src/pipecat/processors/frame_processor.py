@@ -54,6 +54,7 @@ from pipecat.utils.frame_queue import FrameQueue
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
+    from pipecat.workers.runner import WorkerRunner
 
 
 class FrameDirection(Enum):
@@ -447,6 +448,18 @@ class FrameProcessor(BaseObject):
             The :class:`PipelineWorker` instance that set up this processor.
         """
         return self.processor_setup.pipeline_worker
+
+    @property
+    def worker_runner(self) -> WorkerRunner:
+        """Get the :class:`WorkerRunner` hosting this processor's worker.
+
+        Use it to reach another worker on the runner by name, e.g.
+        ``self.worker_runner.get_worker("ui-jobs")``.
+
+        Returns:
+            The runner this processor's :class:`PipelineWorker` is attached to.
+        """
+        return self.pipeline_worker.worker_runner
 
     @property
     @deprecated(
