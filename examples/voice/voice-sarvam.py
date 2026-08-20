@@ -57,12 +57,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = SarvamSTTService(
-        api_key=os.environ["SARVAM_API_KEY"],
-        settings=SarvamSTTService.Settings(
-            model="saaras:v3",
-        ),
-    )
+    stt = SarvamSTTService(api_key=os.environ["SARVAM_API_KEY"])
 
     tts = SarvamTTSService(
         api_key=os.environ["SARVAM_API_KEY"],

@@ -33,6 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.stt import (
+    MODEL_CONFIGS,
     SarvamRealtimeSTTService,
     SarvamRealtimeSTTSettings,
     SarvamSTTService,
@@ -94,6 +95,26 @@ def _query(service: SarvamRealtimeSTTService, *, sample_rate: int = 16000) -> di
 def _seconds_to_bytes(seconds: float, *, sample_rate: int = 16000) -> int:
     """Byte count for `seconds` of 16-bit mono audio."""
     return int(seconds * sample_rate * 2)
+
+
+def test_supported_models():
+    """The sunset saarika:v2.5 and saaras:v2.5 models are no longer offered."""
+    assert set(MODEL_CONFIGS) == {"saaras:v3", "saaras:v4"}
+
+
+def test_default_model():
+    """Constructing without a model picks up the latest one."""
+    service = SarvamSTTService(api_key="test-key")
+    assert service._settings.model == "saaras:v4"
+
+
+def test_sunset_model_raises():
+    """A model that was removed reports what it can be replaced with."""
+    with pytest.raises(ValueError, match="saaras:v3, saaras:v4"):
+        SarvamSTTService(
+            api_key="test-key",
+            settings=SarvamSTTService.Settings(model="saaras:v2.5"),
+        )
 
 
 def test_sarvam_vad_signals_recommend_external_strategies():
@@ -220,7 +241,7 @@ def test_invalid_realtime_settings_raise():
     with pytest.raises(ValueError):
         SarvamRealtimeSTTService(
             api_key="test-key",
-            settings=SarvamRealtimeSTTService.Settings(model="saarika:v2.5"),
+            settings=SarvamRealtimeSTTService.Settings(model="saaras:v3"),
         )
 
 

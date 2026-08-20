@@ -3292,17 +3292,6 @@
       "location": "pipecat/services/sarvam/stt.py"
     },
     {
-      "subject": "SarvamSTTService.set_prompt",
-      "module": "pipecat.services.sarvam.stt",
-      "kind": "method",
-      "deprecated_in": "0.0.104",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))",
-      "message": "`SarvamSTTService.set_prompt` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))` instead.",
-      "location": "pipecat/services/sarvam/stt.py"
-    },
-    {
       "subject": "SarvamHttpTTSService.InputParams",
       "module": "pipecat.services.sarvam.tts",
       "kind": "class",

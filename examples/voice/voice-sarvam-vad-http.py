@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         stt = SarvamSTTService(
             api_key=os.environ["SARVAM_API_KEY"],
             settings=SarvamSTTService.Settings(
-                model="saaras:v3",
+                model="saaras:v4",
                 vad_signals=True,  # Use Sarvam's VAD signals for turn detection
             ),
         )
