@@ -541,6 +541,41 @@ ul.pts strong { color: var(--ink); font-weight: 650; }
   letter-spacing: .04em;
 }
 
+/* Two-halves thesis — the numbering is a real sequence (produce, then align) */
+.half-n {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: .55rem;
+  color: var(--ink-faint);
+}
+.panel.accent-seg .half-n { color: var(--seg); }
+.panel.accent-tts .half-n { color: var(--tts); }
+.half-h {
+  font-size: clamp(1.1rem, 2.1vw, 1.55rem);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  margin: 0 0 .6rem;
+}
+.half-p {
+  margin: 0 0 1rem;
+  font-size: clamp(.94rem, 1.25vw, 1.06rem);
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+.half-p strong { color: var(--ink); font-weight: 650; }
+.half-map {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .04em;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--line-soft);
+  padding-top: .65rem;
+}
+
 .divider-slide { justify-content: center; }
 .divider-slide .kicker {
   font-family: var(--font-mono);
@@ -827,7 +862,31 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   <div>
     <p class="kicker">III</p>
     <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">How they're solved</h1>
-    <div class="scroll" style="margin-top:1.2rem">
+    <p class="lede" style="font-size:clamp(1.05rem,1.7vw,1.4rem);color:var(--ink);max-width:70ch">The solution has <strong>two halves</strong> — and the first one is what makes the second possible.</p>
+    <div class="grid g2" style="margin-top:.5rem">
+      <div class="panel accent-seg">
+        <div class="half-n">Half one · at production time</div>
+        <div class="half-h">Kept distinct, never reconstructed</div>
+        <p class="half-p">The three texts are kept distinct <strong>as they are produced</strong>, so nothing has to be reconstructed later.</p>
+        <div class="half-map">3.1 split points · 3.2 six frames · 3.3 the guarantee</div>
+      </div>
+      <div class="panel accent-tts">
+        <div class="half-n">Half two · during playback</div>
+        <div class="half-h">Kept aligned, word by word</div>
+        <p class="half-p">Three layers keep them <strong>aligned word by word</strong> while the TTS speaks.</p>
+        <div class="half-map">3.4 the layers · the cursor · tracker · sequencer</div>
+      </div>
+    </div>
+    <p class="note"><strong>Rebuilding the context from what the TTS spoke is exactly what caused 2.1.</strong> Once the three texts exist separately from the moment they are created, there is nothing to reverse-engineer — the alignment problem becomes "where are we in each", not "what did this used to say".</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 12 · PROBLEM → SOLUTION MAP ══════════════════════════ -->
+<section class="slide" data-sec="III · How they're solved">
+  <div>
+    <p class="eyebrow"><span class="num">3.0</span> <span class="rule"></span> <span>Every problem, and what answers it</span></p>
+    <h2 class="headline">The map for the rest of the deck.</h2>
+    <div class="scroll">
       <table class="tbl">
         <tr><th>Problem</th><th>Solved by</th></tr>
         <tr><td class="k">2.1 Context drift</td><td><code class="inl">TextSegmentMap</code>'s <span class="ch-llm">llm_pos</span> cursor + <code class="inl">WordCompletionTracker</code>'s span attribution</td></tr>
@@ -838,7 +897,6 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <tr><td class="k ch-seg">2.6 Text transformations <span style="color:var(--ink-faint);font-weight:400">— the feature</span></td><td><strong>Made safe by</strong> <code class="inl">TextSegmentMap</code>'s transformed-segment handling</td></tr>
       </table>
     </div>
-    <p class="note">Two halves: the three texts are kept <strong>distinct as they are produced</strong>, so nothing is reconstructed later — then three layers keep them <strong>aligned word by word</strong> while the TTS speaks.</p>
   </div>
 </section>
 
