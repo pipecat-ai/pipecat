@@ -59,9 +59,18 @@ class TestTTFATMetrics:
         m.set_processor_name("TestLLM")
         return m
 
-    async def _measure_ttfb(self, m: FrameProcessorMetrics, start: float, ttfb: float):
+    async def _measure_ttfb(
+        self,
+        m: FrameProcessorMetrics,
+        start: float,
+        ttfb: float,
+        *,
+        report_only_initial_ttfb: bool = False,
+    ):
         """Run a TTFB measurement of ``ttfb`` seconds, which arms TTFAT."""
-        await m.start_ttfb_metrics(start_time=start, report_only_initial_ttfb=False)
+        await m.start_ttfb_metrics(
+            start_time=start, report_only_initial_ttfb=report_only_initial_ttfb
+        )
         await m.stop_ttfb_metrics(end_time=start + ttfb)
 
     @pytest.mark.asyncio
@@ -132,6 +141,19 @@ class TestTTFATMetrics:
         # Measured against the second request, not the abandoned first.
         assert frame.data[0].ttfat == pytest.approx(0.8, abs=1e-3)
         assert frame.data[0].thinking_time == pytest.approx(0.5, abs=1e-3)
+
+    @pytest.mark.asyncio
+    async def test_interrupted_response_does_not_leak_when_reporting_only_initial_ttfb(self):
+        """``report_only_initial_ttfb`` stops later requests measuring anything at all."""
+        m = self._make_metrics()
+        first = time.time()
+        await self._measure_ttfb(m, first, 0.2, report_only_initial_ttfb=True)
+        # No answer token arrives; the next request starts instead. Its TTFB
+        # goes unmeasured, so there is no request start to measure TTFAT from.
+        second = first + 10.0
+        await self._measure_ttfb(m, second, 0.3, report_only_initial_ttfb=True)
+
+        assert await m.stop_ttfat_metrics(end_time=second + 0.8) is None
 
 
 class TestTTFATServiceReporting:

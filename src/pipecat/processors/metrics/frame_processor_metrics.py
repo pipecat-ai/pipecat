@@ -114,14 +114,16 @@ class FrameProcessorMetrics(BaseObject):
                 uses the current time.
             report_only_initial_ttfb: Whether to report only the first TTFB measurement.
         """
+        # A response that was interrupted before its first answer token leaves
+        # TTFAT armed; drop it so this request measures its own. This is TTFAT
+        # state rather than TTFB reporting policy, so it happens regardless of
+        # whether this request's TTFB will be reported.
+        self._ttfat_active = False
+        self._start_ttfat_time = 0
         if self._should_report_ttfb:
             self._start_ttfb_time = start_time or time.time()
             self._last_ttfb_time = 0
             self._should_report_ttfb = not report_only_initial_ttfb
-            # A response that was interrupted before its first answer token
-            # leaves TTFAT armed; drop it so this request measures its own.
-            self._ttfat_active = False
-            self._start_ttfat_time = 0
 
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop TTFB measurement and generate metrics frame.
