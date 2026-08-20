@@ -134,7 +134,9 @@ class FunctionCallParams:
             feature flags, etc. across all of a session's tool handlers.
         worker_runner: The runner hosting ``pipeline_worker``. Use it to reach
             another worker on the runner by name, e.g.
-            ``params.worker_runner.get_worker("ui-jobs")``.
+            ``params.worker_runner.get_worker("ui-jobs")``. Always set for a
+            call made from a running pipeline; None only when these params
+            were built by hand.
     """
 
     function_name: str
@@ -150,11 +152,7 @@ class FunctionCallParams:
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
-
-    @property
-    def worker_runner(self) -> WorkerRunner:
-        """The runner hosting :attr:`pipeline_worker`."""
-        return self.pipeline_worker.worker_runner
+    worker_runner: WorkerRunner | None = None
 
     @property
     @deprecated(
@@ -1643,6 +1641,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
                         app_resources=self.pipeline_worker.app_resources,
+                        worker_runner=self.pipeline_worker.worker_runner,
                     ),
                 )
             else:
@@ -1656,6 +1655,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
                     app_resources=self.pipeline_worker.app_resources,
+                    worker_runner=self.pipeline_worker.worker_runner,
                 )
                 await item.handler(params)
         except asyncio.CancelledError:
