@@ -458,6 +458,9 @@ code.inl {
 .track.t-llm .lbl, .track.t-llm .body .done, .track.t-llm .pos b { color: var(--llm); }
 .track.t-llm .caret { background: var(--llm); }
 .track.held { background: var(--surface-2); }
+/* Text the tracker claimed without a word event ever naming it. */
+.track .body .swept { font-weight: 700; opacity: .7; text-decoration: underline dotted; text-underline-offset: 3px; }
+.track.claiming { background: color-mix(in srgb, var(--llm) 7%, transparent); }
 
 .walk-bar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
 .wbtn {
@@ -1068,7 +1071,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <div class="track t-llm" id="trk-llm">
           <div class="lbl">① llm text</div>
           <div class="body" id="body-llm"></div>
-          <div class="pos">llm_pos <b id="pos-llm">0</b></div>
+          <div class="pos"><span id="lbl-llm">llm_pos</span> <b id="pos-llm">0</b></div>
         </div>
       </div>
 
@@ -1076,14 +1079,14 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
         <button class="wbtn" id="wPrev">◀ prev</button>
         <button class="wbtn" id="wNext">next word ▶</button>
         <button class="wbtn" id="wReset">reset</button>
-        <div class="wfeed">advance_word(<b id="wWord">—</b>)</div>
+        <div class="wfeed" id="wFeed">advance_word(<b id="wWord">—</b>)</div>
         <div class="wstate" id="wTrans">in_transformed_segment: false</div>
         <div class="wstate" id="wStep">0 / 0</div>
       </div>
 
       <div class="wguarantee" id="wGuarantee"></div>
     </div>
-    <p class="note">Only <span class="ch-tts">raw_pos</span> is a real cursor. Through an <strong>unchanged</strong> segment the other two move by a <em>count</em> — however many letters and digits the word spent. Through a <strong>rewritten</strong> one they are held, then jump to the end of the original span in one step, because no position halfway through <code class="inl">$42.50</code> means anything. <em>(↑ / ↓ also step.)</em></p>
+    <p class="note">Only <span class="ch-tts">raw_pos</span> is a real cursor. Through an <strong>unchanged</strong> segment the other two move by a <em>count</em> — however many letters and digits the word spent. Through a <strong>rewritten</strong> one they are held, then jump to the end of the original span in one step, because no position halfway through <code class="inl">$42.50</code> means anything. Nothing ever speaks a <code class="inl">&lt;/card&gt;</code>, so the walk ends on a beat that is not a word at all: once the frame is done, the <strong>tracker</strong> claims whatever <span class="ch-llm">llm text</span> has left — which is how a closing tag reaches the conversation context. <em>(↑ / ↓ also step.)</em></p>
   </div>
 </section>
 
@@ -1184,7 +1187,8 @@ context records:   <span class="s">"Yeah,"</span></pre>
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.4</span> <span class="rule"></span> <span>_classify_hop</span></p>
-    <h2 class="headline">Provider tokens are messy. Three strategies, first hit wins.</h2>
+    <h2 class="headline">Challenge: Provider tokens are messy.</h2>
+    <h3 class="headline">Three strategies, first hit wins.</h3>
     <div class="grid g2-wide">
       <div class="scroll">
         <table class="tbl compact">
@@ -1635,7 +1639,8 @@ cur.innerHTML =
         { w: 'Your', raw: 4,  seg: 4,  llm: 4,  t: false },
         { w: 'card', raw: 9,  seg: 9,  llm: 9,  t: false },
         { w: 'is',   raw: 12, seg: 12, llm: 12, t: false },
-        { w: '4111', raw: 17, seg: 17, llm: 23, t: false }
+        { w: '4111', raw: 17, seg: 17, llm: 23, t: false },
+        { w: null, raw: 17, seg: 17, llm: 30, t: false, sweep: 23 }
       ]
     }
   };
@@ -1645,7 +1650,8 @@ cur.innerHTML =
 
   var el = {
     note: document.getElementById('walkNote'),
-    word: document.getElementById('wWord'),
+    feed: document.getElementById('wFeed'),
+    lblLlm: document.getElementById('lbl-llm'),
     trans: document.getElementById('wTrans'),
     stepN: document.getElementById('wStep'),
     guarantee: document.getElementById('wGuarantee'),
@@ -1658,10 +1664,13 @@ cur.innerHTML =
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function paint(id, text, pos) {
+  function paint(id, text, pos, sweptFrom) {
     var node = document.getElementById('body-' + id);
+    var spoken = sweptFrom == null ? pos : sweptFrom;
     node.innerHTML =
-      '<span class="done">' + esc(text.slice(0, pos)) + '</span>' +
+      '<span class="done">' + esc(text.slice(0, spoken)) + '</span>' +
+      (sweptFrom == null ? '' :
+        '<span class="swept">' + esc(text.slice(spoken, pos)) + '</span>') +
       '<span class="caret"></span>' +
       '<span class="todo">' + esc(text.slice(pos)) + '</span>';
     document.getElementById('pos-' + id).textContent = pos;
@@ -1674,12 +1683,23 @@ cur.innerHTML =
     el.note.textContent = walk.note;
     paint('tts', walk.tts, s.raw);
     paint('seg', walk.seg, s.seg);
-    paint('llm', walk.llm, s.llm);
+    paint('llm', walk.llm, s.llm, s.sweep);
 
     document.getElementById('trk-seg').classList.toggle('held', s.t);
     document.getElementById('trk-llm').classList.toggle('held', s.t);
+    document.getElementById('trk-llm').classList.toggle('claiming', s.sweep != null);
 
-    el.word.textContent = s.w ? '"' + s.w + '"' : '—';
+    // The sweep is not a word event: nothing was spoken, so the map never moved.
+    // It is the tracker taking the text left over once the frame is done.
+    if (s.sweep != null) {
+      el.feed.innerHTML = 'frame complete \u2192 tracker claims <b>' +
+        esc(walk.llm.slice(s.sweep, s.llm)) + '</b>';
+      el.lblLlm.textContent = 'llm consumed';
+    } else {
+      el.feed.innerHTML = 'advance_word(<b id="wWord">' +
+        (s.w ? '"' + esc(s.w) + '"' : '\u2014') + '</b>)';
+      el.lblLlm.textContent = 'llm_pos';
+    }
     el.trans.textContent = 'in_transformed_segment: ' + s.t;
     el.trans.classList.toggle('on', s.t);
     el.stepN.textContent = step + ' / ' + walk.steps.length;
