@@ -158,7 +158,9 @@ class WordCompletionTracker:
         # Neither end of the token is necessarily this frame's: the head can
         # repeat punctuation the previous word already carried, and the tail can
         # run into the next frame. The map measures both; keep what is between.
-        head = self._segment_map.last_leading_duplicate
+        # Without an llm_text there is no recorded span that could already have
+        # carried the mark, so it is new text on this frame.
+        head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
         overflow = self._segment_map.last_overflow
         tail = len(word) - len(overflow) if overflow else len(word)
         self._frame_word = word[head:tail]
