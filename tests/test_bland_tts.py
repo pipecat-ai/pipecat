@@ -575,7 +575,11 @@ async def test_run_bland_http_tts_success(aiohttp_client):
     assert body["text"] == "Hello from Bland."
     assert body["voice"] == DEFAULT_VOICE_ID
     # 24000 is a rate Bland renders directly, so it is requested as-is.
-    assert body["audio"] == {"encoding": "pcm_s16le", "sample_rate": 24000}
+    assert body["audio"] == {
+        "encoding": "pcm_s16le",
+        "sample_rate": 24000,
+        "container": "raw",
+    }
     assert "controls" not in body
     # fields the request shape does not define
     assert "language" not in body

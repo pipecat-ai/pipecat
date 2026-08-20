@@ -641,7 +641,13 @@ class BlandHttpTTSService(TTSService):
         payload: dict[str, Any] = {
             "text": text,
             "voice": self._settings.voice,
-            "audio": {"encoding": "pcm_s16le", "sample_rate": bland_sample_rate},
+            "audio": {
+                "encoding": "pcm_s16le",
+                "sample_rate": bland_sample_rate,
+                # The body is streamed straight into audio frames, so a
+                # container's header would be read as the first samples.
+                "container": "raw",
+            },
         }
         if controls := _controls(self._settings):
             payload["controls"] = controls
