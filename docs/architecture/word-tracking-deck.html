@@ -1252,7 +1252,7 @@ token <span class="s">'Hello five'</span>
   <div>
     <p class="kicker">V</p>
     <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">Policy and order</h1>
-    <p class="lede">A position is not a decision. <strong>WordCompletionTracker</strong> decides what one word means for its frame; <strong>AggregatedFrameSequencer</strong> decides what the frames mean for the turn.</p>
+    <p class="lede">A position is not a decision. <strong>WordCompletionTracker</strong> decides what text should be emitted; <strong>AggregatedFrameSequencer</strong> decides what means for the turn.</p>
     <div class="legend">
       <span class="tag t-llm">5.1 The tracker</span>
       <span class="tag t-llm">5.2 Span attribution</span>
@@ -1272,19 +1272,19 @@ token <span class="s">'Hello five'</span>
     <p class="lede tight">One call in, several answers out — each read back by the sequencer to build the frames it pushes.</p>
     <div class="scroll">
       <table class="tbl compact">
-        <tr><th>Accessor</th><th>Used for</th></tr>
-        <tr><td class="m">word_belongs_here()</td><td>Decide whether the provider dropped an event, and this slot must be force-completed</td></tr>
-        <tr><td class="m">add_word_and_check_complete()</td><td>Advance, and learn whether the slot is now done</td></tr>
-        <tr><td class="m ch-seg">get_word_for_frame()</td><td>The <strong>text</strong> of the emitted <code class="inl">TTSTextFrame</code></td></tr>
-        <tr><td class="m ch-llm">get_llm_consumed()</td><td>The <strong>raw_text</strong> of that frame — what the conversation context records</td></tr>
-        <tr><td class="m">suppress_in_context()</td><td>Sets <code class="inl">append_to_context=False</code> and skips the progress frame</td></tr>
-        <tr><td class="m">get_overflow_word()</td><td>Re-entered as a new word against the <em>next</em> slot</td></tr>
-        <tr><td class="m ch-seg">get_accumulated_user_facing_text()</td><td><code class="inl">accumulated_text</code> → the spoken part of the segment</td></tr>
-        <tr><td class="m ch-seg">get_remaining_user_facing_text(strip=False)</td><td><code class="inl">remaining_text</code> → the unspoken part</td></tr>
-        <tr><td class="m">get_remaining_tts_text()</td><td>Text of the catch-up frame when a provider goes silent</td></tr>
+        <tr><th>Accessor</th><th>Used for</th><th class="c-seg">On the map</th></tr>
+        <tr><td class="m">word_belongs_here()</td><td>Decide whether the provider dropped an event, and this slot must be force-completed</td><td class="m ch-seg">word_belongs_current_segment()</td></tr>
+        <tr><td class="m">add_word_and_check_complete()</td><td>Advance, and learn whether the slot is now done</td><td class="m ch-seg"><strong>advance_word()</strong></td></tr>
+        <tr><td class="m ch-seg">get_word_for_frame()</td><td>The <strong>text</strong> of the emitted <code class="inl">TTSTextFrame</code></td><td class="m ch-seg">last_leading_duplicate · last_overflow</td></tr>
+        <tr><td class="m ch-llm">get_llm_consumed()</td><td>The <strong>raw_text</strong> of that frame — what the conversation context records</td><td class="m ch-seg">llm_pos · last_completed_segment</td></tr>
+        <tr><td class="m">suppress_in_context()</td><td>Sets <code class="inl">append_to_context=False</code> and skips the progress frame</td><td class="m ch-seg">in_transformed_segment</td></tr>
+        <tr><td class="m">get_overflow_word()</td><td>Re-entered as a new word against the <em>next</em> slot</td><td class="m ch-seg">last_overflow</td></tr>
+        <tr><td class="m ch-seg">get_accumulated_user_facing_text()</td><td><code class="inl">accumulated_text</code> → the spoken part of the segment</td><td class="m ch-seg">user_facing_pos</td></tr>
+        <tr><td class="m ch-seg">get_remaining_user_facing_text(strip=False)</td><td><code class="inl">remaining_text</code> → the unspoken part</td><td class="m ch-seg">user_facing_pos</td></tr>
+        <tr><td class="m">get_remaining_tts_text()</td><td>Text of the catch-up frame when a provider goes silent</td><td class="m ch-seg">raw_pos</td></tr>
       </table>
     </div>
-    <p class="note">A single <code class="inl">process_word</code> call reads six of these to build one <code class="inl">TTSTextFrame</code> plus one <code class="inl">AggregatedTextProgressFrame</code>. And <code class="inl">is_complete</code> is <strong>delegated, not tracked</strong> — forwarded to the segment map, except on a force-completed slot where the map was deliberately never advanced.</p>
+    <p class="note">A single <code class="inl">process_word</code> call reads six of these to build one <code class="inl">TTSTextFrame</code> plus one <code class="inl">AggregatedTextProgressFrame</code>. Note the right-hand column: only <code class="inl">add_word_and_check_complete()</code> ever calls <code class="inl">advance_word()</code> — <strong>one entry point moves the map</strong>, and every other accessor just reads the state that call left behind. And <code class="inl">is_complete</code> is <strong>delegated, not tracked</strong> — forwarded to the segment map, except on a force-completed slot where the map was deliberately never advanced.</p>
   </div>
 </section>
 
