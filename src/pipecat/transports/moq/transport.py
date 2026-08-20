@@ -288,6 +288,16 @@ class MOQParams(TransportParams):
             ``verify_ssl``, which verifies the relay's cert to us.
         client_tls_key: Path to the PEM-encoded private key matching
             ``client_tls_cert``. Both must be set for either to apply.
+        client_tls_roots: Paths to PEM-encoded CA certificates to trust when
+            verifying the relay, in addition to the system roots. Client
+            mode only. Use this for a relay behind a private CA instead of
+            turning ``verify_ssl`` off.
+        client_tls_fingerprints: SHA-256 certificate fingerprints to accept
+            when verifying the relay. Client mode only. Pins one specific
+            certificate, which is what a self-signed relay needs -- a bot in
+            serve mode publishes its own as
+            :attr:`MOQTransport.cert_fingerprints` for exactly this. Again,
+            an alternative to disabling ``verify_ssl``, not a companion.
         connection_timeout: Seconds to wait for the peer broadcast to be
             announced before giving up.
         serve: When ``True``, the bot binds its own UDP socket and accepts
@@ -352,6 +362,8 @@ class MOQParams(TransportParams):
     verify_ssl: bool = True
     client_tls_cert: str | None = None
     client_tls_key: str | None = None
+    client_tls_roots: list[str] | None = None
+    client_tls_fingerprints: list[str] | None = None
     connection_timeout: float = 30.0
     serve: bool = False
     bind: str | None = None
@@ -801,6 +813,10 @@ class MOQTransportClient:
         if self._params.client_tls_cert and self._params.client_tls_key:
             client_tls["tls_cert"] = self._params.client_tls_cert
             client_tls["tls_key"] = self._params.client_tls_key
+        if self._params.client_tls_roots:
+            client_tls["tls_roots"] = self._params.client_tls_roots
+        if self._params.client_tls_fingerprints:
+            client_tls["tls_fingerprints"] = self._params.client_tls_fingerprints
         return moq.Client(
             self._url,
             tls_verify=self._params.verify_ssl,

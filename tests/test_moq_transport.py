@@ -597,6 +597,21 @@ class TestMOQTransportInit(unittest.TestCase):
         self.assertNotIn("tls_cert", self._client_kwargs(client_tls_cert="/c.pem"))
         self.assertNotIn("tls_key", self._client_kwargs(client_tls_key="/k.pem"))
 
+    def test_custom_roots_and_pins_are_passed_through(self):
+        """Both are alternatives to switching ``verify_ssl`` off: a private CA
+        and a self-signed relay can each be verified rather than trusted
+        blindly."""
+        kwargs = self._client_kwargs(
+            client_tls_roots=["/ca.pem"], client_tls_fingerprints=["ab:cd"]
+        )
+        self.assertEqual(kwargs["tls_roots"], ["/ca.pem"])
+        self.assertEqual(kwargs["tls_fingerprints"], ["ab:cd"])
+
+    def test_no_roots_or_pins_by_default(self):
+        kwargs = self._client_kwargs()
+        self.assertNotIn("tls_roots", kwargs)
+        self.assertNotIn("tls_fingerprints", kwargs)
+
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
         pinned the pre-1.8.0 ``serve_bind`` would silently listen on the
