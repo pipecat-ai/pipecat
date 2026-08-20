@@ -1415,7 +1415,7 @@ token <span class="s">'Hello five'</span>
   <div>
     <p class="eyebrow"><span class="num">5.5</span> <span class="rule"></span> <span>Concurrent contexts</span></p>
     <h2 class="headline">Two utterances in flight, one timeline.</h2>
-    <p class="lede tight">Two back-to-back <code class="inl">TTSSpeakFrame</code>s on a websocket service overlap — <code class="inl">run_tts</code> returns before synthesis finishes. Route words to "the first incomplete slot" and B's words get eaten by A's slot.</p>
+    <p class="lede tight">Two back-to-back <code class="inl">TTSSpeakFrame</code>s may overlap <code class="inl">run_tts</code> returns before synthesis finishes. Ordering still has to hold across both.</p>
     <div class="scroll">
       <table class="tbl">
         <tr><th>Field</th><th>Scope</th><th>Lifetime</th></tr>
@@ -1452,14 +1452,6 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
         <div class="panel accent-tts">
           <h3 class="sub">Buffered words</h3>
           <p style="margin:0;font-size:.88rem;color:var(--ink-dim)">Because promotion lags, <strong>a word can arrive before its slot exists</strong>. It is parked in <code class="inl">_buffered_words</code>, then replayed on the next promotion. <code class="inl">_drain_buffered_words</code> snapshots and clears before replaying, so a word that still matches nothing is re-buffered rather than looping.</p>
-        </div>
-        <div class="panel accent-seg">
-          <h3 class="sub">Keeping three channels aligned</h3>
-          <table class="tbl compact" style="margin-top:.3rem">
-            <tr><td>All three identical</td><td class="m">cut <em>inside</em> the token</td></tr>
-            <tr><td>A transform diverged them</td><td class="m">cut at the token boundary</td></tr>
-          </table>
-          <p style="margin:.5rem 0 0;font-size:.85rem;color:var(--ink-faint)">Once lengths differ there is no shared character offset to cut at.</p>
         </div>
       </div>
     </div>
