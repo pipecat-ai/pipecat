@@ -46,8 +46,14 @@ class _PassthroughMixer(BaseAudioMixer):
         return audio
 
 
-async def _make_transport(mixer: BaseAudioMixer | None = None) -> BaseOutputTransport:
-    params = TransportParams(audio_out_enabled=True, audio_out_mixer=mixer)
+async def _make_transport(
+    mixer: BaseAudioMixer | None = None, audio_out_sample_rate: int | None = None
+) -> BaseOutputTransport:
+    params = TransportParams(
+        audio_out_enabled=True,
+        audio_out_mixer=mixer,
+        audio_out_sample_rate=audio_out_sample_rate,
+    )
     transport = BaseOutputTransport(params)
     transport.push_frame = AsyncMock()
     transport.write_audio_frame = AsyncMock(return_value=True)
@@ -258,5 +264,112 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
+    """Tests for audio that has to be resampled to the transport's output rate.
+
+    ``MediaSender`` resamples on arrival, ahead of the paced ``_audio_queue``,
+    so it sits idle whenever TTS delivers audio in bursts. Its resampler must
+    therefore keep the audio held in its filter across those pauses, and give
+    it up only when the speech run actually ends.
+    """
+
+    TTS_RATE = 16000
+    OUT_RATE = 8000
+
+    def _tts_frames(self, sample_count: int, chunk_samples: int = 640):
+        """Split a ramp of TTS-rate audio into frames, as a TTS service would."""
+        audio = bytes(
+            b for i in range(sample_count) for b in (i % 251).to_bytes(2, "little", signed=False)
+        )
+        chunk = chunk_samples * 2
+        return [
+            TTSAudioRawFrame(
+                audio=audio[offset : offset + chunk],
+                sample_rate=self.TTS_RATE,
+                num_channels=1,
+                context_id="ctx1",
+            )
+            for offset in range(0, len(audio), chunk)
+        ]
+
+    async def _run_turn(self, pause_after: int | None = None) -> bytes:
+        """Play one TTS turn, optionally pausing mid-turn, and return what was written."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            frames = self._tts_frames(sample_count=16000)
+            for index, frame in enumerate(frames):
+                if index == pause_after:
+                    # A delivery pause longer than the resampler's old
+                    # inactivity timeout, e.g. a TTS round trip between
+                    # sentences.
+                    await asyncio.sleep(0.3)
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            return b"".join(
+                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_delivery_pause_does_not_change_the_audio(self):
+        """A pause between TTS chunks must not cost any audio.
+
+        The resampler runs ahead of playback, so a gap between two chunks says
+        nothing about the stream: the audio either side of it is one utterance
+        and must come out exactly as it would have without the gap.
+        """
+        uninterrupted = await self._run_turn()
+        paused = await self._run_turn(pause_after=12)
+
+        self.assertEqual(paused, uninterrupted)
+
+    async def test_end_of_turn_flushes_the_resampler(self):
+        """The tail held in the filter belongs to the turn that just ended."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+            frames = self._tts_frames(sample_count=16000)
+            for frame in frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # Mid-turn the filter is still holding audio back.
+            self.assertGreater(len(await sender._resampler.flush()), 0)
+
+            for frame in frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            # Ending the turn hands that audio over, leaving nothing behind.
+            self.assertEqual(await sender._resampler.flush(), b"")
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_discards_the_resampler_tail(self):
+        """Audio cut short is dropped, not carried into what the bot says next."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+            for frame in self._tts_frames(sample_count=16000):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertTrue(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(await sender._resampler.flush(), b"")
         finally:
             await transport.cancel(CancelFrame())
