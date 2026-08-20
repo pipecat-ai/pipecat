@@ -120,6 +120,9 @@ class FunctionCallParams:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
         llm: The LLMService instance being used.
+        pipeline_worker: The worker running the pipeline this call was made
+            from. Carries worker-scoped state, most notably
+            ``pipeline_worker.app_resources``.
         context: The LLM context.
         result_callback: Callback to deliver the result of the function call.
             For async function calls (``cancel_on_interruption=False``), call
