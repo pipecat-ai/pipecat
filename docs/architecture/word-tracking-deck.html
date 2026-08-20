@@ -1382,7 +1382,7 @@ token <span class="s">'Hello five'</span>
     <p class="eyebrow"><span class="num">5.4</span> <span class="rule"></span> <span>AggregatedFrameSequencer</span></p>
     <h2 class="headline">Every frame takes a slot — spoken or not.</h2>
     <div class="queue">
-      <div class="slot spoken"><div class="kind">slot 1 · spoken</div><div class="txt">"Run this:"</div><div class="meta">tracker ● &nbsp; complete: <span class="no">✗</span></div></div>
+      <div class="slot spoken"><div class="kind">slot 1 · spoken</div><div class="txt">"Here is the code:"</div><div class="meta">tracker ● &nbsp; complete: <span class="no">✗</span></div></div>
       <div class="slot skipped"><div class="kind">slot 2 · skipped</div><div class="txt">npm install</div><div class="meta">no tracker</div></div>
       <div class="slot spoken"><div class="kind">slot 3 · spoken</div><div class="txt">"Then reload."</div><div class="meta">tracker ● &nbsp; complete: <span class="no">✗</span></div></div>
     </div>
@@ -1402,7 +1402,7 @@ token <span class="s">'Hello five'</span>
           <tr><td class="m">process_word("Here")</td><td class="m">TTSText, Progress</td></tr>
           <tr><td class="m">process_word("is")</td><td class="m">TTSText, Progress</td></tr>
           <tr><td class="m">process_word("the")</td><td class="m">TTSText, Progress</td></tr>
-          <tr class="hi"><td class="m">process_word("code")</td><td class="m">TTSText, Progress, <strong>AggregatedTextFrame("print('hi')")</strong></td></tr>
+          <tr class="hi"><td class="m">process_word("code")</td><td class="m">TTSText, Progress, <strong>AggregatedTextFrame("npm install")</strong></td></tr>
         </table>
         <p class="note">The code block is released by <strong>the very word that completes the sentence in front of it</strong> — same call, correct position.</p>
       </div>
