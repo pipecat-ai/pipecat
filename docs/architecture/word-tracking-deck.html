@@ -826,7 +826,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
 <section class="slide" data-sec="II · What was broken">
   <div>
     <p class="eyebrow"><span class="num">2.6</span> <span class="rule"></span> <span>And a feature: text transformations</span></p>
-    <h2 class="headline">Fix the audio without touching the transcript.</h2>
+    <h2 class="headline">Rewritten for the provider. For nobody else.</h2>
     <p class="lede tight">TTS engines read what you give them, and written text is often not what you want spoken. <code class="inl">$42.50</code> can come out "dollar forty two point five zero"; <code class="inl">1994</code> as "one thousand nine hundred ninety four" when the sentence means a year. So Pipecat ships a bundle of transforms that <strong>rewrite the text on its way to the provider</strong> — and nowhere else.</p>
     <div class="grid g2-wide">
       <div class="scroll">
@@ -900,7 +900,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 12 · 3.1 SPLIT POINTS ══════════════════════════ -->
+<!-- ══════════════════════════ 13 · 3.1 SPLIT POINTS ══════════════════════════ -->
 <section class="slide" data-sec="III · How they're solved">
   <div>
     <p class="eyebrow"><span class="num">3.1</span> <span class="rule"></span> <span>Three texts, produced at two split points</span></p>
@@ -932,7 +932,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 13 · 3.2 SIX FRAMES ══════════════════════════ -->
+<!-- ══════════════════════════ 14 · 3.2 SIX FRAMES ══════════════════════════ -->
 <section class="slide" data-sec="III · How they're solved">
   <div>
     <p class="eyebrow"><span class="num">3.2</span> <span class="rule"></span> <span>What that looks like for one response</span></p>
@@ -957,7 +957,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 14 · 3.3 THE GUARANTEE ══════════════════════════ -->
+<!-- ══════════════════════════ 15 · 3.3 THE GUARANTEE ══════════════════════════ -->
 <section class="slide" data-sec="III · How they're solved">
   <div>
     <p class="eyebrow"><span class="num">3.3</span> <span class="rule"></span> <span>The guarantee that makes it useful</span></p>
@@ -977,7 +977,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 15 · 3.4 THREE LAYERS ══════════════════════════ -->
+<!-- ══════════════════════════ 16 · 3.4 THREE LAYERS ══════════════════════════ -->
 <section class="slide" data-sec="III · How they're solved">
   <div>
     <p class="eyebrow"><span class="num">3.4</span> <span class="rule"></span> <span>The three layers</span></p>
@@ -1023,7 +1023,24 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 16 · ★ THE CURSOR ══════════════════════════ -->
+<!-- ══════════════════════════ 17 · DIVIDER: THE CURSOR ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="IV · The moving cursor">
+  <div>
+    <p class="kicker">IV</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">The moving cursor</h1>
+    <p class="lede">The bottom layer, and the only one that touches the texts. One spoken word arrives — <strong>TextSegmentMap</strong> says where that leaves all three.</p>
+    <div class="legend">
+      <span class="tag t-seg">★ The walk</span>
+      <span class="tag t-seg">4.1 Building the map</span>
+      <span class="tag t-seg">4.2 Transformed spans</span>
+      <span class="tag t-seg">4.3 Counting alnums</span>
+      <span class="tag t-seg">4.4 Matching a token</span>
+      <span class="tag t-seg">4.5 The four outcomes</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 18 · ★ THE CURSOR ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor" id="slide-walk">
   <div>
     <p class="eyebrow"><span class="num">★</span> <span class="rule"></span> <span>TextSegmentMap · one real cursor drives three</span></p>
@@ -1070,7 +1087,7 @@ Context:  &lt;code&gt;npm install&lt;/code&gt;      <span class="c">← arrived 
   </div>
 </section>
 
-<!-- ══════════════════════════ 17 · OPCODES ══════════════════════════ -->
+<!-- ══════════════════════════ 19 · OPCODES ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.1</span> <span class="rule"></span> <span>Building the map</span></p>
@@ -1104,7 +1121,7 @@ tts      = <span class="s">'Your balance is forty-two
   </div>
 </section>
 
-<!-- ══════════════════════════ 18 · TRANSFORMED ══════════════════════════ -->
+<!-- ══════════════════════════ 20 · TRANSFORMED ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.2</span> <span class="rule"></span> <span>is_transformed · split_markup_runs</span></p>
@@ -1138,7 +1155,7 @@ tts      = <span class="s">'Your balance is forty-two
   </div>
 </section>
 
-<!-- ══════════════════════════ 19 · COUNTING ══════════════════════════ -->
+<!-- ══════════════════════════ 21 · COUNTING ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.3</span> <span class="rule"></span> <span>advance_by_alnums</span></p>
@@ -1163,7 +1180,7 @@ context records:   <span class="s">"Yeah,"</span></pre>
   </div>
 </section>
 
-<!-- ══════════════════════════ 20 · MATCHING ══════════════════════════ -->
+<!-- ══════════════════════════ 22 · MATCHING ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.4</span> <span class="rule"></span> <span>_classify_hop</span></p>
@@ -1194,7 +1211,7 @@ context records:   <span class="s">"Yeah,"</span></pre>
   </div>
 </section>
 
-<!-- ══════════════════════════ 21 · OUTCOMES ══════════════════════════ -->
+<!-- ══════════════════════════ 23 · OUTCOMES ══════════════════════════ -->
 <section class="slide" data-sec="IV · The moving cursor">
   <div>
     <p class="eyebrow"><span class="num">4.5</span> <span class="rule"></span> <span>The four outcomes</span></p>
@@ -1226,7 +1243,24 @@ token <span class="s">'Hello five'</span>
   </div>
 </section>
 
-<!-- ══════════════════════════ 22 · TRACKER ══════════════════════════ -->
+<!-- ══════════════════════════ 24 · DIVIDER: POLICY AND ORDER ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="V · Policy and order">
+  <div>
+    <p class="kicker">V</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">Policy and order</h1>
+    <p class="lede">A position is not a decision. <strong>WordCompletionTracker</strong> decides what one word means for its frame; <strong>AggregatedFrameSequencer</strong> decides what the frames mean for the turn.</p>
+    <div class="legend">
+      <span class="tag t-llm">5.1 The tracker</span>
+      <span class="tag t-llm">5.2 Span attribution</span>
+      <span class="tag t-llm">5.3 Misbehaving providers</span>
+      <span class="tag t-tts">5.4 The slot queue</span>
+      <span class="tag t-tts">5.5 Concurrent contexts</span>
+      <span class="tag t-tts">5.6 Token mode</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 25 · TRACKER ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.1</span> <span class="rule"></span> <span>WordCompletionTracker</span></p>
@@ -1250,7 +1284,7 @@ token <span class="s">'Hello five'</span>
   </div>
 </section>
 
-<!-- ══════════════════════════ 23 · ATTRIBUTION ══════════════════════════ -->
+<!-- ══════════════════════════ 26 · ATTRIBUTION ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.2</span> <span class="rule"></span> <span>Span attribution</span></p>
@@ -1290,7 +1324,7 @@ token <span class="s">'Hello five'</span>
   </div>
 </section>
 
-<!-- ══════════════════════════ 24 · RECOVERY ══════════════════════════ -->
+<!-- ══════════════════════════ 27 · RECOVERY ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.3</span> <span class="rule"></span> <span>When providers misbehave</span></p>
@@ -1330,7 +1364,7 @@ self._frame_word = word[<b>head</b>:<b>tail</b>]</pre>
   </div>
 </section>
 
-<!-- ══════════════════════════ 25 · SLOT QUEUE ══════════════════════════ -->
+<!-- ══════════════════════════ 28 · SLOT QUEUE ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.4</span> <span class="rule"></span> <span>AggregatedFrameSequencer</span></p>
@@ -1364,7 +1398,7 @@ self._frame_word = word[<b>head</b>:<b>tail</b>]</pre>
   </div>
 </section>
 
-<!-- ══════════════════════════ 26 · CONCURRENCY ══════════════════════════ -->
+<!-- ══════════════════════════ 29 · CONCURRENCY ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.5</span> <span class="rule"></span> <span>Concurrent contexts</span></p>
@@ -1384,7 +1418,7 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
   </div>
 </section>
 
-<!-- ══════════════════════════ 27 · TOKEN MODE ══════════════════════════ -->
+<!-- ══════════════════════════ 30 · TOKEN MODE ══════════════════════════ -->
 <section class="slide" data-sec="V · Policy and order">
   <div>
     <p class="eyebrow"><span class="num">5.6</span> <span class="rule"></span> <span>Token mode (streaming)</span></p>
@@ -1420,7 +1454,21 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
   </div>
 </section>
 
-<!-- ══════════════════════════ 28 · WIRING ══════════════════════════ -->
+<!-- ══════════════════════════ 31 · DIVIDER: IN PRACTICE ══════════════════════════ -->
+<section class="slide divider-slide" data-sec="VI · In practice">
+  <div>
+    <p class="kicker">VI</p>
+    <h1 class="title" style="font-size:clamp(2rem,5vw,3.6rem)">In practice</h1>
+    <p class="lede">Where the three layers are wired together, what a client builds on top of them, and where to look in the code.</p>
+    <div class="legend">
+      <span class="tag">6.1 Where they're wired up</span>
+      <span class="tag">6.2 code-helper</span>
+      <span class="tag">6.3 Where to look</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 32 · WIRING ══════════════════════════ -->
 <section class="slide" data-sec="VI · In practice">
   <div>
     <p class="eyebrow"><span class="num">6.1</span> <span class="rule"></span> <span>Where they're wired up</span></p>
@@ -1441,7 +1489,7 @@ seq.<span class="fn">process_word</span>(<span class="s">"alpha"</span>, pts=100
   </div>
 </section>
 
-<!-- ══════════════════════════ 29 · PAYOFF ══════════════════════════ -->
+<!-- ══════════════════════════ 33 · PAYOFF ══════════════════════════ -->
 <section class="slide" data-sec="VI · In practice">
   <div>
     <p class="eyebrow"><span class="num">6.2</span> <span class="rule"></span> <span>code-helper</span></p>
@@ -1486,7 +1534,7 @@ cur.innerHTML =
   </div>
 </section>
 
-<!-- ══════════════════════════ 30 · TESTS ══════════════════════════ -->
+<!-- ══════════════════════════ 34 · TESTS ══════════════════════════ -->
 <section class="slide" data-sec="VI · In practice">
   <div>
     <p class="eyebrow"><span class="num">6.3</span> <span class="rule"></span> <span>Where to look</span></p>
@@ -1530,7 +1578,7 @@ cur.innerHTML =
   <span class="sec" id="railSec">TTS word tracking</span>
   <span class="spacer"></span>
   <span class="keys">← → slides · ↑ ↓ step · T theme · F full</span>
-  <span class="count"><b id="railNum">1</b> / <span id="railTot">30</span></span>
+  <span class="count"><b id="railNum">1</b> / <span id="railTot">34</span></span>
 </div>
 
 <script>
