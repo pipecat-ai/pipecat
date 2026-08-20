@@ -34,7 +34,7 @@ If the context is then rebuilt from what the TTS spoke, **the tags vanish from t
 conversation history**. The LLM sees a transcript where its own convention is absent and
 stops producing it.
 
-That is why the map tracks a *third* text. The two it diffs are `tts_text` and
+That is why the map tracks a *third* text. The two it compares are `tts_text` and
 `original_text` (the **segment text** — see
 [how the three texts are produced](./README.md#31-three-texts-produced-at-two-split-points));
 `llm_text` rides along on its own cursor:
@@ -45,8 +45,13 @@ That is why the map tracks a *third* text. The two it diffs are `tts_text` and
 | `user_facing_pos` | `Your card is 4111` | The segment text — e.g. what the UI highlights |
 | `llm_pos` | `Your card is <card>4111</card>` | The LLM text — what the conversation context records |
 
-Walking that example one word at a time, the two derived cursors stay together until the
-tag appears, then diverge:
+All three are **zero-based character indices**, and each points *just past* what has been
+consumed: `text[:pos]` is everything spoken so far, `text[pos]` is the next character. A
+cursor equal to `len(text)` therefore means finished. Character indices, not byte offsets
+— `→` advances a cursor by 1, not by its 3 UTF-8 bytes.
+
+Walking that example one word at a time, the two follower cursors stay together until the
+tag appears, then part:
 
 | word | `raw_pos` | `user_facing_pos` | `llm_pos` | LLM text consumed |
 | --- | ---: | ---: | ---: | --- |
@@ -62,6 +67,48 @@ with it. (The closing tag is swept up by
 
 Something has to translate a position in the spoken stream into a position in *both* other
 texts. That is the entire job of `TextSegmentMap`.
+
+### Why the third text needs no comparison
+
+Only two of the three texts are ever compared against each other. `llm_text` is not, and
+does not need to be, because of one fact about it:
+
+> **`llm_text` holds the same letters and digits as `original_text`, in the same order.
+> It differs only in what is wrapped around them** — tags, delimiters, punctuation.
+
+So the map never has to find matching *positions* in `llm_text`; it only has to count.
+Each time a word is spoken, it counts the letters and digits that word used up and moves
+`llm_pos` past that many, stepping over any tags on the way for free.
+
+**Where the two texts come from.** Both are fields of the same `AggregatedTextFrame`, and
+the sequencer hands them over as `user_facing_text=frame.text` and
+`llm_text=frame.raw_text or frame.text`:
+
+| Field | Holds | Set by |
+| --- | --- | --- |
+| `text` | The content alone — `4111` | Every aggregation |
+| `raw_text` | The content *with* its delimiters — `<card>4111</card>` | Only a `PatternMatch` |
+
+That is what makes the premise hold today, in two steps:
+
+1. **For an ordinary aggregation, the two are the same string.** `LLMTextProcessor` sets
+   `raw_text=aggregation.text` for anything that is not a `PatternMatch`, so there is
+   nothing to keep in step. This is the common case, including every
+   `SimpleTextAggregator` sentence.
+2. **For a `PatternMatch`, `raw_text` is `full_match`** — the regex match of
+   start-delimiter + content + end-delimiter — while `text` is the content between them.
+   Same characters, in the same order, with delimiters added around them.
+
+**The condition step 2 rests on** is that a delimiter contributes no letters or digits of
+its own. Tag-shaped delimiters satisfy it because `advance_by_alnums` crosses `<...>` for
+free and `alnum_only` strips it; punctuation-only delimiters satisfy it because they have
+no letters to begin with:
+
+```
+llm_text                    after speaking "hello world"
+'<card>hello world</card>'  llm_pos=17  consumed '<card>hello world'
+'**hello world**'           llm_pos=15  consumed '**hello world**'
+```
 
 ## 2. Building the map: opcodes
 
@@ -82,12 +129,10 @@ text. There are four kinds:
 | `delete` | This run exists in the original but not in the TTS text | A filter that removes a whole word |
 | `insert` | This run exists in the TTS text but not in the original | A transform that adds a whole word |
 
-**All four occur** — the map handles them uniformly, so none is a special case in the
-code. `equal` and `replace` dominate, because most transforms rewrite a token in place
-rather than adding or removing one; `delete` and `insert` only appear when a whole
-whitespace-delimited token disappears or appears.
+All four occur, and the code treats them the same way, so none is a special case.
+`equal` and `replace` are by far the most common.
 
-Real output for two `replace` examples:
+What that looks like for a currency expansion:
 
 ```
 original = 'Your balance is $42.50'
@@ -97,25 +142,8 @@ tts      = 'Your balance is forty-two dollars and fifty cents'
    replace  original='$42.50'             tts='forty-two dollars and fifty cents'
 ```
 
-```
-original = 'Visit https://pipecat.ai now'
-tts      = 'Visit pipecat.ai now'
-
-   equal    original='Visit '             tts='Visit '
-   replace  original='https://pipecat.ai' tts='pipecat.ai'
-   equal    original=' now'               tts=' now'
-```
-
-And for `delete` and `insert`, which produce a segment with one empty side:
-
-```
-original = 'Hello there world'          original = 'Hello world'
-tts      = 'Hello world'                tts      = 'Hello there world'
-
-   equal    original='Hello '              equal    original='Hello '
-   delete   original='there '  tts=''      insert   original=''       tts='there '
-   equal    original='world'               equal    original='world'
-```
+`delete` and `insert` produce a segment with one empty side; both are covered in
+[Empty-sided segments](#empty-sided-segments).
 
 Each opcode becomes one `TextSegment`, carrying both sides plus the span it occupies in
 the original text:
@@ -129,29 +157,31 @@ TextSegment(original='$42.50',
 ### Transformed vs unchanged segments
 
 A segment is **transformed** (`TextSegment.is_transformed`) when **its two sides cannot be
-walked character for character**. Three things trigger it:
+followed together, character by character**. Three things trigger it:
 
-1. The alphanumeric content differs (`$42.50` vs `forty-two dollars…`)
-2. The word count differs (a replacement changed tokenization)
-3. The TTS side contains markup — even if the spoken content is identical
+1. The letters and digits differ (`$42.50` vs `forty-two dollars…`)
+2. The number of words differs (a replacement changed how the text splits)
+3. The TTS side contains a tag — even if the spoken words are identical
 
 That third rule is why `<phoneme alphabet="ipa">Siobhan</phoneme>` counts as transformed:
 the raw cursor must move through the tag characters while the original cursor stays put.
 
 ### Splitting markup into its own segment
 
-Rule 3 has a cost. A segment holding *any* markup is atomic, so one tag in the middle of
-otherwise identical text would freeze the cursors across the whole sentence. To contain
-that, `_build` splits an `equal` opcode around the markup it carries:
+Rule 3 has a cost. A segment holding *any* tag is all-or-nothing, so one tag in the middle
+of otherwise identical text would hold the cursors still across the whole sentence. To
+limit that, `_build_segments` cuts an `equal` opcode around the tags it carries, using
+`split_markup_runs` from
+[`pipecat.utils.text.markup_utils`](#5-the-two-markup-strippers):
 
 ```python
-_split_markup_runs("I love to count <spell>1234</spell>.")
+split_markup_runs("I love to count <spell>1234</spell>.")
 # -> ["I love to count ", "<spell>1234</spell>."]
 ```
 
 ```
-"I love to count "       plain   — cursors advance word by word
-"<spell>1234</spell>."   atomic  — commits when its last word lands
+"I love to count "       plain           — cursors move word by word
+"<spell>1234</spell>."   all-or-nothing  — lands as one when its last word arrives
 ```
 
 Only `equal` opcodes can be split this way: both sides hold the same text, so a single
@@ -162,29 +192,34 @@ offset cuts both. The other kinds differ side to side, leaving no shared offset 
 There is exactly one real cursor — `raw_pos`, the position reached in the TTS text.
 `user_facing_pos` and `llm_pos` are derived from it:
 
-- **Unchanged segment** — they advance by an **alphanumeric budget**: the number of
-  alnum characters the word consumed on the TTS side, spent against each of the other
-  two texts.
+- **Unchanged segment** — they move by a **count, not a position**: however many letters
+  and digits the word used up on the TTS side is how many each of the other two cursors
+  moves past.
 - **Transformed segment** — they are *held* until the segment's entire TTS text is
   consumed, then **jump to the end of its original span in one step**. There is no
   meaningful position halfway through `$42.50`, so the map refuses to invent one.
 
-### The budget is what attributes tags
+  The count spent on that jump is the **original's** letters and digits, not the spoken
+  one's: `llm_text` holds `$42.50` (four digits), never `forty-two dollars and fifty
+  cents`. That is why `TextSegment` carries both `tts_alnum_count` and
+  `original_alnum_count` — the two sides of a rewritten segment need different counts.
 
-`advance_by_alnums` spends the budget, and two of its rules are the whole reason the tag
-rule in [§1.2](#12-the-context-drifted-from-what-the-llm-wrote) holds:
+### Counting is what attaches tags to words
 
-- **A `<...>` tag is stepped over without charging the budget.** The cursor ends up past
-  the tag with its count untouched, so an opening tag joins the span of the word that
-  follows it. This is why `llm_pos` reaches 23 rather than 17 in that section's table:
-  `<card>` cost nothing, and four digits cost four.
-- **Punctuation immediately after the budget runs out is swept up**, stopping before the
-  next space, alnum char, or `<`. So a trailing `,` or `.` joins the span of the word
-  *before* it — the provider reports `Yeah`, the context records `Yeah,`.
+`advance_by_alnums` does the counting, and two of its rules are the whole reason the tag
+behaviour in [§1.2](#12-the-context-drifted-from-what-the-llm-wrote) works:
 
-Nothing attributes markup to words explicitly. One loop counts letters and digits and
-steps over everything that is not one; where the tags land follows from that. The
-closing tag is the exception the loop deliberately stops short of — it is swept by
+- **A `<...>` tag is crossed for free**, without using up any of the count. The cursor
+  ends up past the tag with its count untouched, so an opening tag travels with the word
+  that follows it. This is why `llm_pos` reaches 23 rather than 17 in that section's
+  table: `<card>` cost nothing, and four digits cost four.
+- **Punctuation right after the count runs out is taken too**, stopping before the next
+  space, letter, digit, or `<`. So a trailing `,` or `.` travels with the word *before*
+  it — the provider reports `Yeah`, the context records `Yeah,`.
+
+Nothing decides which words own which tags. One loop counts letters and digits and steps
+over everything else; where the tags land simply follows from that. The closing tag is
+the one thing the loop deliberately stops short of — it is swept up by
 [`WordCompletionTracker`](./word-completion-tracker.md) when the frame completes.
 
 ### Worked example
@@ -222,11 +257,12 @@ an aggregator splits content from delimiters: with `llm_text="Your balance is
 
 ### Empty-sided segments
 
-A `delete` or `insert` opcode produces a segment with nothing on one side. Both are
-transformed (their two sides differ), and both resolve without any special handling:
+A `delete` or `insert` opcode produces a segment with nothing on one side. Both count as
+transformed, since their two sides differ, and both work out without any special case in
+the code:
 
 **`delete` — text that exists only in the original.** The segment's TTS side is empty, so
-no word will ever arrive for it. It is drained as soon as the next word shows up, and its
+no word will ever arrive for it. It is finished as soon as the next word shows up, and its
 original text is credited to that word:
 
 ```
@@ -255,7 +291,9 @@ tts='Hello there world'   original='Hello world'
 
 The other half of the job: word-timestamp tokens are *messy*, and no two providers agree.
 **Rather than special-casing each one**, `_classify_hop` matches the token against the
-segment's remaining raw text using three strategies, in order, stopping at the first hit.
+text left in the segment using three strategies, in order, stopping at the first hit. Each
+one lives in its own method — `_literal_hop`, `_folded_hop`, `_markup_hop` — so
+`_classify_hop` itself only decides the order and what to do when all three miss.
 
 ```mermaid
 flowchart TD
@@ -275,13 +313,17 @@ flowchart TD
 
     R(["<b>PLACED</b> — fits here<br/><b>CROSSES</b> — spills onward"])
     ST{"any alphanumeric<br/>left in this segment?"}
-    ST -->|no| EX(["<b>EXHAUSTED</b><br/>drain, retry next segment"])
+    ST -->|no| EX(["<b>EXHAUSTED</b><br/>finish segment, try the next"])
     ST -->|yes| NM(["<b>NO_MATCH</b><br/>nudge past punctuation, stop"])
 ```
 
-Every strategy also retries with the token's own trailing punctuation removed. **The whole
-thing is stateless** — recomputed fresh each call, no tag parsing, no cross-call
-bookkeeping.
+Every strategy also retries with the token's own trailing punctuation removed
+(`_word_variants`), and the first two are offered three starting points into the segment
+(`_match_candidates`): the text as it is, past any spaces, and past everything that is not
+a letter or digit.
+
+**The whole thing is stateless** — worked out fresh on every call, with no tag parsing and
+nothing remembered between words.
 
 ### Which strategy fires, for real token shapes
 
@@ -299,21 +341,33 @@ bookkeeping.
 | Foreign token (dropped event upstream) | `hello world` | `goodbye` | none | `NO_MATCH` |
 | Nothing spoken left here | `<break/>` | `hello` | none | `EXHAUSTED` |
 
-Note how strategy 1 alone covers four different TTS provider quirks, because it tries three
-skip offsets *and* a trailing-punctuation-trimmed variant of the token.
+Note how strategy 1 alone covers four different provider quirks, because it tries three
+starting points *and* a trailing-punctuation-trimmed form of the token.
+
+Strategy 2 has one extra rule: because folding hides case, `account` would otherwise match
+the start of `Accountant`, so a match there is only accepted if it ends where a word ends.
+Strategy 1 needs no such guard, being case-sensitive already.
 
 ### The four outcomes
 
 | Outcome | Meaning | Effect |
 | --- | --- | --- |
-| `PLACED` | Token fits inside this segment | Advance to the matched end, stop |
-| `CROSSES` | Segment's remainder is only a prefix of the token | Drain segment, carry the **remainder** onward |
-| `EXHAUSTED` | No spoken content left here | Drain segment, carry the **whole token** onward |
-| `NO_MATCH` | Token does not belong here | Nudge past leading punctuation, stop |
+| `PLACED` | Token fits inside this segment | Move to the end of the match, stop |
+| `CROSSES` | This segment holds only the start of the token | Finish the segment, carry the **rest of the token** onward |
+| `EXHAUSTED` | Nothing here can be spoken | Finish the segment, carry the **whole token** onward |
+| `NO_MATCH` | Token does not belong here | Step past leading punctuation, stop |
 
-`PLACED` and `NO_MATCH` end the walk. **`CROSSES` and `EXHAUSTED` do not** — they complete
-the current segment and loop to the next one, where the token is classified again from
-scratch. The difference is only **how much of the token survives the hop**.
+Each outcome is returned as a `_Hop`, carrying two numbers: `segment_advance`, how far to
+move in this segment, and `word_consumed`, how much of the token this segment used up.
+
+`PLACED` and `NO_MATCH` end the walk. **`CROSSES` and `EXHAUSTED` do not** — they finish
+the current segment and move to the next one, where the token is matched again from
+scratch. The difference between them is only **how much of the token survives the hop**.
+
+The walk itself is worked out by `_plan_hops`, which decides what every segment would
+answer without moving anything. `_consume_word` then applies those answers, and
+`_can_consume_word` (the dry run behind `word_belongs_current_segment`) just reads the
+last one. Both go through the same walk, so the dry run cannot disagree with the real one.
 
 **`CROSSES` — the token outlives the segment.** A provider that merges two words into one
 token produces this. The segment's remaining text is consumed as a prefix of the token,
@@ -333,10 +387,10 @@ tts='Hello five'   original='Hello 5'
 One incoming token therefore completed two segments and moved the segment-text cursor
 across a transform, in a single `advance_word` call.
 
-**`EXHAUSTED` — the segment outlives nothing.** The segment has no alphanumeric content
-left to speak (a `delete` opcode's empty side, a self-closing `<break/>`, or only trailing
-whitespace), so no word will ever match it. It is drained and the *entire* token — nothing
-was consumed — moves to the next segment:
+**`EXHAUSTED` — the segment has nothing to give.** No letters or digits are left to speak
+here (a `delete` opcode's empty side, a self-closing `<break/>`, or only trailing spaces),
+so no word will ever match it. The segment is finished and the *entire* token — none of it
+was used — moves to the next segment:
 
 ```
 tts='Hello world'   original='Hello there world'
@@ -352,23 +406,52 @@ If a `CROSSES` remainder runs out of segments entirely, the leftover is exposed 
 
 ### Symbol tokens: the dry run accepts what the walk will not place
 
-A token with no alphanumeric content at all — an emoji, a bare punctuation mark, or a
-symbol the provider substituted (ElevenLabs reports `→` as `-`) — cannot be matched by any
-of the three strategies, because there is nothing to compare. `word_belongs_current_segment`
-falls through to a separate check, `_symbol_belongs_here`, which accepts the token when
-either:
+A token with no letters or digits in it at all — an emoji, a bare punctuation mark, or a
+symbol the provider swapped for another (ElevenLabs reports `→` as `-`) — cannot be
+matched by any of the three strategies, because there is nothing to compare.
+`word_belongs_current_segment` falls through to a separate check, `_symbol_belongs_here`,
+which accepts the token when either:
 
-1. it appears literally in the remaining TTS text (the search window backs up over
-   punctuation already swept past), or
-2. alnum content is still unconsumed **and** the next non-space character is itself
-   non-alnum — the substitution case, where the reported symbol will never match the
-   source character it stands for.
+1. it appears as-is in the text still to be spoken (the search starts a little before the
+   cursor, since punctuation is often taken along with the word before it), or
+2. words remain to be spoken **and** the next thing in the text is itself a symbol — the
+   swap case, where the reported symbol will never match the character it stands for.
 
 `advance_word` does **not** consult this path. A substituted symbol therefore passes
 `word_belongs_here` — so the slot is not force-completed over it — and then classifies as
 `NO_MATCH`, nudging the raw cursor past leading punctuation and stopping. The token is
 accepted without being placed, which is the right outcome for a mark the source text
 spells differently.
+
+Feeding a provider's tokens for `Step one → step two`, where the arrow is reported as `-`:
+
+| token | `word_belongs_…` | outcome | `raw_pos` | `user_facing_pos` |
+| --- | --- | --- | ---: | ---: |
+| `Step` | True | `PLACED` | 4 | 4 |
+| `one` | True | `PLACED` | 8 | 8 |
+| `-` | **True** | **`NO_MATCH`** | **11** | **8** |
+| `step` | True | `PLACED` | 15 | 15 |
+| `two` | True | `PLACED` | 19 | 19 |
+
+The `-` is accepted but never placed. On its row the raw cursor moves from 8 to 11,
+stepping over ` → ` so the next token is not blocked by it, while `user_facing_pos` holds
+at 8 — nothing the source text spells was actually spoken. `step` then lands normally and
+the frame completes.
+
+Spelling out what each `raw_pos` above points at:
+
+```
+  pos= 4  consumed='Step'                 next char=' '
+  pos= 8  consumed='Step one'             next char=' '
+  pos=11  consumed='Step one → '          next char='s'
+  pos=15  consumed='Step one → step'      next char=' '
+  pos=19  consumed='Step one → step two'  next char=(end)
+```
+
+Had the dry run rejected `-`, the caller would have read that as a dropped event and
+force-completed the frame. No text would be lost — `_force_complete` emits the entire
+unspoken remainder at once — but `→ step two` would arrive as a single lump attributed to
+the `-`, instead of `step` and `two` arriving as their own timed words.
 
 ### Trimming a token to what it actually covers
 
@@ -398,52 +481,23 @@ exactly that mark.
 It is the mirror of [`last_overflow`](#the-four-outcomes): one reports the head of the
 token that is not this frame's, the other the tail. Callers keep what is between them.
 
-### Why folding needs a word boundary
+## 5. The two markup strippers
 
-Folding erases case, which can manufacture a false match: folded `account` is a prefix of
-folded `Accountant`. Strategy 2 therefore only accepts a `PLACED` match that lands on a
-word boundary. Strategy 1 does not need the guard — it is case-sensitive already.
+These are not in this file — they live in `src/pipecat/utils/text/markup_utils.py`,
+shared so that every part of the codebase decides what counts as a tag the same way. Two
+of them matter here, and they treat a lone `<` in **opposite** ways:
 
-## 5. Two definitions of "markup"
-
-The file deliberately carries two strippers, because a streamed fragment and a complete
-text need opposite treatment of a lone `<`:
-
-| Function | Input | `5 < 10` becomes | Used for |
+| Function | Input | `5 < 10` becomes | Used by |
 | --- | --- | --- | --- |
-| `strip_markup` | A possibly-truncated token | `5 ` | Matching a token that may be mid-tag |
-| `strip_complete_markup` | A whole, static text | `5 < 10` | `is_transformed`, default segment text |
+| `strip_markup` | A token that may be cut off mid-tag | `5 ` | `_markup_hop` |
+| `strip_complete_markup` | A whole, finished text | `5 < 10` | `is_transformed`, default segment text |
 
-The two agree on everything except an unmatched `<`:
-
-| Input | `strip_markup` | `strip_complete_markup` | |
-| --- | --- | --- | --- |
-| `<b>hi</b> there` | `hi there` | `hi there` | agree |
-| `a<break/>b` | `ab` | `ab` | agree |
-| `x < y > z` | `x  z` | `x  z` | agree |
-| `keep <phoneme attr` | `keep ` | `keep <phoneme attr` | **differ** |
-| `5 < 10` | `5 ` | `5 < 10` | **differ** |
-| `I <3 this` | `I ` | `I <3 this` | **differ** |
-
-### Why having two is safe
-
-**Each is applied only where its assumption actually holds**, so the disagreement never
-matters:
-
-- **`strip_markup` runs on provider tokens.** These are *fragments* — some providers split
-  a multi-attribute tag across several word-timestamp events, so a token really can end
-  mid-tag (`<phoneme alphabet="ipa"` with the `>` in the next event). Treating a trailing
-  `<` as an unfinished tag is the correct reading, and it is only ever used to *compare*
-  against the source text — a wrong guess causes a failed match, which falls through to
-  `NO_MATCH`, not a corrupted cursor.
-
-- **`strip_complete_markup` runs on whole texts we assembled ourselves.** Nothing here is
-  truncated, so a lone `<` is content the LLM genuinely wrote — `5 < 10`, `I <3 this`, a
-  generic type like `List<int>`. Swallowing the rest of the sentence would silently drop
-  real text from the segment text and from `is_transformed`'s judgement.
-
-**Applying either function to the other's input is what would be unsafe**; keeping them
-separate is what makes each one correct in its own place.
+Each is only ever applied where its assumption holds, so the disagreement never bites.
+Provider tokens really can end mid-tag — some providers split `<phoneme alphabet="ipa"`
+across two word-timestamp events — and there a trailing `<` is an unfinished tag. Texts we
+assembled ourselves are never cut off, so there a lone `<` is content the LLM wrote:
+`5 < 10`, `I <3 this`, `List<int>`. Swallowing the rest of the sentence would silently
+drop real text.
 
 ## 6. Public surface
 
@@ -452,33 +506,47 @@ separate is what makes each one correct in its own place.
 | `advance_word(word)` | Consume one token, moving all cursors |
 | `word_belongs_current_segment(word)` | Non-mutating dry run, plus the symbol check `advance_word` skips |
 | `user_facing_pos` / `llm_pos` / `raw_pos` | The three cursors (`user_facing_pos` indexes the segment text) |
-| `is_complete` | All alphanumeric content accounted for |
+| `is_complete` | Every letter and digit has been spoken |
 | `in_transformed_segment` | Cursor sits mid-transform (callers suppress context writes) |
 | `last_completed_segment` | Segment finished by the last `advance_word` |
 | `last_overflow` | Raw suffix that ran past the end of the TTS text |
 | `last_leading_duplicate` | Leading chars of the token already carried by the previous word |
 | `reset()` | Rewind every cursor, keep the segments |
 
-Two details in `is_complete` are worth knowing. A frame whose remainder is pure
-punctuation or markup is already complete — a closing tag never arrives as its own token.
-The exception is punctuation set off by a space (French `Comment ça va ?`), which *is*
-emitted as its own token, so `_pending_separated_punctuation` holds completion open for it.
+Two details in `is_complete` are worth knowing. A frame whose remaining text is nothing
+but punctuation or tags already counts as complete, because a closing tag never arrives as
+its own token. The exception is punctuation set off by a space, as French writes
+`Comment ça va ?` — that *does* arrive as its own token, so
+`_pending_separated_punctuation` keeps the frame open until it does.
 
 ## 7. Tests
 
-`tests/test_text_segment_map.py` — 66 tests.
+`tests/test_text_segment_map.py` — 54 tests.
 
 | Class | Covers |
 | --- | --- |
-| `TestStripMarkupHelpers` | `strip_markup`, `_raw_offset_after_clean_chars` round-trip |
-| `TestStripCompleteMarkupHelper` | Lone `<` kept as content |
 | `TestTextSegmentMapBuild` | Segment construction and spans |
-| `TestTextSegmentMapAdvance` | Cursor hold/jump behaviour |
+| `TestTextSegmentMapAdvance` | Cursors holding and jumping |
 | `TestTextSegmentMapWithLlmText` | The third cursor |
-| `TestTextSegmentMapTokenChangingReplacements` | Replacements that change word count |
-| `TestTextSegmentMapSsmlPhonemeTag` | Markup segments |
-| `TestClassifyHopSkipsLeadingPunctuation` | Strategy 1's skip offsets |
+| `TestTextSegmentMapReset` | Rewind and replay |
+| `TestTextSegmentMapEqualTexts` | The no-transform case |
+| `TestTextSegmentMapTokenChangingReplacements` | Replacements that change the word count |
+| `TestTextSegmentMapSsmlPhonemeTag` | Tag segments |
+| `TestTextSegmentMapStrayAngleBracket` | A lone `<` as content |
+| `TestClassifyHopLiteralMatchHandlesStrayAngleBracket` | Which strategy matched a `<` |
+| `TestClassifyHopSkipsLeadingPunctuation` | The three starting points |
 | `TestClassifyHopCaseFoldRequiresWordBoundary` | The `account` / `Accountant` guard |
-| `TestProviderTokenShapes` | Leading-space tokens |
+| `TestClassifyHopFoldsTypographicVariants` | Quotes and dashes |
+| `TestFoldPreservesLength` | Folding never changes a string's length |
+| `TestProviderTokenShapes` | Tokens carrying their own spacing |
 | `TestWordCarriesItsOwnPunctuation` | Provider-added terminal punctuation |
 | `TestLeadingDuplicatePunctuation` | A mark reported with the following word |
+
+`tests/test_markup_utils.py` — 20 tests, covering the shared helpers this file leans on.
+
+| Class | Covers |
+| --- | --- |
+| `TestStripMarkupHelpers` | `strip_markup` and the `raw_offset_after_clean_chars` round-trip |
+| `TestStripCompleteMarkupHelper` | A lone `<` kept as content |
+| `TestSplitMarkupRuns` | Giving a tag its own run |
+| `TestHasAlnum` | `has_alnum` agreeing with `alnum_only`, tags included |
