@@ -662,7 +662,7 @@ def _http_bytes(url: str) -> bytes:
         return response.read()
 
 
-def provider_hints(provider: str) -> dict:
+def provider_entry(provider: str) -> dict:
     """The provider's entry in providers.yaml, or an empty dict."""
     import yaml
 
@@ -750,11 +750,11 @@ def cmd_signals(args: argparse.Namespace) -> int:
         print(f"unknown provider {provider!r}; see inventory.py --md", file=sys.stderr)
         return EXIT_UNSUPPORTED
     inventory.enrich(units)
-    hints = provider_hints(provider)
+    entry = provider_entry(provider)
 
     sdks = [pypi_latest(r) for r in sdk_requirements(provider, units)]
 
-    specs = list(hints.get("specs") or [])
+    specs = list(entry.get("specs") or [])
     for item in args.spec or []:
         name, sep, url = item.partition("=")
         if not sep:

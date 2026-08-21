@@ -21,7 +21,7 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
-Corrections researchers recorded under ``hints`` (a replacement for a dead URL,
+Corrections researchers recorded under ``providers_yaml_updates`` (a replacement for a dead URL,
 a spec worth tracking) are merged into ``providers.yaml`` on one branch per run
 and opened as one draft PR outside the cap, so the file stays current without
 anyone editing it by hand.
@@ -56,8 +56,8 @@ DEFAULT_REPORTS = REPO_ROOT / "_reports"
 PROVIDERS_YAML = Path(".claude/skills/provider-watch/providers.yaml")
 PR_LABEL = "provider-watch"
 DEFAULT_PR_CAP = 8
-HINT_SCALARS = ("models", "changelog", "notes")
-HINT_LISTS = ("docs", "specs")
+PROVIDERS_YAML_SCALARS = ("models", "changelog", "notes")
+PROVIDERS_YAML_LISTS = ("docs", "specs")
 
 # The line a researcher writes under "## PRs" for a local branch; rewritten to
 # the PR URL once the PR exists.
@@ -108,7 +108,7 @@ class Outcome:
     adopted: list[str] = field(default_factory=list)
     capped: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
-    hints_pr: str | None = None
+    providers_yaml_pr: str | None = None
     reports_pushed: bool = False
     issue_url: str | None = None
 
@@ -210,19 +210,19 @@ def publish_prs(
     return outcome
 
 
-# --------------------------------------------------------------------- hints
+# ----------------------------------------------------------- providers.yaml
 
 
-def merge_hints(data: dict, provider: str, hints: dict) -> bool:
-    """Fold one report's ``hints`` into the providers.yaml mapping; True if anything changed."""
+def merge_providers_yaml(data: dict, provider: str, updates: dict) -> bool:
+    """Fold one report's ``providers_yaml_updates`` into the mapping; True if anything changed."""
     entry = data.get(provider) or {}
     changed = False
-    for key in HINT_SCALARS:
-        if hints.get(key) and hints[key] != entry.get(key):
-            entry[key] = hints[key]
+    for key in PROVIDERS_YAML_SCALARS:
+        if updates.get(key) and updates[key] != entry.get(key):
+            entry[key] = updates[key]
             changed = True
-    for key in HINT_LISTS:
-        for item in hints.get(key) or []:
+    for key in PROVIDERS_YAML_LISTS:
+        for item in updates.get(key) or []:
             existing = entry.setdefault(key, [])
             if item not in existing:
                 existing.append(item)
@@ -273,7 +273,7 @@ def render_providers_yaml(original: str, data: dict) -> str:
     return header + spaced + "\n"
 
 
-def publish_hints(
+def publish_providers_yaml(
     reports: list[Report],
     *,
     sh: Shell,
@@ -282,21 +282,21 @@ def publish_hints(
     date: str,
     scratch: Path,
 ) -> str | None:
-    """Turn the run's hint corrections into one draft PR against providers.yaml.
+    """Turn the run's providers_yaml_updates into one draft PR against providers.yaml.
 
     Returns the PR URL, or None when no report proposed anything new.
     """
     proposals = [
-        (r.meta["service"].split("/")[0], r.meta["hints"])
+        (r.meta["service"].split("/")[0], r.meta["providers_yaml_updates"])
         for r in reports
-        if isinstance(r.meta.get("hints"), dict) and r.meta.get("service")
+        if isinstance(r.meta.get("providers_yaml_updates"), dict) and r.meta.get("service")
     ]
     if not proposals:
         return None
     yaml_path = repo_root / PROVIDERS_YAML
     original = yaml_path.read_text()
     data = yaml.safe_load(original) or {}
-    providers = sorted({p for p, h in proposals if merge_hints(data, p, h)})
+    providers = sorted({p for p, u in proposals if merge_providers_yaml(data, p, u)})
     if not providers:
         return None
 
@@ -310,7 +310,7 @@ def publish_hints(
         else "main"
     )
     worktree = scratch / f"wt-providers-{date}"
-    title = f"Update provider-watch hints for {', '.join(providers)}"
+    title = f"Update providers.yaml for {', '.join(providers)}"
     sh.run("git", "worktree", "add", str(worktree), "-b", branch, base, cwd=repo_root)
     try:
         (worktree / PROVIDERS_YAML).write_text(render_providers_yaml(original, data))
@@ -470,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
         date=args.date,
         cap=args.pr_cap,
     )
-    outcome.hints_pr = publish_hints(
+    outcome.providers_yaml_pr = publish_providers_yaml(
         reports,
         sh=sh,
         repo_root=args.repo_root,

@@ -141,12 +141,16 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
     if quiet:
         lines += ["## Nothing new", "", ", ".join(_link(r, repo_url) for r in quiet), ""]
 
-    hinted = [r for r in reports if isinstance(r.get("hints"), dict) and r["hints"]]
-    if hinted:
+    updates = [
+        r
+        for r in reports
+        if isinstance(r.get("providers_yaml_updates"), dict) and r["providers_yaml_updates"]
+    ]
+    if updates:
         lines += ["## Proposed providers.yaml updates", ""]
-        for r in hinted:
+        for r in updates:
             parts = []
-            for key, value in r["hints"].items():
+            for key, value in r["providers_yaml_updates"].items():
                 if isinstance(value, list):
                     value = ", ".join(
                         str(v.get("url", v)) if isinstance(v, dict) else str(v) for v in value

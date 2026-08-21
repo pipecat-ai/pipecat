@@ -1,9 +1,9 @@
-# Research hints per provider directory (src/pipecat/services/<provider>).
+# Per-provider research inputs (src/pipecat/services/<provider>): URLs, specs, notes.
 #
 # Maintained by the bot as much as by people: when a researcher finds a URL
 # here dead, a better page, or a spec worth tracking, it records the
-# correction in its report's `hints`, and publish.py folds every run's hints
-# into this file on one draft PR. Providers without an entry are researched
+# correction in its report's `providers_yaml_updates`, and publish.py folds every
+# run's updates into this file on one draft PR. Providers without an entry are researched
 # from the unit's docs_url and web search.
 #
 # Only this header comment survives a regeneration; keep prose in `notes:`.
@@ -17,7 +17,7 @@
 #              is a change signal and `git diff` on the snapshot shows what moved.
 #              Stainless SDK repos publish `.stats.yml` with the spec hash; Google
 #              APIs publish discovery documents; AWS shapes live in botocore.
-#   notes:     free-form hints (gates in our code, quirks, what to focus on)
+#   notes:     free-form guidance (gates in our code, quirks, what to focus on)
 
 openai:
   specs:
