@@ -373,9 +373,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
     async def _on_websocket_connected(self):
         """Run any protocol-specific setup once the connection is open."""
 
-    async def _after_input_sent(self, context_id: str):
-        """Run any protocol-specific follow-up after text is sent for synthesis."""
-
     def _clear_connection_state(self):
         """Drop per-connection context bookkeeping after the socket closes."""
 
@@ -585,7 +582,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
                     logger.trace(f"Created new context {context_id}")
 
                 await self._send_text(text, context_id)
-                await self._after_input_sent(context_id)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield TTSStoppedFrame(context_id=context_id)

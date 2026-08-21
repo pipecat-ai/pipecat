@@ -124,9 +124,6 @@ class _DialogueContext:
             Flushing without new text would add a batch the server never
             acknowledges, unbalancing ``outstanding_batches``.
         outstanding_batches: Flushed generation batches not yet acknowledged.
-        batches_flushed: Total batches flushed since the context opened. Unlike
-            ``outstanding_batches`` it only ever increases, so it identifies a
-            batch in logs.
         close_when_drained: Whether the turn has ended and the context should
             close once its batches are done.
         alignment_started: Whether an alignment message has been seen, so
@@ -137,7 +134,6 @@ class _DialogueContext:
     new_turn_pending: bool = True
     has_unflushed_text: bool = False
     outstanding_batches: int = 0
-    batches_flushed: int = 0
     close_when_drained: bool = False
     alignment_started: bool = False
 
@@ -240,6 +236,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     async def flush_audio(self, context_id: str | None = None):
         """Force generation of any text still held in the server-side buffer.
 
+        Text accumulates until roughly 40 characters and 8 words, at which
+        point the server starts generating on its own, so a turn is usually
+        under way before the end-of-turn flush covers what is left.
+
         Each flush starts one generation batch, which the server acknowledges
         with an ``is_final_audio_for_turn``. A flush with no new text behind it
         is skipped so that batches sent and batches acknowledged stay in step —
@@ -258,10 +258,8 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
         context.has_unflushed_text = False
         context.outstanding_batches += 1
-        context.batches_flushed += 1
         logger.trace(
-            f"{self}: flushing context {flush_id} "
-            f"(batch {context.batches_flushed}, {context.outstanding_batches} outstanding)"
+            f"{self}: flushing context {flush_id} ({context.outstanding_batches} outstanding)"
         )
         await self._websocket.send(json.dumps({"context_id": flush_id, "flush": True}))
 
@@ -371,7 +369,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if received_ctx_id == _KEEPALIVE_CONTEXT_ID:
             return
 
-        # One acknowledgement per flushed batch; several arrive per turn.
+        # One acknowledgement per explicit flush. Batches the server starts
+        # on its own, once enough text has accumulated, are not acknowledged,
+        # so the count only ever tracks flushes we sent.
         if msg.get("is_final_audio_for_turn") is True:
             context = self._contexts.get(received_ctx_id)
             if context:
@@ -498,16 +498,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             msg["voice_settings"] = self._voice_settings
         await self._get_websocket().send(json.dumps(msg))
         self._contexts[context_id] = _DialogueContext()
-
-    async def _after_input_sent(self, context_id: str):
-        """Flush so the server generates text below its buffering threshold.
-
-        Text-to-Dialogue holds input until roughly 40 characters and 8 words
-        accumulate. Without a flush per synthesis request, no audio arrives
-        until the end-of-turn flush, so playback can't start until the LLM has
-        finished the whole response.
-        """
-        await self.flush_audio(context_id)
 
     async def _send_text(self, text: str, context_id: str):
         """Send text to the WebSocket for synthesis."""
