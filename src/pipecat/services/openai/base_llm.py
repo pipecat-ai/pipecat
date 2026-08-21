@@ -72,6 +72,13 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
+@dataclass
+class _StreamedToolCall:
+    function_name: str = ""
+    arguments: str = ""
+    tool_call_id: str = ""
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -434,13 +441,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
-        functions_list = []
-        arguments_list = []
-        tool_id_list = []
-        func_idx = 0
-        function_name = ""
-        arguments = ""
-        tool_call_id = ""
+        streamed_tool_calls: dict[int, _StreamedToolCall] = {}
 
         await self.start_ttfb_metrics()
 
@@ -523,21 +524,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         # the response is done, we package up all the arguments and the function name and
                         # yield a frame containing the function name and the arguments.
 
-                        tool_call = chunk.choices[0].delta.tool_calls[0]
-                        if tool_call.index != func_idx:
-                            functions_list.append(function_name)
-                            arguments_list.append(arguments or "{}")
-                            tool_id_list.append(tool_call_id)
-                            function_name = ""
-                            arguments = ""
-                            tool_call_id = ""
-                            func_idx += 1
-                        if tool_call.function and tool_call.function.name:
-                            function_name += tool_call.function.name
-                            tool_call_id = tool_call.id
-                        if tool_call.function and tool_call.function.arguments:
-                            # Keep iterating through the response to collect all the argument fragments
-                            arguments += tool_call.function.arguments
+                        for tool_call in chunk.choices[0].delta.tool_calls:
+                            elem = streamed_tool_calls.setdefault(
+                                tool_call.index, _StreamedToolCall()
+                            )
+                            if tool_call.id:
+                                elem.tool_call_id = tool_call.id
+                            if tool_call.function and tool_call.function.name:
+                                elem.function_name += tool_call.function.name
+                            if tool_call.function and tool_call.function.arguments:
+                                # Keep iterating through the response to collect all argument fragments.
+                                elem.arguments += tool_call.function.arguments
                     elif chunk.choices[0].delta.content:
                         await self._push_llm_text(chunk.choices[0].delta.content)
 
@@ -560,17 +557,19 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name:
-            # added to the list as last function name and arguments not added to the list
-            functions_list.append(function_name)
-            arguments_list.append(arguments or "{}")
-            tool_id_list.append(tool_call_id)
-
+        if streamed_tool_calls:
             function_calls = []
 
-            for function_name, arguments, tool_id in zip(
-                functions_list, arguments_list, tool_id_list
-            ):
+            for _, tool_call in sorted(streamed_tool_calls.items()):
+                if not tool_call.tool_call_id or not tool_call.function_name:
+                    logger.warning(
+                        f"{self}: skipping tool call with empty id/name "
+                        f"function_name={tool_call.function_name!r} "
+                        f"tool_call_id={tool_call.tool_call_id!r}"
+                    )
+                    continue
+
+                arguments = tool_call.arguments or "{}"
                 try:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
@@ -579,13 +578,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 function_calls.append(
                     FunctionCallFromLLM(
                         context=context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
+                        tool_call_id=tool_call.tool_call_id,
+                        function_name=tool_call.function_name,
                         arguments=arguments,
                     )
                 )
 
-            await self.run_function_calls(function_calls)
+            if function_calls:
+                await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
