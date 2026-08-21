@@ -21,6 +21,7 @@ from pipecat.metrics.metrics import (
     STTUsageMetricsData,
     TextAggregationMetricsData,
     TTFAMetricsData,
+    TTFATMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -58,6 +59,10 @@ class FrameProcessorMetrics(BaseObject):
         # Audio is buffered across chunks until a sustained onset is confirmed.
         self._ttfa_active = False
         self._ttfa_buffer = b""
+        # TTFAT (time-to-first-answer-token) state. TTFAT extends TTFB the same
+        # way, so it keeps the request start that stop_ttfb_metrics clears.
+        self._ttfat_active = False
+        self._start_ttfat_time = 0
 
     @property
     def ttfb(self) -> float | None:
@@ -109,6 +114,12 @@ class FrameProcessorMetrics(BaseObject):
                 uses the current time.
             report_only_initial_ttfb: Whether to report only the first TTFB measurement.
         """
+        # A response that was interrupted before its first answer token leaves
+        # TTFAT armed; drop it so this request measures its own. This is TTFAT
+        # state rather than TTFB reporting policy, so it happens regardless of
+        # whether this request's TTFB will be reported.
+        self._ttfat_active = False
+        self._start_ttfat_time = 0
         if self._should_report_ttfb:
             self._start_ttfb_time = start_time or time.time()
             self._last_ttfb_time = 0
@@ -144,11 +155,15 @@ class FrameProcessorMetrics(BaseObject):
         ttfb = TTFBMetricsData(
             processor=self._processor_name(), value=self._last_ttfb_time, model=self._model_name()
         )
-        self._start_ttfb_time = 0
         # The first byte has arrived; begin scanning leading silence so TTFA can
         # be reported as TTFB plus the silence duration (see process_ttfa_metrics).
         self._ttfa_active = True
         self._ttfa_buffer = b""
+        # Likewise for TTFAT, which needs the request start that is cleared below
+        # (see stop_ttfat_metrics).
+        self._ttfat_active = True
+        self._start_ttfat_time = self._start_ttfb_time
+        self._start_ttfb_time = 0
         return MetricsFrame(data=[ttfb])
 
     async def process_ttfa_metrics(self, *, audio: bytes, sample_rate: int, num_channels: int):
@@ -202,6 +217,47 @@ class FrameProcessorMetrics(BaseObject):
         self._ttfa_active = False
         self._ttfa_buffer = b""
         return MetricsFrame(data=[ttfa])
+
+    async def stop_ttfat_metrics(self, *, end_time: float | None = None):
+        """Stop TTFAT measurement and generate metrics frame.
+
+        TTFAT extends TTFB: it runs from the same request start but ends at the
+        first token of the answer the caller sees, so anything the model streams
+        first — reasoning, most often — falls between the two. Measuring it at
+        the point a service produces the token, rather than where the pipeline
+        releases it, keeps buffering downstream of the service out of the number.
+
+        Only the first call per measurement takes effect, so services can call
+        this from every branch that produces an answer — streamed text, and the
+        start of a tool call on a turn that answers with one instead of text.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+
+        Returns:
+            MetricsFrame containing TTFAT data, or None if not measuring.
+        """
+        if not self._ttfat_active or self._start_ttfat_time == 0:
+            return None
+
+        end_time = end_time or time.time()
+
+        value = end_time - self._start_ttfat_time
+        thinking_time = value - self._last_ttfb_time
+        logger.debug(
+            f"{self._processor_name()} TTFAT: {value:.3f}s ({thinking_time:.3f}s thinking)"
+        )
+        ttfat = TTFATMetricsData(
+            processor=self._processor_name(),
+            ttfat=value,
+            ttfb=self._last_ttfb_time,
+            thinking_time=thinking_time,
+            model=self._model_name(),
+        )
+        self._ttfat_active = False
+        self._start_ttfat_time = 0
+        return MetricsFrame(data=[ttfat])
 
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start measuring processing time.

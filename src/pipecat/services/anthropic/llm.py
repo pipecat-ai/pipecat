@@ -462,6 +462,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
                         tool_use_block = event.content_block
                         json_accumulator = ""
                     elif event.content_block.type == "thinking":

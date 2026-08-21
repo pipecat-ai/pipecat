@@ -530,6 +530,18 @@ class FrameProcessor(BaseObject):
             if metrics_frame:
                 await self.push_frame(metrics_frame)
 
+    async def stop_ttfat_metrics(self, *, end_time: float | None = None):
+        """Stop time-to-first-answer-token metrics collection and push results.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+        """
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_ttfat_metrics(end_time=end_time)
+            if frame:
+                await self.push_frame(frame)
+
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start processing metrics collection.
 
