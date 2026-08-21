@@ -10,7 +10,7 @@ Goal: decide within a handful of tool calls whether anything changed since the p
 
 1. Read `previous_report_file` if it is not null. Note its `models_seen`, `sources[].latest_entry`, `default_model`, `prs`, and `open_items`.
 2. Compare `unit.default_model` (today's code) with the previous report's `default_model`. A change means a maintainer already acted; note it.
-3. Run `uv run python scripts/provider-watch/probe.py list-models --provider <provider>` (skip under `probe_enabled: false`). Exit 3 means no catalogue — fall back to the docs. Diff the result against `models_seen`.
+3. Run `uv run python scripts/provider-watch/probe.py list-models --provider <provider>`. Exit 3 means no catalogue — fall back to the docs. Diff the result against `models_seen`.
 4. Fetch the provider's changelog / release-notes page (`providers.yaml` has the URL for the major providers; otherwise the docs URL in the unit, then WebSearch `"<provider> changelog"`). Compare the first entry with the previous `sources[].latest_entry`.
 5. If the previous report's `prs` has open PRs, check their state with `gh pr view <url> --json state,mergedAt` and carry them forward.
 
@@ -38,8 +38,6 @@ Every claim that something "works" or "is faster" needs a probe. Tiers, cheapest
 2. `uv run python scripts/provider-watch/probe.py run --service <Class> --model <current> --model <candidate> --json` — one real turn through the actual Pipecat class (LLM text, TTS audio, STT transcript; realtime is a connect check). Pass both the current default and the candidate in one call so latency is comparable. Latency comes from the service's own metrics: `ttfb_ms` for every type; for LLMs also `ttfat_ms` (first answer token) and `thinking_ms` — judge LLMs on `ttfat_ms`, since a reasoning model's TTFB ends at its first reasoning token. Use `--setting key=value` / `--kwarg key=value` for a required voice, region, or endpoint (JSON for dict values: `--setting 'extra={"reasoning_effort":"low"}'`); `--json` output is safe to paste into the report. Exit 2 means a credential is missing — record `status: blocked` with the variable **name** if that blocks the unit.
 3. An ad-hoc script in `scratch_dir` — only when `probe.py` cannot answer the question (a new API affordance, a parameter the `Settings` lacks). Keep it to a handful of calls, never loop over models, and scrub output for secrets before quoting it.
 4. Behavioral evals (`uv run pipecat eval suite scripts/release-evals/manifest.yaml -p <bot> -s <scenario> -n pw-<unit>`) — only when `curl -s localhost:11434/api/tags` succeeds (a local judge is running) and from inside a PR worktree after editing the example's `model=` literal. Never in CI; never as the first probe.
-
-`probe_enabled: false` means none of the above: write what the docs say, mark claims as unverified, and do not open PRs.
 
 Probes cost real money on real accounts: at most a few calls per model, no retries in loops, no long audio.
 
