@@ -882,8 +882,9 @@ class PipelineWorker(BaseWorker):
         Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
         the sink bounces it back upstream and the source sets its event once it
         completes the round-trip, signalling that every frame queued ahead of it
-        has been processed. The probe is injected straight into the pipeline so
-        it bypasses any ``queue_frame`` override (e.g. tool-call deferral).
+        has been processed. The probe goes on the worker's push queue, behind
+        whatever is already waiting there, and bypasses any ``queue_frame``
+        override (e.g. tool-call deferral).
 
         Args:
             timeout: Seconds to wait before giving up. On timeout a warning is
@@ -894,7 +895,7 @@ class PipelineWorker(BaseWorker):
             True if the pipeline drained, False if the wait timed out.
         """
         event = asyncio.Event()
-        await self._pipeline.queue_frame(PipelineFlushFrame(event=event))
+        await self._push_queue.put(PipelineFlushFrame(event=event))
         try:
             await asyncio.wait_for(event.wait(), timeout)
             return True
