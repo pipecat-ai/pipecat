@@ -25,6 +25,12 @@ request to the first output frame. Compare LLM candidates on ``ttfat_ms``.
 ``list-models`` queries the provider's model catalogue where one exists
 (OpenAI-compatible ``/models``, Anthropic, Google, Deepgram, ElevenLabs).
 
+``signals`` gathers the cheap change signals a researcher compares against the
+previous report: the latest PyPI version of each SDK the provider's extra
+depends on, and a content hash of each published API spec listed for the
+provider in ``providers.yaml`` (or passed with ``--spec``). Specs are
+snapshotted under the reports checkout so ``git diff`` shows what changed.
+
 Credentials come from the repo's ``.env`` loaded *without* override, so exported
 variables win and CI runs without a ``.env`` at all (``--no-dotenv`` ignores it). Every value
 of a secret-looking environment variable is redacted from output. Only the
@@ -33,6 +39,7 @@ variable *names* of missing credentials are printed. Run::
     uv run python scripts/provider-watch/probe.py run --service CartesiaTTSService --model sonic-3.5
     uv run python scripts/provider-watch/probe.py run --service OpenAILLMService --model gpt-4.1 --model gpt-5 --json
     uv run python scripts/provider-watch/probe.py list-models --provider groq
+    uv run python scripts/provider-watch/probe.py signals --provider deepgram
 
 Exit codes: 0 all probes passed · 1 a probe failed · 2 missing credentials ·
 3 unsupported (no probe for this service type / no model catalogue for this provider).
@@ -42,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import importlib
 import inspect
 import json
@@ -49,6 +57,7 @@ import os
 import re
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import wave
@@ -63,6 +72,9 @@ sys.path.insert(0, str(HERE))
 import inventory  # noqa: E402
 
 DEFAULT_WAV = HERE / "assets" / "speech-16k.wav"
+PROVIDERS_YAML = inventory.REPO_ROOT / ".claude" / "skills" / "provider-watch" / "providers.yaml"
+PYPROJECT = inventory.REPO_ROOT / "pyproject.toml"
+DEFAULT_SPECS_DIR = inventory.REPO_ROOT / "_reports" / "specs"
 DEFAULT_TEXT = "In one short sentence, what is the capital of France?"
 DEFAULT_TTS_TEXT = "Hello from Pipecat. This is a short synthesis check."
 MAX_MODELS_PER_RUN = 3
@@ -641,6 +653,141 @@ def cmd_list_models(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# ---------------------------------------------------------------------- signals
+
+
+def _http_bytes(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "pipecat-provider-watch"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read()
+
+
+def provider_hints(provider: str) -> dict:
+    """The provider's entry in providers.yaml, or an empty dict."""
+    import yaml
+
+    if not PROVIDERS_YAML.exists():
+        return {}
+    data = yaml.safe_load(PROVIDERS_YAML.read_text()) or {}
+    return data.get(provider) or {}
+
+
+def sdk_requirements(provider: str, units: list[inventory.Unit]) -> list[str]:
+    """Requirement strings from pyproject extras backing this provider's services.
+
+    The extras are the provider directory name and whatever the CLI registry lists
+    for its units; providers with no SDK of their own (OpenAI-compatible wrappers
+    and OpenAI itself) fall back to the core ``openai`` dependency.
+    """
+    project = tomllib.load(PYPROJECT.open("rb"))["project"]
+    extras = project.get("optional-dependencies", {})
+    names = {provider.replace("_", "-")}
+    for unit in units:
+        for entry in unit.registry:
+            package = entry.get("package") or ""
+            if "[" in package:
+                names.update(e.strip() for e in package.split("[")[1].split("]")[0].split(","))
+    requirements: list[str] = []
+    for name in sorted(names):
+        for requirement in extras.get(name, []):
+            if requirement.startswith("pipecat-ai[") or requirement in requirements:
+                continue
+            requirements.append(requirement)
+    if not requirements and (provider == "openai" or any(u.is_thin_wrapper for u in units)):
+        requirements.extend(
+            r
+            for r in project["dependencies"]
+            if r.split("[")[0].split(">")[0].split("<")[0].split("=")[0].strip() == "openai"
+        )
+    return requirements
+
+
+def pypi_latest(requirement: str) -> dict:
+    from packaging.requirements import Requirement
+
+    name = Requirement(requirement).name
+    try:
+        data = json.loads(_http_bytes(f"https://pypi.org/pypi/{name}/json"))
+    except Exception as e:  # network or unknown package
+        return {"package": name, "requirement": requirement, "error": str(e)}
+    version = data["info"]["version"]
+    files = data.get("releases", {}).get(version) or []
+    released = max(
+        (f.get("upload_time_iso_8601") or f.get("upload_time") or "" for f in files), default=""
+    )
+    return {
+        "package": name,
+        "requirement": requirement,
+        "latest": version,
+        "released": released[:10],
+    }
+
+
+def spec_snapshot(name: str, url: str, snapshot_dir: Path | None) -> dict:
+    """Fetch one API spec, hash it, and note whether it differs from the snapshot on disk."""
+    try:
+        content = _http_bytes(url)
+    except Exception as e:
+        return {"name": name, "url": url, "error": str(e)}
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    result = {"name": name, "url": url, "sha256": digest, "bytes": len(content)}
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        path = snapshot_dir / name
+        previous = path.read_bytes() if path.exists() else None
+        result["changed"] = previous != content
+        result["new"] = previous is None
+        if previous != content:
+            path.write_bytes(content)
+        result["path"] = str(path)
+    return result
+
+
+def cmd_signals(args: argparse.Namespace) -> int:
+    provider = args.provider
+    units = [u for u in inventory.scan_services() if u.provider == provider]
+    if not units:
+        print(f"unknown provider {provider!r}; see inventory.py --md", file=sys.stderr)
+        return EXIT_UNSUPPORTED
+    inventory.enrich(units)
+    hints = provider_hints(provider)
+
+    sdks = [pypi_latest(r) for r in sdk_requirements(provider, units)]
+
+    specs = list(hints.get("specs") or [])
+    for item in args.spec or []:
+        name, sep, url = item.partition("=")
+        if not sep:
+            raise SystemExit(f"expected name=url, got {item!r}")
+        specs.append({"name": name, "url": url})
+    snapshot_dir = (
+        None if args.no_snapshot else Path(args.snapshot_dir or DEFAULT_SPECS_DIR / provider)
+    )
+    spec_results = [spec_snapshot(spec["name"], spec["url"], snapshot_dir) for spec in specs]
+
+    out = {"provider": provider, "sdks": sdks, "specs": spec_results}
+    if args.json:
+        print(json.dumps(out, indent=2))
+    else:
+        for sdk in sdks:
+            latest = sdk.get("latest", "?")
+            tail = (
+                f" ({sdk['released']})"
+                if sdk.get("released")
+                else (f" — {sdk['error']}" if sdk.get("error") else "")
+            )
+            print(f"sdk   {sdk['package']:<28} pin {sdk['requirement']:<40} latest {latest}{tail}")
+        for spec in spec_results:
+            if spec.get("error"):
+                print(f"spec  {spec['name']:<28} ERROR {spec['error']} ({spec['url']})")
+                continue
+            state = (
+                "new" if spec.get("new") else ("CHANGED" if spec.get("changed") else "unchanged")
+            )
+            print(f"spec  {spec['name']:<28} sha256 {spec['sha256']} {spec['bytes']:>9} B  {state}")
+    return EXIT_OK
+
+
 # ------------------------------------------------------------------------- main
 
 
@@ -687,6 +834,18 @@ def main(argv: list[str] | None = None) -> int:
     lm.add_argument("--base-url", help="override the OpenAI-compatible base URL")
     lm.add_argument("--json", action="store_true")
     lm.set_defaults(func=cmd_list_models)
+
+    sg = sub.add_parser("signals", help="SDK versions on PyPI and API spec hashes for a provider")
+    sg.add_argument("--provider", required=True, help="provider directory name, e.g. deepgram")
+    sg.add_argument("--spec", action="append", metavar="NAME=URL", help="extra spec to fetch")
+    sg.add_argument(
+        "--snapshot-dir", help="where spec snapshots live (default: _reports/specs/<provider>)"
+    )
+    sg.add_argument(
+        "--no-snapshot", action="store_true", help="hash only; do not read or write snapshots"
+    )
+    sg.add_argument("--json", action="store_true")
+    sg.set_defaults(func=cmd_signals)
 
     args = parser.parse_args(argv)
     return args.func(args)

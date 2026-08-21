@@ -13,9 +13,10 @@ The report is a snapshot of the gap between the provider and Pipecat *today*. It
 3. For each previous `prs` entry with a URL, `gh pr view <url> --json state,mergedAt,url`. Merged ⇒ the gap is closed (drop it; the code will show the change). Closed unmerged ⇒ `decided` with the PR as `source`. Open ⇒ carry it forward as-is.
 4. Compare `unit.default_model` (today's code) with the previous report's `default_model`; a change means a maintainer acted and some gaps may be gone.
 5. Run `uv run python scripts/provider-watch/probe.py list-models --provider <provider>`. Exit 3 means no catalogue — fall back to the docs. Diff the result against `models_seen`.
-6. Fetch the provider's changelog / release-notes page (`providers.yaml` has the URL for the major providers; otherwise the docs URL in the unit, then WebSearch `"<provider> changelog"`). Compare the first entry with the previous `sources[].latest_entry`.
+6. Run `uv run python scripts/provider-watch/probe.py signals --provider <provider>`. It reports the latest PyPI version of each SDK the provider's extra depends on, and a content hash of each published API spec known for the provider (`providers.yaml` `specs`, plus any `--spec name=url` you add), snapshotting the specs under `<reports_path>/specs/<provider>/`. Compare against the previous `sources`. A **changed spec** is the strongest signal there is for an API change, including nested request fields: `git -C <reports_path> diff -- specs/<provider>/<name>` shows exactly what moved — read the hunks that touch the endpoints and schemas our classes use. A new SDK version is a prompt to read its release notes.
+7. Fetch the provider's changelog / release-notes page. Prefer the URLs recorded in the previous report's `sources` — they are known to work; `providers.yaml` seeds a first run; otherwise the docs URL in the unit, then WebSearch `"<provider> changelog"`. Compare the first entry with the previous `sources[].latest_entry`. If a recorded URL is dead, find the replacement and record that instead; the next run inherits it.
 
-**Nothing changed upstream** — same catalogue, same latest changelog entry, same default in code — means the previous report's gaps are still the gaps. Re-verify them briefly against the code (a maintainer may have fixed one by hand), apply any new decisions, write the report with refreshed `date`/`pipecat_commit`/`models_seen`/`sources`, and stop. Aim to be done by your 8th tool call.
+**Nothing changed upstream** — same catalogue, same SDK versions, same spec hashes, same latest changelog entry, same default in code — means the previous report's gaps are still the gaps. Re-verify them briefly against the code (a maintainer may have fixed one by hand), apply any new decisions, write the report with refreshed `date`/`pipecat_commit`/`models_seen`/`sources`, and stop. Aim to be done by your 8th tool call.
 
 Otherwise do the full research below. On a **first run** there is no previous report and no early path; keep the report proportionate — a service that is already current gets a short one.
 
@@ -86,7 +87,7 @@ In the worktree:
 
 - Follow `REPORT_TEMPLATE.md` exactly; write to `report_file` (the absolute path in the payload), creating directories as needed. Overwrite if it exists (re-run). `report_path` is the repo-relative form for the return line.
 - Be concise: a maintainer should get the verdict from the first two lines. Empty sections say `Nothing.`; do not pad.
-- `models_seen` is the sorted catalogue (or the list from the docs); `sources` holds every page/endpoint you relied on with the first entry you saw, so the next run's delta check is cheap.
+- `models_seen` is the sorted catalogue (or the list from the docs); `sources` holds every page/endpoint you relied on with the first entry you saw — changelog pages, `list-models`, each SDK (`pypi:<package>` with the latest version and date), each spec (its URL with the hash) — so the next run's delta check is a string comparison. Record the URL you actually used, not the one you were given.
 - Never write credentials, `Authorization` headers, or raw error payloads that may contain them. Never mention the contents of `.env`.
 
 ## Return value

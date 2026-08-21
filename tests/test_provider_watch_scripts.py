@@ -405,3 +405,61 @@ class TestPublish:
             cap=8,
         )
         assert len(outcome.skipped) == 3 and not outcome.opened
+
+
+class TestSignals:
+    """probe.py signals: SDK derivation from pyproject and spec snapshotting, no network."""
+
+    @pytest.fixture
+    def probe(self):
+        import probe
+
+        return probe
+
+    def test_sdk_requirements_come_from_pyproject_extras(self, probe, units):
+        deepgram = [u for u in units if u.provider == "deepgram"]
+        reqs = probe.sdk_requirements("deepgram", deepgram)
+        assert any(r.startswith("deepgram-sdk") for r in reqs)
+        assert not any(r.startswith("pipecat-ai") for r in reqs)
+
+        google = [u for u in units if u.provider == "google"]
+        names = {
+            r.split(">")[0].split("<")[0].split("=")[0]
+            for r in probe.sdk_requirements("google", google)
+        }
+        assert {"google-genai", "google-cloud-speech", "google-cloud-texttospeech"} <= names
+
+    def test_thin_wrappers_fall_back_to_openai(self, probe, units):
+        groq = [u for u in units if u.provider == "groq"]
+        reqs = probe.sdk_requirements("groq", groq)
+        assert any(r.startswith("groq") for r in reqs)  # groq has its own extra
+        cerebras = [u for u in units if u.provider == "cerebras"]
+        reqs = probe.sdk_requirements("cerebras", cerebras)
+        assert reqs and all(r.startswith("openai") for r in reqs)
+
+    def test_spec_snapshot_detects_change(self, probe, tmp_path, monkeypatch):
+        payloads = iter(
+            [b"openapi: 3.0\npaths: {}\n", b"openapi: 3.0\npaths: {}\n", b"openapi: 3.1\n"]
+        )
+        monkeypatch.setattr(probe, "_http_bytes", lambda url: next(payloads))
+
+        first = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
+        assert first["new"] and first["changed"] and (tmp_path / "spec.yml").exists()
+        second = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
+        assert not second["new"] and not second["changed"] and second["sha256"] == first["sha256"]
+        third = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
+        assert third["changed"] and third["sha256"] != first["sha256"]
+        assert (tmp_path / "spec.yml").read_bytes() == b"openapi: 3.1\n"
+
+    def test_spec_fetch_failure_is_reported_not_raised(self, probe, tmp_path, monkeypatch):
+        def boom(url):
+            raise OSError("nope")
+
+        monkeypatch.setattr(probe, "_http_bytes", boom)
+        result = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
+        assert result["error"] == "nope" and not (tmp_path / "spec.yml").exists()
+
+    def test_provider_hints_have_named_specs(self, probe):
+        hints = probe.provider_hints("deepgram")
+        assert all({"name", "url"} <= set(spec) for spec in hints["specs"])
+        assert probe.provider_hints("nosuchprovider") == {}

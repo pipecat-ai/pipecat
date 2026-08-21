@@ -28,6 +28,10 @@ sources:                                   # what the next run's delta check com
     latest_entry: "2026-08-12 — Sonic 3.5 generally available"
   - url: probe.py list-models --provider cartesia
     latest_entry: "unsupported"            # or the number of models returned
+  - url: pypi:cartesia                     # one per SDK from probe.py signals
+    latest_entry: "2.1.0 (2026-08-03)"
+  - url: https://raw.githubusercontent.com/cartesia-ai/cartesia-python/main/.stats.yml
+    latest_entry: "sha256 3f9c1a2b7d10"    # one per spec from probe.py signals
 gaps:                                      # what Pipecat should consider; see below
   - item: Default sonic-3.5 is superseded by sonic-4 (GA 2026-08-12)
     first_seen: 2026-08-20
