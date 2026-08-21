@@ -8,7 +8,7 @@
 
 The pipeline is two processors long::
 
-    OpenClawGatewayProcessor -> RunCollector
+    OpenClawGatewayService -> RunCollector
 
 The processor turns the Gateway's websocket traffic into frames, and the
 collector folds one run's frames into the single answer a voice loop can speak.
@@ -32,12 +32,13 @@ from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.openclaw import (
+from pipecat.services.openclaw.client import (
     DEFAULT_GATEWAY_URL,
     DEFAULT_SESSION_KEY,
-    OpenClawAbortFrame,
     OpenClawGatewayClient,
-    OpenClawGatewayProcessor,
+)
+from pipecat.services.openclaw.frames import (
+    OpenClawAbortFrame,
     OpenClawRunCancelledFrame,
     OpenClawRunCompletedFrame,
     OpenClawRunFailedFrame,
@@ -46,6 +47,7 @@ from pipecat.services.openclaw import (
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
+from pipecat.services.openclaw.processor import OpenClawGatewayService
 
 WORKER_NAME = "openclaw-agent"
 
@@ -153,7 +155,7 @@ class OpenClawAgentWorker(PipelineWorker):
         """
         pipeline = Pipeline(
             [
-                OpenClawGatewayProcessor(client),
+                OpenClawGatewayService(client),
                 RunCollector(self._on_run_started, self._on_run_result),
             ]
         )

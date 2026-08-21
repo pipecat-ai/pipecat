@@ -13,7 +13,7 @@ republishes that socket on the host, which is how a bot outside the sandbox
 talks to an agent inside one.
 
 This module deals in runs and events. Turning those into frames is
-:class:`~pipecat.services.openclaw.processor.OpenClawGatewayProcessor`'s job.
+:class:`~pipecat.services.openclaw.processor.OpenClawGatewayService`'s job.
 
 The client targets the Gateway as OpenClaw v2026.6.1 speaks it. Where the
 Gateway does something surprising, the surprise is written down at the method
@@ -206,7 +206,7 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         token: str | None = None,
         password: str | None = None,
         session_key: str = DEFAULT_SESSION_KEY,
-        connect_timeout: float = 30.0,
+        connect_timeout: float = 15.0,
         request_timeout: float = 30.0,
         run_timeout: float = 300.0,
         scopes: list[str] | None = None,
@@ -230,7 +230,10 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
             password: Gateway password, if the deployment uses one instead.
             session_key: Which OpenClaw session to run in. Runs against the
                 same key share conversation history.
-            connect_timeout: Seconds to wait for the handshake.
+            connect_timeout: Seconds to wait for the handshake. The service
+                connects while the pipeline sets up, which the pipeline bounds
+                by its own ``setup_timeout_secs``, so a value above that budget
+                never gets to report an unreachable Gateway itself.
             request_timeout: Seconds to wait for a Gateway method to answer.
                 Does not apply to a run, which streams for as long as it takes.
             run_timeout: Seconds the agent is given to finish a run, sent to

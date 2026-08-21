@@ -14,7 +14,7 @@ websocket. They meet only at the bus, over jobs.
 Architecture::
 
     Voice loop (transport + LLM + send/stop/status tools)
-      └── job → Agent loop (OpenClawGatewayProcessor)
+      └── job → Agent loop (OpenClawGatewayService)
                   └── websocket → OpenClaw Gateway
 
 The voice LLM makes one judgment per turn: answer the user itself, or

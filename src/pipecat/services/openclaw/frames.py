@@ -8,7 +8,7 @@
 
 The command frames mirror the Gateway's three methods, and the run frames
 mirror what its ``chat`` event stream reports.
-:class:`~pipecat.services.openclaw.processor.OpenClawGatewayProcessor` is what
+:class:`~pipecat.services.openclaw.processor.OpenClawGatewayService` is what
 translates between them and the socket.
 """
 

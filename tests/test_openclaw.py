@@ -26,7 +26,7 @@ from pipecat.services.openclaw.frames import (
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
-from pipecat.services.openclaw.processor import OpenClawGatewayProcessor
+from pipecat.services.openclaw.processor import OpenClawGatewayService
 from pipecat.tests.utils import SleepFrame, run_test
 from tests.openclaw_fake_gateway import FakeGateway
 
@@ -331,13 +331,13 @@ class TestOpenClawGatewayClient(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.client._pending)
 
 
-class TestOpenClawGatewayProcessor(unittest.IsolatedAsyncioTestCase):
+class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
     """The processor, driven through a pipeline."""
 
     async def asyncSetUp(self):
         self.gateway = await FakeGateway().__aenter__()
         self.client = OpenClawGatewayClient(url=self.gateway.url, token="test-token")
-        self.processor = OpenClawGatewayProcessor(self.client)
+        self.processor = OpenClawGatewayService(self.client)
 
     async def asyncTearDown(self):
         await self.gateway.__aexit__(None, None, None)
@@ -486,7 +486,7 @@ class TestOpenClawGatewayProcessor(unittest.IsolatedAsyncioTestCase):
         client = OpenClawGatewayClient(url=self.gateway.url, connect_timeout=1.0)
 
         await run_test(
-            OpenClawGatewayProcessor(client),
+            OpenClawGatewayService(client),
             frames_to_send=[SleepFrame()],
             expected_down_frames=[],
             expected_up_frames=[ErrorFrame],

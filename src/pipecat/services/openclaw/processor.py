@@ -4,19 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A pipeline processor for the OpenClaw Gateway."""
+"""A pipeline service for the OpenClaw Gateway."""
 
 import asyncio
 from contextlib import suppress
 
 from loguru import logger
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame
 from pipecat.processors.frame_processor import (
     FrameDirection,
-    FrameProcessor,
     FrameProcessorSetup,
 )
+from pipecat.services.ai_service import AIService
 from pipecat.services.openclaw.client import OpenClawGatewayClient, OpenClawRun
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
@@ -28,9 +28,10 @@ from pipecat.services.openclaw.frames import (
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
+from pipecat.services.settings import ServiceSettings
 
 
-class OpenClawGatewayProcessor(FrameProcessor):
+class OpenClawGatewayService(AIService):
     """Turns OpenClaw Gateway traffic into frames, and frames into Gateway calls.
 
     Downstream, :class:`~pipecat.services.openclaw.frames.OpenClawSendFrame`
@@ -42,8 +43,8 @@ class OpenClawGatewayProcessor(FrameProcessor):
     started frame and one terminal frame.
 
     An agent run is not a spoken turn: it can take minutes and it answers in
-    prose. What that should sound like belongs to a service wrapping this
-    processor, which is why nothing here reads or writes conversational frames.
+    prose. What that should sound like belongs to whatever wraps this, which
+    is why nothing here reads or writes conversational frames.
 
     A session runs one turn at a time, so a send arriving while a run is live
     stops that run first. Every started frame is followed by exactly one
@@ -51,19 +52,19 @@ class OpenClawGatewayProcessor(FrameProcessor):
 
     Example::
 
-        processor = OpenClawGatewayProcessor(
+        service = OpenClawGatewayService(
             OpenClawGatewayClient(token=os.getenv("OPENCLAW_TOKEN"))
         )
     """
 
     def __init__(self, client: OpenClawGatewayClient, **kwargs):
-        """Initialize the processor.
+        """Initialize the service.
 
         Args:
             client: The Gateway client to drive.
-            **kwargs: Additional arguments passed to :class:`FrameProcessor`.
+            **kwargs: Additional arguments passed to :class:`AIService`.
         """
-        super().__init__(**kwargs)
+        super().__init__(settings=ServiceSettings(model=None), **kwargs)
         self._client = client
         self._run: OpenClawRun | None = None
         self._stream_task: asyncio.Task | None = None
@@ -71,11 +72,14 @@ class OpenClawGatewayProcessor(FrameProcessor):
 
     @property
     def client(self) -> OpenClawGatewayClient:
-        """The Gateway client this processor drives."""
+        """The Gateway client this service drives."""
         return self._client
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Wire the client up with the pipeline's task manager.
+        """Wire the client up with the pipeline's task manager, and connect.
+
+        Connecting here rather than on the ``StartFrame`` overlaps the Gateway
+        handshake with the rest of the pipeline setting up.
 
         Args:
             setup: Configuration parameters for the frame processor.
@@ -87,11 +91,36 @@ class OpenClawGatewayProcessor(FrameProcessor):
         async def _on_connection_error(client, message: str):
             await self.push_error(message)
 
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the run in flight and close the connection.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._shutdown()
+
+    async def cancel(self, frame: CancelFrame):
+        """Stop the run in flight and close the connection, at once.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._shutdown()
+
     async def cleanup(self):
         """Release the run in flight and the connection."""
         await super().cleanup()
-        await self._stop_run(notify=False)
+        await self._shutdown()
         await self._client.cleanup()
+
+    async def _shutdown(self):
+        """Stop whatever is in flight and let go of the connection."""
+        await self._stop_run(notify=False)
+        await self._client.disconnect()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame, driving the Gateway from the ones addressed to it.
@@ -102,14 +131,7 @@ class OpenClawGatewayProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
-            await self._connect()
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self._stop_run(notify=False)
-            await self._client.disconnect()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, OpenClawSendFrame):
+        if isinstance(frame, OpenClawSendFrame):
             await self._send(frame)
         elif isinstance(frame, OpenClawSteerFrame):
             await self._steer(frame)
@@ -179,7 +201,7 @@ class OpenClawGatewayProcessor(FrameProcessor):
     async def _end(self, frame: Frame):
         """Push a run's terminal frame and let go of the run.
 
-        The processor stops holding a finished run so that a steer or an abort
+        The service stops holding a finished run so that a steer or an abort
         arriving afterwards has nothing to act on. Steering a run the Gateway
         has already finished would start a replacement nobody is streaming.
         """
@@ -198,7 +220,7 @@ class OpenClawGatewayProcessor(FrameProcessor):
         run, self._run = self._run, None
         if run and not run.done:
             with suppress(Exception):
-                await self._client.abort(run, "the processor stopped the run")
+                await self._client.abort(run, "the service stopped the run")
         if self._stream_task:
             await self.cancel_task(self._stream_task)
             self._stream_task = None

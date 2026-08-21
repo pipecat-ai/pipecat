@@ -64,7 +64,7 @@ uv run openclaw-agent/openclaw-agent.py --transport daily
 
 ```
 Voice loop (transport + LLM + send/stop/status tools)
-  └── job → Agent loop (OpenClawGatewayProcessor)
+  └── job → Agent loop (OpenClawGatewayService)
               └── websocket → OpenClaw Gateway
 ```
 
@@ -73,7 +73,7 @@ Voice loop (transport + LLM + send/stop/status tools)
   from the agent loop, so it can stop the work, say what is running, and narrate
   each outcome. Three tools: `send_to_agent`, `stop_agent`, `agent_status`.
 - **[`openclaw_worker.py`](openclaw_worker.py)** — The agent loop: a
-  `PipelineWorker` whose pipeline is `OpenClawGatewayProcessor -> RunCollector`.
+  `PipelineWorker` whose pipeline is `OpenClawGatewayService -> RunCollector`.
   A `run` job becomes the frames that drive a run, and `RunCollector` folds a
   run's frames back into one answer.
 
