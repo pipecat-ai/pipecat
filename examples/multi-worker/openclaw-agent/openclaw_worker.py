@@ -38,11 +38,9 @@ from pipecat.services.openclaw.client import (
 )
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
-    OpenClawRunCancelledFrame,
-    OpenClawRunCompletedFrame,
-    OpenClawRunFailedFrame,
-    OpenClawRunStartedFrame,
+    OpenClawEndFrame,
     OpenClawSendFrame,
+    OpenClawStartedFrame,
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
@@ -104,17 +102,19 @@ class RunCollector(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, OpenClawRunStartedFrame):
+        if isinstance(frame, OpenClawStartedFrame):
             self._parts = []
             await self._on_started(frame.run_id)
         elif isinstance(frame, OpenClawTextFrame):
             self._parts.append(frame.text)
-        elif isinstance(frame, OpenClawRunCompletedFrame):
-            await self._on_result("completed", frame.text or "".join(self._parts).strip())
-        elif isinstance(frame, OpenClawRunCancelledFrame):
-            await self._on_result("cancelled", frame.text)
-        elif isinstance(frame, OpenClawRunFailedFrame):
-            await self._on_result("failed", frame.error)
+        elif isinstance(frame, OpenClawEndFrame):
+            # A run that answered reports the answer, falling back to what it
+            # streamed. A run that didn't reports why, which the text carries
+            # on its own.
+            answer = frame.text
+            if frame.status == "completed":
+                answer = frame.text or "".join(self._parts).strip()
+            await self._on_result(frame.status, answer)
 
         await self.push_frame(frame, direction)
 

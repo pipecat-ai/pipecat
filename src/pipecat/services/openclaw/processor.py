@@ -30,11 +30,9 @@ from pipecat.services.openclaw.client import (
 )
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
-    OpenClawRunCancelledFrame,
-    OpenClawRunCompletedFrame,
-    OpenClawRunFailedFrame,
-    OpenClawRunStartedFrame,
+    OpenClawEndFrame,
     OpenClawSendFrame,
+    OpenClawStartedFrame,
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
@@ -49,16 +47,17 @@ class OpenClawGatewayService(AIService):
     redirects the one in flight, and
     :class:`~pipecat.services.openclaw.frames.OpenClawAbortFrame` stops it.
     What the Gateway streams back is pushed as
-    :class:`~pipecat.services.openclaw.frames.OpenClawTextFrame` between a
-    started frame and one terminal frame.
+    :class:`~pipecat.services.openclaw.frames.OpenClawTextFrame` between an
+    :class:`~pipecat.services.openclaw.frames.OpenClawStartedFrame` and one
+    :class:`~pipecat.services.openclaw.frames.OpenClawEndFrame`.
 
     An agent run is not a spoken turn: it can take minutes and it answers in
     prose. What that should sound like belongs to whatever wraps this, which
     is why nothing here reads or writes conversational frames.
 
     A session runs one turn at a time, so a send arriving while a run is live
-    stops that run first. Every started frame is followed by exactly one
-    terminal frame.
+    stops that run first. Every started frame is followed by exactly one end
+    frame.
 
     Example::
 
@@ -209,7 +208,7 @@ class OpenClawGatewayService(AIService):
 
         self._run = run
         self._run_ended = False
-        await self.push_frame(OpenClawRunStartedFrame(run_id=run.run_id))
+        await self.push_frame(OpenClawStartedFrame(run_id=run.run_id))
         self._stream_task = self.create_task(self._stream(run), name=f"{self}::stream")
 
     async def _steer(self, frame: OpenClawSteerFrame):
@@ -240,12 +239,14 @@ class OpenClawGatewayService(AIService):
         async for event in self._client.events(run):
             if event.kind == "text_delta":
                 await self.push_frame(OpenClawTextFrame(text=event.text, run_id=run.run_id))
-            elif event.kind == "completed":
-                await self._end(OpenClawRunCompletedFrame(run_id=run.run_id, text=event.text))
-            elif event.kind == "cancelled":
-                await self._end(OpenClawRunCancelledFrame(run_id=run.run_id, text=event.text))
-            elif event.kind == "failed":
-                await self._end(OpenClawRunFailedFrame(run_id=run.run_id, error=event.text))
+            elif event.kind in ("completed", "cancelled", "failed"):
+                await self._end(
+                    OpenClawEndFrame(run_id=run.run_id, status=event.kind, text=event.text)
+                )
+                if event.kind == "failed":
+                    # A run the Gateway gave up on is the pipeline's business
+                    # too, not just the caller's.
+                    await self.push_error(f"{self} OpenClaw run failed: {event.text}")
 
     async def _end(self, frame: Frame):
         """Push a run's terminal frame and let go of the run.
@@ -276,4 +277,4 @@ class OpenClawGatewayService(AIService):
         if run and not self._run_ended:
             self._run_ended = True
             if notify:
-                await self.push_frame(OpenClawRunCancelledFrame(run_id=run.run_id))
+                await self.push_frame(OpenClawEndFrame(run_id=run.run_id, status="cancelled"))

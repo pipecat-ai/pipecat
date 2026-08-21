@@ -19,10 +19,9 @@ from pipecat.services.openclaw.client import (
 )
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
-    OpenClawRunCancelledFrame,
-    OpenClawRunCompletedFrame,
-    OpenClawRunStartedFrame,
+    OpenClawEndFrame,
     OpenClawSendFrame,
+    OpenClawStartedFrame,
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
@@ -363,13 +362,14 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
             self.processor,
             frames_to_send=[OpenClawSendFrame(message="hello"), SleepFrame()],
             expected_down_frames=[
-                OpenClawRunStartedFrame,
+                OpenClawStartedFrame,
                 OpenClawTextFrame,
                 OpenClawTextFrame,
-                OpenClawRunCompletedFrame,
+                OpenClawEndFrame,
             ],
         )
         self.assertEqual(self.gateway.params("chat.send")["message"], "hello")
+        self.assertEqual(received[-1].status, "completed")
         self.assertEqual(received[-1].text, "one two")
 
     async def test_an_abort_ends_the_run_as_cancelled(self):
@@ -381,7 +381,7 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
 
         self._stream(answer)
 
-        await run_test(
+        received, _ = await run_test(
             self.processor,
             frames_to_send=[
                 OpenClawSendFrame(message="hello"),
@@ -390,11 +390,12 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
             ],
             expected_down_frames=[
-                OpenClawRunStartedFrame,
+                OpenClawStartedFrame,
                 OpenClawTextFrame,
-                OpenClawRunCancelledFrame,
+                OpenClawEndFrame,
             ],
         )
+        self.assertEqual(received[-1].status, "cancelled")
 
     async def test_a_steer_keeps_streaming_the_same_run(self):
         """Steering starts a new run on the Gateway, and one stream downstream."""
@@ -418,10 +419,10 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
             ],
             expected_down_frames=[
-                OpenClawRunStartedFrame,
+                OpenClawStartedFrame,
                 OpenClawTextFrame,
                 OpenClawTextFrame,
-                OpenClawRunCompletedFrame,
+                OpenClawEndFrame,
             ],
         )
         self.assertEqual(received[-1].text, "FP8 wins on throughput")
@@ -444,10 +445,10 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
             ],
             expected_down_frames=[
-                OpenClawRunStartedFrame,
-                OpenClawRunCancelledFrame,
-                OpenClawRunStartedFrame,
-                OpenClawRunCompletedFrame,
+                OpenClawStartedFrame,
+                OpenClawEndFrame,
+                OpenClawStartedFrame,
+                OpenClawEndFrame,
             ],
         )
 
@@ -474,11 +475,31 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
             ],
             expected_down_frames=[
-                OpenClawRunStartedFrame,
-                OpenClawRunCompletedFrame,
+                OpenClawStartedFrame,
+                OpenClawEndFrame,
             ],
         )
         self.assertEqual(self.gateway.count("sessions.steer"), 0)
+
+    async def test_a_failed_run_is_reported_upstream(self):
+        """A run the Gateway gave up on ends the stream and raises an error."""
+
+        async def answer(method, params):
+            if method == "chat.send":
+                await self.gateway.chat(
+                    params["idempotencyKey"], "error", error_message="the model is unavailable"
+                )
+
+        self._stream(answer)
+
+        received, errors = await run_test(
+            self.processor,
+            frames_to_send=[OpenClawSendFrame(message="hello"), SleepFrame()],
+            expected_down_frames=[OpenClawStartedFrame, OpenClawEndFrame],
+            expected_up_frames=[ErrorFrame],
+        )
+        self.assertEqual(received[-1].status, "failed")
+        self.assertIn("the model is unavailable", received[-1].text)
 
     async def test_an_unreachable_gateway_is_reported_upstream(self):
         await self.gateway.__aexit__(None, None, None)

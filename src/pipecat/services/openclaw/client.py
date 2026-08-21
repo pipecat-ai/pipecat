@@ -94,6 +94,10 @@ MAX_BUFFERED_FRAMES = 100
 """How many unrouted chat frames to hold for replay. See :meth:`_route`."""
 
 EventKind = Literal["text_delta", "completed", "cancelled", "failed"]
+"""What a run's event reports."""
+
+RunStatus = Literal["completed", "cancelled", "failed"]
+"""How a run ended."""
 """What a run's event stream can carry."""
 
 
@@ -130,11 +134,12 @@ class OpenClawResult:
 
     Parameters:
         summary: The agent's final answer, or why there isn't one.
-        status: How the run ended.
+        status: How the run ended, in the same words as
+            :class:`~pipecat.services.openclaw.frames.OpenClawEndFrame`.
     """
 
     summary: str
-    status: Literal["completed", "cancelled", "error"] = "completed"
+    status: RunStatus = "completed"
 
 
 class OpenClawRun:
@@ -184,7 +189,7 @@ async def collect_result(events: AsyncIterator[OpenClawEvent]) -> OpenClawResult
         elif event.kind == "cancelled":
             return OpenClawResult(event.text or "The agent run was cancelled.", "cancelled")
         elif event.kind == "failed":
-            return OpenClawResult(event.text or "The agent run failed.", "error")
+            return OpenClawResult(event.text or "The agent run failed.", "failed")
     return OpenClawResult("The agent run ended without a final response.")
 
 
