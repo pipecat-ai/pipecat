@@ -14,7 +14,7 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -103,6 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

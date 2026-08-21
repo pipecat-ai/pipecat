@@ -150,7 +150,7 @@ class TestHttpTokenUsageMetrics:
             input_tokens=100,
             output_tokens=50,
             total_tokens=150,
-            input_tokens_details=InputTokensDetails(cached_tokens=20),
+            input_tokens_details=InputTokensDetails(cached_tokens=20, cache_write_tokens=0),
             output_tokens_details=OutputTokensDetails(reasoning_tokens=10),
         )
         await _run(service, _completed_event(usage))

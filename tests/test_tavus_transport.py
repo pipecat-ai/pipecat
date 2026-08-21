@@ -15,6 +15,7 @@ from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.transports.tavus.transport import (
     TavusOutputTransport,
     TavusParams,
+    TavusTransport,
     TavusTransportClient,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -157,3 +158,35 @@ async def test_the_conversation_outlives_the_first_transport_to_stop(monkeypatch
     await client.stop()
     daily.leave.assert_awaited_once()
     client._api.end_conversation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_bot_name_reaches_the_daily_client(monkeypatch):
+    """The name the caller picks is the bot's display name in the room."""
+    import pipecat.transports.tavus.transport as tavus
+
+    captured = {}
+
+    def fake_daily_client(room_url, token, bot_name, params, callbacks, transport_name):
+        captured["bot_name"] = bot_name
+        daily = MagicMock()
+        daily.setup = AsyncMock()
+        return daily
+
+    monkeypatch.setattr(tavus, "DailyTransportClient", fake_daily_client)
+
+    transport = TavusTransport(
+        bot_name="Ada",
+        session=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+    )
+
+    async def fake_initialize():
+        return "https://example.daily.co/room"
+
+    monkeypatch.setattr(transport._client, "_initialize", fake_initialize)
+
+    await transport._client.setup(frame_processor_setup(TaskManager()))
+
+    assert captured["bot_name"] == "Ada"

@@ -92,6 +92,32 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertEqual(tracker.get_word_for_frame(), "that")
         self.assertTrue(tracker.is_complete)
 
+    def test_repeated_mark_is_kept_without_an_llm_text(self):
+        """The mark is this frame's text when no span is recorded to carry it.
+
+        A provider may report the comma of "Yeah," with the *following* word
+        instead. With an ``llm_text`` that repeat is trimmed, because the span
+        attributed to "Yeah" already ends in it. Without one nothing records
+        spans, and the frame word is the provider's own token -- which never
+        carried the comma -- so trimming here would delete it outright.
+        """
+        tracker = WordCompletionTracker("Yeah, I can")
+        words = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            words.append(tracker.get_word_for_frame())
+        self.assertEqual(words, ["Yeah", ", I", "can"])
+
+    def test_repeated_mark_is_trimmed_with_an_llm_text(self):
+        """The same stream, where the recorded span does carry the mark."""
+        text = "Yeah, I can"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        spans = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            spans.append(tracker.get_llm_consumed())
+        self.assertEqual(spans, ["Yeah,", "I", "can"], "the comma is recorded once")
+
     def test_punctuation_ignored_in_words(self):
         """Punctuation attached to TTS word tokens is also stripped."""
         tracker = WordCompletionTracker("Hello world")

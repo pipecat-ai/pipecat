@@ -34,6 +34,10 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-azure-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-bland.py
+    scenarios: [capital_question]
+  - bot: voice/voice-bland-http.py
+    scenarios: [capital_question]
   - bot: voice/voice-camb.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia.py
@@ -156,9 +160,8 @@ suite:
   #
   - bot: realtime/realtime-aws-nova-sonic.py
     scenarios: [weather_function_call_audio]
-  # Needs a deployed Azure realtime model for $AZURE_REALTIME_BASE_URL to resolve.
-  # - bot: realtime/realtime-azure.py
-  #   scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-azure.py
+    scenarios: [weather_function_call_audio]
   - bot: realtime/realtime-gemini-live.py
     scenarios: [weather_function_call_audio]
   - bot: realtime/realtime-grok.py

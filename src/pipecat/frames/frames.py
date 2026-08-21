@@ -34,7 +34,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated_read
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
@@ -908,6 +908,18 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 #
 
 
+# Fields of :class:`StartFrame` whose reads are deprecated.
+_START_FRAME_DEPRECATED_FIELDS = (
+    "audio_in_sample_rate",
+    "audio_out_sample_rate",
+    "enable_metrics",
+    "enable_tracing",
+    "enable_usage_metrics",
+    "report_only_initial_ttfb",
+    "tracing_context",
+)
+
+
 @dataclass
 class StartFrame(SystemFrame):
     """Initial frame to start pipeline processing.
@@ -971,26 +983,14 @@ class StartFrame(SystemFrame):
         # Reads warn, writes don't: assignment goes through ``__setattr__``. The None
         # guard is for ``tracing_context``, the only field whose default is None and
         # so can't be told apart from unset.
-        if name in (
-            "audio_in_sample_rate",
-            "audio_out_sample_rate",
-            "enable_metrics",
-            "enable_tracing",
-            "enable_usage_metrics",
-            "report_only_initial_ttfb",
-            "tracing_context",
-        ):
+        if name in _START_FRAME_DEPRECATED_FIELDS:
             value = object.__getattribute__(self, name)
             if value is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        f"`StartFrame.{name}` is deprecated since 1.8.0, "
-                        f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
-                        "Will be removed in 2.0.0.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated_read(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
+                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
+                    "Will be removed in 2.0.0."
+                )
             return value
         return object.__getattribute__(self, name)
 

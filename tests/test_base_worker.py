@@ -93,10 +93,76 @@ def make_stub_pipeline_task(name, *, bridged=None, active=True):
     )
 
 
+class _RunnerProbe(FrameProcessor):
+    """Records the peer worker it can reach through its runner."""
+
+    def __init__(self, peer_name: str):
+        super().__init__()
+        self._peer_name = peer_name
+        self.peer = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if self.peer is None:
+            self.peer = self.worker_runner.get_worker(self._peer_name)
+        await self.push_frame(frame, direction)
+
+
+class TestWorkerRunnerAccess(unittest.IsolatedAsyncioTestCase):
+    """Reaching a runner's workers by name."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    async def test_get_worker_returns_added_worker(self):
+        helper = BaseWorker("helper")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(helper)
+
+        self.assertIs(runner.get_worker("helper"), helper)
+
+    async def test_get_worker_is_none_for_unknown_name(self):
+        """A worker on another runner has no local instance, same as an unknown name."""
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+
+        self.assertIsNone(runner.get_worker("elsewhere"))
+
+    async def test_added_worker_reaches_its_runner(self):
+        helper = BaseWorker("helper")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(helper)
+
+        self.assertIs(helper.worker_runner, runner)
+
+    async def test_worker_runner_raises_before_attach(self):
+        with self.assertRaises(RuntimeError):
+            _ = BaseWorker("helper").worker_runner
+
+    async def test_processor_reaches_a_peer_worker(self):
+        """A processor finds a peer by name without the app handing it over."""
+        helper = BaseWorker("helper")
+        probe = _RunnerProbe("helper")
+        worker = PipelineWorker(Pipeline([probe]), name="main", cancel_on_idle_timeout=False)
+
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker, helper)
+
+        async def end_after_start():
+            await asyncio.sleep(0.05)
+            await worker.queue_frame(EndFrame())
+            await asyncio.sleep(0.05)
+            await runner.end()
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), end_after_start()), timeout=10.0)
+
+        self.assertIs(probe.peer, helper)
+
+
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
 
     async def test_task_starts_inactive_by_default(self):
         """Bridged worker is inactive by default."""
@@ -110,7 +176,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         worker = make_stub_pipeline_task("test", bridged=())
         worker._active = False
         worker._pending_activation = False
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
 
         handoff_done = asyncio.Event()
         handoff_args_received = []
@@ -163,7 +229,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         worker = make_stub_pipeline_task("test", bridged=())
         worker._active = True
         worker._pending_activation = False
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
 
         sent: list[tuple[str, bool]] = []
         original_send = worker.send_bus_message
@@ -236,7 +302,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = make_stub_pipeline_task("task_a", bridged=())
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
 
         await worker.activate_worker("task_b", deactivate_self=True)
 
@@ -252,7 +318,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.end(reason="done")
 
         end_msgs = [m for m in sent if isinstance(m, BusEndMessage)]
@@ -265,9 +331,9 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent_task")
-        await parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         worker = BaseWorker("child")
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await parent.add_workers(worker)
         await worker.end(reason="goodbye")
 
@@ -281,7 +347,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.cancel()
 
         cancel_msgs = [m for m in sent if isinstance(m, BusCancelMessage)]
@@ -293,7 +359,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         new_task = BaseWorker("task_b")
         await worker.add_workers(new_task)
 
@@ -369,7 +435,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         """activate_worker(deactivate_self=True) sends a deactivate for the calling worker."""
         sent = capture_bus(self.bus)
         worker = make_stub_pipeline_task("test", bridged=())
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
 
         self.assertTrue(worker.active)
         await worker.activate_worker("other", deactivate_self=True)
@@ -550,7 +616,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_add_workers_tracks_children(self):
         """add_workers() populates children list and sets parent."""
         parent = BaseWorker("parent")
-        await parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
 
@@ -566,7 +632,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent")
-        await parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
         await parent.add_workers(child_a)
@@ -588,7 +654,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_end_waits_for_children(self):
         """Parent waits for children to finish before completing _handle_worker_end."""
         parent = BaseWorker("parent")
-        await parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         child = BaseWorker("child")
         await parent.add_workers(child)
 
@@ -616,7 +682,7 @@ class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent")
-        await parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
         await parent.add_workers(child_a)
@@ -646,6 +712,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
 
     async def test_generated_frames_reach_bus(self):
         """Pipeline-generated frames are broadcast to the bus."""
@@ -956,9 +1023,10 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
 
     async def _attach(self, worker):
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.setup(self.tm)
         return worker
 
@@ -1368,9 +1436,10 @@ class TestJobDecorator(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
 
     async def _attach(self, worker):
-        await worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
         await worker.setup(self.tm)
         return worker
 

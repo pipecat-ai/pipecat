@@ -128,8 +128,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
                 in-process :class:`AsyncQueueBus`.
             handle_sigint: Whether to automatically handle SIGINT signals.
             handle_sigterm: Whether to automatically handle SIGTERM signals.
-            force_gc: Whether to force garbage collection after the main
-                worker completes.
+            force_gc: Whether to force garbage collection once every worker
+                has been torn down.
             check_dangling_tasks: Whether to warn about tasks left running on
                 the shared task manager once every worker has finished.
             task_manager: Optional task manager for handling asyncio tasks.
@@ -180,6 +180,22 @@ class WorkerRunner(BaseObject, BusSubscriber):
         """The worker registry this runner owns."""
         return self._registry
 
+    def get_worker(self, name: str) -> BaseWorker | None:
+        """Look up a worker running on this runner by name.
+
+        Only workers added to this runner have a local instance to return.
+        A worker on another runner is addressable over the bus by name but
+        has no object here, so it looks the same as an unknown name.
+
+        Args:
+            name: The name the worker was created with.
+
+        Returns:
+            The worker, or None if this runner has no worker by that name.
+        """
+        entry = self._entries.get(name)
+        return entry.worker if entry else None
+
     async def add_workers(self, *workers: BaseWorker) -> None:
         """Add one or more workers to the runner.
 
@@ -189,9 +205,12 @@ class WorkerRunner(BaseObject, BusSubscriber):
         queued and started during run setup; if the runner is already
         running, each worker starts immediately.
 
-        Added workers run alongside the main worker and are cancelled
-        when the main worker finishes (or when :meth:`end` /
-        :meth:`cancel` is called).
+        Every added worker is a peer: the runner privileges none of them.
+        They run concurrently, and whichever are still running when the
+        runner ends are cancelled. With ``auto_end=True`` the runner ends
+        once every root worker has finished, so a worker that never
+        finishes on its own, such as a bus-only one waiting for messages,
+        keeps it up until :meth:`end` or :meth:`cancel` is called.
 
         Args:
             *workers: One or more workers to add.
@@ -206,7 +225,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
             # to the bus — eager subscription is required so workers
             # added later are listening before earlier workers emit
             # their first messages.
-            await worker.attach(registry=self._registry, bus=self._bus)
+            await worker.attach(registry=self._registry, bus=self._bus, worker_runner=self)
             await self._registry.watch(worker.name, self._on_local_worker_ready)
             entry = _WorkerEntry(worker=worker)
             self._entries[worker.name] = entry
@@ -258,9 +277,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._auto_end = auto_end
         self._shutdown_event.clear()
 
-        # Treat the main worker as any other added worker: ``add_workers`` attaches
-        # it to the bus and registry, and ``_setup_session`` then starts every
-        # entry (main and pre-added) through the same code path.
+        # A worker passed here is added like any other: ``add_workers``
+        # attaches it to the bus and registry, and ``_setup_session`` then
+        # starts every entry through the same code path.
         if worker is not None:
             await self.add_workers(worker)
 

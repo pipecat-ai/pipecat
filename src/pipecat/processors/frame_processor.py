@@ -47,13 +47,14 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated_read
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
+    from pipecat.workers.runner import WorkerRunner
 
 
 class FrameDirection(Enum):
@@ -120,14 +121,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                        "read `setup.pipeline_worker.app_resources` instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated_read(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
+                    "read `setup.pipeline_worker.app_resources` instead."
+                )
             return value
         return object.__getattribute__(self, name)
 
@@ -453,6 +450,18 @@ class FrameProcessor(BaseObject):
         return self.processor_setup.pipeline_worker
 
     @property
+    def worker_runner(self) -> WorkerRunner:
+        """Get the :class:`WorkerRunner` hosting this processor's worker.
+
+        Use it to reach another worker on the runner by name, e.g.
+        ``self.worker_runner.get_worker("ui-jobs")``.
+
+        Returns:
+            The runner this processor's :class:`PipelineWorker` is attached to.
+        """
+        return self.pipeline_worker.worker_runner
+
+    @property
     @deprecated(
         "`FrameProcessor.pipeline_task` is deprecated since 1.3.0 and will be removed in 2.0.0. "
         "Use `pipeline_worker` instead."
@@ -504,6 +513,11 @@ class FrameProcessor(BaseObject):
                 start_time=start_time, report_only_initial_ttfb=self.report_only_initial_ttfb
             )
 
+    async def cancel_ttfb_metrics(self):
+        """Abandon the current time-to-first-byte measurement without reporting it."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.cancel_ttfb_metrics()
+
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop time-to-first-byte metrics collection and push results.
 
@@ -533,6 +547,18 @@ class FrameProcessor(BaseObject):
             )
             if metrics_frame:
                 await self.push_frame(metrics_frame)
+
+    async def stop_ttfat_metrics(self, *, end_time: float | None = None):
+        """Stop time-to-first-answer-token metrics collection and push results.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+        """
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_ttfat_metrics(end_time=end_time)
+            if frame:
+                await self.push_frame(frame)
 
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start processing metrics collection.

@@ -287,7 +287,43 @@ To determine the correct values:
 
 Insert the new row **alphabetically** within the table. Match the column alignment of the existing rows.
 
-### Step 9: Output summary
+#### 8d: Frontmatter conventions
+
+A new page's `title` and `description` become its `llms.txt` entry and its
+citation label in AI tools, and the docs repo's metadata lint enforces them:
+
+- **title**: 50 chars max, no `- Pipecat` suffix (Mintlify appends it). Add a
+  `sidebarTitle` when the title runs past 30 chars.
+- **description**: 110-140 chars, naming the classes the page documents and the
+  modality acronym (STT/TTS/LLM/VAD) where relevant. Must be unique site-wide,
+  as must the effective unfurl title (`og:title` if set, else `title`) — add an
+  `og:title` when another page already uses the same short title.
+
+### Step 9: Format and regenerate llms.txt
+
+The docs repo checks in `llms.txt` (a navigation-ordered index built from each
+page's frontmatter) and `llms-full.txt` (every page's full body). Its metadata
+lint fails when either is stale, so regenerate them after any page edit,
+`docs.json` navigation change, or new page.
+
+Prettier reflows MDX and `llms-full.txt` embeds the page bodies verbatim, so
+formatting has to settle before generation:
+
+```bash
+cd DOCS_PATH
+npx prettier --ignore-unknown --write <edited files>
+node scripts/gen-llms-txt.mjs
+```
+
+Commit the doc edits together with the regenerated `llms.txt` and
+`llms-full.txt`. Generating before formatting leaves them stale — as does
+relying on the repo's pre-commit hook, which formats pages after generation has
+already run.
+
+`node scripts/docs-meta-lint.mjs` reports the same staleness and frontmatter
+findings CI will.
+
+### Step 10: Output summary
 
 After all edits are complete, print a summary:
 
@@ -338,4 +374,5 @@ Before finishing, verify:
 - [ ] Guides referencing changed APIs were checked and updated
 - [ ] New service pages were added to `docs.json` in the correct group, alphabetically
 - [ ] New service pages were added to `supported-services.mdx` in the correct table, alphabetically
+- [ ] Edited pages were formatted, then `llms.txt` and `llms-full.txt` regenerated and committed
 - [ ] Unmapped files were reported to the user

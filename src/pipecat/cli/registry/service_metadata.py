@@ -727,6 +727,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="bland_tts",
+            label="Bland",
+            package="pipecat-ai[bland]",
+            class_name=["BlandTTSService"],
+            env_prefix="BLAND",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "2f29fdbb-c55e-4add-9c7c-93437ebf379d"},
+        ),
+        ServiceDefinition(
             value="cartesia_tts",
             label="Cartesia",
             package="pipecat-ai[cartesia]",

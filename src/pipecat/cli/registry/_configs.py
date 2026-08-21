@@ -124,8 +124,8 @@ SERVICE_CONFIGS = {
     ),
     "azure_llm": (
         "AzureLLMService(\n"
-        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         '        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),\n'
+        '        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),\n'
         "        settings=AzureLLMService.Settings(\n"
         '            model=os.getenv("AZURE_CHATGPT_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
@@ -362,6 +362,14 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("CAMB_API_KEY"),\n'
         "        settings=CambTTSService.Settings(\n"
         '            voice=os.getenv("CAMB_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "bland_tts": (
+        "BlandTTSService(\n"
+        '        api_key=os.getenv("BLAND_API_KEY"),\n'
+        "        settings=BlandTTSService.Settings(\n"
+        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
         "        ),\n"
         "    )\n"
     ),

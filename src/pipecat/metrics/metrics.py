@@ -61,6 +61,41 @@ class TTFAMetricsData(MetricsData):
     leading_silence: float
 
 
+class TTFATMetricsData(MetricsData):
+    """Time To First Answer Token (TTFAT) metrics data.
+
+    Measures the time from an LLM request to the first token of the answer the
+    caller sees, i.e. time-to-first-byte plus any reasoning the model streamed
+    first. ``ttfat`` is reported with its breakdown so consumers can see how much
+    of the perceived latency is the model thinking rather than responding,
+    without correlating a separate ``TTFBMetricsData``.
+
+    A turn that answers with a tool call rather than text ends the measurement at
+    the call, taken where it first appears in the stream. Answering from a tool
+    result takes a second inference, so such a turn reports twice — once for the
+    call, once for the answer built from its result. Each figure covers one
+    inference; consumers wanting one per user turn keep the first, which is the
+    one that measures how quickly the model began responding at all.
+
+    Reported only by LLM services that answer in text. Speech-to-speech services
+    answer in audio, which has no answer token to measure to.
+
+    Parameters:
+        ttfat: TTFAT measurement in seconds (``ttfb`` plus ``thinking_time``).
+        ttfb: Time-to-first-byte that TTFAT builds on, in seconds. This mirrors
+            the standalone ``TTFBMetricsData`` (emitted earlier) for convenience;
+            it is not a separate measurement, so don't aggregate both.
+        thinking_time: Time between the model's first output and the first answer
+            token, in seconds (``ttfat`` minus ``ttfb``). Reasoning is the usual
+            reason a model streams something before it starts answering, though a
+            model that reasons none still spends a little time here.
+    """
+
+    ttfat: float
+    ttfb: float
+    thinking_time: float
+
+
 class ProcessingMetricsData(MetricsData):
     """General processing time metrics data.
 
