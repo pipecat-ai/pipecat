@@ -25,11 +25,9 @@ request to the first output frame. Compare LLM candidates on ``ttfat_ms``.
 ``list-models`` queries the provider's model catalogue where one exists
 (OpenAI-compatible ``/models``, Anthropic, Google, Deepgram, ElevenLabs).
 
-``signals`` gathers two inputs for the research: the latest PyPI version of
-each SDK the provider's extra depends on (a prompt to read release notes), and
-each published API spec known for the provider (``PROVIDER_SPECS`` below, or
-passed with ``--spec``), snapshotted under the reports checkout so ``git diff``
-shows exactly what changed in the API since the last run.
+``sdk-versions`` compares the ``pyproject.toml`` pin of each SDK the provider's
+extra depends on with the latest release on PyPI, so a researcher knows which
+release notes to read.
 
 Credentials come from the repo's ``.env`` loaded *without* override, so exported
 variables win and CI runs without a ``.env`` at all (``--no-dotenv`` ignores it). Every value
@@ -39,7 +37,7 @@ variable *names* of missing credentials are printed. Run::
     uv run python scripts/provider-watch/probe.py run --service CartesiaTTSService --model sonic-3.5
     uv run python scripts/provider-watch/probe.py run --service OpenAILLMService --model gpt-4.1 --model gpt-5 --json
     uv run python scripts/provider-watch/probe.py list-models --provider groq
-    uv run python scripts/provider-watch/probe.py signals --provider deepgram
+    uv run python scripts/provider-watch/probe.py sdk-versions --provider deepgram
 
 Exit codes: 0 all probes passed · 1 a probe failed · 2 missing credentials ·
 3 unsupported (no probe for this service type / no model catalogue for this provider).
@@ -49,7 +47,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import importlib
 import inspect
 import json
@@ -73,7 +70,6 @@ import inventory  # noqa: E402
 
 DEFAULT_WAV = HERE / "assets" / "speech-16k.wav"
 PYPROJECT = inventory.REPO_ROOT / "pyproject.toml"
-DEFAULT_SPECS_DIR = inventory.REPO_ROOT / "_reports" / "specs"
 DEFAULT_TEXT = "In one short sentence, what is the capital of France?"
 DEFAULT_TTS_TEXT = "Hello from Pipecat. This is a short synthesis check."
 MAX_MODELS_PER_RUN = 3
@@ -652,77 +648,7 @@ def cmd_list_models(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-# ---------------------------------------------------------------------- signals
-
-# Published API specs per provider directory, snapshotted by ``signals`` so a
-# run can diff them against the previous run. Stainless SDK repos publish
-# ``.stats.yml`` with the spec hash; Google APIs publish discovery documents;
-# AWS shapes live in botocore. A provider without an entry gets no spec signal.
-PROVIDER_SPECS: dict[str, list[tuple[str, str]]] = {
-    "openai": [
-        (
-            "openai-openapi.yaml",
-            "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
-        ),
-    ],
-    "anthropic": [
-        (
-            "anthropic-sdk.stats.yml",
-            "https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/.stats.yml",
-        ),
-    ],
-    "google": [
-        (
-            "generativelanguage-v1beta.json",
-            "https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta",
-        ),
-        ("speech-v1.json", "https://speech.googleapis.com/$discovery/rest?version=v1"),
-        ("texttospeech-v1.json", "https://texttospeech.googleapis.com/$discovery/rest?version=v1"),
-    ],
-    "aws": [
-        (
-            "bedrock-runtime.json",
-            "https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/bedrock-runtime/2023-09-30/service-2.json",
-        ),
-        (
-            "polly.json",
-            "https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/polly/2016-06-10/service-2.json",
-        ),
-    ],
-    "deepgram": [
-        (
-            "deepgram-openapi.yml",
-            "https://raw.githubusercontent.com/deepgram/deepgram-api-specs/main/openapi.yml",
-        ),
-    ],
-    "elevenlabs": [
-        ("elevenlabs-openapi.json", "https://api.elevenlabs.io/openapi.json"),
-    ],
-    "cartesia": [
-        (
-            "cartesia-sdk.stats.yml",
-            "https://raw.githubusercontent.com/cartesia-ai/cartesia-python/main/.stats.yml",
-        ),
-    ],
-    "groq": [
-        (
-            "groq-sdk.stats.yml",
-            "https://raw.githubusercontent.com/groq/groq-python/main/.stats.yml",
-        ),
-    ],
-    "mistral": [
-        (
-            "mistral-sdk.gen.lock",
-            "https://raw.githubusercontent.com/mistralai/client-python/main/.speakeasy/gen.lock",
-        ),
-    ],
-    "cerebras": [
-        (
-            "cerebras-sdk.stats.yml",
-            "https://raw.githubusercontent.com/Cerebras/cerebras-cloud-sdk-python/main/.stats.yml",
-        ),
-    ],
-}
+# ----------------------------------------------------------------- sdk-versions
 
 
 def _http_bytes(url: str) -> bytes:
@@ -782,50 +708,16 @@ def pypi_latest(requirement: str) -> dict:
     }
 
 
-def spec_snapshot(name: str, url: str, snapshot_dir: Path | None) -> dict:
-    """Fetch one API spec, hash it, and note whether it differs from the snapshot on disk."""
-    try:
-        content = _http_bytes(url)
-    except Exception as e:
-        return {"name": name, "url": url, "error": str(e)}
-    digest = hashlib.sha256(content).hexdigest()[:12]
-    result = {"name": name, "url": url, "sha256": digest, "bytes": len(content)}
-    if snapshot_dir is not None:
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        path = snapshot_dir / name
-        previous = path.read_bytes() if path.exists() else None
-        result["changed"] = previous != content
-        result["new"] = previous is None
-        if previous != content:
-            path.write_bytes(content)
-        result["path"] = str(path)
-    return result
-
-
-def cmd_signals(args: argparse.Namespace) -> int:
+def cmd_sdk_versions(args: argparse.Namespace) -> int:
     provider = args.provider
     units = [u for u in inventory.scan_services() if u.provider == provider]
     if not units:
         print(f"unknown provider {provider!r}; see inventory.py --md", file=sys.stderr)
         return EXIT_UNSUPPORTED
     inventory.enrich(units)
-
     sdks = [pypi_latest(r) for r in sdk_requirements(provider, units)]
-
-    specs = [{"name": n, "url": u} for n, u in PROVIDER_SPECS.get(provider, [])]
-    for item in args.spec or []:
-        name, sep, url = item.partition("=")
-        if not sep:
-            raise SystemExit(f"expected name=url, got {item!r}")
-        specs.append({"name": name, "url": url})
-    snapshot_dir = (
-        None if args.no_snapshot else Path(args.snapshot_dir or DEFAULT_SPECS_DIR / provider)
-    )
-    spec_results = [spec_snapshot(spec["name"], spec["url"], snapshot_dir) for spec in specs]
-
-    out = {"provider": provider, "sdks": sdks, "specs": spec_results}
     if args.json:
-        print(json.dumps(out, indent=2))
+        print(json.dumps({"provider": provider, "sdks": sdks}, indent=2))
     else:
         for sdk in sdks:
             latest = sdk.get("latest", "?")
@@ -834,15 +726,7 @@ def cmd_signals(args: argparse.Namespace) -> int:
                 if sdk.get("released")
                 else (f" — {sdk['error']}" if sdk.get("error") else "")
             )
-            print(f"sdk   {sdk['package']:<28} pin {sdk['requirement']:<40} latest {latest}{tail}")
-        for spec in spec_results:
-            if spec.get("error"):
-                print(f"spec  {spec['name']:<28} ERROR {spec['error']} ({spec['url']})")
-                continue
-            state = (
-                "new" if spec.get("new") else ("CHANGED" if spec.get("changed") else "unchanged")
-            )
-            print(f"spec  {spec['name']:<28} sha256 {spec['sha256']} {spec['bytes']:>9} B  {state}")
+            print(f"{sdk['package']:<28} pin {sdk['requirement']:<40} latest {latest}{tail}")
     return EXIT_OK
 
 
@@ -893,17 +777,10 @@ def main(argv: list[str] | None = None) -> int:
     lm.add_argument("--json", action="store_true")
     lm.set_defaults(func=cmd_list_models)
 
-    sg = sub.add_parser("signals", help="SDK versions on PyPI and API spec hashes for a provider")
-    sg.add_argument("--provider", required=True, help="provider directory name, e.g. deepgram")
-    sg.add_argument("--spec", action="append", metavar="NAME=URL", help="extra spec to fetch")
-    sg.add_argument(
-        "--snapshot-dir", help="where spec snapshots live (default: _reports/specs/<provider>)"
-    )
-    sg.add_argument(
-        "--no-snapshot", action="store_true", help="hash only; do not read or write snapshots"
-    )
-    sg.add_argument("--json", action="store_true")
-    sg.set_defaults(func=cmd_signals)
+    sv = sub.add_parser("sdk-versions", help="pyproject pin vs latest PyPI release per SDK")
+    sv.add_argument("--provider", required=True, help="provider directory name, e.g. deepgram")
+    sv.add_argument("--json", action="store_true")
+    sv.set_defaults(func=cmd_sdk_versions)
 
     args = parser.parse_args(argv)
     return args.func(args)

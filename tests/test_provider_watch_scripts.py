@@ -407,8 +407,8 @@ class TestPublish:
         assert len(outcome.skipped) == 3 and not outcome.opened
 
 
-class TestSignals:
-    """probe.py signals: SDK derivation from pyproject and spec snapshotting, no network."""
+class TestSdkVersions:
+    """probe.py sdk-versions: SDK derivation from pyproject, no network."""
 
     @pytest.fixture
     def probe(self):
@@ -436,31 +436,3 @@ class TestSignals:
         cerebras = [u for u in units if u.provider == "cerebras"]
         reqs = probe.sdk_requirements("cerebras", cerebras)
         assert reqs and all(r.startswith("openai") for r in reqs)
-
-    def test_spec_snapshot_detects_change(self, probe, tmp_path, monkeypatch):
-        payloads = iter(
-            [b"openapi: 3.0\npaths: {}\n", b"openapi: 3.0\npaths: {}\n", b"openapi: 3.1\n"]
-        )
-        monkeypatch.setattr(probe, "_http_bytes", lambda url: next(payloads))
-
-        first = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
-        assert first["new"] and first["changed"] and (tmp_path / "spec.yml").exists()
-        second = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
-        assert not second["new"] and not second["changed"] and second["sha256"] == first["sha256"]
-        third = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
-        assert third["changed"] and third["sha256"] != first["sha256"]
-        assert (tmp_path / "spec.yml").read_bytes() == b"openapi: 3.1\n"
-
-    def test_spec_fetch_failure_is_reported_not_raised(self, probe, tmp_path, monkeypatch):
-        def boom(url):
-            raise OSError("nope")
-
-        monkeypatch.setattr(probe, "_http_bytes", boom)
-        result = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
-        assert result["error"] == "nope" and not (tmp_path / "spec.yml").exists()
-
-    def test_provider_specs_table(self, probe, units):
-        providers = {u.provider for u in units}
-        assert set(probe.PROVIDER_SPECS) <= providers
-        for specs in probe.PROVIDER_SPECS.values():
-            assert specs and all(name and url.startswith("https://") for name, url in specs)
