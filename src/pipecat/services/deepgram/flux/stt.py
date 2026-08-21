@@ -374,7 +374,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             if self._websocket:
                 await self._send_close_stream()
-                logger.debug("Disconnecting from Deepgram Flux Websocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)

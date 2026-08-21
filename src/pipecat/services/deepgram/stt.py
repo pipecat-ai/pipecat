@@ -623,7 +623,7 @@ class DeepgramSTTService(STTService):
         if not self._connection_task:
             return
 
-        logger.debug("Disconnecting from Deepgram")
+        logger.debug(f"{self}: Disconnecting from Deepgram")
         # Clear the connection first to prevent run_stt from sending audio
         # during the close handshake.
         connection = self._connection
