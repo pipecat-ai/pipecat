@@ -39,7 +39,7 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.metrics.metrics import TurnMetricsData
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -141,6 +141,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[MetricsLogObserver(include_metrics={TurnMetricsData})],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

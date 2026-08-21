@@ -13,7 +13,7 @@ from loguru import logger
 
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.workers.runner import WorkerRunner
@@ -36,7 +36,7 @@ async def main():
 
     pipeline = Pipeline([tts, transport.output()])
 
-    worker = PipelineWorker(pipeline)
+    worker = PipelineWorker(pipeline, processor_unusable_policy=ProcessorUnusablePolicy.END)
 
     runner = WorkerRunner(handle_sigint=False if sys.platform == "win32" else True)
 

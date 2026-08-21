@@ -17,7 +17,7 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.startup_timing_observer import StartupTimingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -128,6 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[latency_observer, startup_observer],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
