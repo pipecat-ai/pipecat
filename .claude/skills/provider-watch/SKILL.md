@@ -1,39 +1,38 @@
 ---
 name: provider-watch
-description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and open draft PRs for clear-cut updates
+description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and propose draft PRs for clear-cut updates
 disable-model-invocation: true
-argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--publish|--local] [--ci]"
+argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive]"
 ---
 
-Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit in the reports repo, a digest, and draft PRs on pipecat for changes the researcher is confident about. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
+Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit, a digest, and a branch for every change a researcher is confident about. All of that is produced locally first; publishing — pushing reports, opening draft PRs on pipecat, filing the digest issue — happens through `scripts/provider-watch/publish.py`, either as the run goes (`--publish`) or after the maintainer confirms at the end. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
 
 ## Arguments
 
 ```
-/provider-watch [--only a,b] [--limit N] [--concurrency N] [--publish|--local] [--ci]
+/provider-watch [--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive]
 ```
 
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
 - `--limit N` — research only the first N selected units (deterministic order). For test runs.
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
-- `--publish` / `--local` — push reports, open PRs and the digest issue / write everything locally and push nothing. Without either, ask once (Step 1).
-- `--ci` — unattended mode: never ask questions, implies `--publish`, fail fast if prerequisites are missing.
+- `--publish` — publish as the run goes, without asking. Without it, the run is a dry run until Step 5 asks whether to publish; the default answer is no.
+- `--non-interactive` — never ask anything; an unasked question takes its default. Without `--publish` this is an unattended dry run. Also fails fast if prerequisites are missing.
 
 Examples:
 
-- `/provider-watch --only deepgram,groq --limit 2 --concurrency 1 --local` — cheap smoke test; PR branches stay local
-- `/provider-watch --only ollama --local` — exercise the PR path without pushing
-- `/provider-watch --ci` — what the weekly workflow runs
+- `/provider-watch --only deepgram,groq --limit 2 --concurrency 1` — smoke test; asks at the end, default no
+- `/provider-watch --only groq` — exercise the branch path; review the branch with the command the report prints
+- `/provider-watch --publish --non-interactive` — what the weekly workflow runs
 
 ## Instructions
 
-### Step 1: Resolve mode and paths
+### Step 1: Resolve paths and prerequisites
 
 1. Parse the arguments. Record `RUN_DATE` as today's date (`YYYY-MM-DD`) and `PIPECAT_COMMIT` as `git rev-parse --short HEAD`.
 2. Pick a scratch directory outside the repo (your session scratchpad if you have one, else `mktemp -d -t provider-watch`). Everything transient — payloads, `run.jsonl`, worktrees — lives there.
-3. Mode: `--ci` or `--publish` ⇒ **publish**; `--local` ⇒ **local-only**. Otherwise ask the user exactly one question: *"Write reports locally only (default — no push, no PRs, no issue; PR branches are created but not pushed), or publish?"* Treat no answer as local-only.
-4. Reports checkout: always `./_reports` in this repo (gitignored). If it is missing, `gh repo clone pipecat-ai/provider-watch _reports`; if the clone fails in local-only mode (repo not created yet), `git init _reports` and continue with no history. In publish mode run `git -C _reports pull --ff-only` first.
-5. In `--ci` mode, stop with a clear error if any of these is missing: `gh auth status` succeeds, the reports checkout exists and is on `main`, `uv run python scripts/provider-watch/inventory.py --md` runs.
+3. Reports checkout: always `./_reports` in this repo (gitignored). If it is missing, `gh repo clone pipecat-ai/provider-watch _reports`; if the clone fails without `--publish` (repo not created yet), `git init _reports` and continue with no history. With `--publish`, run `git -C _reports pull --ff-only` first.
+4. With `--publish` or `--non-interactive`, stop with a clear error if any of these fails: `gh auth status`, `_reports` exists and is on `main` (publish only), `uv run python scripts/provider-watch/inventory.py --md`.
 
 ### Step 2: Build the unit list
 
@@ -57,9 +56,7 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
   "report_path": "reports/<provider>/<unit-suffix>/<RUN_DATE>.md",
   "report_file": "<reports_path>/reports/<provider>/<unit-suffix>/<RUN_DATE>.md",
   "previous_report_file": "<absolute path of the newest existing reports/<provider>/<unit-suffix>/*.md, or null>",
-  "scratch_dir": "<scratch>",
-  "mode": "publish" | "local-only",
-  "pr_budget_remaining": <int>
+  "scratch_dir": "<scratch>"
 }
 ```
 
@@ -68,48 +65,32 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
 Rules for the batch loop:
 
 - Launch the whole batch at once so the subagents run concurrently; wait for all of them before starting the next batch.
+- Researchers only produce local artifacts: the report, and at most one committed `provider-watch/*` branch in a worktree under `<scratch>`. They never push or open PRs.
 - Each researcher returns exactly one JSON line: `{"service", "status", "default_model", "prs", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `status: error` and the failure in the body, and append a matching line.
-- PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; at 0, later batches write qualifying changes under "PRs withheld" instead of opening them.
-- **Publish mode:** after every batch, commit and push the reports checkout (`git add reports && git commit -m "provider-watch: <RUN_DATE> (<unit ids>)" && git push`). A run that dies later keeps what it has done.
-- Researchers never touch this checkout's git state; PR work happens in worktrees under `<scratch>`. If `git status` here shows changes you did not make, stop and report it.
+- **With `--publish`:** after every batch run `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>`. It pushes the finished units' branches, opens their draft PRs (up to 8 per run; the rest stay branches marked `capped`), rewrites their reports with the PR URLs, and pushes `_reports`. It is idempotent, so a run that dies keeps everything published so far and a re-run picks up the rest.
+- If `git status` in this checkout shows changes you did not make, stop and report it.
 
-### Step 4: Digest
+### Step 4: Highlights
 
-1. Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: what a maintainer should look at first (PRs to review, defaults that look stale, providers that errored). Skip bullets when nothing stands out.
-2. Render:
-   ```bash
-   uv run python scripts/provider-watch/digest.py --reports <reports_path> --date <RUN_DATE> \
-     --highlights <scratch>/highlights.md --out <reports_path>/digests/<RUN_DATE>.md
-   ```
-3. Publish mode: commit and push the digest.
+Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: what a maintainer should look at first (PRs or branches to review, defaults that look stale, providers that errored). Skip bullets when nothing stands out.
 
-### Step 5: Notify (publish mode only)
+### Step 5: Publish or ask
 
-If any report has a status other than `up-to-date`, or any PR was opened, open one issue on the reports repo:
-
-```bash
-gh issue create --repo pipecat-ai/provider-watch --title "Provider watch <RUN_DATE>" \
-  --body-file <reports_path>/digests/<RUN_DATE>.md
-```
-
-If an issue with that title already exists (re-run), update its body with `gh issue edit` instead. If everything is up to date, do not open an issue; print `No provider changes found.`
+- **With `--publish`:** `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize --highlights <scratch>/highlights.md`. This renders `digests/<RUN_DATE>.md`, pushes it, and opens the digest issue on the reports repo (or updates it on a re-run) when anything is worth showing.
+- **Without `--publish`, interactive:** render the digest locally first — `uv run python scripts/provider-watch/digest.py --reports _reports --date <RUN_DATE> --highlights <scratch>/highlights.md --out _reports/digests/<RUN_DATE>.md` — then ask exactly one question, with **"No — keep everything local"** as the first (default) option and the publish option spelling out the scope: "Publish: push N reports and the digest to pipecat-ai/provider-watch, push M branches and open M draft PRs on pipecat-ai/pipecat, open the digest issue." Only an explicit choice of the publish option publishes; any other answer, no answer, or an interrupted session means no. If yes, run the `--finalize` command above.
+- **Without `--publish`, `--non-interactive`:** render the digest locally as above and publish nothing.
 
 ### Step 6: Clean up and summarize
 
-1. `git worktree prune` in this checkout, and remove `<scratch>/wt-*` directories (local-only mode keeps the branches; the worktrees can go).
-2. Print a summary table — unit, status, default model, PRs — and the paths of the digest (under `_reports/digests/`) and any local branches. In local-only mode remind the user nothing was pushed.
+1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the dry-run output.
+2. Print a summary table — unit, status, default model, PR or branch — plus the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git diff main...<branch>`), and, when nothing was published, how to publish later: re-run with `--publish` (the local reports are the baseline, so it is cheap) or run `publish.py --date <RUN_DATE> --finalize` by hand.
 
-## Unattended (`--ci`) behaviour
+## Unattended runs
 
-The weekly workflow invokes this skill with `--ci`. In that mode:
-
-- Never ask questions; every decision has a default above.
-- Set the git identity in the reports checkout and worktrees to `github-actions[bot]` / `github-actions[bot]@users.noreply.github.com` before committing.
-- Re-runs are safe: reports for today are overwritten, PR branches that already exist on origin are left alone and referenced, the digest issue is edited rather than duplicated.
-- A researcher failure never aborts the run. Exit non-zero only when Step 1 prerequisites fail.
+The weekly workflow runs `--publish --non-interactive`; its dry-run input runs `--non-interactive` alone. In those modes never ask anything — every decision above has a default — and exit non-zero only when Step 1 prerequisites fail; a researcher failure never aborts the run. The workflow sets the bot git identity before the skill runs.
 
 ## Guardrails
 
 - Never print, commit, or paste environment variable values, `Authorization` headers, or raw API keys — in reports, PR bodies, issues, or your output. `probe.py` redacts; ad-hoc output must be checked by hand.
-- Never push to `pipecat-ai/pipecat` `main`, never force-push, never close or merge PRs.
+- Only `publish.py` pushes or opens anything, and only in Step 3 (with `--publish`) and Step 5. Never push to `pipecat-ai/pipecat` `main`, never force-push, never close or merge PRs.
 - Only `scripts/provider-watch/*`, `RESEARCH_GUIDE.md` and `REPORT_TEMPLATE.md` define what a researcher does; do not improvise extra instructions per unit beyond the payload.
