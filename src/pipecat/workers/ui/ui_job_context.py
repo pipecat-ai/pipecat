@@ -6,29 +6,27 @@
 
 """User-facing job group context (compatibility shim).
 
-Client-visible job groups live on ``JobGroupContext`` itself: pass
-``ui=UIJobGroupOptions(...)`` to ``BaseUIWorker.job(...)``,
-``job_group(...)``, or ``request_job_group(...)``. This subclass keeps the
+A group dispatched by a ``BaseUIWorker`` is client-visible, so a plain
+``JobGroupContext`` covers what this subclass used to. It keeps the
 historical constructor signature for code that imported it directly.
 """
 
-from pipecat.pipeline.job_context import JobGroupContext
+from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams
 from pipecat.utils.deprecation import deprecated
-from pipecat.workers.base_ui_worker import UIJobGroupOptions
 from pipecat.workers.base_worker import BaseWorker
 
 
 @deprecated(
     "`UIJobGroupContext` is deprecated since 1.8.0 and will be removed in 2.0.0. "
-    "Use `JobGroupContext` with `ui=UIJobGroupOptions(...)` instead."
+    "Use `JobGroupContext` instead."
 )
 class UIJobGroupContext(JobGroupContext):
-    """Deprecated alias for a client-visible :class:`JobGroupContext`.
+    """Deprecated alias for a :class:`JobGroupContext` on a ``BaseUIWorker``.
 
     .. deprecated:: 1.8.0
-        Use :class:`~pipecat.pipeline.job_context.JobGroupContext` with
-        ``ui=UIJobGroupOptions(...)`` instead (or the ``ui=`` parameter on
-        ``BaseUIWorker.job_group``). Will be removed in 2.0.0.
+        Use :class:`~pipecat.pipeline.job_context.JobGroupContext` instead;
+        a group dispatched by a ``BaseUIWorker`` is client-visible either
+        way. Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -47,19 +45,22 @@ class UIJobGroupContext(JobGroupContext):
         super().__init__(
             worker,
             worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            ui=UIJobGroupOptions(label=label, cancellable=cancellable),
+            params=JobGroupParams(
+                name=name,
+                payload=payload,
+                timeout=timeout,
+                cancel_on_error=cancel_on_error,
+                label=label,
+                cancellable=cancellable,
+            ),
         )
 
     @property
     def label(self) -> str | None:
         """The group's human-readable label."""
-        return self._ui.label if self._ui else None
+        return self._params.label
 
     @property
     def cancellable(self) -> bool:
         """Whether the client may request cancellation."""
-        return self._ui.cancellable if self._ui else True
+        return self._params.cancellable

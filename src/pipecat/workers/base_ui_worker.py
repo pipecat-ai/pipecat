@@ -4,18 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""BaseUIWorker: a worker whose jobs and job groups can surface on the client UI.
+"""BaseUIWorker: a worker whose jobs and job groups surface on the client UI.
 
-Extends ``BaseWorker`` with client-visible job dispatch: pass
-``ui=UIJobGroupOptions(...)`` to ``job(...)``, ``job_group(...)``,
-``request_job(...)``, or ``request_job_group(...)`` and the work's lifecycle
--- start, per-worker progress, and completion -- streams to the UI client as
-``ui-job-group`` envelopes, with the client's reserved ``__cancel_job_group``
-event honored for groups registered as cancellable. No LLM is involved:
-``BaseUIWorker`` is instantiable as-is (its inherited ``run()`` is a bus-only
-loop), so a plain pipeline app can register one on the runner as a dispatcher
-and call it from tools. ``UIWorker`` inherits this class and adds the
-LLM-driven page interaction (snapshots, UI events, commands).
+Every group a ``BaseUIWorker`` dispatches streams its lifecycle -- start,
+per-worker progress, and completion -- to the UI client as ``ui-job-group``
+envelopes, and the client's reserved ``__cancel_job_group`` event is honored
+for groups dispatched as cancellable. ``JobGroupParams.label`` titles the
+client's progress card. Dispatch from a plain ``BaseWorker`` instead when the
+work should stay invisible.
+
+No LLM is involved: ``BaseUIWorker`` is instantiable as-is (its inherited
+``run()`` is a bus-only loop), so a plain pipeline app can register one on the
+runner as a dispatcher and call it from tools. ``UIWorker`` inherits this class
+and adds the LLM-driven page interaction (snapshots, UI events, commands).
 """
 
 import time
@@ -40,37 +41,12 @@ from pipecat.bus.ui.messages import (
     BusUIJobUpdateMessage,
 )
 from pipecat.pipeline.job_context import (
-    JobContext,
     JobGroup,
-    JobGroupContext,
+    JobGroupParams,
     JobStatus,
+    resolve_job_params,
 )
 from pipecat.workers.base_worker import BaseWorker
-
-
-@dataclass
-class UIJobGroupOptions:
-    """Client-visibility options for a job or job group.
-
-    Passing one to ``BaseUIWorker.job(...)``, ``job_group(...)``,
-    ``request_job(...)``, or ``request_job_group(...)`` surfaces the work's
-    lifecycle -- start, per-worker progress, and completion -- to the UI
-    client as ``ui-job-group`` envelopes, so the client can show a
-    (optionally cancellable) progress card. Workers need not know about the
-    UI surface: any ``send_job_update`` they emit against the group's
-    ``job_id`` is forwarded automatically.
-
-    Parameters:
-        label: Optional human-readable label surfaced to the client
-            (e.g. ``"Research: Radiohead"``). The client UI uses it to
-            title the in-flight job-group card.
-        cancellable: Whether the client may request cancellation of the
-            group via the reserved ``__cancel_job_group`` event.
-            Defaults to True.
-    """
-
-    label: str | None = None
-    cancellable: bool = True
 
 
 @dataclass
@@ -96,17 +72,15 @@ class _UIJobGroupRegistration:
 
 
 class BaseUIWorker(BaseWorker):
-    """Worker that can surface its jobs and job groups on the client UI.
+    """Worker that surfaces its jobs and job groups on the client UI.
 
-    Overrides the ``BaseWorker`` dispatch methods with an optional ``ui``
-    parameter. When set, the group is registered for lifecycle forwarding:
-    a ``group_started`` envelope is published at dispatch, worker updates
-    and responses are forwarded as ``job_update`` / ``job_completed``
-    envelopes, ``group_completed`` is published at group teardown (normal
-    completion, cancellation, or timeout), and the client's reserved
-    ``__cancel_job_group`` event is translated into ``cancel_job_group``
-    for groups registered as cancellable. Without ``ui``, behavior is
-    identical to ``BaseWorker``.
+    Every group this worker dispatches is registered for lifecycle
+    forwarding: a ``group_started`` envelope is published at dispatch,
+    worker updates and responses are forwarded as ``job_update`` /
+    ``job_completed`` envelopes, ``group_completed`` is published at group
+    teardown (normal completion, cancellation, or timeout), and the
+    client's reserved ``__cancel_job_group`` event is translated into
+    ``cancel_job_group`` for groups dispatched as cancellable.
 
     Instantiable directly (no LLM): register one on the runner as a
     dispatcher when a pipeline app wants client-visible background work::
@@ -114,8 +88,10 @@ class BaseUIWorker(BaseWorker):
         ui_jobs = BaseUIWorker("ui-jobs")
         job_id = await ui_jobs.request_job_group(
             "wikipedia", "news",
-            payload={"query": query},
-            ui=UIJobGroupOptions(label=f"Research: {query}"),
+            params=JobGroupParams(
+                payload={"query": query},
+                label=f"Research: {query}",
+            ),
         )
     """
 
@@ -135,223 +111,76 @@ class BaseUIWorker(BaseWorker):
         # client as ``ui-job-group`` envelopes.
         self._ui_job_groups: dict[str, _UIJobGroupRegistration] = {}
 
-    def job(
-        self,
-        worker_name: str,
-        *,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        ui: UIJobGroupOptions | None = None,
-    ) -> JobContext:
-        """Create a single-worker job context manager.
-
-        Like ``BaseWorker.job(...)``, plus optional client visibility.
-
-        Args:
-            worker_name: Name of the worker to send the job to.
-            name: Optional job name for routing to a named ``@job``
-                handler on the worker.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds.
-            ui: Optional client-visibility options; when set, the job's
-                lifecycle streams to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
-
-        Returns:
-            A ``JobContext`` to use with ``async with``.
-        """
-        return JobContext(
-            self,
-            worker_name,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            ui=ui,
-        )
-
-    def job_group(
-        self,
-        *worker_names: str,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
-        ui: UIJobGroupOptions | None = None,
-    ) -> JobGroupContext:
-        """Create a job group context manager.
-
-        Like ``BaseWorker.job_group(...)``, plus optional client visibility.
-
-        Args:
-            *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-            ui: Optional client-visibility options; when set, the group's
-                lifecycle streams to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
-
-        Returns:
-            A ``JobGroupContext`` to use with ``async with``.
-        """
-        for worker_name in worker_names:
-            if not isinstance(worker_name, str):
-                raise TypeError(
-                    f"{self} Expected worker name as str, got {type(worker_name).__name__}"
-                )
-        return JobGroupContext(
-            self,
-            worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            ui=ui,
-        )
-
-    async def request_job(
-        self,
-        worker_name: str,
-        *,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        ui: UIJobGroupOptions | None = None,
-    ) -> str:
-        """Send a job request to a single worker (fire-and-forget).
-
-        Like ``BaseWorker.request_job(...)``, plus optional client visibility.
-
-        Args:
-            worker_name: Name of the worker to send the job to.
-            name: Optional job name for routing to a named ``@job``
-                handler on the worker.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. If set, the job is
-                automatically cancelled after this duration.
-            ui: Optional client-visibility options; when set, the job's
-                lifecycle streams to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
-
-        Returns:
-            The generated job_id.
-        """
-        group = await self.create_job_group_and_request_job(
-            [worker_name],
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=True,
-            ui=ui,
-        )
-        return group.job_id
-
-    async def request_job_group(
-        self,
-        *worker_names: str,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
-        ui: UIJobGroupOptions | None = None,
-    ) -> str:
-        """Send a job request to multiple workers (fire-and-forget).
-
-        Like ``BaseWorker.request_job_group(...)``, plus optional client
-        visibility.
-
-        Args:
-            *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. If set, the job is
-                automatically cancelled after this duration.
-            cancel_on_error: Whether to cancel the entire group if a
-                worker responds with an error status. Defaults to True.
-            ui: Optional client-visibility options; when set, the group's
-                lifecycle streams to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
-
-        Returns:
-            The generated job_id shared by all workers in the group.
-        """
-        for worker_name in worker_names:
-            if not isinstance(worker_name, str):
-                raise TypeError(
-                    f"{self} Expected worker name as str, got {type(worker_name).__name__}"
-                )
-        group = await self.create_job_group_and_request_job(
-            list(worker_names),
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            ui=ui,
-        )
-        return group.job_id
-
     async def create_job_group_and_request_job(
         self,
         worker_names: list[str],
         *,
+        params: JobGroupParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
-        cancel_on_error: bool = True,
-        ui: UIJobGroupOptions | None = None,
+        cancel_on_error: bool | None = None,
     ) -> JobGroup:
-        """Create a job group and send requests, optionally client-visible.
+        """Dispatch a job group and announce it to the client.
 
-        Like ``BaseWorker.create_job_group_and_request_job(...)``; when
-        ``ui`` is set, the group is additionally registered for lifecycle
-        forwarding and a ``group_started`` envelope is published before
-        this method returns. The matching ``group_completed`` is published
-        when the group completes, is cancelled, or times out.
+        Like ``BaseWorker.create_job_group_and_request_job(...)``, and then
+        registers the group for lifecycle forwarding and publishes
+        ``group_started``. The matching ``group_completed`` follows when the
+        group completes, is cancelled, or times out.
 
         Args:
             worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named handlers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. Covers both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-            ui: Optional client-visibility options (see
-                ``UIJobGroupOptions``).
+            params: How to run the group. See :class:`JobGroupParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(payload=...)`` instead. Will
+                    be removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(timeout=...)`` instead. Will
+                    be removed in 2.0.0.
+            cancel_on_error: Whether a worker error cancels the group.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(cancel_on_error=...)``
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             The created ``JobGroup``.
         """
-        group = await super().create_job_group_and_request_job(
-            worker_names,
+        group_params = resolve_job_params(
+            params,
+            JobGroupParams,
             name=name,
             payload=payload,
             timeout=timeout,
             cancel_on_error=cancel_on_error,
         )
-        if ui:
-            self._register_ui_job_group(
+        group = await super().create_job_group_and_request_job(worker_names, params=group_params)
+        self._register_ui_job_group(
+            job_id=group.job_id,
+            worker_names=list(worker_names),
+            label=group_params.label,
+            cancellable=group_params.cancellable,
+        )
+        await self.send_bus_message(
+            BusUIJobGroupStartedMessage(
+                source=self.name,
+                target=None,
                 job_id=group.job_id,
-                worker_names=list(worker_names),
-                label=ui.label,
-                cancellable=ui.cancellable,
+                workers=list(worker_names),
+                label=group_params.label,
+                cancellable=group_params.cancellable,
+                at=int(time.time() * 1000),
             )
-            await self.send_bus_message(
-                BusUIJobGroupStartedMessage(
-                    source=self.name,
-                    target=None,
-                    job_id=group.job_id,
-                    workers=list(worker_names),
-                    label=ui.label,
-                    cancellable=ui.cancellable,
-                    at=int(time.time() * 1000),
-                )
-            )
+        )
         return group
 
     async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:

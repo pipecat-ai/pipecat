@@ -17,6 +17,7 @@ Covers:
 
 import asyncio
 import unittest
+import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 from pipecat.bus.messages import (
@@ -33,11 +34,12 @@ from pipecat.bus.ui.messages import (
     BusUIJobUpdateMessage,
 )
 from pipecat.frames.frames import LLMMessagesAppendFrame
-from pipecat.pipeline.job_context import JobGroup, JobStatus
+from pipecat.pipeline.job_context import JobGroup, JobGroupParams, JobParams, JobStatus
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager
-from pipecat.workers.base_ui_worker import BaseUIWorker, UIJobGroupOptions
+from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.ui import UIWorker
+from pipecat.workers.ui.ui_job_context import UIJobGroupContext
 
 
 async def _make_solo_worker(**kwargs) -> UIWorker:
@@ -315,6 +317,16 @@ def _stub_job_group(worker, job_id="t1", worker_names=("w1",)):
 
 
 class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
+    async def test_label_and_cancellable_read_the_group_params(self):
+        """The deprecated context still answers for how it was built."""
+        worker = await _make_solo_worker()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            context = UIJobGroupContext(worker, ("w1",), label="My research", cancellable=False)
+
+        self.assertEqual(context.label, "My research")
+        self.assertFalse(context.cancellable)
+
     async def test_context_publishes_started_and_completed(self):
         worker = await _make_solo_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
@@ -409,7 +421,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        async with worker.job_group("w1", ui=UIJobGroupOptions(label="Research: SMRs")) as tg:
+        async with worker.job_group("w1", params=JobGroupParams(label="Research: SMRs")) as tg:
             self.assertEqual(tg.job_id, "t1")
             self.assertIn("t1", worker._ui_job_groups)
 
@@ -490,7 +502,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        async with worker.job("w1", ui=UIJobGroupOptions(label="one job")) as t:
+        async with worker.job("w1", params=JobParams(label="one job")) as t:
             self.assertEqual(t.job_id, "t1")
             self.assertIn("t1", worker._ui_job_groups)
 
@@ -614,7 +626,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        job_id = await worker.request_job_group("w1", ui=UIJobGroupOptions(label="bg work"))
+        job_id = await worker.request_job_group("w1", params=JobGroupParams(label="bg work"))
         self.assertEqual(job_id, "t1")
         await asyncio.sleep(0.05)  # let the background drainer finish
 

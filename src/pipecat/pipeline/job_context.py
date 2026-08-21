@@ -9,13 +9,100 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from pipecat.workers.base_ui_worker import UIJobGroupOptions
     from pipecat.workers.base_worker import BaseWorker
+
+
+class JobParams(BaseModel):
+    """Configuration for a job sent to a single worker.
+
+    Parameters:
+        name: Optional job name, routing the request to the matching
+            ``@job(name=...)`` handler on the worker.
+        payload: Optional structured data describing the work.
+        timeout: Optional timeout in seconds, covering both the wait for
+            the worker to become ready and the job itself.
+        label: Optional human-readable description of the work, e.g.
+            ``"Research: Radiohead"``. A
+            :class:`~pipecat.workers.base_ui_worker.BaseUIWorker` titles
+            the client's progress card with it.
+        cancellable: Whether an external requester, such as the client UI,
+            may ask for the job to be cancelled. Cancellation the worker
+            initiates itself (shutdown, timeout, ``cancel_on_error``)
+            proceeds either way.
+    """
+
+    name: str | None = None
+    payload: dict | None = None
+    timeout: float | None = None
+    label: str | None = None
+    cancellable: bool = True
+
+
+class JobGroupParams(JobParams):
+    """Configuration for a job sent to several workers at once.
+
+    Carries every :class:`JobParams` field, which apply to the group as a
+    whole, plus how the group reacts to one of its workers failing.
+
+    Parameters:
+        cancel_on_error: Whether a worker responding with an error status
+            cancels the rest of the group.
+    """
+
+    cancel_on_error: bool = True
+
+
+#: Either params class, so ``resolve_job_params`` hands back what it was asked for.
+JobParamsT = TypeVar("JobParamsT", bound=JobParams)
+
+
+def resolve_job_params(
+    params: JobParamsT | None,
+    params_class: type[JobParamsT],
+    **deprecated,
+) -> JobParamsT:
+    """Fold the deprecated per-argument job spelling into a params object.
+
+    Dispatch methods accept a params object and, until 2.0.0, the individual
+    arguments it replaced. Call this once at the entry point a caller reaches,
+    then pass the result down as ``params`` so nothing warns twice.
+
+    .. deprecated:: 1.8.0
+        No replacement. Will be removed in 2.0.0, along with the individual
+        arguments it exists to absorb.
+
+    Args:
+        params: The params object the caller passed, if any.
+        params_class: The class to build when only individual arguments came in.
+        **deprecated: The individual arguments. Each defaults to None, so a
+            non-None value means the caller passed it explicitly.
+
+    Returns:
+        The params to dispatch with.
+
+    Raises:
+        TypeError: If both ``params`` and individual arguments were passed.
+    """
+    passed = {key: value for key, value in deprecated.items() if value is not None}
+    if not passed:
+        return params or params_class()
+    if params is not None:
+        raise TypeError(f"Pass either `params` or `{'`, `'.join(sorted(passed))}`, not both.")
+    warnings.warn(
+        f"Passing `{'`, `'.join(sorted(passed))}` to a job dispatch method is deprecated since "
+        f"1.8.0 and will be removed in 2.0.0. Use `params={params_class.__name__}(...)` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return params_class(**passed)
 
 
 class JobStatus(StrEnum):
@@ -170,7 +257,9 @@ class JobGroupContext:
 
     Example::
 
-        async with self.job_group("w1", "w2", payload=data) as tg:
+        async with self.job_group(
+            "w1", "w2", params=JobGroupParams(payload=data)
+        ) as tg:
             async for event in tg:
                 print(f"{event.worker_name} [{event.type}]: {event.data}")
 
@@ -183,34 +272,19 @@ class JobGroupContext:
         worker: BaseWorker,
         worker_names: tuple[str, ...],
         *,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
-        ui: UIJobGroupOptions | None = None,
+        params: JobGroupParams | None = None,
     ):
         """Initialize the JobGroupContext.
 
         Args:
             worker: The parent `BaseWorker` that owns this job group.
             worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job`` handlers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds covering both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-            ui: Optional client-visibility options. When set, the group's
-                lifecycle is surfaced to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
+            params: How to run the group. Defaults to
+                :class:`JobGroupParams` defaults.
         """
         self._worker = worker
         self._worker_names = worker_names
-        self._name = name
-        self._payload = payload
-        self._timeout = timeout
-        self._cancel_on_error = cancel_on_error
-        self._ui = ui
+        self._params = params or JobGroupParams()
         self._group: JobGroup | None = None
 
     @property
@@ -239,16 +313,9 @@ class JobGroupContext:
         return event
 
     async def __aenter__(self) -> JobGroupContext:
-        # ``ui`` is only understood by ``BaseUIWorker``'s override; omit it
-        # entirely for plain workers (where it is always ``None``).
-        ui_kwargs = {"ui": self._ui} if self._ui is not None else {}
         self._group = await self._worker.create_job_group_and_request_job(
             list(self._worker_names),
-            name=self._name,
-            payload=self._payload,
-            timeout=self._timeout,
-            cancel_on_error=self._cancel_on_error,
-            **ui_kwargs,
+            params=self._params,
         )
         self._group.event_queue = asyncio.Queue()
         return self
@@ -284,7 +351,7 @@ class JobContext:
 
     Example::
 
-        async with self.job("worker", payload=data) as t:
+        async with self.job("worker", params=JobParams(payload=data)) as t:
             async for event in t:
                 print(f"[{event.type}]: {event.data}")
 
@@ -296,30 +363,19 @@ class JobContext:
         worker: BaseWorker,
         worker_name: str,
         *,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        ui: UIJobGroupOptions | None = None,
+        params: JobParams | None = None,
     ):
         """Initialize the JobContext.
 
         Args:
             worker: The parent `BaseWorker` that owns this job.
             worker_name: Name of the worker to send the job to.
-            name: Optional job name for routing to a named ``@job`` handler.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds covering both the
-                ready-wait and job execution.
-            ui: Optional client-visibility options. When set, the job's
-                lifecycle is surfaced to the UI client as ``ui-job-group``
-                envelopes (see ``UIJobGroupOptions``).
+            params: How to run the job. Defaults to :class:`JobParams`
+                defaults.
         """
         self._worker = worker
         self._worker_name = worker_name
-        self._name = name
-        self._payload = payload
-        self._timeout = timeout
-        self._ui = ui
+        self._params = params or JobParams()
         self._group: JobGroup | None = None
 
     @property
@@ -348,14 +404,9 @@ class JobContext:
         return JobEvent(type=event.type, data=event.data)
 
     async def __aenter__(self) -> JobContext:
-        ui_kwargs = {"ui": self._ui} if self._ui is not None else {}
         self._group = await self._worker.create_job_group_and_request_job(
             [self._worker_name],
-            name=self._name,
-            payload=self._payload,
-            timeout=self._timeout,
-            cancel_on_error=True,
-            **ui_kwargs,
+            params=JobGroupParams(**self._params.model_dump()),
         )
         self._group.event_queue = asyncio.Queue()
         return self

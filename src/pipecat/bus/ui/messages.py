@@ -6,8 +6,11 @@
 
 """Bus carriers for the UI Worker protocol.
 
-These dataclasses are the on-the-bus shape that ``UIWorker`` (see
-``pipecat.workers.ui``) and ``PipelineWorker`` exchange. They are NOT
+These dataclasses are the on-the-bus shape that a UI worker (see
+``pipecat.workers.ui``) and the worker bridging to the client exchange.
+Nothing in the carriers themselves is tied to a transport; ``PipelineWorker``
+over RTVI is the bridge that ships, and a different one could carry the same
+messages to a client that speaks something else. They are NOT
 the on-the-wire format the client sees; that lives in
 ``pipecat.processors.frameworks.rtvi.models`` (``UIEventMessage``,
 ``UICommandMessage``, ``UIJobGroupMessage``, ...). When RTVI is enabled,
@@ -23,7 +26,7 @@ dispatches on to translate outbound ones into RTVI frames.
 - ``BusUIJobGroupStartedMessage``, ``BusUIJobUpdateMessage``,
   ``BusUIJobCompletedMessage``, and ``BusUIJobGroupCompletedMessage``
   carry the four phases of a user-facing job group's lifecycle (see
-  ``UIWorker.ui_job_group``).
+  ``BaseUIWorker``).
 
 The carriers live in the ``bus`` layer (rather than alongside
 ``UIWorker``) because both ``PipelineWorker`` (in ``pipecat.pipeline``)

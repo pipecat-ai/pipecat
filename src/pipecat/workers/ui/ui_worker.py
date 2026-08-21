@@ -25,7 +25,7 @@ from pipecat.bus.ui.messages import (
     BusUIEventMessage,
 )
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
-from pipecat.pipeline.job_context import JobGroupContext, JobStatus
+from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -40,7 +40,7 @@ from pipecat.processors.frameworks.rtvi.models import (
 )
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.deprecation import deprecated
-from pipecat.workers.base_ui_worker import BaseUIWorker, UIJobGroupOptions
+from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
@@ -467,7 +467,7 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
 
     @deprecated(
         "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. "
-        "Use `job_group` with `ui=UIJobGroupOptions(...)` instead."
+        "Use `job_group` instead."
     )
     def ui_job_group(
         self,
@@ -482,22 +482,25 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
         """Deprecated wrapper for client-visible job groups.
 
         .. deprecated:: 1.8.0
-            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.job_group` with
-            ``ui=UIJobGroupOptions(...)`` instead — client-visible job groups
-            are a ``BaseUIWorker`` feature. Will be removed in 2.0.0.
+            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.job_group`
+            instead, since every group a ``BaseUIWorker`` dispatches is
+            client-visible. Will be removed in 2.0.0.
         """
         return self.job_group(
             *worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            ui=UIJobGroupOptions(label=label, cancellable=cancellable),
+            params=JobGroupParams(
+                name=name,
+                payload=payload,
+                timeout=timeout,
+                cancel_on_error=cancel_on_error,
+                label=label,
+                cancellable=cancellable,
+            ),
         )
 
     @deprecated(
         "`UIWorker.start_ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. "
-        "Use `request_job_group` with `ui=UIJobGroupOptions(...)` instead."
+        "Use `request_job_group` instead."
     )
     async def start_ui_job_group(
         self,
@@ -513,16 +516,19 @@ class UIWorker(BaseUIWorker, LLMContextWorker):
 
         .. deprecated:: 1.8.0
             Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.request_job_group`
-            with ``ui=UIJobGroupOptions(...)`` instead — client-visible job
-            groups are a ``BaseUIWorker`` feature. Will be removed in 2.0.0.
+            instead, since every group a ``BaseUIWorker`` dispatches is
+            client-visible. Will be removed in 2.0.0.
         """
         return await self.request_job_group(
             *worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            ui=UIJobGroupOptions(label=label, cancellable=cancellable),
+            params=JobGroupParams(
+                name=name,
+                payload=payload,
+                timeout=timeout,
+                cancel_on_error=cancel_on_error,
+                label=label,
+                cancellable=cancellable,
+            ),
         )
 
     def render_ui_state(self) -> str:
