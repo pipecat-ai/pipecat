@@ -85,4 +85,5 @@ Guidance:
 - A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git show <branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
 - The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
 - "Sources" is one line per page, endpoint, spec and SDK you relied on and what it told you; the next researcher starts from it.
+- Frontmatter is YAML: quote any value that starts with a backtick, `*`, `&`, `[`, `{`, `#`, `|`, `>`, `%`, `@` or contains `: ` — e.g. `note: "`extra` covers it"` — or the report fails to parse and is listed as an error.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.
