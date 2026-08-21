@@ -208,7 +208,8 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
 
     - on_connected: Called once the socket is open.
     - on_disconnected: Called once it is closed.
-    - on_connection_error: Called with a message when the connection fails.
+    - on_connection_error: Called with a message and whether the failure will
+      keep recurring, when the connection fails.
 
     Example::
 
@@ -550,9 +551,16 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         if not self._disconnecting:
             await self._disconnect_websocket()
 
-    async def _report_error(self, error: ErrorFrame):
-        """Hand a connection failure to whoever is driving the client."""
-        await self._call_event_handler("on_connection_error", error.error)
+    async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
+        """Hand a connection failure to whoever is driving the client.
+
+        Args:
+            error: The failure to report.
+            force_treat_as_permanent: Whether the failure will keep recurring,
+                which a driver reports onwards so the pipeline can stop sending
+                work this way.
+        """
+        await self._call_event_handler("on_connection_error", error.error, force_treat_as_permanent)
 
     async def _wait_ready(self):
         """Wait for the handshake to settle."""

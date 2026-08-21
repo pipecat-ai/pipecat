@@ -137,8 +137,8 @@ class OpenClawGatewayService(AIService):
         await self._client.setup(setup.task_manager)
 
         @self._client.event_handler("on_connection_error")
-        async def _on_connection_error(client, message: str):
-            await self.push_error(message)
+        async def _on_connection_error(client, message: str, force_treat_as_permanent: bool):
+            await self.push_error(message, force_treat_as_permanent=force_treat_as_permanent)
 
         await self._connect()
 
