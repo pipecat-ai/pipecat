@@ -24,18 +24,9 @@ from pathlib import Path
 
 import yaml
 
-STATUS_ORDER = [
-    "prs-opened",
-    "prs-withheld",
-    "needs-judgement",
-    "new-upstream",
-    "blocked",
-    "error",
-    "up-to-date",
-]
+STATUS_ORDER = ["pr-proposed", "needs-judgement", "new-upstream", "blocked", "error", "up-to-date"]
 STATUS_LABELS = {
-    "prs-opened": "PRs opened, to review",
-    "prs-withheld": "PRs withheld (criteria met; per-run PR cap reached)",
+    "pr-proposed": "PRs to review",
     "needs-judgement": "Changes to consider",
     "new-upstream": "New upstream, no action proposed",
     "blocked": "Blocked",
@@ -67,6 +58,11 @@ def load_reports(reports_dir: Path, date: str) -> list[dict]:
     return found
 
 
+def _summary(pr: dict) -> str:
+    summary = str(pr.get("summary") or "").strip()
+    return f" — {summary}" if summary else ""
+
+
 def _link(report: dict, repo_url: str | None) -> str:
     path = report["_path"]
     return (
@@ -92,13 +88,26 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
     )
     lines += [f"**{len(reports)} units researched** — {counts or 'none'}.", ""]
 
-    prs = [(r, pr) for r in reports for pr in (r.get("prs") or [])]
-    if prs:
-        lines += ["## PRs opened, to review", ""]
-        for report, pr in prs:
-            url = pr.get("url") if isinstance(pr, dict) else str(pr)
-            summary = pr.get("summary", "") if isinstance(pr, dict) else ""
-            lines.append(f"- {_link(report, repo_url)} — {url}{' — ' + summary if summary else ''}")
+    prs = [(r, pr) for r in reports for pr in (r.get("prs") or []) if isinstance(pr, dict)]
+    open_prs = [(r, pr) for r, pr in prs if pr.get("state") in {"open", "merged", "closed"}]
+    branches = [(r, pr) for r, pr in prs if pr.get("state") == "branch"]
+    if open_prs:
+        lines += ["## PRs to review", ""]
+        for report, pr in open_prs:
+            state = f" ({pr['state']})" if pr.get("state") != "open" else ""
+            lines.append(f"- {_link(report, repo_url)} — {pr.get('url')}{state}{_summary(pr)}")
+        lines.append("")
+    if branches:
+        capped = [b for b in branches if b[1].get("capped")]
+        title = "## Branches not opened as PRs" + (
+            " (per-run cap reached)" if capped else " (dry run)"
+        )
+        lines += [title, ""]
+        for report, pr in branches:
+            branch = pr.get("branch")
+            lines.append(
+                f"- {_link(report, repo_url)} — `{branch}` — review: `git diff main...{branch}`{_summary(pr)}"
+            )
         lines.append("")
 
     for status in STATUS_ORDER + sorted(set(by_status) - set(STATUS_ORDER)):

@@ -17,7 +17,7 @@ on:
         description: "Research only the first N selected units"
         required: false
         type: string
-      local_only:
+      dry_run:
         description: "Dry run: push nothing, open nothing; reports are uploaded as an artifact"
         required: false
         type: boolean
@@ -115,10 +115,10 @@ jobs:
       - name: Compose skill arguments
         id: args
         run: |
-          ARGS="--ci"
+          ARGS="--non-interactive"
+          [ "${{ inputs.dry_run }}" != "true" ] && ARGS="$ARGS --publish"
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ -n "${{ inputs.limit }}" ] && ARGS="$ARGS --limit ${{ inputs.limit }}"
-          [ "${{ inputs.local_only }}" = "true" ] && ARGS="$ARGS --local"
           echo "value=$ARGS" >> "$GITHUB_OUTPUT"
           echo "Running: /provider-watch $ARGS"
 
@@ -135,22 +135,22 @@ jobs:
             /provider-watch ${{ steps.args.outputs.value }}
 
             Read `.claude/skills/provider-watch/SKILL.md` and follow it exactly,
-            including its "Unattended (--ci) behaviour" section. The reports repo
-            is checked out at `./_reports` on `main`; `gh` is authenticated with
-            a token that can push to pipecat-ai/pipecat branches, open pull
-            requests there, and push/open issues on pipecat-ai/provider-watch.
-            Use `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
+            including its "Unattended runs" section. The reports repo is checked
+            out at `./_reports` on `main`; `gh` is authenticated with a token
+            that can push to pipecat-ai/pipecat branches, open pull requests
+            there, and push/open issues on pipecat-ai/provider-watch. Use
+            `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
 
-            `--local` in the arguments means a dry run: write reports into
-            `./_reports` and create PR branches locally, but push nothing and
-            open nothing; a later workflow step uploads the results.
+            Without `--publish` this is a dry run: write reports into
+            `./_reports` and leave branches locally, but push nothing and open
+            nothing; a later workflow step uploads the results.
           claude_args: |
             --model claude-opus-5
-            --max-turns 200
+            --max-turns 300
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
 
       - name: Push any reports the run left uncommitted
-        if: always() && inputs.local_only != true
+        if: always() && inputs.dry_run != true
         working-directory: _reports
         run: |
           if git diff --quiet && git diff --cached --quiet && [ -z "$(git status --porcelain)" ]; then

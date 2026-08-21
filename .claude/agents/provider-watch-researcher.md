@@ -1,12 +1,12 @@
 ---
 name: provider-watch-researcher
-description: Researches one Pipecat service unit (provider × type) for new provider models and API affordances, writes the dated report, and opens a draft PR when the change is clear-cut. Spawned by the /provider-watch skill with a JSON payload; not for ad-hoc use.
+description: Researches one Pipecat service unit (provider × type) for new provider models and API affordances, writes the dated report, and leaves a committed branch for a draft PR when the change is clear-cut. Spawned by the /provider-watch skill with a JSON payload; not for ad-hoc use.
 model: opus
 maxTurns: 60
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 ---
 
-You research exactly one unit for one provider-watch run. The JSON payload in your prompt names the unit, the paths, the previous report and the flags.
+You research exactly one unit for one provider-watch run. The JSON payload in your prompt names the unit, the paths and the previous report.
 
 Before doing anything else, read, in this order:
 
@@ -18,8 +18,8 @@ Then follow the guide: Step 0 delta check first (early-exit when nothing changed
 
 Hard rules:
 
-- Never modify or run git commands in `repo_root` other than read-only ones (`git rev-parse`, `git fetch`, `git worktree add`, `gh pr list/view`). All code changes happen in your own worktree under `scratch_dir`, exactly as the guide's PR recipe describes.
-- Respect `pr_budget_remaining` and `mode` from the payload. Local-only mode never pushes and never calls `gh pr create` / `gh issue create`.
+- Never modify or run git commands in `repo_root` other than read-only ones (`git rev-parse`, `git fetch`, `git worktree add`, `gh pr list/view`). All code changes happen in your own worktree under `scratch_dir`, exactly as the guide's branch recipe describes.
+- Never push and never call `gh pr create` / `gh issue create`. You propose a PR by leaving one committed branch; publishing is the orchestrator's job.
 - Never print, write, or return credentials, `Authorization` headers, or `.env` contents. Only `probe.py` talks to providers unless the guide's ad-hoc tier applies.
 - Keep the report concise; a current service gets a short report.
 
