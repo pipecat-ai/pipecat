@@ -2,7 +2,7 @@
 name: provider-watch
 description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and open draft PRs for clear-cut updates
 disable-model-invocation: true
-argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--ci]"
+argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--publish|--local] [--ci]"
 ---
 
 Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit in the reports repo, a digest, and draft PRs on pipecat for changes the researcher is confident about. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
@@ -10,19 +10,18 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 ## Arguments
 
 ```
-/provider-watch [--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--ci]
+/provider-watch [--only a,b] [--limit N] [--concurrency N] [--publish|--local] [--ci]
 ```
 
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
 - `--limit N` — research only the first N selected units (deterministic order). For test runs.
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
-- `--no-prs` — never create branches or PRs. Changes that meet the PR criteria are written up under "PRs withheld" (status `prs-withheld`) so a test run shows what a real run would have opened.
 - `--publish` / `--local` — push reports, open PRs and the digest issue / write everything locally and push nothing. Without either, ask once (Step 1).
 - `--ci` — unattended mode: never ask questions, implies `--publish`, fail fast if prerequisites are missing.
 
 Examples:
 
-- `/provider-watch --only deepgram,groq --limit 2 --concurrency 1 --no-prs` — cheap local smoke test
+- `/provider-watch --only deepgram,groq --limit 2 --concurrency 1 --local` — cheap smoke test; PR branches stay local
 - `/provider-watch --only ollama --local` — exercise the PR path without pushing
 - `/provider-watch --ci` — what the weekly workflow runs
 
@@ -60,7 +59,6 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
   "previous_report_file": "<absolute path of the newest existing reports/<provider>/<unit-suffix>/*.md, or null>",
   "scratch_dir": "<scratch>",
   "mode": "publish" | "local-only",
-  "prs_enabled": true | false,
   "pr_budget_remaining": <int>
 }
 ```
@@ -71,7 +69,7 @@ Rules for the batch loop:
 
 - Launch the whole batch at once so the subagents run concurrently; wait for all of them before starting the next batch.
 - Each researcher returns exactly one JSON line: `{"service", "status", "default_model", "prs", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `status: error` and the failure in the body, and append a matching line.
-- PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; once it reaches 0 pass `prs_enabled: false` to later batches (their qualifying changes land under "PRs withheld").
+- PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; at 0, later batches write qualifying changes under "PRs withheld" instead of opening them.
 - **Publish mode:** after every batch, commit and push the reports checkout (`git add reports && git commit -m "provider-watch: <RUN_DATE> (<unit ids>)" && git push`). A run that dies later keeps what it has done.
 - Researchers never touch this checkout's git state; PR work happens in worktrees under `<scratch>`. If `git status` here shows changes you did not make, stop and report it.
 
