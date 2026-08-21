@@ -50,12 +50,18 @@ decided:                                   # things the team said not to do (or 
     source: https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1
     date: 2026-08-13
 error: null                                # or one line: why the unit could not be researched
+hints:                                     # optional: corrections to providers.yaml for this provider
+  changelog: https://docs.cartesia.ai/changelog/2026
+  specs:
+    - name: cartesia-openapi.json
+      url: https://api.cartesia.ai/openapi.json
 ---
 ```
 
 - `gaps` is the full current list, not just what is new this run. Keep `first_seen` from the previous report when the item is the same gap, so the digest can show how long it has been open. `action` is `pr` (a `prs` entry exists for it) or `consider` (needs a maintainer's call or more work). A `note` is optional — use it for "re-check when GA" and similar.
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
 - `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
+- `hints` is present only when `providers.yaml` should change for this provider: a replacement for a dead `models`/`changelog` URL, a page to add under `docs`, a spec to add under `specs`. `publish.py` merges every run's hints into the file on one draft PR. Omit the key otherwise.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
 
 ## Body
