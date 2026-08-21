@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -11,6 +12,7 @@ import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
+    EndFrame,
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -40,6 +42,29 @@ class _FakeWebsocket:
             yield message
 
 
+class _StopAwareWebsocket:
+    """Yield Soniox's trailing response only after end-of-audio is sent."""
+
+    def __init__(self, messages):
+        self._messages = messages
+        self._stop_sent = asyncio.Event()
+        self.state = State.OPEN
+        self.send = AsyncMock(side_effect=self._send)
+        self.close = AsyncMock()
+
+    async def _send(self, message):
+        if message == "":
+            self._stop_sent.set()
+
+    def __aiter__(self):
+        return self._iter_messages()
+
+    async def _iter_messages(self):
+        await self._stop_sent.wait()
+        for message in self._messages:
+            yield message
+
+
 @pytest.mark.asyncio
 async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatch):
     async def fake_websocket_connect(*args, **kwargs):
@@ -55,6 +80,49 @@ async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatc
     await service._connect_websocket()
 
     assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_stop_drains_final_transcript_without_reconnecting(monkeypatch):
+    task_manager = TaskManager()
+    service = SonioxSTTService(api_key="test-key", task_manager=task_manager)
+    pushed_frames = []
+
+    messages = [
+        json.dumps(
+            {
+                "tokens": [
+                    {"text": "open", "is_final": True},
+                    {"text": " shifts", "is_final": True},
+                ]
+            }
+        ),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    websocket = _StopAwareWebsocket(messages)
+    service._websocket = websocket
+
+    async def fake_push_frame(frame, direction=None):
+        pushed_frames.append(frame)
+
+    async def fake_noop(*args, **kwargs):
+        pass
+
+    reconnect = AsyncMock(return_value=False)
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "_handle_transcription", fake_noop)
+    monkeypatch.setattr(service, "_try_reconnect", reconnect)
+
+    service._receive_task = service.create_task(
+        service._receive_task_handler(service._report_error), name="receive"
+    )
+
+    await service.stop(EndFrame())
+
+    websocket.send.assert_awaited_once_with("")
+    final_frames = [frame for frame in pushed_frames if isinstance(frame, TranscriptionFrame)]
+    assert [frame.text for frame in final_frames] == ["open shifts"]
+    reconnect.assert_not_awaited()
 
 
 def test_language_from_tokens_uses_single_recognized_language():

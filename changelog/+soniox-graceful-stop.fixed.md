@@ -1,0 +1,1 @@
+- Fixed Soniox STT graceful shutdown dropping trailing final transcripts.
