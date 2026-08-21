@@ -120,7 +120,7 @@ jobs:
       - name: Compose skill arguments
         id: args
         run: |
-          ARGS="--ci --reports-path $GITHUB_WORKSPACE/_reports"
+          ARGS="--ci"
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ -n "${{ inputs.limit }}" ] && ARGS="$ARGS --limit ${{ inputs.limit }}"
           [ "${{ inputs.no_prs }}" = "true" ] && ARGS="$ARGS --no-prs"
