@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pipecat.bus import (
     BusCancelWorkerMessage,
     BusEndWorkerMessage,
+    BusFrameMessage,
     BusMessage,
     BusTTSSpeakMessage,
 )
@@ -86,7 +87,7 @@ from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
-from pipecat.workers.base_worker import BaseWorker, WorkerParams
+from pipecat.workers.base_worker import BaseWorker, WorkerActivationArgs, WorkerParams
 
 HEARTBEAT_SECS = 1.0
 HEARTBEAT_MONITOR_SECS = 10.0
@@ -523,14 +524,12 @@ class PipelineWorker(BaseWorker):
             edge_source = _BusEdgeProcessor(
                 worker=self,
                 direction=FrameDirection.UPSTREAM,
-                bridges=bridged,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSource",
             )
             edge_sink = _BusEdgeProcessor(
                 worker=self,
                 direction=FrameDirection.DOWNSTREAM,
-                bridges=bridged,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSink",
             )
@@ -736,6 +735,55 @@ class PipelineWorker(BaseWorker):
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
 
+    async def end(self, *, reason: str | None = None) -> None:
+        """Request a graceful end of the session, draining the pipeline first.
+
+        Whatever this worker has already pushed reaches the end of the
+        pipeline before the session goes away, so a closing line is heard
+        rather than cut off.
+
+        Args:
+            reason: Optional human-readable reason for ending.
+        """
+        await self._drain_pipeline()
+        await super().end(reason=reason)
+
+    async def activate_worker(
+        self,
+        worker_name: str,
+        *,
+        args: WorkerActivationArgs | None = None,
+        deactivate_self: bool = False,
+    ) -> None:
+        """Activate a worker by name, draining this pipeline first.
+
+        Handing over before the pipeline drains would let the target
+        start while this worker's output is still in flight, so the two
+        would talk over each other.
+
+        Args:
+            worker_name: The name of the worker to activate.
+            args: Optional ``WorkerActivationArgs`` forwarded to the
+                target worker's ``on_activated``.
+            deactivate_self: Whether to deactivate this worker before
+                activating the target.
+        """
+        await self._drain_pipeline()
+        await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
+
+    async def _drain_pipeline(self) -> None:
+        """Wait for in-flight frames to be processed, if any can be.
+
+        A pipeline that is not running has no one left to bounce the
+        flush probe back, so waiting on it would only spend the flush
+        timeout. ``_process_push_task`` is created with the worker's
+        tasks and cleared once they are torn down, so it stands for
+        whether there is a pipeline to drain.
+        """
+        if self._process_push_task is None or self.has_finished():
+            return
+        await self.flush_pipeline()
+
     async def cancel(self, *, reason: str | None = None):
         """Request the running pipeline to cancel.
 
@@ -834,8 +882,9 @@ class PipelineWorker(BaseWorker):
         Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
         the sink bounces it back upstream and the source sets its event once it
         completes the round-trip, signalling that every frame queued ahead of it
-        has been processed. The probe is injected straight into the pipeline so
-        it bypasses any ``queue_frame`` override (e.g. tool-call deferral).
+        has been processed. The probe goes on the worker's push queue, behind
+        whatever is already waiting there, and bypasses any ``queue_frame``
+        override (e.g. tool-call deferral).
 
         Args:
             timeout: Seconds to wait before giving up. On timeout a warning is
@@ -846,7 +895,7 @@ class PipelineWorker(BaseWorker):
             True if the pipeline drained, False if the wait timed out.
         """
         event = asyncio.Event()
-        await self._pipeline.queue_frame(PipelineFlushFrame(event=event))
+        await self._push_queue.put(PipelineFlushFrame(event=event))
         try:
             await asyncio.wait_for(event.wait(), timeout)
             return True
@@ -872,6 +921,10 @@ class PipelineWorker(BaseWorker):
         if message.target and message.target != self.name:
             return
 
+        if isinstance(message, BusFrameMessage):
+            await self._queue_bridged_frame(message)
+            return
+
         if isinstance(message, BusTTSSpeakMessage):
             await self.queue_frame(
                 TTSSpeakFrame(text=message.text, append_to_context=message.append_to_context)
@@ -880,6 +933,25 @@ class PipelineWorker(BaseWorker):
 
         if self._rtvi and isinstance(message, BusUIDataMessage):
             await self._handle_ui_bus_message(message)
+
+    async def _queue_bridged_frame(self, message: BusFrameMessage) -> None:
+        """Queue a frame that reached this worker over the bus.
+
+        Queued rather than pushed from the edge that captured the
+        outbound direction, so bus inbound serialises with the frames
+        this worker queues itself (e.g. those a flow framework enqueues
+        from ``set_node``).
+
+        Args:
+            message: The frame carrier to inject.
+        """
+        if self._bridged is None:
+            return
+        if message.source == self.name:
+            return
+        if self._bridged and message.bridge not in self._bridged:
+            return
+        await self.queue_frame(message.frame, message.direction)
 
     async def _handle_ui_bus_message(self, message: BusUIDataMessage) -> None:
         """Translate a UI carrier into the matching RTVI frame and queue it.
@@ -1190,7 +1262,15 @@ class PipelineWorker(BaseWorker):
         Drives shutdown through the pipeline (``CancelFrame``) so
         ``_finished_event`` fires once the frame drains, rather than
         calling ``stop()`` directly.
+
+        A worker already cancelling ignores this. More than one cancel
+        reaches a worker on an ordinary shutdown, since the runner
+        cancels its workers and then cancels whatever it launched, and
+        acting on each would announce the cancellation twice and hand
+        every child a second one to propagate.
         """
+        if self._cancelled:
+            return
         logger.debug(f"Worker '{self}': received cancel")
         await self._propagate_cancel_to_children(message)
         await self.cancel(reason=message.reason)

@@ -160,6 +160,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._known_runners: set[str] = set()
         self._running: bool = False
         self._auto_end: bool = True
+        self._cancel_reason: str | None = None
         self._shutdown_event = asyncio.Event()
         self._sig_task: asyncio.Task | None = None
 
@@ -294,8 +295,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
             pass
 
         try:
-            # Cancel any remaining launched workers and wait for them to finish.
-            await self._cancel_spawned_tasks()
+            # Cancel any worker still going and wait for it to finish.
+            await self._cancel_spawned_workers()
 
             # Cleanup base object.
             await self.cleanup()
@@ -341,29 +342,24 @@ class WorkerRunner(BaseObject, BusSubscriber):
             return
         logger.debug(f"WorkerRunner '{self}': ending gracefully (reason={reason})")
         self._shutdown_event.set()
-        for name, entry in self._entries.items():
-            if entry.worker.parent is None:
-                await self._bus.send(
-                    BusEndWorkerMessage(source=self.name, target=name, reason=reason)
-                )
+        await self._finish_running_workers(BusEndWorkerMessage, reason)
 
     async def cancel(self, reason: str | None = None) -> None:
         """Immediately cancel all running workers.
 
-        Idempotent; subsequent calls are ignored.
+        Signals shutdown, which :meth:`run` answers by cancelling every
+        worker still going and waiting for it. Idempotent; subsequent
+        calls are ignored.
 
         Args:
-            reason: Optional human-readable reason for cancelling.
+            reason: Optional human-readable reason for cancelling. Reaches
+                each worker on the cancel message sent as the runner exits.
         """
         if self._shutdown_event.is_set():
             return
         logger.debug(f"WorkerRunner '{self}': cancelling (reason={reason})")
+        self._cancel_reason = reason
         self._shutdown_event.set()
-        for name, entry in self._entries.items():
-            if entry.worker.parent is None:
-                await self._bus.send(
-                    BusCancelWorkerMessage(source=self.name, target=name, reason=reason)
-                )
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Process incoming bus messages for runner-level concerns."""
@@ -399,23 +395,56 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
         self._running = True
 
-    async def _cancel_spawned_tasks(self) -> None:
-        """Wait for added workers' runner tasks to finish (or cancel them)."""
-        remaining = [
-            e.runner_task
-            for e in self._entries.values()
-            if e.runner_task and not e.runner_task.done()
+    async def _cancel_spawned_workers(self) -> None:
+        """Cancel every worker still going and wait for it to finish.
+
+        The one place the runner cancels its workers, reached on every
+        way out: an ended session, a cancelled one, or the last root
+        worker finishing. A worker whose task has already finished is
+        left alone.
+        """
+        running = await self._finish_running_workers(
+            BusCancelWorkerMessage, self._cancel_reason or "runner exiting"
+        )
+        await asyncio.gather(
+            *(entry.runner_task for entry in running if entry.runner_task),
+            return_exceptions=True,
+        )
+
+    async def _finish_running_workers(
+        self,
+        message_class: type[BusEndWorkerMessage] | type[BusCancelWorkerMessage],
+        reason: str | None,
+    ) -> list[_WorkerEntry]:
+        """Ask each root worker that has not finished to wind down.
+
+        Both messages this takes end a worker, gracefully or not. A worker
+        whose task has already finished is skipped; one that has not
+        started yet has not finished either, so it is still told.
+
+        Sending is all this does. The worker finishes in its own time, which
+        is what the returned entries are for.
+
+        Args:
+            message_class: The per-worker message to send.
+            reason: Optional human-readable reason, carried on each message.
+
+        Returns:
+            The entries that were messaged, root or otherwise.
+        """
+        # A worker with no task has not started rather than finished, so it
+        # is still owed the message.
+        running = [
+            entry
+            for entry in self._entries.values()
+            if not (entry.runner_task and entry.runner_task.done())
         ]
-        if not remaining:
-            return
-        for entry in self._entries.values():
+        for entry in running:
             if entry.worker.parent is None:
                 await self._bus.send(
-                    BusCancelWorkerMessage(
-                        source=self.name, target=entry.worker.name, reason="runner exiting"
-                    )
+                    message_class(source=self.name, target=entry.worker.name, reason=reason)
                 )
-        await asyncio.gather(*remaining, return_exceptions=True)
+        return running
 
     async def _load_setup_files(self) -> None:
         """Run ``setup_worker_runner`` from each file in ``PIPECAT_SETUP_FILES``.

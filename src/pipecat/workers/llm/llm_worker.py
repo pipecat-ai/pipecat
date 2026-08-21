@@ -190,8 +190,9 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Request a graceful end of the session.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback`` to
-        ensure any pending LLM output is fully delivered before ending.
+        When called from a ``@tool`` handler, pass ``params.result_callback``
+        so the call is settled before the pipeline drains, and any pending
+        LLM output is fully delivered before ending.
 
         Args:
             reason: Optional human-readable reason for ending.
@@ -293,8 +294,11 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Finish an in-progress function call before taking action.
 
-        Optionally injects LLM messages and flushes the pipeline so the
-        output is fully delivered before handing off or ending.
+        Optionally injects LLM messages and waits for the output they
+        produce, so the call is not settled in the middle of it. The
+        caller is ``end`` or ``activate_worker``, both of which drain the
+        pipeline afterwards, so the settled call needs no further wait
+        here.
 
         Args:
             result_callback: The callback from `FunctionCallParams`, or None.
@@ -302,8 +306,8 @@ class LLMWorker(PipelineWorker):
         """
         if messages:
             # Bypass our deferral override: this runs inside a tool call, so
-            # self.queue_frame would defer the frame and the flush below would
-            # return before the LLM output is delivered.
+            # self.queue_frame would park the frame instead of queueing it,
+            # and the flush below would return before the output is delivered.
             await super().queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
             await self.flush_pipeline()
 
@@ -311,6 +315,3 @@ class LLMWorker(PipelineWorker):
             return
 
         await result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
-
-        # Wait until the function result frame is really processed.
-        await self.flush_pipeline()

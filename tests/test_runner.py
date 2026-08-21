@@ -131,7 +131,11 @@ class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("child", targets)
 
     async def test_cancel_sends_cancel_task_message_to_root_tasks_only(self):
-        """cancel() sends BusCancelWorkerMessage only to root tasks (no parent)."""
+        """Cancelling reaches root tasks only, and carries the caller's reason.
+
+        ``cancel()`` signals shutdown; the messages go out as the runner
+        exits, which is why that step is driven here directly.
+        """
         runner = WorkerRunner(handle_sigint=False)
         root = StubTask("root")
         child = StubTask("child")
@@ -149,13 +153,15 @@ class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
 
         bus.send = capture_send
 
-        # Call cancel() directly — no need to run the full pipeline lifecycle
-        await runner.cancel()
+        await runner.cancel("stop now")
+        # What ``run()`` does once the shutdown signal reaches it.
+        await runner._cancel_spawned_workers()
 
         cancel_msgs = [m for m in sent if isinstance(m, BusCancelWorkerMessage)]
         targets = {m.target for m in cancel_msgs}
         self.assertIn("root", targets)
         self.assertNotIn("child", targets)
+        self.assertEqual({m.reason for m in cancel_msgs}, {"stop now"})
 
     async def test_bus_end_message_triggers_end(self):
         """BusEndMessage on bus triggers runner.end()."""

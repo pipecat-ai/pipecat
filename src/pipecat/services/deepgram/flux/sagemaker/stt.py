@@ -231,7 +231,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         self._reset_configure_state()
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram Flux on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram Flux on SageMaker...")
 
             await self._send_close_stream()
 

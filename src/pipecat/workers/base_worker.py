@@ -105,6 +105,18 @@ class WorkerActivationArgs:
         }
 
 
+#: Messages an inactive worker still receives. Activation is how a worker
+#: stops being inactive, and the shutdown messages are how a runner or a
+#: parent stops it: ``WorkerRunner.end`` sends one ``BusEndWorkerMessage``
+#: per root worker and ``_propagate_end_to_children`` awaits each child,
+#: so a worker that ignored them could never be stopped or waited on.
+_ALWAYS_DELIVERED = (
+    BusActivateWorkerMessage,
+    BusEndWorkerMessage,
+    BusCancelWorkerMessage,
+)
+
+
 class BaseWorker(BaseObject, BusSubscriber):
     """Abstract base for workers in framework.
 
@@ -176,7 +188,11 @@ class BaseWorker(BaseObject, BusSubscriber):
             name: Unique name for this worker. If ``None``, an auto-generated
                 name is used (useful for instances that don't participate
                 in inter-worker communication).
-            active: Whether the worker starts active. Defaults to True.
+            active: Whether the worker starts out accepting bus messages
+                (see :attr:`active`). Starting one inactive is for
+                multi-worker setups where workers take turns: it stays out
+                of the way, doing nothing, until another worker or the
+                application activates it. Defaults to True.
             check_dangling_tasks: Whether to warn about tasks left running when
                 the worker finishes. Only applies when the worker owns its task
                 manager; a worker sharing the runner's task manager leaves the
@@ -259,7 +275,24 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     @property
     def active(self) -> bool:
-        """Whether this worker is currently active."""
+        """Whether this worker is accepting bus messages.
+
+        That is the whole of what it means. An active worker takes
+        everything addressed to it. An inactive one takes only what can
+        change its mind, an activation, an end or a cancel, so no job
+        request, frame or UI event reaches it and none of its
+        :meth:`on_bus_message` handling runs.
+
+        It therefore only says something where several workers share a
+        bus and take turns, such as a handoff between two LLM workers
+        where the one not speaking should stay out of the way. A bot
+        built from a single worker has nobody to take turns with, so its
+        worker is active for its whole life and this never comes up.
+
+        Registry watches sit outside this: ``@worker_ready`` handlers
+        fire from :class:`~pipecat.registry.WorkerRegistry` whatever this
+        returns, because they never travel over the bus.
+        """
         return self._active
 
     @property
@@ -464,6 +497,26 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         pass
 
+    def accepts_bus_message(self, message: BusMessage) -> bool:
+        """Take bus messages only while active.
+
+        An inactive worker is handed nothing but the messages that can
+        change that: an activation, or a request to end or cancel. Work
+        addressed to it, and everything it would merely observe, is
+        dropped by the bus rather than reaching :meth:`on_bus_message`.
+
+        Registry notifications are unaffected, since ``@worker_ready``
+        watches fire from :class:`~pipecat.registry.WorkerRegistry`
+        rather than travelling over the bus.
+
+        Args:
+            message: The bus message about to be delivered.
+
+        Returns:
+            Whether to deliver the message.
+        """
+        return self._active or isinstance(message, _ALWAYS_DELIVERED)
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Called for every bus message after built-in lifecycle handling.
 
@@ -638,7 +691,9 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Activate a worker by name.
 
         The target worker's ``on_activated`` hook will be called
-        with the provided arguments.
+        with the provided arguments. The target need not be active
+        already: an activation reaches an inactive worker, which is what
+        lets it become active.
 
         Args:
             worker_name: The name of the worker to activate.
