@@ -87,7 +87,7 @@ from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
-from pipecat.workers.base_worker import BaseWorker, WorkerParams
+from pipecat.workers.base_worker import BaseWorker, WorkerActivationArgs, WorkerParams
 
 HEARTBEAT_SECS = 1.0
 HEARTBEAT_MONITOR_SECS = 10.0
@@ -734,6 +734,53 @@ class PipelineWorker(BaseWorker):
         """
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
+
+    async def end(self, *, reason: str | None = None) -> None:
+        """Request a graceful end of the session, draining the pipeline first.
+
+        Whatever this worker has already pushed reaches the end of the
+        pipeline before the session goes away, so a closing line is heard
+        rather than cut off.
+
+        Args:
+            reason: Optional human-readable reason for ending.
+        """
+        await self._drain_pipeline()
+        await super().end(reason=reason)
+
+    async def activate_worker(
+        self,
+        worker_name: str,
+        *,
+        args: WorkerActivationArgs | None = None,
+        deactivate_self: bool = False,
+    ) -> None:
+        """Activate a worker by name, draining this pipeline first.
+
+        Handing over before the pipeline drains would let the target
+        start while this worker's output is still in flight, so the two
+        would talk over each other.
+
+        Args:
+            worker_name: The name of the worker to activate.
+            args: Optional ``WorkerActivationArgs`` forwarded to the
+                target worker's ``on_activated``.
+            deactivate_self: Whether to deactivate this worker before
+                activating the target.
+        """
+        await self._drain_pipeline()
+        await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
+
+    async def _drain_pipeline(self) -> None:
+        """Wait for in-flight frames to be processed, if any can be.
+
+        A pipeline that never started, or one that has already finished,
+        has nothing to drain and no one left to bounce the flush probe
+        back, so waiting on it would only spend the flush timeout.
+        """
+        if not self._pipeline_start_event.is_set() or self.has_finished():
+            return
+        await self.flush_pipeline()
 
     async def cancel(self, *, reason: str | None = None):
         """Request the running pipeline to cancel.
