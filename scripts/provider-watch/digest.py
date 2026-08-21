@@ -141,24 +141,6 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
     if quiet:
         lines += ["## Nothing new", "", ", ".join(_link(r, repo_url) for r in quiet), ""]
 
-    updates = [
-        r
-        for r in reports
-        if isinstance(r.get("providers_yaml_updates"), dict) and r["providers_yaml_updates"]
-    ]
-    if updates:
-        lines += ["## Proposed providers.yaml updates", ""]
-        for r in updates:
-            parts = []
-            for key, value in r["providers_yaml_updates"].items():
-                if isinstance(value, list):
-                    value = ", ".join(
-                        str(v.get("url", v)) if isinstance(v, dict) else str(v) for v in value
-                    )
-                parts.append(f"{key}: {value}")
-            lines.append(f"- {_link(r, repo_url)} — " + "; ".join(parts))
-        lines.append("")
-
     lines += [
         "---",
         "To record a decision about any item above, reply on this issue starting with the unit id "

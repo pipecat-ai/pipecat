@@ -27,9 +27,9 @@ request to the first output frame. Compare LLM candidates on ``ttfat_ms``.
 
 ``signals`` gathers two inputs for the research: the latest PyPI version of
 each SDK the provider's extra depends on (a prompt to read release notes), and
-each published API spec listed for the provider in ``providers.yaml`` (or passed
-with ``--spec``), snapshotted under the reports checkout so ``git diff`` shows
-exactly what changed in the API since the last run.
+each published API spec known for the provider (``PROVIDER_SPECS`` below, or
+passed with ``--spec``), snapshotted under the reports checkout so ``git diff``
+shows exactly what changed in the API since the last run.
 
 Credentials come from the repo's ``.env`` loaded *without* override, so exported
 variables win and CI runs without a ``.env`` at all (``--no-dotenv`` ignores it). Every value
@@ -72,7 +72,6 @@ sys.path.insert(0, str(HERE))
 import inventory  # noqa: E402
 
 DEFAULT_WAV = HERE / "assets" / "speech-16k.wav"
-PROVIDERS_YAML = inventory.REPO_ROOT / ".claude" / "skills" / "provider-watch" / "providers.yaml"
 PYPROJECT = inventory.REPO_ROOT / "pyproject.toml"
 DEFAULT_SPECS_DIR = inventory.REPO_ROOT / "_reports" / "specs"
 DEFAULT_TEXT = "In one short sentence, what is the capital of France?"
@@ -655,21 +654,81 @@ def cmd_list_models(args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------------- signals
 
+# Published API specs per provider directory, snapshotted by ``signals`` so a
+# run can diff them against the previous run. Stainless SDK repos publish
+# ``.stats.yml`` with the spec hash; Google APIs publish discovery documents;
+# AWS shapes live in botocore. A provider without an entry gets no spec signal.
+PROVIDER_SPECS: dict[str, list[tuple[str, str]]] = {
+    "openai": [
+        (
+            "openai-openapi.yaml",
+            "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+        ),
+    ],
+    "anthropic": [
+        (
+            "anthropic-sdk.stats.yml",
+            "https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/.stats.yml",
+        ),
+    ],
+    "google": [
+        (
+            "generativelanguage-v1beta.json",
+            "https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta",
+        ),
+        ("speech-v1.json", "https://speech.googleapis.com/$discovery/rest?version=v1"),
+        ("texttospeech-v1.json", "https://texttospeech.googleapis.com/$discovery/rest?version=v1"),
+    ],
+    "aws": [
+        (
+            "bedrock-runtime.json",
+            "https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/bedrock-runtime/2023-09-30/service-2.json",
+        ),
+        (
+            "polly.json",
+            "https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/polly/2016-06-10/service-2.json",
+        ),
+    ],
+    "deepgram": [
+        (
+            "deepgram-openapi.yml",
+            "https://raw.githubusercontent.com/deepgram/deepgram-api-specs/main/openapi.yml",
+        ),
+    ],
+    "elevenlabs": [
+        ("elevenlabs-openapi.json", "https://api.elevenlabs.io/openapi.json"),
+    ],
+    "cartesia": [
+        (
+            "cartesia-sdk.stats.yml",
+            "https://raw.githubusercontent.com/cartesia-ai/cartesia-python/main/.stats.yml",
+        ),
+    ],
+    "groq": [
+        (
+            "groq-sdk.stats.yml",
+            "https://raw.githubusercontent.com/groq/groq-python/main/.stats.yml",
+        ),
+    ],
+    "mistral": [
+        (
+            "mistral-sdk.gen.lock",
+            "https://raw.githubusercontent.com/mistralai/client-python/main/.speakeasy/gen.lock",
+        ),
+    ],
+    "cerebras": [
+        (
+            "cerebras-sdk.stats.yml",
+            "https://raw.githubusercontent.com/Cerebras/cerebras-cloud-sdk-python/main/.stats.yml",
+        ),
+    ],
+}
+
 
 def _http_bytes(url: str) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": "pipecat-provider-watch"})
     with urllib.request.urlopen(request, timeout=60) as response:
         return response.read()
-
-
-def provider_entry(provider: str) -> dict:
-    """The provider's entry in providers.yaml, or an empty dict."""
-    import yaml
-
-    if not PROVIDERS_YAML.exists():
-        return {}
-    data = yaml.safe_load(PROVIDERS_YAML.read_text()) or {}
-    return data.get(provider) or {}
 
 
 def sdk_requirements(provider: str, units: list[inventory.Unit]) -> list[str]:
@@ -750,11 +809,10 @@ def cmd_signals(args: argparse.Namespace) -> int:
         print(f"unknown provider {provider!r}; see inventory.py --md", file=sys.stderr)
         return EXIT_UNSUPPORTED
     inventory.enrich(units)
-    entry = provider_entry(provider)
 
     sdks = [pypi_latest(r) for r in sdk_requirements(provider, units)]
 
-    specs = list(entry.get("specs") or [])
+    specs = [{"name": n, "url": u} for n, u in PROVIDER_SPECS.get(provider, [])]
     for item in args.spec or []:
         name, sep, url = item.partition("=")
         if not sep:

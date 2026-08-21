@@ -40,11 +40,6 @@ decided:                                   # things the team said not to do (or 
     source: https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1
     date: 2026-08-13
 error: null                                # or one line: why the unit could not be researched
-providers_yaml_updates:                    # optional: corrections a maintainer should make to providers.yaml
-  changelog: https://docs.cartesia.ai/changelog/2026
-  specs:
-    - name: cartesia-openapi.json
-      url: https://api.cartesia.ai/openapi.json
 ---
 ```
 
@@ -52,7 +47,6 @@ providers_yaml_updates:                    # optional: corrections a maintainer 
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
 - `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
-- `providers_yaml_updates` is present only when `providers.yaml` should change for this provider: a replacement for a dead `models`/`changelog` URL, a page to add under `docs`, a spec to add under `specs`. The digest lists it for a maintainer to apply. Omit the key otherwise.
 
 ## Body
 
