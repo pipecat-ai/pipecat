@@ -13,7 +13,7 @@ from pipecat.services.fish.tts import FishAudioTTSService
 
 @pytest.mark.asyncio
 async def test_one_silent_context_writes_off_the_service():
-    service = FishAudioTTSService(api_key="key")
+    service = FishAudioTTSService(api_key="key", max_consecutive_zero_audio_contexts=1)
 
     assert service._max_consecutive_zero_audio_contexts == 1
 
