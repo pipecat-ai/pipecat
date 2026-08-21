@@ -1268,7 +1268,15 @@ class PipelineWorker(BaseWorker):
         Drives shutdown through the pipeline (``CancelFrame``) so
         ``_finished_event`` fires once the frame drains, rather than
         calling ``stop()`` directly.
+
+        A worker already cancelling ignores this. More than one cancel
+        reaches a worker on an ordinary shutdown, since the runner
+        cancels its workers and then cancels whatever it launched, and
+        acting on each would announce the cancellation twice and hand
+        every child a second one to propagate.
         """
+        if self._cancelled:
+            return
         logger.debug(f"Worker '{self}': received cancel")
         await self._propagate_cancel_to_children(message)
         await self.cancel(reason=message.reason)
