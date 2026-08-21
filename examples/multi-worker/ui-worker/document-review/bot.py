@@ -31,7 +31,7 @@ Architecture::
     ReviewWorker (ReplyToolMixin + UIWorker, keep_history=True):
       ├── inherited: reply(answer, scroll_to, highlight, select_text, fills, click)
       ├── @tool start_review(answer, paragraph_ref, paragraph_text)
-      │     └── start_ui_job_group("clarity", "tone", ...)
+      │     └── request_job_group("clarity", "tone", params=JobGroupParams(...))
       ├── @ui_event("note_click") → scroll_to + select_text(ref)
       └── on_job_response → emit add_note for each reviewer that completes
 
@@ -69,7 +69,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobStatus
+from pipecat.pipeline.job_context import JobError, JobGroupParams, JobStatus
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -353,7 +353,7 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
     ):
         """Kick off a parallel review of one paragraph.
 
-        Spawns the clarity and tone workers via ``start_ui_job_group``.
+        Spawns the clarity and tone workers via ``request_job_group``.
         Workers run in the background; their progress is forwarded to the
         page automatically. As each completes, ``on_job_response``
         translates the response into an ``add_note`` UI command.
@@ -367,11 +367,13 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
                 this directly.
         """
         logger.info(f"{self}: start_review(ref={paragraph_ref!r})")
-        job_id = await self.start_ui_job_group(
+        job_id = await self.request_job_group(
             "clarity",
             "tone",
-            payload={"ref": paragraph_ref, "text": paragraph_text},
-            label=f"Reviewing ¶ {paragraph_ref}",
+            params=JobGroupParams(
+                payload={"ref": paragraph_ref, "text": paragraph_text},
+                label=f"Reviewing ¶ {paragraph_ref}",
+            ),
         )
         # Remember which paragraph this review is for so we can attach
         # each worker's response to the right note.

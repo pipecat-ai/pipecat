@@ -8,19 +8,13 @@
 
 import asyncio
 import json
-import time
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.bus.messages import (
     BusJobRequestMessage,
-    BusJobResponseMessage,
-    BusJobResponseUrgentMessage,
-    BusJobUpdateMessage,
-    BusJobUpdateUrgentMessage,
     BusMessage,
     BusTTSSpeakMessage,
 )
@@ -29,11 +23,9 @@ from pipecat.bus.ui.messages import (
     _UI_SNAPSHOT_BUS_EVENT_NAME,
     BusUICommandMessage,
     BusUIEventMessage,
-    BusUIJobCompletedMessage,
-    BusUIJobUpdateMessage,
 )
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
-from pipecat.pipeline.job_context import JobGroupError, JobStatus
+from pipecat.pipeline.job_context import JobGroupContext, JobGroupParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -47,31 +39,14 @@ from pipecat.processors.frameworks.rtvi.models import (
     SetInputValue,
 )
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.deprecation import deprecated
+from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
-from pipecat.workers.ui.ui_job_context import UIJobGroupContext
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
 
-@dataclass
-class _UIJobGroupRegistration:
-    """Per-group metadata a UIWorker keeps for each in-flight user job group.
-
-    Consulted by ``on_bus_message`` to decide which bus job messages to forward
-    to the client and whether a ``__cancel_job_group`` event should be honored.
-
-    Parameters:
-        worker_names: Names of the workers the group was dispatched to.
-        label: Optional human-readable label shown on the client job-group card.
-        cancellable: Whether the client may cancel the group via ``__cancel_job_group``.
-    """
-
-    worker_names: list[str]
-    label: str | None
-    cancellable: bool
-
-
-class UIWorker(LLMContextWorker):
+class UIWorker(BaseUIWorker, LLMContextWorker):
     """LLM worker that reads and drives a client GUI over the RTVI UI channel.
 
     A ``UIWorker`` connects an LLM to whatever the user is looking at: it sees
@@ -195,12 +170,6 @@ class UIWorker(LLMContextWorker):
         # job response. See the "Single-flight job semantics" section
         # in the class docstring.
         self._pending: asyncio.Future | None = None
-        # Registry of in-flight user job groups dispatched by this
-        # worker (see ``ui_job_group``). Keyed by ``job_id``.
-        # ``on_bus_message`` consults this to decide which job
-        # update / response messages should be forwarded to the
-        # client as ``ui-job-group`` envelopes.
-        self._ui_job_groups: dict[str, _UIJobGroupRegistration] = {}
 
         # Auto-inject the current ``<ui_state>`` snapshot into the context just
         # before each inference. Driven by the LLM's ``on_before_process_frame``
@@ -342,16 +311,8 @@ class UIWorker(LLMContextWorker):
         """Dispatch UI events alongside base lifecycle handling."""
         await super().on_bus_message(message)
 
-        # Forward job lifecycle for user-facing job groups before
-        # touching anything else. This is independent of UI event
-        # handling and may fire on messages targeted at this worker
-        # (the requester) for groups it dispatched.
-        if isinstance(message, (BusJobUpdateMessage, BusJobUpdateUrgentMessage)):
-            await self._maybe_forward_job_update(message)
-            return
-        if isinstance(message, (BusJobResponseMessage, BusJobResponseUrgentMessage)):
-            await self._maybe_forward_job_completed(message)
-            return
+        # Job-group lifecycle forwarding and the reserved cancel event
+        # are handled by ``BaseUIWorker`` (via the ``super()`` call above).
 
         if not isinstance(message, BusUIEventMessage):
             return
@@ -365,11 +326,9 @@ class UIWorker(LLMContextWorker):
                 self._latest_snapshot = message.payload
             return
 
-        # Reserved cancel event: route to ``cancel_job_group`` for the
-        # registered user job group. Honored only when the group was
-        # registered with ``cancellable=True``.
+        # Reserved cancel event: handled in ``BaseUIWorker``; never
+        # dispatched to app ``@ui_event`` handlers.
         if message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME:
-            await self._handle_cancel_job_event(message)
             return
 
         await self._handle_ui_event(message)
@@ -506,6 +465,10 @@ class UIWorker(LLMContextWorker):
             response = {"answer": answer} if answer else None
         pending.set_result({"response": response, "status": status})
 
+    @deprecated(
+        "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+        "Use `job_group` instead."
+    )
     def ui_job_group(
         self,
         *worker_names: str,
@@ -515,58 +478,30 @@ class UIWorker(LLMContextWorker):
         cancel_on_error: bool = True,
         label: str | None = None,
         cancellable: bool = True,
-    ) -> UIJobGroupContext:
-        """Dispatch a job group whose lifecycle is forwarded to the client.
+    ) -> JobGroupContext:
+        """Deprecated wrapper for client-visible job groups.
 
-        Like ``job_group(...)``, but also forwards the group's lifecycle to the
-        client as ``ui-job-group`` envelopes so the user can watch (and optionally
-        cancel) the work. See ``UIJobGroupContext`` for the forwarding details.
-
-        Args:
-            *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds covering both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-            label: Optional human-readable label surfaced to the
-                client. The client UI uses it to title the in-flight
-                job-group card.
-            cancellable: Whether the client may request cancellation
-                of this group via the reserved ``__cancel_job_group``
-                event. Defaults to True.
-
-        Returns:
-            A ``UIJobGroupContext`` to use with ``async with``.
-
-        Example::
-
-            async with self.ui_job_group(
-                "researcher_a", "researcher_b",
-                payload={"query": query},
-                label=f"Research: {query}",
-            ) as tg:
-                async for event in tg:
-                    ...
+        .. deprecated:: 1.8.0
+            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.job_group`
+            instead, since every group a ``BaseUIWorker`` dispatches is
+            client-visible. Will be removed in 2.0.0.
         """
-        for worker_name in worker_names:
-            if not isinstance(worker_name, str):
-                raise TypeError(
-                    f"{self} Expected worker name as str, got {type(worker_name).__name__}"
-                )
-        return UIJobGroupContext(
-            self,
-            worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            label=label,
-            cancellable=cancellable,
+        return self.job_group(
+            *worker_names,
+            params=JobGroupParams(
+                name=name,
+                payload=payload,
+                timeout=timeout,
+                cancel_on_error=cancel_on_error,
+                label=label,
+                cancellable=cancellable,
+            ),
         )
 
+    @deprecated(
+        "`UIWorker.start_ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+        "Use `request_job_group` instead."
+    )
     async def start_ui_job_group(
         self,
         *worker_names: str,
@@ -577,207 +512,24 @@ class UIWorker(LLMContextWorker):
         label: str | None = None,
         cancellable: bool = True,
     ) -> str:
-        """Fire-and-forget version of ``ui_job_group``.
+        """Deprecated wrapper for fire-and-forget client-visible job groups.
 
-        Dispatches the group in the background and returns immediately (the
-        lifecycle still forwards to the client). Use it when a ``@tool`` wants to
-        kick off work and unblock the voice worker; use ``ui_job_group`` to
-        consume worker events inline. Worker exceptions are logged, not propagated.
-
-        Args:
-            *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds covering both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-            label: Optional human-readable label surfaced to the
-                client. The client UI uses it to title the in-flight
-                job-group card.
-            cancellable: Whether the client may request cancellation
-                of this group via the reserved ``__cancel_job_group``
-                event. Defaults to True.
-
-        Returns:
-            The ``job_id`` of the dispatched group. Useful if the
-            caller wants to track it (e.g. to cancel programmatically
-            via ``cancel_job_group(job_id)``).
-
-        Example::
-
-            @tool
-            async def reply(self, params, answer, research_query=None):
-                if research_query:
-                    await self.start_ui_job_group(
-                        "wikipedia", "news", "scholar",
-                        payload={"query": research_query},
-                        label=f"Research: {research_query}",
-                    )
-                await self.respond_to_job(answer)
-                await params.result_callback(None)
+        .. deprecated:: 1.8.0
+            Use :meth:`~pipecat.workers.base_ui_worker.BaseUIWorker.request_job_group`
+            instead, since every group a ``BaseUIWorker`` dispatches is
+            client-visible. Will be removed in 2.0.0.
         """
-        ctx = self.ui_job_group(
+        return await self.request_job_group(
             *worker_names,
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=cancel_on_error,
-            label=label,
-            cancellable=cancellable,
+            params=JobGroupParams(
+                name=name,
+                payload=payload,
+                timeout=timeout,
+                cancel_on_error=cancel_on_error,
+                label=label,
+                cancellable=cancellable,
+            ),
         )
-        # Enter the context now so the caller has a valid job_id and
-        # the ``group_started`` envelope has fired before we return.
-        # The body and exit run in a background asyncio task so the
-        # caller doesn't await worker completion.
-        await ctx.__aenter__()
-        job_id = ctx.job_id
-
-        async def _run_to_completion() -> None:
-            # Drain the event stream so __aexit__ sees a fully
-            # consumed group, matching what ``async with ... : pass``
-            # does. Cancellation and worker errors are expected exits
-            # for fire-and-forget groups: the client already learned
-            # via the group_completed envelope, so we log at debug.
-            iteration_exc: BaseException | None = None
-            try:
-                async for _ in ctx:
-                    pass
-            except Exception as e:
-                iteration_exc = e
-
-            try:
-                if iteration_exc is None:
-                    await ctx.__aexit__(None, None, None)
-                else:
-                    await ctx.__aexit__(
-                        type(iteration_exc),
-                        iteration_exc,
-                        iteration_exc.__traceback__,
-                    )
-            except JobGroupError as e:
-                logger.debug(
-                    f"UIWorker '{self.name}': background user job group {job_id} ended: {e}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"UIWorker '{self.name}': background user job group {job_id} failed: {e}"
-                )
-
-        self.create_task(
-            _run_to_completion(),
-            f"{self.name}::ui_job_group::{job_id}",
-        )
-        return job_id
-
-    def _register_ui_job_group(
-        self,
-        *,
-        job_id: str,
-        worker_names: list[str],
-        label: str | None,
-        cancellable: bool,
-    ) -> None:
-        """Register an in-flight user job group for lifecycle forwarding.
-
-        Called from ``UIJobGroupContext.__aenter__``. Subsequent
-        ``BusJobUpdateMessage`` / ``BusJobResponseMessage`` whose
-        ``job_id`` matches this entry will be forwarded to the client.
-        """
-        if job_id in self._ui_job_groups:
-            logger.warning(
-                f"UIWorker '{self.name}': user job group {job_id} already registered; overwriting"
-            )
-        self._ui_job_groups[job_id] = _UIJobGroupRegistration(
-            worker_names=list(worker_names),
-            label=label,
-            cancellable=cancellable,
-        )
-
-    def _unregister_ui_job_group(self, job_id: str) -> None:
-        """Remove a user job group from the forwarding registry.
-
-        Called from ``UIJobGroupContext.__aexit__``. After this,
-        late-arriving updates or responses for the group are not
-        forwarded.
-        """
-        self._ui_job_groups.pop(job_id, None)
-
-    async def _maybe_forward_job_update(
-        self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage
-    ) -> None:
-        """Forward a worker update for a registered user job group.
-
-        No-op if the message's ``job_id`` is not registered.
-        """
-        if message.job_id not in self._ui_job_groups:
-            return
-        await self.send_bus_message(
-            BusUIJobUpdateMessage(
-                source=self.name,
-                target=None,
-                job_id=message.job_id,
-                worker_name=message.source,
-                data=message.update,
-                at=int(time.time() * 1000),
-            )
-        )
-
-    async def _maybe_forward_job_completed(
-        self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
-    ) -> None:
-        """Forward a worker response for a registered user job group.
-
-        No-op if the message's ``job_id`` is not registered.
-        """
-        if message.job_id not in self._ui_job_groups:
-            return
-        await self.send_bus_message(
-            BusUIJobCompletedMessage(
-                source=self.name,
-                target=None,
-                job_id=message.job_id,
-                worker_name=message.source,
-                status=str(message.status),
-                response=message.response,
-                at=int(time.time() * 1000),
-            )
-        )
-
-    async def _handle_cancel_job_event(self, message: BusUIEventMessage) -> None:
-        """Translate a client ``__cancel_job_group`` event into ``cancel_job_group``.
-
-        Looks up the registered group and calls
-        ``cancel_job_group(job_id, reason)``. Ignores the request
-        silently if the group is unknown or was registered with
-        ``cancellable=False``.
-        """
-        payload = message.payload if isinstance(message.payload, dict) else {}
-        job_id = payload.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            logger.warning(
-                f"UIWorker '{self.name}': received {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} "
-                "with no job_id; ignoring"
-            )
-            return
-        registration = self._ui_job_groups.get(job_id)
-        if registration is None:
-            logger.debug(
-                f"UIWorker '{self.name}': {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} for "
-                f"unknown job_id {job_id}; ignoring"
-            )
-            return
-        if not registration.cancellable:
-            logger.debug(
-                f"UIWorker '{self.name}': {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} for "
-                f"non-cancellable group {job_id}; ignoring"
-            )
-            return
-        reason = payload.get("reason")
-        if reason is not None and not isinstance(reason, str):
-            reason = None
-        await self.cancel_job_group(job_id, reason=reason or "cancelled by user")
 
     def render_ui_state(self) -> str:
         """Render the latest accessibility snapshot as a ``<ui_state>`` block.

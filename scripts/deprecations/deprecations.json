@@ -333,6 +333,17 @@
       "location": "pipecat/metrics/metrics.py"
     },
     {
+      "subject": "resolve_job_params",
+      "module": "pipecat.pipeline.job_context",
+      "kind": "function",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0, along with the individual arguments it exists to absorb.",
+      "location": "pipecat/pipeline/job_context.py"
+    },
+    {
       "subject": "LLMSwitcher.register_direct_function",
       "module": "pipecat.pipeline.llm_switcher",
       "kind": "method",
@@ -4018,6 +4029,204 @@
       "location": "pipecat/utils/context/llm_context_summarization.py"
     },
     {
+      "subject": "BaseWorker.create_job_group_and_request_job.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.create_job_group_and_request_job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(name=...)",
+      "message": "Use ``params=JobParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(payload=...)",
+      "message": "Use ``params=JobParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(timeout=...)",
+      "message": "Use ``params=JobParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.job_group.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(name=...)",
+      "message": "Use ``params=JobParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(payload=...)",
+      "message": "Use ``params=JobParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobParams(timeout=...)",
+      "message": "Use ``params=JobParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.cancel_on_error",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(cancel_on_error=...)",
+      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.name",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(name=...)",
+      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.payload",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(payload=...)",
+      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
+      "subject": "BaseWorker.request_job_group.timeout",
+      "module": "pipecat.workers.base_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params=JobGroupParams(timeout=...)",
+      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/base_worker.py"
+    },
+    {
       "subject": "tool.timeout",
       "module": "pipecat.workers.llm.tool_decorator",
       "kind": "parameter",
@@ -4049,6 +4258,39 @@
       "replacement": "add_workers",
       "message": "Register the worker with :meth:`add_workers` before calling ``run()`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/workers/runner.py"
+    },
+    {
+      "subject": "UIJobGroupContext",
+      "module": "pipecat.workers.ui.ui_job_context",
+      "kind": "class",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "JobGroupContext",
+      "message": "`UIJobGroupContext` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `JobGroupContext` instead.",
+      "location": "pipecat/workers/ui/ui_job_context.py"
+    },
+    {
+      "subject": "UIWorker.start_ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "request_job_group",
+      "message": "`UIWorker.start_ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `request_job_group` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
+    },
+    {
+      "subject": "UIWorker.ui_job_group",
+      "module": "pipecat.workers.ui.ui_worker",
+      "kind": "method",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "job_group",
+      "message": "`UIWorker.ui_job_group` is deprecated since 1.8.0 and will be removed in 2.0.0. Use `job_group` instead.",
+      "location": "pipecat/workers/ui/ui_worker.py"
     }
   ]
 }

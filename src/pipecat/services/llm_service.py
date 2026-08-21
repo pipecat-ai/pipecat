@@ -81,6 +81,7 @@ from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
+    from pipecat.workers.runner import WorkerRunner
 
 
 # Type alias for a callable that handles LLM function calls.
@@ -119,6 +120,9 @@ class FunctionCallParams:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
         llm: The LLMService instance being used.
+        pipeline_worker: The worker running the pipeline this call was made
+            from. Carries worker-scoped state, most notably
+            ``pipeline_worker.app_resources``.
         context: The LLM context.
         result_callback: Callback to deliver the result of the function call.
             For async function calls (``cancel_on_interruption=False``), call
@@ -128,6 +132,11 @@ class FunctionCallParams:
             ``PipelineWorker(..., app_resources=...)``. Same object — passed by
             reference, not a copy. Use it to share DB handles, clients, state,
             feature flags, etc. across all of a session's tool handlers.
+        worker_runner: The runner hosting ``pipeline_worker``. Use it to reach
+            another worker on the runner by name, e.g.
+            ``params.worker_runner.get_worker("ui-jobs")``. Always set for a
+            call made from a running pipeline; None only when these params
+            were built by hand.
     """
 
     function_name: str
@@ -143,6 +152,7 @@ class FunctionCallParams:
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
+    worker_runner: WorkerRunner | None = None
 
     @property
     @deprecated(
@@ -1654,6 +1664,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
                         app_resources=self.pipeline_worker.app_resources,
+                        worker_runner=self.pipeline_worker.worker_runner,
                     ),
                 )
             else:
@@ -1667,6 +1678,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
                     app_resources=self.pipeline_worker.app_resources,
+                    worker_runner=self.pipeline_worker.worker_runner,
                 )
                 await item.handler(params)
         except asyncio.CancelledError:
