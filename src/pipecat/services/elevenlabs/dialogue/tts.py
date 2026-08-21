@@ -10,37 +10,28 @@ This module provides a WebSocket TTS service for ElevenLabs' multi-context
 Text-to-Dialogue endpoint, the only way to reach Eleven v3 models.
 """
 
-import asyncio
 import base64
 import json
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Union
 
-import websockets
 from loguru import logger
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    ErrorFrame,
-    Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.services.elevenlabs.tts import (
+from pipecat.services.elevenlabs.tts_base import (
+    ElevenLabsTTSBase,
+    ElevenLabsTTSSettingsBase,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
-    language_to_elevenlabs_language,
-    output_format_from_sample_rate,
 )
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import WebsocketTTSService
-from pipecat.transcriptions.language import Language
-from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Text-to-Dialogue rejects a keepalive that doesn't name a registered context,
@@ -50,7 +41,7 @@ _KEEPALIVE_CONTEXT_ID = "pipecat-keepalive"
 
 
 @dataclass
-class ElevenLabsDialogueTTSSettings(TTSSettings):
+class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
     """Settings for ElevenLabsDialogueTTSService.
 
     Parameters:
@@ -103,7 +94,8 @@ def _normalize_ttd_alignment(alignment: Mapping[str, Any]) -> dict[str, Any]:
 
     Text-to-Dialogue emits snake_case alignment fields where the text-to-speech
     endpoint emits camelCase, and
-    :func:`~pipecat.services.elevenlabs.tts.calculate_word_times` expects the
+    :func:`~pipecat.services.elevenlabs.tts_base.calculate_word_times` expects
+    the
     latter.
     """
     return {
@@ -149,7 +141,7 @@ class _DialogueContext:
     alignment_started: bool = False
 
 
-class ElevenLabsDialogueTTSService(WebsocketTTSService):
+class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     """ElevenLabs Text-to-Dialogue WebSocket TTS service for Eleven v3 models.
 
     Uses the multi-context Text-to-Dialogue endpoint, which is the only way to
@@ -165,6 +157,8 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
 
     Settings = ElevenLabsDialogueTTSSettings
     _settings: Settings
+
+    CONNECTION_NAME = "ElevenLabs Text-to-Dialogue"
 
     def __init__(
         self,
@@ -205,6 +199,9 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             )
 
         super().__init__(
+            api_key=api_key,
+            url=url,
+            enable_logging=enable_logging,
             push_text_frames=False,
             push_stop_frames=False,
             pause_frame_processing=True,
@@ -216,96 +213,12 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             **kwargs,
         )
 
-        self._api_key = api_key
-        self._url = url
-        self._enable_logging = enable_logging
         self._seed = seed
-
-        self._output_format = ""  # initialized in setup()
-        self._voice_settings = self._set_voice_settings()
-
-        self._cumulative_time = 0
-        # Track partial words that span across alignment chunks
-        self._partial_word = ""
-        self._partial_word_start_time = 0.0
 
         self._contexts: dict[str, _DialogueContext] = {}
 
-        self._receive_task = None
-        self._keepalive_task = None
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as ElevenLabs service supports metrics generation.
-        """
-        return True
-
-    def language_to_service_language(self, language: Language) -> str | None:
-        """Convert a Language enum to ElevenLabs language format.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            The ElevenLabs-specific language code, or None if not supported.
-        """
-        return language_to_elevenlabs_language(language)
-
     def _set_voice_settings(self):
         return build_elevenlabs_ttd_voice_settings(self._settings)
-
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta, reconnecting as needed.
-
-        Args:
-            delta: A :class:`TTSSettings` (or ``ElevenLabsDialogueTTSService.Settings``) delta.
-
-        Returns:
-            Dict mapping changed field names to their previous values.
-        """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        self._voice_settings = self._set_voice_settings()
-
-        url_changed = bool(changed.keys() & self.Settings.URL_FIELDS)
-        voice_settings_changed = bool(changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS)
-
-        if url_changed:
-            logger.debug(
-                f"URL-level setting changed ({changed.keys() & self.Settings.URL_FIELDS}), "
-                f"reconnecting WebSocket"
-            )
-            await self._disconnect()
-            await self._connect()
-        elif voice_settings_changed:
-            logger.debug(
-                f"Voice settings changed ({changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS}), "
-                f"closing current context to apply changes"
-            )
-            for ctx_id in self.get_audio_contexts():
-                await self._close_context(ctx_id)
-                self._reset_alignment_state(ctx_id)
-
-        if not url_changed:
-            handled = self.Settings.URL_FIELDS | self.Settings.VOICE_SETTINGS_FIELDS
-            self._warn_unhandled_updated_settings(changed.keys() - handled)
-
-        return changed
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the service and connect.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        await super().setup(setup)
-        self._output_format = output_format_from_sample_rate(self.sample_rate)
-        await self._connect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Force generation of any text still held in the server-side buffer.
@@ -335,104 +248,38 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
         )
         await self._websocket.send(json.dumps({"context_id": flush_id, "flush": True}))
 
-    async def _connect(self):
-        await super()._connect()
+    def _build_websocket_url(self) -> str:
+        model = self._settings.model
+        url = (
+            f"{self._url}/v1/text-to-dialogue/multi-stream-input"
+            f"?model_id={model}&output_format={self._output_format}&sync_alignment=true"
+        )
 
-        await self._connect_websocket()
+        if self._enable_logging is not None:
+            url += f"&enable_logging={str(self._enable_logging).lower()}"
 
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+        if self._seed is not None:
+            url += f"&seed={self._seed}"
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        language = self._settings.language
+        if language is not None:
+            url += f"&language_code={language}"
 
-    async def _disconnect(self):
-        await super()._disconnect()
+        return url
 
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
+    async def _on_websocket_connected(self):
+        await self._register_keepalive_context()
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
-
-        await self._disconnect_websocket()
-
-    async def _connect_websocket(self):
-        try:
-            if self._websocket and self._websocket.state is State.OPEN:
-                return
-
-            logger.debug("Connecting to ElevenLabs Text-to-Dialogue")
-
-            model = self._settings.model
-            url = (
-                f"{self._url}/v1/text-to-dialogue/multi-stream-input"
-                f"?model_id={model}&output_format={self._output_format}&sync_alignment=true"
-            )
-
-            if self._enable_logging is not None:
-                url += f"&enable_logging={str(self._enable_logging).lower()}"
-
-            if self._seed is not None:
-                url += f"&seed={self._seed}"
-
-            language = self._settings.language
-            if language is not None:
-                url += f"&language_code={language}"
-
-            # Set max websocket message size to 16MB for large audio responses
-            self._websocket = await self._websocket_connect(
-                url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
-            )
-
-            await self._register_keepalive_context()
-
-            await self._call_event_handler("on_connected")
-        except Exception as e:
-            self._websocket = None
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            await self._call_event_handler("on_connection_error", f"{e}")
-
-    async def _disconnect_websocket(self):
-        try:
-            await self.stop_all_metrics()
-            websocket = self._websocket
-            if websocket:
-                logger.debug("Disconnecting from ElevenLabs Text-to-Dialogue")
-                # As with the multi-stream text-to-speech protocol, teardown is
-                # two steps: we ask ElevenLabs to close, then it closes. Wait for
-                # its close before forcing ours so we don't race the closing
-                # handshake and end the session in a 1006 close.
-                await websocket.send(json.dumps({"close_socket": True}))
-                try:
-                    await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
-                except TimeoutError:
-                    logger.debug(
-                        "ElevenLabs did not close the WebSocket within 2.0s; closing from our side"
-                    )
-                await websocket.close()
-                logger.debug("Disconnected from ElevenLabs Text-to-Dialogue")
-        except websockets.ConnectionClosed as e:
-            # The server closed first — normal during teardown. Not a pipeline
-            # error, so don't push an ErrorFrame.
-            logger.debug(f"{self} websocket already closed during disconnect: {e}")
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            await self.remove_active_audio_context()
-            self._websocket = None
-            self._contexts.clear()
-            await self._call_event_handler("on_disconnected")
-
-    def _get_websocket(self):
-        if self._websocket:
-            return self._websocket
-        raise Exception("Websocket not connected")
+    def _clear_connection_state(self):
+        self._contexts.clear()
 
     async def _close_context(self, context_id: str):
         """Close a server-side context to free its slot.
+
+        A close discards flushed batches the server hasn't started generating,
+        so it is only safe once the turn has drained — see
+        :meth:`on_turn_context_completed`. On an interruption that discarding is
+        the point.
 
         Generation already under way cannot be cancelled, so a context closed
         mid-generation still drains audio for the text it has — one aggregated
@@ -455,27 +302,8 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _reset_alignment_state(self, context_id: str):
-        self._cumulative_time = 0.0
-        self._partial_word = ""
-        self._partial_word_start_time = 0.0
+        super()._reset_alignment_state(context_id)
         self._contexts.pop(context_id, None)
-
-    async def on_audio_context_interrupted(self, context_id: str):
-        """Close the ElevenLabs context when the bot is interrupted.
-
-        This close is immediate, where the end-of-turn one waits for batches to
-        drain. If generation hasn't started the close discards the buffered text
-        outright, and if it has, the context drains audio that the removed audio
-        context throws away.
-        """
-        await self._close_context(context_id)
-        self._reset_alignment_state(context_id)
-        await super().on_audio_context_interrupted(context_id)
-
-    async def on_audio_context_completed(self, context_id: str):
-        """Reset alignment state after all audio for the context has played."""
-        self._reset_alignment_state(context_id)
-        await super().on_audio_context_completed(context_id)
 
     async def on_turn_context_completed(self):
         """Close the turn's context once the server has generated all of its text.
@@ -605,17 +433,6 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             elif word_times:
                 self._cumulative_time = word_times[-1][1]
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                await self._send_keepalive()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
-
     async def _register_keepalive_context(self):
         """Open a context that exists only to keep the connection alive.
 
@@ -650,6 +467,31 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             json.dumps({"context_id": _KEEPALIVE_CONTEXT_ID, "keep_alive": True})
         )
 
+    async def _send_context_init(self, context_id: str):
+        """Open a context, registering the voice it speaks with.
+
+        Every context must open with a ``voices`` registration; ElevenLabs
+        closes the socket otherwise.
+        """
+        msg: dict[str, Any] = {
+            "context_id": context_id,
+            "voices": [assert_given(self._settings.voice)],
+        }
+        if self._voice_settings:
+            msg["voice_settings"] = self._voice_settings
+        await self._get_websocket().send(json.dumps(msg))
+        self._contexts[context_id] = _DialogueContext()
+
+    async def _after_input_sent(self, context_id: str):
+        """Flush so the server generates text below its buffering threshold.
+
+        Text-to-Dialogue holds input until roughly 40 characters and 8 words
+        accumulate. Without a flush per synthesis request, no audio arrives
+        until the end-of-turn flush, so playback can't start until the LLM has
+        finished the whole response.
+        """
+        await self.flush_audio(context_id)
+
     async def _send_text(self, text: str, context_id: str):
         """Send text to the WebSocket for synthesis."""
         context = self._contexts.get(context_id)
@@ -671,58 +513,3 @@ class ElevenLabsDialogueTTSService(WebsocketTTSService):
             ],
         }
         await self._websocket.send(json.dumps(msg))
-
-    @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
-        """Generate speech from text using ElevenLabs' Text-to-Dialogue WebSocket API.
-
-        Args:
-            text: The text to synthesize into speech.
-            context_id: The context ID for tracking audio frames.
-
-        Yields:
-            Frame: Audio frames containing the synthesized speech.
-        """
-        try:
-            if not self._websocket or self._websocket.state is State.CLOSED:
-                await self._connect()
-
-            if self._websocket is None:
-                logger.warning(f"{self}: websocket unavailable after reconnect, skipping TTS")
-                yield ErrorFrame(error="websocket unavailable")
-                return
-
-            try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                    self._cumulative_time = 0
-                    self._partial_word = ""
-                    self._partial_word_start_time = 0.0
-
-                    # Every context must open with a `voices` registration;
-                    # ElevenLabs closes the socket otherwise.
-                    msg: dict[str, Any] = {
-                        "context_id": context_id,
-                        "voices": [assert_given(self._settings.voice)],
-                    }
-                    if self._voice_settings:
-                        msg["voice_settings"] = self._voice_settings
-                    await self._websocket.send(json.dumps(msg))
-                    self._contexts[context_id] = _DialogueContext()
-                    logger.trace(f"Created new context {context_id}")
-
-                await self._send_text(text, context_id)
-                # Without a flush, text below the server's buffering threshold
-                # isn't synthesized until more arrives — a short reply would
-                # otherwise sit until the context times out.
-                await self.flush_audio(context_id)
-                await self.start_tts_usage_metrics(text)
-            except Exception as e:
-                yield TTSStoppedFrame(context_id=context_id)
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                return
-            yield None
-        except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
