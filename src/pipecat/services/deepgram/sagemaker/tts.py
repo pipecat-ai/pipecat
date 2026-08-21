@@ -227,7 +227,7 @@ class DeepgramSageMakerTTSService(TTSService):
         and closes the BiDi session. Safe to call multiple times.
         """
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram TTS on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram TTS on SageMaker...")
 
             try:
                 await self._client.send_json({"type": "Close"})

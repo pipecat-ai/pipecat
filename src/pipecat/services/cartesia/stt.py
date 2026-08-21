@@ -433,7 +433,7 @@ class CartesiaSTTService(WebsocketSTTService):
         ws = self._websocket
         try:
             if ws and ws.state is State.OPEN:
-                logger.debug("Disconnecting from Cartesia STT")
+                logger.debug(f"{self}: Disconnecting from Cartesia STT")
                 await ws.send("done")
                 await ws.close()
         except Exception as e:

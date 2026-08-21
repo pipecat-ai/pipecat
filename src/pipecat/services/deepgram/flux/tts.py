@@ -200,7 +200,7 @@ class DeepgramFluxTTSService(DeepgramFluxTTSBase, WebsocketService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Deepgram Flux WebSocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram Flux WebSocket")
                 # No `Close` message here: in Flux, `Close` asks the server to
                 # drain the active turn, generating all of its remaining audio,
                 # which a teardown has no use for. Closing the socket ends the

@@ -616,7 +616,7 @@ class CartesiaTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia")
+                logger.debug(f"{self}: Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
