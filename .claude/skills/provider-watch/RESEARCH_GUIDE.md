@@ -47,7 +47,7 @@ You never push or open PRs yourself. You propose one by leaving a committed bran
 - The diff is small and self-explanatory; no new constructor parameters, no new `Settings` fields, no new service classes, no new extras, no behavioral changes beyond the value itself.
 - The team has not decided against it (`decided`).
 
-Everything else is a gap with `action: consider`, listed under "To consider" with a sketch of the change and the evidence.
+Everything else is a gap with `action: consider`, listed under "To consider" with a sketch of the change, the evidence, and a `priority` by the template's criteria — the digest sorts by it, so rank honestly: most items are `medium` or `low`; `high` means users are affected now or on a date.
 
 ### Branch recipe
 

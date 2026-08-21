@@ -29,6 +29,7 @@ gaps:                                      # what Pipecat should consider; see b
   - item: Cartesia's new `emotion` controls are not reachable from Settings
     first_seen: 2026-08-06
     action: consider
+    priority: medium                       # high | medium | low; see below
     note: needs a Settings field; check whether sonic-4 voices all support it
 prs:                                       # see below
   - branch: provider-watch/cartesia-tts-sonic-4
@@ -44,6 +45,10 @@ error: null                                # or one line: why the unit could not
 ```
 
 - `gaps` is the full current list. Keep `first_seen` from the previous report when the item is the same gap, so the digest can show how long it has been open. `action` is `pr` (a `prs` entry exists for it) or `consider` (needs a maintainer's call or more work). A `note` is optional — use it for "re-check when GA" and similar.
+- Every `consider` item carries a `priority`, which orders the digest:
+  - `high` — users are affected now or imminently: a request the provider rejects or has scheduled to reject (a deprecated parameter with a removal date), a crash or hang path, a default that is retiring, something a released model needs in order to work at all.
+  - `medium` — a capability users plausibly want that the service cannot express: a missing `Settings` field, a model an allowlist blocks, an SDK pin behind the provider's current major.
+  - `low` — hygiene: naming, docs that live in another repo, preview-only models to re-check, enum cleanup.
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
 - `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
@@ -62,7 +67,7 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 - https://github.com/pipecat-ai/pipecat/pull/1230 — Add sonic-4 to the sample-rate table (open since last run)
 
 ### To consider
-- **Emotion controls** (since 2026-08-06) — Cartesia's `emotion` request field is not reachable from `Settings`; a field plus a pass-through in `_build_request` would do it, but check whether every sonic-4 voice supports it.
+- **Emotion controls** (medium, since 2026-08-06) — Cartesia's `emotion` request field is not reachable from `Settings`; a field plus a pass-through in `_build_request` would do it, but check whether every sonic-4 voice supports it.
 
 ### Decided
 - Add a `pronunciation` field — wontfix, covered by `pronunciation_dict_id` ([comment](https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1), 2026-08-13)
@@ -81,7 +86,7 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 
 Guidance:
 
-- Lead with what a maintainer needs to decide or review; details after. Every gap appears exactly once, under the bucket matching its `action`; decided items appear only under "Decided", in one line each.
+- Lead with what a maintainer needs to decide or review; details after. Every gap appears exactly once, under the bucket matching its `action`, "To consider" items ordered high → medium → low with the priority in the lead-in; decided items appear only under "Decided", in one line each.
 - A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git show <branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
 - The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
 - "Sources" is one line per page, endpoint, spec and SDK you relied on and what it told you; the next researcher starts from it.

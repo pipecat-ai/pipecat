@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+PRIORITY_ORDER = ["high", "medium", "low"]
+
 
 def parse_frontmatter(text: str) -> dict:
     """Return the YAML frontmatter of a report, or an empty dict."""
@@ -128,12 +130,26 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         lines.append("")
     if considerations:
         lines += ["## Changes to consider", ""]
+        by_priority: dict[str, list] = {}
         for report, gap in considerations:
-            note = f" — {gap['note']}" if gap.get("note") else ""
-            lines.append(
-                f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}{note}"
-            )
-        lines.append("")
+            by_priority.setdefault(str(gap.get("priority") or "unranked"), []).append((report, gap))
+        for priority in PRIORITY_ORDER + sorted(set(by_priority) - set(PRIORITY_ORDER)):
+            group = by_priority.get(priority)
+            if not group:
+                continue
+            items = [
+                f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}"
+                + (f" — {gap['note']}" if gap.get("note") else "")
+                for report, gap in group
+            ]
+            if priority == "low":
+                lines += (
+                    [f"<details><summary><b>Low</b> ({len(items)})</summary>", ""]
+                    + items
+                    + ["", "</details>", ""]
+                )
+            else:
+                lines += [f"**{priority.capitalize()}**", ""] + items + [""]
     if errors:
         lines += ["## Did not complete", ""]
         lines += [f"- {_link(r, repo_url)} — {r['error']}" for r in errors]

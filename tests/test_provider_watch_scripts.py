@@ -139,7 +139,9 @@ class TestDigest:
             "cartesia/tts",
             "---\nservice: cartesia/tts\ndefault_model: sonic-3.5\n"
             "gaps:\n  - item: sonic-4 preview needs a voice migration\n    first_seen: 2026-07-30\n"
-            "    action: consider\n    note: re-check when GA\nprs: []\nerror: null\n---\n",
+            "    action: consider\n    priority: low\n    note: re-check when GA\n"
+            "  - item: emotion controls unreachable\n    first_seen: 2026-08-20\n"
+            "    action: consider\n    priority: high\nprs: []\nerror: null\n---\n",
         )
         write(
             "groq/llm",
@@ -166,7 +168,7 @@ class TestDigest:
 
         assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
         assert (
-            "**6 units researched** — 1 PRs, 1 branches, 1 changes to consider, 2 errors, 1 with nothing new."
+            "**6 units researched** — 1 PRs, 1 branches, 2 changes to consider, 2 errors, 1 with nothing new."
             in text
         )
         sections = [line for line in text.splitlines() if line.startswith("## ")]
@@ -183,6 +185,12 @@ class TestDigest:
             "sonic-4 preview needs a voice migration (since 2026-07-30, 3 weeks) — re-check when GA"
             in text
         )
+        consider = text.split("## Changes to consider")[1].split("## Did not complete")[0]
+        assert consider.index("**High**") < consider.index("emotion controls unreachable")
+        assert consider.index("emotion controls unreachable") < consider.index(
+            "<details><summary><b>Low</b> (1)"
+        )
+        assert consider.index("<details>") < consider.index("sonic-4 preview")
         assert "missing MISTRAL_API_KEY" in text and "report has no frontmatter" in text
         assert (
             "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
