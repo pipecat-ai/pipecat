@@ -66,9 +66,10 @@ One-line verdict, e.g. "Sonic 3.5 is still current; nothing to do."
 
 ## Verification
 
-| model     | class              | ok | TTFB   | note |
-| --------- | ------------------ | -- | ------ | ---- |
-| sonic-3.5 | CartesiaTTSService | ✅ | 123 ms |      |
+| model     | class              | ok | latency                          | note |
+| --------- | ------------------ | -- | -------------------------------- | ---- |
+| sonic-3.5 | CartesiaTTSService | ✅ | TTFB 123 ms                      |      |
+| gpt-5.4   | OpenAILLMService   | ✅ | TTFAT 2.4 s (1.9 s thinking)     |      |
 
 ## Sources
 - <url> — what it told you
@@ -78,5 +79,5 @@ Guidance:
 
 - Lead with what a maintainer needs to decide or review; details after.
 - "New since last report" is empty when this is the first report for the unit — say so in one line and put notable pre-existing gaps (e.g. a default model the provider has retired) under "Changes to consider" or open a PR.
-- The Verification table lists every probe that ran, including failures and the current default when you compared against it. Omit the section only under `--no-probe`.
+- The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them. Omit the section only under `--no-probe`.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.
