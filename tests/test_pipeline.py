@@ -960,11 +960,10 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         test has no transport, so no BotStoppedSpeakingFrame or
         BotStartedSpeakingFrame is ever sent, modeling that gap directly.
 
-        The terminal EndFrame is a ControlFrame, so it queues behind the pause
-        and never reaches the sink, and _wait_for_pipeline_end's EndFrame
-        branch has no timeout (unlike the CancelFrame branch) — so
-        TTSService's pause watchdog must force-resume after
-        pause_watchdog_timeout_s for PipelineWorker.run() to return.
+        The terminal EndFrame is a ControlFrame, so a pause left latched would
+        queue it behind the pause and it would never reach the sink —
+        _wait_for_pipeline_end's EndFrame branch has no timeout (unlike the
+        CancelFrame branch), so PipelineWorker.run() would never return.
         """
 
         class TTSZeroAudioNoResume(TTSService):
@@ -973,7 +972,6 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
                     push_start_frame=True,
                     push_text_frames=False,
                     pause_frame_processing=True,
-                    pause_watchdog_timeout_s=0.2,
                     sample_rate=16000,
                     **kwargs,
                 )
