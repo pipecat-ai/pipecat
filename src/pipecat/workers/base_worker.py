@@ -950,6 +950,29 @@ class BaseWorker(BaseObject, BusSubscriber):
                 )
             group.fail(reason)
 
+    async def request_cancel_job_group(self, job_id: str, *, reason: str | None = None) -> bool:
+        """Honor an externally requested cancellation, if the group allows it.
+
+        The door for cancellation asked for from outside the worker, by a client
+        UI or an operator endpoint, which :attr:`JobGroupParams.cancellable`
+        governs. Cancellation the worker decides on itself (shutdown, a timeout,
+        ``cancel_on_error``) goes straight to :meth:`cancel_job_group` and is
+        never refused.
+
+        Args:
+            job_id: The job identifier to cancel.
+            reason: Optional human-readable reason for cancellation.
+
+        Returns:
+            Whether the group was cancelled. False means it is unknown or
+            was dispatched as non-cancellable.
+        """
+        group = self._job_groups.get(job_id)
+        if group is None or not group.cancellable:
+            return False
+        await self.cancel_job_group(job_id, reason=reason)
+        return True
+
     async def request_job_update(self, job_id: str, worker_name: str) -> None:
         """Request a progress update from a worker.
 
@@ -1022,11 +1045,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         except TimeoutError:
             raise JobGroupError("workers not ready within timeout")
 
-        group = self._create_job_group(
-            worker_names,
-            timeout=group_params.timeout,
-            cancel_on_error=group_params.cancel_on_error,
-        )
+        group = self._create_job_group(worker_names, params=group_params)
 
         for worker_name in worker_names:
             await self._send_job_request(
@@ -1352,6 +1371,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
     ) -> None:
         """Handle a job response and track group completion."""
+        self._mark_worker_terminated(message.job_id, message.source)
         await self.on_job_response(message)
         await self._call_event_handler("on_job_response", message)
 
@@ -1368,6 +1388,18 @@ class BaseWorker(BaseObject, BusSubscriber):
                 return
 
         await self._track_job_group_response(message.job_id, message.source, message.response)
+
+    def _mark_worker_terminated(self, job_id: str, worker_name: str) -> None:
+        """Record that a worker of a group has reached a terminal state.
+
+        A worker terminates either by responding or by ending its stream.
+        ``cancel_job_group`` reads this to tell apart the workers a
+        cancellation actually cut short from those that had already
+        finished on their own.
+        """
+        group = self._job_groups.get(job_id)
+        if group:
+            group.terminated.add(worker_name)
 
     async def _handle_job_update(
         self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage
@@ -1422,6 +1454,7 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     async def _handle_job_stream_end(self, message: BusJobStreamEndMessage) -> None:
         """Handle the end of a streaming job response."""
+        self._mark_worker_terminated(message.job_id, message.source)
         await self.on_job_stream_end(message)
         await self._call_event_handler("on_job_stream_end", message)
         self._push_job_group_event(
@@ -1433,18 +1466,21 @@ class BaseWorker(BaseObject, BusSubscriber):
         self,
         worker_names: list[str],
         *,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
+        params: JobGroupParams,
     ) -> JobGroup:
         job_id = str(uuid.uuid4())
         group = JobGroup(
-            job_id=job_id, worker_names=set(worker_names), cancel_on_error=cancel_on_error
+            job_id=job_id,
+            worker_names=list(worker_names),
+            cancel_on_error=params.cancel_on_error,
+            label=params.label,
+            cancellable=params.cancellable,
         )
         self._job_groups[job_id] = group
 
-        if timeout is not None:
+        if params.timeout is not None:
             group.timeout_task = self.create_task(
-                self._task_timeout(job_id, timeout), f"task_timeout_{job_id[:8]}"
+                self._task_timeout(job_id, params.timeout), f"task_timeout_{job_id[:8]}"
             )
 
         return group
@@ -1509,7 +1545,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         group = self._job_groups.get(job_id)
         if group:
             group.responses[source] = response or {}
-            if group.responses.keys() >= group.worker_names:
+            if group.responses.keys() >= set(group.worker_names):
                 if group.timeout_task:
                     await self.cancel_task(group.timeout_task)
                 del self._job_groups[job_id]

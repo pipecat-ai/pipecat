@@ -16,6 +16,7 @@ from pipecat.bus import (
 from pipecat.pipeline.job_context import (
     JobError,
     JobEvent,
+    JobGroup,
     JobGroupError,
     JobGroupEvent,
     JobStatus,
@@ -493,6 +494,44 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         # First message should be the urgent response
         self.assertIsInstance(received[0], BusJobResponseUrgentMessage)
+
+
+class TestRequestCancelJobGroup(unittest.IsolatedAsyncioTestCase):
+    """External cancellation requests, which ``cancellable`` governs."""
+
+    async def _worker(self):
+        bus, tm, registry = await create_test_env()
+        parent = BaseWorker("parent")
+        await setup_task(bus, registry, parent)
+        return parent
+
+    async def test_cancels_a_cancellable_group(self):
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=True)
+
+        self.assertTrue(await parent.request_cancel_job_group("j1", reason="user"))
+        self.assertNotIn("j1", parent._job_groups)
+
+    async def test_refuses_a_non_cancellable_group(self):
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=False)
+
+        self.assertFalse(await parent.request_cancel_job_group("j1"))
+        self.assertIn("j1", parent._job_groups)
+
+    async def test_refuses_an_unknown_group(self):
+        parent = await self._worker()
+
+        self.assertFalse(await parent.request_cancel_job_group("nope"))
+
+    async def test_worker_initiated_cancel_ignores_cancellable(self):
+        """Shutdown, timeout and cancel_on_error go straight to cancel_job_group."""
+        parent = await self._worker()
+        parent._job_groups["j1"] = JobGroup(job_id="j1", worker_names=["w1"], cancellable=False)
+
+        await parent.cancel_job_group("j1", reason="timeout")
+
+        self.assertNotIn("j1", parent._job_groups)
 
 
 class TestJobContext(unittest.IsolatedAsyncioTestCase):

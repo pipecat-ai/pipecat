@@ -63,6 +63,18 @@ async def _make_solo_worker(**kwargs) -> UIWorker:
     return worker
 
 
+def _register(worker, *, job_id, worker_names, label=None, cancellable=True):
+    """Put a live job group on the worker, as dispatch would."""
+    group = JobGroup(
+        job_id=job_id,
+        worker_names=list(worker_names),
+        label=label,
+        cancellable=cancellable,
+    )
+    worker._job_groups[job_id] = group
+    return group
+
+
 class TestUIWorkerForwarding(unittest.IsolatedAsyncioTestCase):
     async def test_unregistered_job_update_is_not_forwarded(self):
         worker = await _make_solo_worker()
@@ -83,9 +95,7 @@ class TestUIWorkerForwarding(unittest.IsolatedAsyncioTestCase):
 
     async def test_registered_job_update_is_forwarded(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["worker"], label="hello", cancellable=True
-        )
+        _register(worker, job_id="t1", worker_names=["worker"], label="hello", cancellable=True)
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -109,9 +119,7 @@ class TestUIWorkerForwarding(unittest.IsolatedAsyncioTestCase):
 
     async def test_registered_job_response_is_forwarded(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["worker"], label=None, cancellable=True
-        )
+        _register(worker, job_id="t1", worker_names=["worker"], label=None, cancellable=True)
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -137,11 +145,9 @@ class TestUIWorkerForwarding(unittest.IsolatedAsyncioTestCase):
 
     async def test_response_status_serializes_for_cancelled_and_error(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(job_id="t1", worker_names=["w"], label=None, cancellable=True)
-        # Keep the group "live" across both responses so the registration
-        # isn't torn down after the first (source "w" responds twice here,
-        # so the group never sees responses from both of its workers).
-        worker._job_groups["t1"] = JobGroup(job_id="t1", worker_names={"w", "other"})
+        # Two workers, so the group stays live across both responses
+        # (source "w" responds twice here, and "other" never does).
+        _register(worker, job_id="t1", worker_names=["w", "other"])
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -160,13 +166,54 @@ class TestUIWorkerForwarding(unittest.IsolatedAsyncioTestCase):
             for c in worker.send_bus_message.await_args_list
             if isinstance(c.args[0], BusUIJobCompletedMessage)
         ]
-        self.assertEqual(statuses, ["cancelled", "error"])
+        # The error cancels the group, so "other", which never reached a
+        # terminal state of its own, is reported cancelled.
+        self.assertEqual(statuses, ["cancelled", "error", "cancelled"])
+
+
+class TestLateMessagesAfterTeardown(unittest.IsolatedAsyncioTestCase):
+    """Messages that arrive for a group that is already gone."""
+
+    async def test_late_cancelled_response_is_not_forwarded(self):
+        worker = await _make_solo_base_worker()
+        _register(worker, job_id="t1", worker_names=["w1", "w2"])
+        worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
+
+        await worker.cancel_job_group("t1", reason="user")
+        before = len(worker.send_bus_message.await_args_list)
+
+        # Each worker answers the cancel it was sent, after the group is gone.
+        for name in ("w1", "w2"):
+            await worker.on_bus_message(
+                BusJobResponseMessage(
+                    source=name,
+                    target=worker.name,
+                    job_id="t1",
+                    status=JobStatus.CANCELLED,
+                )
+            )
+
+        self.assertEqual(len(worker.send_bus_message.await_args_list), before)
+
+    async def test_late_update_is_not_forwarded(self):
+        worker = await _make_solo_base_worker()
+        _register(worker, job_id="t1", worker_names=["w1"])
+        worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
+
+        await worker.cancel_job_group("t1", reason="user")
+        before = len(worker.send_bus_message.await_args_list)
+
+        await worker.on_bus_message(
+            BusJobUpdateMessage(source="w1", target=worker.name, job_id="t1", update={"x": 1})
+        )
+
+        self.assertEqual(len(worker.send_bus_message.await_args_list), before)
 
 
 class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_event_routes_to_cancel_job_group(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(job_id="t1", worker_names=["w"], label=None, cancellable=True)
+        _register(worker, job_id="t1", worker_names=["w"], label=None, cancellable=True)
         worker.cancel_job_group = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -182,7 +229,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_event_default_reason_when_omitted(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(job_id="t1", worker_names=["w"], label=None, cancellable=True)
+        _register(worker, job_id="t1", worker_names=["w"], label=None, cancellable=True)
         worker.cancel_job_group = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -199,9 +246,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_cancellable_group_is_ignored(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w"], label=None, cancellable=False
-        )
+        _register(worker, job_id="t1", worker_names=["w"], label=None, cancellable=False)
         worker.cancel_job_group = AsyncMock()  # type: ignore[method-assign]
 
         await worker.on_bus_message(
@@ -257,7 +302,7 @@ class TestCancelJobEvent(unittest.IsolatedAsyncioTestCase):
 class TestForwardingDoesNotInjectLLMContext(unittest.IsolatedAsyncioTestCase):
     async def test_job_update_forwarding_does_not_queue_append_frames(self):
         worker = await _make_solo_worker()
-        worker._register_ui_job_group(job_id="t1", worker_names=["w"], label=None, cancellable=True)
+        _register(worker, job_id="t1", worker_names=["w"], label=None, cancellable=True)
 
         await worker.on_bus_message(
             BusJobUpdateMessage(source="w", target=worker.name, job_id="t1", update={"x": 1})
@@ -287,8 +332,15 @@ def _stub_job_group(worker, job_id="t1", worker_names=("w1",)):
     async def _send(worker_name, jid, job_name=None, payload=None):
         pass
 
-    def _fake_create(names, *, timeout=None, cancel_on_error=True):
-        group = JobGroup(job_id=job_id, worker_names=set(names))
+    def _fake_create(names, *, params=None, **kwargs):
+        params = params or JobGroupParams()
+        group = JobGroup(
+            job_id=job_id,
+            worker_names=list(names),
+            cancel_on_error=params.cancel_on_error,
+            label=params.label,
+            cancellable=params.cancellable,
+        )
         worker._job_groups[job_id] = group
 
         async def _finish():
@@ -334,9 +386,9 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         async with worker.ui_job_group("w1", label="My research") as tg:
             self.assertEqual(tg.job_id, "t1")
-            self.assertIn("t1", worker._ui_job_groups)
+            self.assertIn("t1", worker._job_groups)
 
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
 
         kinds = [type(c.args[0]).__name__ for c in worker.send_bus_message.await_args_list]
         self.assertEqual(
@@ -378,7 +430,7 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
         async with worker.ui_job_group("w1") as tg:
             pass
 
-        self.assertNotIn(tg.job_id, worker._ui_job_groups)
+        self.assertNotIn(tg.job_id, worker._job_groups)
 
     async def test_start_ui_job_group_returns_id_and_publishes(self):
         worker = await _make_solo_worker()
@@ -403,7 +455,7 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
         else:
             self.fail("group_completed envelope was not published")
 
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
 
 
 async def _make_solo_base_worker() -> BaseUIWorker:
@@ -423,9 +475,9 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
 
         async with worker.job_group("w1", params=JobGroupParams(label="Research: SMRs")) as tg:
             self.assertEqual(tg.job_id, "t1")
-            self.assertIn("t1", worker._ui_job_groups)
+            self.assertIn("t1", worker._job_groups)
 
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
         kinds = [type(c.args[0]).__name__ for c in worker.send_bus_message.await_args_list]
         self.assertEqual(
             kinds,
@@ -440,9 +492,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
     async def test_registered_update_and_response_are_forwarded(self):
         worker = await _make_solo_base_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1"], label=None, cancellable=True
-        )
+        _register(worker, job_id="t1", worker_names=["w1"], label=None, cancellable=True)
 
         await worker.on_bus_message(
             BusJobUpdateMessage(source="w1", target=worker.name, job_id="t1", update={"p": 1})
@@ -464,9 +514,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_event_routes_to_cancel_job_group(self):
         worker = await _make_solo_base_worker()
         worker.cancel_job_group = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1"], label=None, cancellable=True
-        )
+        _register(worker, job_id="t1", worker_names=["w1"], label=None, cancellable=True)
 
         await worker.on_bus_message(
             BusUIEventMessage(
@@ -482,9 +530,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
     async def test_non_cancellable_group_ignores_cancel_event(self):
         worker = await _make_solo_base_worker()
         worker.cancel_job_group = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1"], label=None, cancellable=False
-        )
+        _register(worker, job_id="t1", worker_names=["w1"], label=None, cancellable=False)
 
         await worker.on_bus_message(
             BusUIEventMessage(
@@ -504,9 +550,9 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
 
         async with worker.job("w1", params=JobParams(label="one job")) as t:
             self.assertEqual(t.job_id, "t1")
-            self.assertIn("t1", worker._ui_job_groups)
+            self.assertIn("t1", worker._job_groups)
 
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
         kinds = [type(c.args[0]).__name__ for c in worker.send_bus_message.await_args_list]
         self.assertEqual(
             kinds,
@@ -523,10 +569,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         # that worker's job_completed envelope, before group_completed.
         worker = await _make_solo_base_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1", "w2"], label=None, cancellable=True
-        )
-        worker._job_groups["t1"] = JobGroup(job_id="t1", worker_names={"w1", "w2"})
+        _register(worker, job_id="t1", worker_names=["w1", "w2"])
 
         await worker.on_bus_message(
             BusJobResponseMessage(
@@ -557,17 +600,14 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui_messages[0].status, "error")
         self.assertEqual(ui_messages[1].worker_name, "w2")
         self.assertEqual(ui_messages[1].status, "cancelled")
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
 
     async def test_cancel_synthesizes_cancelled_envelopes_for_unreported_workers(self):
         # The workers' own CANCELLED responses arrive after unregistration,
         # so cancellation reports them deterministically instead.
         worker = await _make_solo_base_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1", "w2"], label=None, cancellable=True
-        )
-        worker._job_groups["t1"] = JobGroup(job_id="t1", worker_names={"w1", "w2"})
+        _register(worker, job_id="t1", worker_names=["w1", "w2"])
 
         await worker.cancel_job_group("t1", reason="user clicked cancel")
 
@@ -588,7 +628,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
             {(m.worker_name, m.status) for m in ui_messages[:2]},
             {("w1", "cancelled"), ("w2", "cancelled")},
         )
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
 
     async def test_stream_end_completion_completes_group(self):
         # Regression: a worker may finish via send_job_stream_end instead of
@@ -596,10 +636,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         # release the registration.
         worker = await _make_solo_base_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
-        worker._register_ui_job_group(
-            job_id="t1", worker_names=["w1"], label=None, cancellable=True
-        )
-        worker._job_groups["t1"] = JobGroup(job_id="t1", worker_names={"w1"})
+        _register(worker, job_id="t1", worker_names=["w1"])
 
         await worker.on_bus_message(
             BusJobStreamEndMessage(
@@ -619,7 +656,7 @@ class TestBaseUIWorkerJobGroups(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui_messages[0].worker_name, "w1")
         self.assertEqual(ui_messages[0].status, "completed")
         self.assertEqual(ui_messages[0].response, {"final": True})
-        self.assertNotIn("t1", worker._ui_job_groups)
+        self.assertNotIn("t1", worker._job_groups)
 
     async def test_request_job_group_returns_id_and_publishes(self):
         worker = await _make_solo_base_worker()

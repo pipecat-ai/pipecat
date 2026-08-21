@@ -193,19 +193,28 @@ class JobGroup:
 
     Parameters:
         job_id: Shared identifier for all workers in this group.
-        worker_names: Names of the workers in the group.
+        worker_names: Names of the workers in the group, in dispatch order.
         responses: Collected responses keyed by worker name.
         timeout_task: Optional asyncio worker that cancels the group on timeout.
         cancel_on_error: Whether to cancel the group if a worker errors.
+        label: Optional human-readable description of the work, from
+            :attr:`JobGroupParams.label`.
+        cancellable: Whether an external requester may ask for the group to be
+            cancelled, from :attr:`JobGroupParams.cancellable`.
+        terminated: Names of the workers that have reached a terminal state,
+            whether by responding or by ending their stream.
         event_queue: Optional queue for streaming events to a
             ``JobGroupContext`` async iterator.
     """
 
     job_id: str
-    worker_names: set[str]
+    worker_names: list[str]
     responses: dict[str, dict] = field(default_factory=dict)
     timeout_task: asyncio.Task | None = None
     cancel_on_error: bool = True
+    label: str | None = None
+    cancellable: bool = True
+    terminated: set[str] = field(default_factory=set)
     event_queue: asyncio.Queue | None = field(default=None, repr=False)
     _done: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     _error: str | None = field(default=None, repr=False)

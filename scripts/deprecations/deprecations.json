@@ -4029,50 +4029,6 @@
       "location": "pipecat/utils/context/llm_context_summarization.py"
     },
     {
-      "subject": "BaseUIWorker.create_job_group_and_request_job.cancel_on_error",
-      "module": "pipecat.workers.base_ui_worker",
-      "kind": "parameter",
-      "deprecated_in": "1.8.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "params=JobGroupParams(cancel_on_error=...)",
-      "message": "Use ``params=JobGroupParams(cancel_on_error=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/base_ui_worker.py"
-    },
-    {
-      "subject": "BaseUIWorker.create_job_group_and_request_job.name",
-      "module": "pipecat.workers.base_ui_worker",
-      "kind": "parameter",
-      "deprecated_in": "1.8.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "params=JobGroupParams(name=...)",
-      "message": "Use ``params=JobGroupParams(name=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/base_ui_worker.py"
-    },
-    {
-      "subject": "BaseUIWorker.create_job_group_and_request_job.payload",
-      "module": "pipecat.workers.base_ui_worker",
-      "kind": "parameter",
-      "deprecated_in": "1.8.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "params=JobGroupParams(payload=...)",
-      "message": "Use ``params=JobGroupParams(payload=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/base_ui_worker.py"
-    },
-    {
-      "subject": "BaseUIWorker.create_job_group_and_request_job.timeout",
-      "module": "pipecat.workers.base_ui_worker",
-      "kind": "parameter",
-      "deprecated_in": "1.8.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "params=JobGroupParams(timeout=...)",
-      "message": "Use ``params=JobGroupParams(timeout=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/workers/base_ui_worker.py"
-    },
-    {
       "subject": "BaseWorker.create_job_group_and_request_job.cancel_on_error",
       "module": "pipecat.workers.base_worker",
       "kind": "parameter",
