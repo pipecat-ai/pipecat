@@ -25,11 +25,11 @@ request to the first output frame. Compare LLM candidates on ``ttfat_ms``.
 ``list-models`` queries the provider's model catalogue where one exists
 (OpenAI-compatible ``/models``, Anthropic, Google, Deepgram, ElevenLabs).
 
-``signals`` gathers the cheap change signals a researcher compares against the
-previous report: the latest PyPI version of each SDK the provider's extra
-depends on, and a content hash of each published API spec listed for the
-provider in ``providers.yaml`` (or passed with ``--spec``). Specs are
-snapshotted under the reports checkout so ``git diff`` shows what changed.
+``signals`` gathers two inputs for the research: the latest PyPI version of
+each SDK the provider's extra depends on (a prompt to read release notes), and
+each published API spec listed for the provider in ``providers.yaml`` (or passed
+with ``--spec``), snapshotted under the reports checkout so ``git diff`` shows
+exactly what changed in the API since the last run.
 
 Credentials come from the repo's ``.env`` loaded *without* override, so exported
 variables win and CI runs without a ``.env`` at all (``--no-dotenv`` ignores it). Every value

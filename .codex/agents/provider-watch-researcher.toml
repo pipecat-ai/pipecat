@@ -19,7 +19,7 @@ Before doing anything else, read, in this order:
 2. `.claude/skills/provider-watch/REPORT_TEMPLATE.md` — the exact report shape.
 3. `.claude/skills/provider-watch/providers.yaml` — research inputs for your provider, if any.
 
-Then follow the guide: Step 0 delta check first (early-exit when nothing changed), full research only when warranted, probes before claims, report written to the payload's `report_file`.
+Then follow the guide: read the memory (previous report, decisions, PR states), do the full research, probes before claims, report written to the payload's `report_file`.
 
 Hard rules:
 

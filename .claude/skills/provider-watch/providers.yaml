@@ -1,20 +1,18 @@
 # Per-provider research inputs (src/pipecat/services/<provider>): URLs, specs, notes.
 #
-# Maintained by the bot as much as by people: when a researcher finds a URL
-# here dead, a better page, or a spec worth tracking, it records the
-# correction in its report's `providers_yaml_updates`, and publish.py folds every
-# run's updates into this file on one draft PR. Providers without an entry are researched
-# from the unit's docs_url and web search.
-#
-# Only this header comment survives a regeneration; keep prose in `notes:`.
+# Hand-maintained. When a researcher finds a URL here dead, a better page, or a
+# spec worth tracking, it records the correction in its report's
+# `providers_yaml_updates` and the digest lists it for a maintainer to apply.
+# Providers without an entry are researched from the unit's docs_url and web
+# search.
 #
 # Keys (all optional):
 #   models:    page listing the current model catalogue
 #   changelog: release notes / changelog page
 #   docs:      other pages worth reading for this provider's Pipecat services
-#   specs:     published API specs fetched by `probe.py signals`, hashed and
-#              snapshotted under _reports/specs/<provider>/<name>; a changed hash
-#              is a change signal and `git diff` on the snapshot shows what moved.
+#   specs:     published API specs fetched by `probe.py signals` and snapshotted
+#              under _reports/specs/<provider>/<name>; `git diff` on the snapshot
+#              shows exactly what changed in the API between runs.
 #              Stainless SDK repos publish `.stats.yml` with the spec hash; Google
 #              APIs publish discovery documents; AWS shapes live in botocore.
 #   notes:     free-form guidance (gates in our code, quirks, what to focus on)
