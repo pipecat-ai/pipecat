@@ -111,14 +111,14 @@ async def test_push_stt_metadata_frame_contents():
 @pytest.mark.asyncio
 async def test_on_dialin_ready_reports_http_error_and_ready_event():
     transport = _make_dialin_transport()
-    transport._on_dialin_error = AsyncMock()
+    transport._on_error = AsyncMock()
     transport._call_event_handler = AsyncMock()
     session = _make_client_session(status=503, body="service unavailable")
 
     with patch("pipecat.transports.daily.transport.aiohttp.ClientSession", return_value=session):
         await transport._on_dialin_ready("sip:test@example.com")
 
-    transport._on_dialin_error.assert_awaited_once_with(
+    transport._on_error.assert_awaited_once_with(
         "Unable to handle dialin-ready event (status: 503, error: service unavailable)"
     )
     transport._call_event_handler.assert_awaited_once_with(
@@ -129,13 +129,13 @@ async def test_on_dialin_ready_reports_http_error_and_ready_event():
 @pytest.mark.asyncio
 async def test_on_dialin_ready_reports_timeout():
     transport = _make_dialin_transport()
-    transport._on_dialin_error = AsyncMock()
+    transport._on_error = AsyncMock()
     session = _make_client_session(error=TimeoutError())
 
     with patch("pipecat.transports.daily.transport.aiohttp.ClientSession", return_value=session):
         await transport._handle_dialin_ready("sip:test@example.com")
 
-    transport._on_dialin_error.assert_awaited_once_with(
+    transport._on_error.assert_awaited_once_with(
         "Timeout handling dialin-ready event (https://api.daily.co/v1/dialin/pinlessCallUpdate)"
     )
 
@@ -143,13 +143,13 @@ async def test_on_dialin_ready_reports_timeout():
 @pytest.mark.asyncio
 async def test_on_dialin_ready_reports_unexpected_error():
     transport = _make_dialin_transport()
-    transport._on_dialin_error = AsyncMock()
+    transport._on_error = AsyncMock()
     session = _make_client_session(error=RuntimeError("connection failed"))
 
     with patch("pipecat.transports.daily.transport.aiohttp.ClientSession", return_value=session):
         await transport._handle_dialin_ready("sip:test@example.com")
 
-    transport._on_dialin_error.assert_awaited_once_with(
+    transport._on_error.assert_awaited_once_with(
         "Error handling dialin-ready event "
         "(https://api.daily.co/v1/dialin/pinlessCallUpdate): connection failed"
     )
@@ -158,10 +158,10 @@ async def test_on_dialin_ready_reports_unexpected_error():
 @pytest.mark.asyncio
 async def test_on_dialin_ready_does_not_report_success_as_error():
     transport = _make_dialin_transport()
-    transport._on_dialin_error = AsyncMock()
+    transport._on_error = AsyncMock()
     session = _make_client_session()
 
     with patch("pipecat.transports.daily.transport.aiohttp.ClientSession", return_value=session):
         await transport._handle_dialin_ready("sip:test@example.com")
 
-    transport._on_dialin_error.assert_not_awaited()
+    transport._on_error.assert_not_awaited()
