@@ -1,0 +1,1 @@
+- The eval harness now synthesizes Cartesia user speech with `sonic-3.5` when a scenario doesn't name a model. Cartesia sunsets `sonic-2` after October 20, 2026, after which requests to it return an error.

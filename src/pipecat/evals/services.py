@@ -95,7 +95,7 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
         voice_cfg: The ``user.speech`` config mapping:
 
             - ``voice``: Cartesia voice id.
-            - ``model``: Optional model (defaults to ``sonic-2``).
+            - ``model``: Optional model (defaults to ``sonic-3.5``).
             - ``api_key``: Optional key (falls back to ``$CARTESIA_API_KEY``).
             - ``language``: Optional language code (e.g. ``zh``) or ``Language``.
               When omitted, Cartesia keeps its own default (English).
@@ -119,7 +119,7 @@ def cartesia_service(voice_cfg: dict, sample_rate: int) -> TTSService:
         api_key=api_key,
         settings=CartesiaHttpTTSService.Settings(
             voice=str(voice_cfg.get("voice", "")),
-            model=voice_cfg.get("model") or "sonic-2",
+            model=voice_cfg.get("model") or "sonic-3.5",
             language=_cfg_language(voice_cfg),
         ),
         sample_rate=sample_rate,
