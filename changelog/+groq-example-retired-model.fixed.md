@@ -1,0 +1,1 @@
+- Fixed the `voice-groq.py` foundational example failing with a 404: it asked for `llama-3.1-8b-instant`, which Groq shut down on 2026-08-16. It now uses `openai/gpt-oss-20b`, Groq's designated replacement.
