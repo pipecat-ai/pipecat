@@ -16,7 +16,7 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
 - `--limit N` — research only the first N selected units (deterministic order). For test runs.
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
-- `--no-prs` — never create branches or PRs; findings go to "Changes to consider".
+- `--no-prs` — never create branches or PRs. Changes that meet the PR criteria are written up under "PRs withheld" (status `prs-withheld`) so a test run shows what a real run would have opened.
 - `--no-probe` — skip live provider calls (`probe.py`, ad-hoc scripts, evals). Implies `--no-prs`: a PR needs a passing probe.
 - `--publish` / `--local` — push reports, open PRs and the digest issue / write everything locally and push nothing. Without either, ask once (Step 1).
 - `--reports-path P` — existing checkout of the reports repo. Default: `./_reports` if present, else a fresh clone in the scratch dir.
@@ -74,7 +74,7 @@ Rules for the batch loop:
 
 - Launch the whole batch at once so the subagents run concurrently; wait for all of them before starting the next batch.
 - Each researcher returns exactly one JSON line: `{"service", "status", "default_model", "prs", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `status: error` and the failure in the body, and append a matching line.
-- PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; once it reaches 0 pass `prs_enabled: false` to later batches.
+- PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; once it reaches 0 pass `prs_enabled: false` to later batches (their qualifying changes land under "PRs withheld").
 - **Publish mode:** after every batch, commit and push the reports checkout (`git add reports && git commit -m "provider-watch: <RUN_DATE> (<unit ids>)" && git push`). A run that dies later keeps what it has done.
 - Researchers never touch this checkout's git state; PR work happens in worktrees under `<scratch>`. If `git status` here shows changes you did not make, stop and report it.
 

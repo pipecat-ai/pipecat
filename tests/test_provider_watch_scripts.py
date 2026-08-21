@@ -143,6 +143,12 @@ class TestDigest:
             "groq/llm",
             "---\nservice: groq/llm\nstatus: up-to-date\ndefault_model: openai/gpt-oss-120b\n---\n",
         )
+        write(
+            "fireworks/llm",
+            "---\nservice: fireworks/llm\nstatus: prs-withheld\n"
+            "default_model: accounts/fireworks/models/firefunction-v2\n"
+            "summary: default retired; gpt-oss-120b passes the probe (PRs disabled)\n---\n",
+        )
         write("broken/tts", "no frontmatter at all\n")
         return tmp_path
 
@@ -153,8 +159,10 @@ class TestDigest:
         )
 
         assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
-        assert "**4 units researched**" in text
+        assert "**5 units researched**" in text
         assert "## PRs opened, to review" in text
+        assert text.index("## PRs withheld") < text.index("## Changes to consider")
+        assert "fireworks/llm" in text.split("## PRs withheld")[1].split("## Changes")[0]
         assert "https://github.com/pipecat-ai/pipecat/pull/1 — bump default to gpt-5" in text
         assert "## Changes to consider" in text
         assert "  - sonic-4 preview needs a voice migration" in text

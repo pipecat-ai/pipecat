@@ -24,9 +24,18 @@ from pathlib import Path
 
 import yaml
 
-STATUS_ORDER = ["prs-opened", "needs-judgement", "new-upstream", "blocked", "error", "up-to-date"]
+STATUS_ORDER = [
+    "prs-opened",
+    "prs-withheld",
+    "needs-judgement",
+    "new-upstream",
+    "blocked",
+    "error",
+    "up-to-date",
+]
 STATUS_LABELS = {
     "prs-opened": "PRs opened, to review",
+    "prs-withheld": "PRs withheld (criteria met; PRs disabled or budget spent)",
     "needs-judgement": "Changes to consider",
     "new-upstream": "New upstream, no action proposed",
     "blocked": "Blocked",
