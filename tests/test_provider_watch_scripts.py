@@ -151,7 +151,7 @@ class TestDigest:
             "prs:\n  - branch: provider-watch/fireworks-llm-default\n    state: branch\n"
             "    summary: Default FireworksLLMService to gpt-oss-120b\n---\n"
             "\n## PRs\n- `provider-watch/fireworks-llm-default` — review: "
-            "`git diff main...provider-watch/fireworks-llm-default` — Default FireworksLLMService to gpt-oss-120b\n",
+            "`git show provider-watch/fireworks-llm-default` — Default FireworksLLMService to gpt-oss-120b\n",
         )
         write("broken/tts", "no frontmatter at all\n")
         return tmp_path
@@ -167,9 +167,9 @@ class TestDigest:
         assert "## PRs to review" in text
         assert "https://github.com/pipecat-ai/pipecat/pull/1 — bump default to gpt-5" in text
         assert "## Branches not opened as PRs (dry run)" in text
-        assert "`git diff main...provider-watch/fireworks-llm-default`" in text
+        assert "`git show provider-watch/fireworks-llm-default`" in text
         assert "## Changes to consider" in text
-        assert "  - sonic-4 preview needs a voice migration" in text
+        assert "## Open items" in text and "— sonic-4 preview needs a voice migration" in text
         assert "## Errors" in text and "`broken/tts`" not in text and "broken/tts" in text
         assert text.rstrip().endswith(
             "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
@@ -291,7 +291,7 @@ class TestPublish:
             path.write_text(
                 f"---\nservice: {unit}\nstatus: pr-proposed\nprs:\n  - branch: {branch}\n"
                 f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-                f"- `{branch}` — review: `git diff main...{branch}` — s\n"
+                f"- `{branch}` — review: `git show {branch}` — s\n"
             )
 
         write("fireworks/llm", "provider-watch/fireworks-llm-default")
@@ -333,10 +333,7 @@ class TestPublish:
         assert "- https://github.com/pipecat-ai/pipecat/pull/101 — s" in fireworks
         assert "git diff" not in fireworks
         ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text()
-        assert (
-            "capped: true" in ollama
-            and "git diff main...provider-watch/ollama-llm-default" in ollama
-        )
+        assert "capped: true" in ollama and "git show provider-watch/ollama-llm-default" in ollama
 
         pushes = [c for c in sh.calls if c[:2] == ("git", "push")]
         assert pushes == [("git", "push", "-u", "origin", "provider-watch/fireworks-llm-default")]

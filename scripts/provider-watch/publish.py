@@ -54,7 +54,7 @@ DEFAULT_PR_CAP = 8
 # The line a researcher writes under "## PRs" for a local branch; rewritten to
 # the PR URL once the PR exists.
 BRANCH_LINE = re.compile(
-    r"^- `(?P<branch>provider-watch/[^`\s]+)` — review: `git diff main\.\.\.(?P=branch)`",
+    r"^- `(?P<branch>provider-watch/[^`\s]+)` — review: `git show (?P=branch)`",
     re.MULTILINE,
 )
 

@@ -74,7 +74,7 @@ One-line verdict, e.g. "Sonic 3.5 is still current; nothing to do."
 ## Recommended next steps
 
 ### PRs
-- `provider-watch/cartesia-tts-sonic-4` — review: `git diff main...provider-watch/cartesia-tts-sonic-4` — Default CartesiaTTSService to sonic-4
+- `provider-watch/cartesia-tts-sonic-4` — review: `git show provider-watch/cartesia-tts-sonic-4` — Default CartesiaTTSService to sonic-4
 - https://github.com/pipecat-ai/pipecat/pull/1230 — Add sonic-4 to the sample-rate table (open since last run)
 
 ### Changes to consider
@@ -94,7 +94,7 @@ One-line verdict, e.g. "Sonic 3.5 is still current; nothing to do."
 Guidance:
 
 - Lead with what a maintainer needs to decide or review; details after.
-- A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git diff main...<branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
+- A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git show <branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
 - "New since last report" is empty when this is the first report for the unit — say so in one line and put notable pre-existing gaps (e.g. a default model the provider has retired) under "Changes to consider" or propose a PR.
 - The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.

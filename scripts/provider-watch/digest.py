@@ -26,7 +26,7 @@ import yaml
 
 STATUS_ORDER = ["pr-proposed", "needs-judgement", "new-upstream", "blocked", "error", "up-to-date"]
 STATUS_LABELS = {
-    "pr-proposed": "PRs to review",
+    "pr-proposed": "PRs proposed",
     "needs-judgement": "Changes to consider",
     "new-upstream": "New upstream, no action proposed",
     "blocked": "Blocked",
@@ -106,13 +106,13 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         for report, pr in branches:
             branch = pr.get("branch")
             lines.append(
-                f"- {_link(report, repo_url)} — `{branch}` — review: `git diff main...{branch}`{_summary(pr)}"
+                f"- {_link(report, repo_url)} — `{branch}` — review: `git show {branch}`{_summary(pr)}"
             )
         lines.append("")
 
     for status in STATUS_ORDER + sorted(set(by_status) - set(STATUS_ORDER)):
         group = by_status.get(status)
-        if not group or status == "up-to-date":
+        if not group or status in {"pr-proposed", "up-to-date"}:
             continue
         lines += [f"## {STATUS_LABELS.get(status, status)}", ""]
         for report in group:
@@ -121,8 +121,12 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
                 f"- {_link(report, repo_url)} — {report.get('default_model') or '—'}"
                 + (f": {summary}" if summary else "")
             )
-            for item in report.get("open_items") or []:
-                lines.append(f"  - {item}")
+        lines.append("")
+
+    open_items = [(r, item) for r in reports for item in (r.get("open_items") or [])]
+    if open_items:
+        lines += ["## Open items", ""]
+        lines += [f"- {_link(r, repo_url)} — {item}" for r, item in open_items]
         lines.append("")
 
     up_to_date = by_status.get("up-to-date") or []
