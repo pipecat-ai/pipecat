@@ -9,7 +9,7 @@ The report is a snapshot of the gap between the provider and Pipecat *today*: ev
 ## Step 0 — Read the memory
 
 1. Read `previous_report_file` if it is not null. Note its `gaps` (with `first_seen`), `decided`, `prs`, `models_seen`, `default_model`, and which sources it used.
-2. Read `decisions_file`: comments from recent digest issues. Pick out explicit decisions about **your unit** — "won't do", "skip", "not worth it", "done in #1234", "revisit in Q4". Discussion is not a decision. Record each as a `decided` entry with the comment URL as `source`. Ignore comments about other units.
+2. Read `decisions_file`: comments from recent digest issues. Pick out explicit decisions about **your unit** — "won't do", "skip", "not worth it", "done in #1234", "revisit in Q4" — and match each to an item by the wording the commenter quoted; a comment that names the unit but no identifiable item applies to nothing. Discussion is not a decision. Record each as a `decided` entry with the comment URL as `source`. Ignore comments about other units.
 3. For each previous `prs` entry with a URL, `gh pr view <url> --json state,mergedAt,url`. Merged ⇒ the gap is closed (drop it; the code will show the change). Closed unmerged ⇒ `decided` with the PR as `source`. Open ⇒ carry it forward as-is.
 
 ## Research
