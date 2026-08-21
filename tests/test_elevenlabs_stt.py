@@ -12,10 +12,12 @@ from aiohttp import web
 
 from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.elevenlabs.stt import (
+    LANGUAGE_MAP,
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
     ElevenLabsSTTService,
     audio_format_from_sample_rate,
+    elevenlabs_language_to_language,
 )
 from pipecat.transcriptions.language import Language
 
@@ -256,4 +258,88 @@ async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
 
     assert len(captured) == 1
     assert captured[0].text == COMMITTED_TEXT
+    assert captured[0].language is None
+
+
+# --- detected language reaches the frame as a Language ------------------------
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("por", Language.PT),
+        ("eng", Language.EN),
+        ("spa", Language.ES),
+        ("fas", Language.FA),
+        # ISO-639-1 is documented too and must pass straight through.
+        ("pt", Language.PT),
+        ("en", Language.EN),
+        ("POR", Language.PT),
+        (" por ", Language.PT),
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("not-a-language", None),
+    ],
+)
+def test_elevenlabs_language_to_language(code, expected):
+    assert elevenlabs_language_to_language(code) == expected
+
+
+def test_every_code_the_service_can_send_round_trips():
+    """The reverse map is derived from LANGUAGE_MAP, so the two cannot drift."""
+    for language, code in LANGUAGE_MAP.items():
+        assert elevenlabs_language_to_language(code) == language
+
+
+@pytest.mark.asyncio
+async def test_realtime_iso_639_3_becomes_a_language_enum():
+    """ElevenLabs reports ISO-639-3; the frame field is a Language.
+
+    Passing the raw code through made this service the odd one out — Deepgram and
+    Soniox both resolve the detected code — so a consumer asking
+    `frame.language == Language.PT` silently never matched a Portuguese turn.
+    """
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_language_detection=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response(
+        {
+            "message_type": "committed_transcript_with_timestamps",
+            "text": "O primeiro slot funciona pra mim.",
+            "language_code": "por",
+            "words": None,
+        }
+    )
+
+    assert len(captured) == 1
+    assert captured[0].language == Language.PT
+    assert captured[0].language != "por"
+
+
+@pytest.mark.asyncio
+async def test_realtime_an_unrecognised_code_is_dropped_not_forwarded():
+    """The frame field is typed as a Language, so a code we cannot map is None
+    rather than a string nothing downstream can compare against."""
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_language_detection=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response(
+        {
+            "message_type": "committed_transcript_with_timestamps",
+            "text": "hello",
+            "language_code": "not-a-language",
+            "words": None,
+        }
+    )
+
+    assert len(captured) == 1
     assert captured[0].language is None
