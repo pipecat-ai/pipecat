@@ -34,6 +34,10 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-azure-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-bland.py
+    scenarios: [capital_question]
+  - bot: voice/voice-bland-http.py
+    scenarios: [capital_question]
   - bot: voice/voice-camb.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia.py

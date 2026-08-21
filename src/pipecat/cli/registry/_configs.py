@@ -365,6 +365,14 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "bland_tts": (
+        "BlandTTSService(\n"
+        '        api_key=os.getenv("BLAND_API_KEY"),\n'
+        "        settings=BlandTTSService.Settings(\n"
+        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cartesia_tts": (
         "CartesiaTTSService(\n"
         '        api_key=os.getenv("CARTESIA_API_KEY"),\n'
