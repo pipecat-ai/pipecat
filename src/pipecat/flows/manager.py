@@ -762,10 +762,21 @@ class FlowManager:
         try:
             frames = []
 
-            # New path: role_message as LLM system instruction (persists until changed)
+            # New path: role_message as LLM system instruction (persists until changed).
+            # Scope the frame to ``self._llm`` so it is only picked up by the
+            # FlowManager's own LLM service. Without a ``service=`` target, every
+            # LLMService that observes the pipeline bus applies the delta on
+            # itself (see ``LLMService.process_frame``: the default check
+            # ``frame.service is None or frame.service == self`` accepts the
+            # unscoped frame). In multi-worker pipelines that pattern causes
+            # sibling workers' LLM services to adopt this manager's role
+            # message — a persona/context "hijack" during sub-bot handoffs.
             if role_message:
                 frames.append(
-                    LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=role_message))
+                    LLMUpdateSettingsFrame(
+                        delta=LLMSettings(system_instruction=role_message),
+                        service=self._llm,
+                    )
                 )
 
             messages = []
