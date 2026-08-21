@@ -27,6 +27,11 @@ from typing import Any
 from websockets.asyncio.server import serve
 
 
+def _assistant_message(text: str) -> dict[str, Any]:
+    """Wrap text the way the Gateway wraps a chat message."""
+    return {"role": "assistant", "content": [{"type": "text", "text": text}]}
+
+
 class FakeGateway:
     """A scriptable stand-in for the OpenClaw Gateway.
 
@@ -47,6 +52,7 @@ class FakeGateway:
         self.on_request: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self.url: str = ""
 
+        self._streamed: dict[str, str] = {}
         self._server = None
         self._ws: Any = None
         self._connected = asyncio.Event()
@@ -76,9 +82,18 @@ class FakeGateway:
         *,
         error_message: str | None = None,
     ):
-        """Push one ``chat`` event."""
+        """Push one ``chat`` event.
+
+        A ``delta`` carries the piece just produced and, like the real Gateway,
+        the whole answer so far alongside it. Pass the piece; the rest is
+        accumulated here.
+        """
         payload: dict[str, Any] = {"runId": run_id, "state": state}
-        if message is not None:
+        if state == "delta" and isinstance(message, str):
+            payload["deltaText"] = message
+            self._streamed[run_id] = self._streamed.get(run_id, "") + message
+            payload["message"] = _assistant_message(self._streamed[run_id])
+        elif message is not None:
             payload["message"] = message
         if error_message is not None:
             payload["errorMessage"] = error_message

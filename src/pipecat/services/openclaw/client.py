@@ -691,7 +691,13 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         state = payload.get("state")
         text = _extract_text(payload.get("message"))
         if state == "delta":
-            run.queue.put_nowait(OpenClawEvent("text_delta", text=text))
+            # A delta frame carries both the piece the agent just produced and
+            # the whole answer so far. Only the piece is new: the message
+            # restates everything already sent, so joining those would repeat
+            # the answer.
+            delta = payload.get("deltaText")
+            if isinstance(delta, str) and delta:
+                run.queue.put_nowait(OpenClawEvent("text_delta", text=delta))
         elif state == "final":
             self._finish(run, OpenClawEvent("completed", text=text))
         elif state == "aborted":
