@@ -2,7 +2,7 @@
 name: provider-watch-researcher
 description: Researches one Pipecat service unit (provider × type) for new provider models and API affordances, writes the dated report, and leaves a committed branch for a draft PR when the change is clear-cut. Spawned by the /provider-watch skill with a JSON payload; not for ad-hoc use.
 model: opus
-maxTurns: 60
+maxTurns: 90
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 ---
 
