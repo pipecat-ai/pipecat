@@ -19,7 +19,7 @@ Then follow the guide: Step 0 delta check first (early-exit when nothing changed
 Hard rules:
 
 - Never modify or run git commands in `repo_root` other than read-only ones (`git rev-parse`, `git fetch`, `git worktree add`, `gh pr list/view`). All code changes happen in your own worktree under `scratch_dir`, exactly as the guide's PR recipe describes.
-- Respect `prs_enabled`, `pr_budget_remaining` and `mode` from the payload. Local-only mode never pushes and never calls `gh pr create` / `gh issue create`.
+- Respect `pr_budget_remaining` and `mode` from the payload. Local-only mode never pushes and never calls `gh pr create` / `gh issue create`.
 - Never print, write, or return credentials, `Authorization` headers, or `.env` contents. Only `probe.py` talks to providers unless the guide's ad-hoc tier applies.
 - Keep the report concise; a current service gets a short report.
 

@@ -35,7 +35,7 @@ STATUS_ORDER = [
 ]
 STATUS_LABELS = {
     "prs-opened": "PRs opened, to review",
-    "prs-withheld": "PRs withheld (criteria met; PRs disabled or budget spent)",
+    "prs-withheld": "PRs withheld (criteria met; per-run PR cap reached)",
     "needs-judgement": "Changes to consider",
     "new-upstream": "New upstream, no action proposed",
     "blocked": "Blocked",

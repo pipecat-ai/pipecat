@@ -17,11 +17,6 @@ on:
         description: "Research only the first N selected units"
         required: false
         type: string
-      no_prs:
-        description: "Write reports only; open no PRs"
-        required: false
-        type: boolean
-        default: false
       local_only:
         description: "Dry run: push nothing, open nothing; reports are uploaded as an artifact"
         required: false
@@ -123,7 +118,6 @@ jobs:
           ARGS="--ci"
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ -n "${{ inputs.limit }}" ] && ARGS="$ARGS --limit ${{ inputs.limit }}"
-          [ "${{ inputs.no_prs }}" = "true" ] && ARGS="$ARGS --no-prs"
           [ "${{ inputs.local_only }}" = "true" ] && ARGS="$ARGS --local"
           echo "value=$ARGS" >> "$GITHUB_OUTPUT"
           echo "Running: /provider-watch $ARGS"

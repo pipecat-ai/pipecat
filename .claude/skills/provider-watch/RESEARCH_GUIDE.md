@@ -43,7 +43,7 @@ Probes cost real money on real accounts: at most a few calls per model, no retri
 
 ## When to open a PR
 
-Open a PR (max one per unit per run, and only if `prs_enabled` and `pr_budget_remaining > 0`) when **all** of these hold:
+Open a PR (max one per unit per run, and only while `pr_budget_remaining > 0`) when **all** of these hold:
 
 - The change is one of: bump a default model to the provider's designated successor; add a model to a hard allowlist/table so it works; fix a renamed or retired model/version string in the service, its docstrings, or an example under `examples/`; a one-line constant that a new model needs (sample rate, header).
 - A `probe.py run` against the changed class passes with the new value, and — for default bumps — latency is not worse than the old default (`ttfat_ms` for LLMs, `ttfb_ms` otherwise).
@@ -51,7 +51,7 @@ Open a PR (max one per unit per run, and only if `prs_enabled` and `pr_budget_re
 
 Everything else goes under "Changes to consider" with a sketch of the change and the evidence, and `status: needs-judgement`.
 
-When a change meets all three criteria but you cannot open the PR — `prs_enabled: false`, or `pr_budget_remaining` is 0 — do not fold it into "Changes to consider". Put it under "PRs withheld" with everything the PR would have contained: the exact edit (`file:line`, old → new), the probe rows that justify it, and the changelog line; note why it was withheld; set `status: prs-withheld`. A test run is validated by comparing that section against the criteria above. Still apply the dedupe check: if an open PR already covers the change, it belongs under "PRs opened, to review" instead.
+When a change meets all three criteria but the run's PR budget is spent (`pr_budget_remaining` is 0), do not fold it into "Changes to consider". Put it under "PRs withheld" with everything the PR would have contained: the exact edit (`file:line`, old → new), the probe rows that justify it, and the changelog line; set `status: prs-withheld`. Still apply the dedupe check: if an open PR already covers the change, it belongs under "PRs opened, to review" instead.
 
 ### PR recipe
 

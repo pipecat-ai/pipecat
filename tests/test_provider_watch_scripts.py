@@ -147,7 +147,7 @@ class TestDigest:
             "fireworks/llm",
             "---\nservice: fireworks/llm\nstatus: prs-withheld\n"
             "default_model: accounts/fireworks/models/firefunction-v2\n"
-            "summary: default retired; gpt-oss-120b passes the probe (PRs disabled)\n---\n",
+            "summary: default retired; gpt-oss-120b passes the probe (PR cap reached)\n---\n",
         )
         write("broken/tts", "no frontmatter at all\n")
         return tmp_path
