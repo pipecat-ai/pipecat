@@ -68,7 +68,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
         "anthropic": {
             "service": "pipecat.services.anthropic.llm.AnthropicLLMService",
             "api_key_env": "ANTHROPIC_API_KEY",
-            "default_model": "claude-sonnet-4-6",
+            "default_model": "claude-sonnet-5",
         },
         "google": {
             "service": "pipecat.services.google.llm.GoogleLLMService",

@@ -3131,7 +3131,8 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
             "claude-sonnet-4-6",
             "claude-opus-4-6",
             "claude-opus-4-8",
-            "claude-sonnet-5",  # hypothetical future model: must default to inject
+            "claude-sonnet-5",
+            "claude-sonnet-9",  # unknown future model: must default to inject
         ):
             service = self._anthropic(model=model)
             self.assertTrue(service._should_inject_trailing_user_message(), model)
