@@ -161,8 +161,9 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         "---",
         "To record a decision about an item above, reply on this issue naming the unit and enough of "
         "the item to identify it, one decision per line — e.g. `deepgram/stt, diarize_model: skip, "
-        "the extra= workaround is fine` or `openai/realtime, tool_choice: done in #5400`. "
-        "The next run reads these comments.",
+        "the extra= workaround is fine` or `openai/realtime, tool_choice: tracked in #5400, stop reporting`. "
+        "Fixes need no comment: the next run sees the code change. It reads these comments for "
+        "everything it cannot see — won't do, later, tracked elsewhere.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 

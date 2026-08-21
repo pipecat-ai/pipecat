@@ -35,7 +35,7 @@ prs:                                       # see below
   - branch: provider-watch/cartesia-tts-sonic-4
     state: branch
     summary: Default CartesiaTTSService to sonic-4
-decided:                                   # things the team said not to do (or already did)
+decided:                                   # things the team said not to do, defer, or track elsewhere
   - item: Add a `pronunciation` Settings field
     decision: wontfix — covered by pronunciation_dict_id
     source: https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1
