@@ -17,6 +17,11 @@ arrived and how long it took:
 - STT: a bundled 16 kHz speech clip → first ``TranscriptionFrame``
 - realtime (speech-to-speech): connect on ``StartFrame`` and stay error-free
 
+Latency comes from the service's own metrics when it emits them (``ttfb_ms``;
+for LLMs also ``ttfat_ms``, time to the first *answer* token, and
+``thinking_ms`` spent on reasoning), falling back to wall-clock from the
+request to the first output frame. Compare LLM candidates on ``ttfat_ms``.
+
 ``list-models`` queries the provider's model catalogue where one exists
 (OpenAI-compatible ``/models``, Anthropic, Google, Deepgram, ElevenLabs).
 
@@ -85,6 +90,16 @@ EXIT_OK, EXIT_FAILED, EXIT_MISSING_ENV, EXIT_UNSUPPORTED = 0, 1, 2, 3
 
 
 @dataclass
+class Timings:
+    """Latency figures gathered while a probe runs, in seconds."""
+
+    wall_clock_ttfb: float | None = None
+    ttfb: float | None = None
+    ttfat: float | None = None
+    thinking: float | None = None
+
+
+@dataclass
 class ProbeResult:
     """Outcome of one service × model probe."""
 
@@ -92,6 +107,8 @@ class ProbeResult:
     model: str | None
     ok: bool
     ttfb_ms: int | None
+    ttfat_ms: int | None
+    thinking_ms: int | None
     frames: dict[str, int]
     error: str | None
     first_text: str | None = None
@@ -240,19 +257,22 @@ async def _run_pipeline(
     start_timeout: float,
     audio_in_sample_rate: int,
     settle: float = 0.0,
-) -> tuple[dict[str, int], float | None, list[str], str | None]:
+) -> tuple[dict[str, int], Timings, list[str], str | None]:
     """Push frames through ``[source, service, sink]``.
 
-    Returns frame counts by type, TTFB to the first ``target`` frame, upstream
-    error messages, and the ``text`` of that first target frame when it has one.
+    Returns frame counts by type, the timings (service metrics plus wall-clock to
+    the first ``target`` frame), upstream error messages, and the ``text`` of
+    that first target frame when it has one.
     """
-    from pipecat.frames.frames import EndFrame, ErrorFrame, Frame
+    from pipecat.frames.frames import EndFrame, ErrorFrame, Frame, MetricsFrame
+    from pipecat.metrics.metrics import TTFATMetricsData, TTFBMetricsData
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.worker import PipelineParams, PipelineWorker
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.workers.runner import WorkerRunner
 
     counts: dict[str, int] = {}
+    timings = Timings()
     errors: list[str] = []
     hit = asyncio.Event()
     failed = asyncio.Event()
@@ -282,6 +302,15 @@ async def _run_pipeline(
             if direction == FrameDirection.DOWNSTREAM:
                 name = type(frame).__name__
                 counts[name] = counts.get(name, 0) + 1
+                if isinstance(frame, MetricsFrame):
+                    # Services emit a zeroed TTFB when they start; the measurement
+                    # is the first non-zero one.
+                    for data in frame.data:
+                        if isinstance(data, TTFBMetricsData) and timings.ttfb is None:
+                            timings.ttfb = data.value or None
+                        elif isinstance(data, TTFATMetricsData) and timings.ttfat is None:
+                            timings.ttfat = data.ttfat
+                            timings.thinking = data.thinking_time
                 if target is not None and isinstance(frame, target) and first_at is None:
                     first_at = time.monotonic()
                     first_text = getattr(frame, "text", None)
@@ -292,7 +321,7 @@ async def _run_pipeline(
     worker = PipelineWorker(
         pipeline,
         cancel_on_idle_timeout=False,
-        params=PipelineParams(audio_in_sample_rate=audio_in_sample_rate),
+        params=PipelineParams(audio_in_sample_rate=audio_in_sample_rate, enable_metrics=True),
     )
 
     @worker.event_handler("on_pipeline_started")
@@ -337,8 +366,9 @@ async def _run_pipeline(
         errors.append("pipeline did not shut down; cancelled")
         await worker.cancel()
 
-    ttfb = (first_at - sent_at) if (first_at and sent_at) else None
-    return counts, ttfb, errors, first_text
+    if first_at and sent_at:
+        timings.wall_clock_ttfb = first_at - sent_at
+    return counts, timings, errors, first_text
 
 
 def _frames_for(unit_type: str, args: argparse.Namespace) -> tuple[list[Any], type | None, float]:
@@ -392,7 +422,9 @@ async def probe_one(
             kwarg_overrides=_kv_pairs(args.kwarg),
         )
     except TypeError as e:
-        return ProbeResult(cls_info.name, model, False, None, {}, redact(f"settings: {e}"))
+        return ProbeResult(
+            cls_info.name, model, False, None, None, None, {}, redact(f"settings: {e}")
+        )
     if missing:
         print(f"missing environment variable(s): {', '.join(missing)}", file=sys.stderr)
         raise SystemExit(EXIT_MISSING_ENV)
@@ -400,7 +432,9 @@ async def probe_one(
     try:
         service = cls(**kwargs)
     except Exception as e:  # constructor rejected something — that is a finding
-        return ProbeResult(cls_info.name, model, False, None, {}, redact(f"constructor: {e!r}"))
+        return ProbeResult(
+            cls_info.name, model, False, None, None, None, {}, redact(f"constructor: {e!r}")
+        )
 
     frames, target, settle = _frames_for(unit.type, args)
     sample_rate = 16000
@@ -414,7 +448,7 @@ async def probe_one(
         note = "connect-only: passes when no ErrorFrame arrives after StartFrame"
 
     try:
-        counts, ttfb, errors, first_text = await _run_pipeline(
+        counts, timings, errors, first_text = await _run_pipeline(
             service,
             frames_to_send=frames,
             target=target,
@@ -424,14 +458,21 @@ async def probe_one(
             settle=settle,
         )
     except Exception as e:
-        return ProbeResult(cls_info.name, model, False, None, {}, redact(f"pipeline: {e!r}"))
+        return ProbeResult(
+            cls_info.name, model, False, None, None, None, {}, redact(f"pipeline: {e!r}")
+        )
+
+    def ms(value: float | None) -> int | None:
+        return int(value * 1000) if value is not None else None
 
     ok = not errors and (target is None or counts.get(target.__name__, 0) > 0)
     return ProbeResult(
         service=cls_info.name,
         model=model,
         ok=ok,
-        ttfb_ms=int(ttfb * 1000) if ttfb is not None else None,
+        ttfb_ms=ms(timings.ttfb if timings.ttfb is not None else timings.wall_clock_ttfb),
+        ttfat_ms=ms(timings.ttfat),
+        thinking_ms=ms(timings.thinking),
         frames=counts,
         error=redact("; ".join(errors)) if errors else None,
         first_text=redact(first_text),
@@ -470,7 +511,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         else:
             status = "ok " if result.ok else "FAIL"
             ttfb = f"{result.ttfb_ms} ms" if result.ttfb_ms is not None else "—"
-            print(f"[{status}] {result.service} model={result.model or '(default)'} ttfb={ttfb}")
+            line = f"[{status}] {result.service} model={result.model or '(default)'} ttfb={ttfb}"
+            if result.ttfat_ms is not None:
+                line += f" ttfat={result.ttfat_ms} ms (thinking {result.thinking_ms} ms)"
+            print(line)
             if result.first_text:
                 print(f"       text: {result.first_text!r}")
             if result.note:
