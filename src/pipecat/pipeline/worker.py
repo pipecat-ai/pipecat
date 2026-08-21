@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pipecat.bus import (
     BusCancelWorkerMessage,
     BusEndWorkerMessage,
+    BusFrameMessage,
     BusMessage,
     BusTTSSpeakMessage,
 )
@@ -523,14 +524,12 @@ class PipelineWorker(BaseWorker):
             edge_source = _BusEdgeProcessor(
                 worker=self,
                 direction=FrameDirection.UPSTREAM,
-                bridges=bridged,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSource",
             )
             edge_sink = _BusEdgeProcessor(
                 worker=self,
                 direction=FrameDirection.DOWNSTREAM,
-                bridges=bridged,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSink",
             )
@@ -872,6 +871,10 @@ class PipelineWorker(BaseWorker):
         if message.target and message.target != self.name:
             return
 
+        if isinstance(message, BusFrameMessage):
+            await self._queue_bridged_frame(message)
+            return
+
         if isinstance(message, BusTTSSpeakMessage):
             await self.queue_frame(
                 TTSSpeakFrame(text=message.text, append_to_context=message.append_to_context)
@@ -880,6 +883,25 @@ class PipelineWorker(BaseWorker):
 
         if self._rtvi and isinstance(message, BusUIDataMessage):
             await self._handle_ui_bus_message(message)
+
+    async def _queue_bridged_frame(self, message: BusFrameMessage) -> None:
+        """Queue a frame that reached this worker over the bus.
+
+        Queued rather than pushed from the edge that captured the
+        outbound direction, so bus inbound serialises with the frames
+        this worker queues itself (e.g. those a flow framework enqueues
+        from ``set_node``).
+
+        Args:
+            message: The frame carrier to inject.
+        """
+        if self._bridged is None:
+            return
+        if message.source == self.name:
+            return
+        if self._bridged and message.bridge not in self._bridged:
+            return
+        await self.queue_frame(message.frame, message.direction)
 
     async def _handle_ui_bus_message(self, message: BusUIDataMessage) -> None:
         """Translate a UI carrier into the matching RTVI frame and queue it.
