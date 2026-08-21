@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -233,8 +234,11 @@ class UserBotLatencyObserver(BaseObserver):
             return
 
         # Track speech and pipeline events for latency
-        if isinstance(data.frame, VADUserStartedSpeakingFrame):
-            # Reset when user starts speaking
+        if isinstance(data.frame, (UserStartedSpeakingFrame, VADUserStartedSpeakingFrame)):
+            # Reset when the user starts speaking. VADUserStartedSpeakingFrame
+            # is the raw VAD signal; UserStartedSpeakingFrame is the
+            # strategy-level signal and the only one available when the turn
+            # started without VAD (e.g. TranscriptionUserTurnStartStrategy).
             self._user_stopped_time = None
             self._user_turn_start_time = None
             self._user_turn = None
@@ -254,6 +258,12 @@ class UserBotLatencyObserver(BaseObserver):
             # and any turn analyzer wait.
             if self._user_stopped_time is not None:
                 self._user_turn = time.time() - self._user_stopped_time
+            else:
+                # No VAD stop was observed (e.g. the turn started via
+                # TranscriptionUserTurnStartStrategy), so the actual silence
+                # time is unknown. Anchor the measurement at the moment the
+                # turn was released so the cycle still yields a latency.
+                self._user_stopped_time = time.time()
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
