@@ -218,10 +218,11 @@ class TTSService(AIService):
                 processing (and report a non-fatal error) if no BotStartedSpeakingFrame confirms
                 audio is playing for the current turn within this many seconds of pausing. Not
                 armed when audio was already confirmed before the pause (the common case for
-                streaming TTS, where playback starts while the LLM is still generating). Guards
-                against a context completing with no audio (e.g. a quota-exhausted TTS provider
-                reporting success with zero bytes), or a BotStoppedSpeakingFrame race that leaves
-                the pause permanently latched.
+                streaming TTS, where playback starts while the LLM is still generating). A
+                context that completes with no audio lifts the pause itself, so this covers
+                what that completion can't: a BotStoppedSpeakingFrame race that leaves the
+                pause latched after audio did play, and a context that completed in silence
+                before the pause was taken.
             max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
                 complete without producing any audio before the service is reported unable
                 to do its job. Catches a provider that accepts requests and stays silent —
@@ -1821,6 +1822,14 @@ class TTSService(AIService):
         if received_audio:
             self._consecutive_zero_audio_contexts = 0
             return
+
+        # This context played nothing, so the transport will never send the
+        # BotStoppedSpeakingFrame that lifts a pause taken for it. Resume as
+        # soon as that is known rather than waiting out the pause watchdog. A
+        # bot still speaking is playing audio from another context, whose own
+        # BotStoppedSpeakingFrame is still to come.
+        if not self._bot_speaking:
+            await self._maybe_resume_frame_processing()
 
         if not self._max_consecutive_zero_audio_contexts:
             return

@@ -14,15 +14,21 @@ its job so the pipeline worker and any ServiceSwitcher can act on it.
 
 import asyncio
 from collections.abc import AsyncGenerator, Sequence
+from dataclasses import dataclass
 
 import pytest
 
 from pipecat.frames.frames import (
+    DataFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
+    TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
@@ -70,6 +76,44 @@ class MockTTSService(TTSService):
                 num_channels=1,
                 context_id=context_id,
             )
+
+
+@dataclass
+class MarkerFrame(DataFrame):
+    """Marks how far downstream processing has got."""
+
+    label: str = ""
+
+
+class MockPausingTTSService(TTSService):
+    """WebSocket-style service that pauses frame processing and never speaks.
+
+    The provider reports the context finished with no audio at all, so the
+    transport never sends the BotStartedSpeakingFrame/BotStoppedSpeakingFrame
+    pair that would lift the pause.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=True,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _deliver_zero_audio_completion():
+            await asyncio.sleep(0.01)
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_deliver_zero_audio_completion(), name=f"zero_audio_{context_id}")
+        if False:
+            yield
 
 
 def _speak(*texts: str) -> list[Frame]:
@@ -196,3 +240,37 @@ async def test_becoming_usable_again_clears_the_count():
     await tts.set_usable(True)
 
     assert tts._consecutive_zero_audio_contexts == 0
+
+
+@pytest.mark.asyncio
+async def test_a_silent_context_resumes_frame_processing():
+    """A context known to have played nothing lifts the pause it took.
+
+    The watchdog would eventually force-resume, so it is given a timeout far
+    longer than the test: the frames only get through if completing in silence
+    resumes frame processing on its own.
+    """
+    tts = MockPausingTTSService(
+        pause_watchdog_timeout_s=30.0,
+        max_consecutive_zero_audio_contexts=0,
+    )
+
+    frames_to_send: list[Frame] = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="Hello."),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=0.2),
+        MarkerFrame(label="after_silence"),
+    ]
+
+    down, up = await asyncio.wait_for(
+        run_test(tts, frames_to_send=frames_to_send),
+        timeout=5.0,
+    )
+
+    markers = [frame for frame in down if isinstance(frame, MarkerFrame)]
+    assert any(marker.label == "after_silence" for marker in markers), (
+        "frame processing stayed paused after a context completed with no audio"
+    )
+    # The watchdog never fired, so the error it reports is absent too.
+    assert _errors(up) == []
