@@ -23,15 +23,6 @@ summary: One sentence a maintainer can act on.
 models_seen:                               # sorted; from probe.py list-models or the docs
   - sonic-3
   - sonic-3.5
-sources:                                   # what the next run's delta check compares against
-  - url: https://docs.cartesia.ai/changelog
-    latest_entry: "2026-08-12 — Sonic 3.5 generally available"
-  - url: probe.py list-models --provider cartesia
-    latest_entry: "unsupported"            # or the number of models returned
-  - url: pypi:cartesia                     # one per SDK from probe.py signals
-    latest_entry: "2.1.0 (2026-08-03)"
-  - url: https://raw.githubusercontent.com/cartesia-ai/cartesia-python/main/.stats.yml
-    latest_entry: "sha256 3f9c1a2b7d10"    # one per spec from probe.py signals
 gaps:                                      # what Pipecat should consider; see below
   - item: Default sonic-3.5 is superseded by sonic-4 (GA 2026-08-12)
     first_seen: 2026-08-20
@@ -50,7 +41,7 @@ decided:                                   # things the team said not to do (or 
     source: https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1
     date: 2026-08-13
 error: null                                # or one line: why the unit could not be researched
-providers_yaml_updates:                    # optional: corrections to providers.yaml for this provider
+providers_yaml_updates:                    # optional: corrections a maintainer should make to providers.yaml
   changelog: https://docs.cartesia.ai/changelog/2026
   specs:
     - name: cartesia-openapi.json
@@ -61,8 +52,8 @@ providers_yaml_updates:                    # optional: corrections to providers.
 - `gaps` is the full current list, not just what is new this run. Keep `first_seen` from the previous report when the item is the same gap, so the digest can show how long it has been open. `action` is `pr` (a `prs` entry exists for it) or `consider` (needs a maintainer's call or more work). A `note` is optional — use it for "re-check when GA" and similar.
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
 - `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
-- `providers_yaml_updates` is present only when `providers.yaml` should change for this provider: a replacement for a dead `models`/`changelog` URL, a page to add under `docs`, a spec to add under `specs`. `publish.py` merges every run's updates into the file on one draft PR. Omit the key otherwise.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
+- `providers_yaml_updates` is present only when `providers.yaml` should change for this provider: a replacement for a dead `models`/`changelog` URL, a page to add under `docs`, a spec to add under `specs`. The digest lists it for a maintainer to apply. Omit the key otherwise.
 
 ## Body
 
@@ -91,7 +82,8 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 | sonic-4   | CartesiaTTSService | ✅ | TTFB 118 ms                      |      |
 
 ## Sources
-- <url> — what it told you
+- https://docs.cartesia.ai/changelog — Sonic 4 GA on 2026-08-12, sonic-3.5 unchanged
+- probe.py signals — cartesia 2.1.0 on PyPI (2026-08-03); cartesia-sdk.stats.yml unchanged
 ```
 
 Guidance:
@@ -99,4 +91,5 @@ Guidance:
 - Lead with what a maintainer needs to decide or review; details after. Every gap appears exactly once, under the bucket matching its `action`; decided items appear only under "Decided", in one line each.
 - A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git show <branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
 - The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
+- "Sources" is one line per page, endpoint, spec and SDK you relied on and what it told you; the next researcher starts from it.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.
