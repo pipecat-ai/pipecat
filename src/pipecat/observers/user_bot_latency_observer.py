@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -143,10 +144,12 @@ class LatencyBreakdown(BaseModel):
 class UserBotLatencyObserver(BaseObserver):
     """Observer that tracks user-to-bot response latency.
 
-    Measures the time between when a user stops speaking (VADUserStoppedSpeakingFrame)
-    and when the bot starts speaking (BotStartedSpeakingFrame). Emits events when
-    latency is measured, allowing consumers to log, trace, or otherwise process
-    the latency data.
+    Measures the time between when a user stops speaking and when the bot
+    starts speaking (BotStartedSpeakingFrame). Prefers VADUserStoppedSpeakingFrame
+    for precise timing (adjusted by stop_secs), but falls back to
+    UserStoppedSpeakingFrame for turns started without VAD (e.g. via
+    TranscriptionUserTurnStartStrategy). Emits events when latency is measured,
+    allowing consumers to log, trace, or otherwise process the latency data.
 
     When ``enable_metrics=True`` in pipeline params, also collects per-service
     latency breakdown (TTFB, text aggregation) and emits an
@@ -242,6 +245,15 @@ class UserBotLatencyObserver(BaseObserver):
             # If user speaks before the bot's first speech, abandon the
             # first-bot-speech measurement — it's only meaningful for greetings.
             self._first_bot_speech_measured = True
+        elif isinstance(data.frame, UserStartedSpeakingFrame):
+            # Reset for turns started without VAD (e.g.
+            # TranscriptionUserTurnStartStrategy). When VAD fires,
+            # VADUserStartedSpeakingFrame already handled the reset.
+            self._user_stopped_time = None
+            self._user_turn_start_time = None
+            self._user_turn = None
+            self._reset_accumulators()
+            self._first_bot_speech_measured = True
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             # Record the actual time the user stopped speaking, which is
             # the VAD determination time minus the stop_secs silence duration
@@ -249,11 +261,17 @@ class UserBotLatencyObserver(BaseObserver):
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
             self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
-            # Measure the user turn duration: from actual user silence to
-            # turn release. Includes VAD silence detection, STT finalization,
-            # and any turn analyzer wait.
             if self._user_stopped_time is not None:
+                # VAD path: measure user turn duration from actual silence
+                # to turn release.
                 self._user_turn = time.time() - self._user_stopped_time
+            else:
+                # Fallback for turns without VAD (e.g.
+                # TranscriptionUserTurnStartStrategy). Less precise than
+                # VAD's stop_secs-adjusted timestamp, but approximate
+                # latency is better than a silently dropped turn.
+                self._user_stopped_time = time.time()
+                self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
