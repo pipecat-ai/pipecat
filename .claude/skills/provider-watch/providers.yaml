@@ -1,0 +1,159 @@
+# Optional research hints per provider directory (src/pipecat/services/<provider>).
+#
+# Everything here is a starting point for the researcher, not a source of truth:
+# URLs move, so verify each one and fall back to WebSearch when a page is gone.
+# Providers without an entry are researched from the unit's docs_url and search.
+#
+# Keys (all optional):
+#   models:    page listing the current model catalogue
+#   changelog: release notes / changelog page (the delta check compares its first entry)
+#   docs:      other pages worth reading for this provider's Pipecat services
+#   notes:     free-form hints (gates in our code, quirks, what to focus on)
+
+openai:
+  models: https://platform.openai.com/docs/models
+  changelog: https://platform.openai.com/docs/changelog
+  docs:
+    - https://platform.openai.com/docs/guides/realtime
+    - https://platform.openai.com/docs/guides/speech-to-text
+    - https://platform.openai.com/docs/guides/text-to-speech
+    - https://platform.openai.com/docs/api-reference/responses
+  notes: >
+    Chat Completions (llm), Responses (responses-llm), Realtime (realtime), STT (incl. the
+    realtime transcription session), TTS and image generation are separate units; research
+    each against its own API reference. Azure, and the thin OpenAI-compatible wrappers under
+    other providers, inherit this implementation.
+
+anthropic:
+  models: https://docs.claude.com/en/docs/about-claude/models/overview
+  changelog: https://docs.claude.com/en/release-notes/api
+  notes: Prompt caching, extended thinking and tool-use betas are exposed through Settings; check new beta headers.
+
+google:
+  models: https://ai.google.dev/gemini-api/docs/models
+  changelog: https://ai.google.dev/gemini-api/docs/changelog
+  docs:
+    - https://ai.google.dev/gemini-api/docs/live
+    - https://cloud.google.com/speech-to-text/docs/release-notes
+    - https://cloud.google.com/text-to-speech/docs/release-notes
+    - https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions
+  notes: >
+    Gemini Developer API (llm, realtime, image, Gemini TTS) and Google Cloud (stt, tts, vertex
+    variants) have different release notes. Vertex units need location "global" for Gemini 3.
+
+aws:
+  models: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
+  changelog: https://docs.aws.amazon.com/bedrock/latest/userguide/doc-history.html
+  docs:
+    - https://docs.aws.amazon.com/nova/latest/userguide/speech.html
+    - https://docs.aws.amazon.com/polly/latest/dg/doc-history.html
+    - https://docs.aws.amazon.com/transcribe/latest/dg/doc-history.html
+  notes: Bedrock model ids are region-prefixed inference profiles; Nova Sonic is the realtime unit.
+
+azure:
+  models: https://learn.microsoft.com/azure/ai-services/openai/concepts/models
+  changelog: https://learn.microsoft.com/azure/ai-services/openai/whats-new
+  docs:
+    - https://learn.microsoft.com/azure/ai-services/speech-service/releasenotes
+  notes: llm and realtime wrap the OpenAI services; stt/tts/image use the Speech and Image SDKs.
+
+deepgram:
+  models: https://developers.deepgram.com/docs/models-languages-overview
+  changelog: https://deepgram.com/changelog
+  docs:
+    - https://developers.deepgram.com/docs/flux
+    - https://developers.deepgram.com/docs/tts-models
+  notes: Flux (turn-taking STT) is its own unit; SageMaker variants fold into the parent unit.
+
+elevenlabs:
+  models: https://elevenlabs.io/docs/models
+  changelog: https://elevenlabs.io/docs/changelog
+  notes: ELEVENLABS_MULTILINGUAL_MODELS and ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS in tts.py gate behaviour per model.
+
+cartesia:
+  models: https://docs.cartesia.ai/build-with-cartesia/models
+  changelog: https://docs.cartesia.ai/changelog
+  notes: The WebSocket API version is pinned in the service; check whether a newer version is required for new models.
+
+assemblyai:
+  models: https://www.assemblyai.com/docs/speech-to-text/universal-streaming
+  changelog: https://www.assemblyai.com/changelog
+  notes: speech_model is a Literal in models.py and rejects unknown values at construction.
+
+groq:
+  models: https://console.groq.com/docs/models
+  changelog: https://console.groq.com/docs/changelog
+  notes: llm and stt are thin wrappers; tts has its own implementation.
+
+mistral:
+  models: https://docs.mistral.ai/getting-started/models/models_overview/
+  changelog: https://docs.mistral.ai/getting-started/changelog/
+  notes: Voxtral powers the stt and tts units; llm is a thin OpenAI-compatible wrapper.
+
+xai:
+  models: https://docs.x.ai/docs/models
+  changelog: https://docs.x.ai/docs/release-notes
+  notes: The grok/ directory is a deprecated shim over xai/.
+
+rime:
+  models: https://docs.rime.ai/api-reference/models
+  changelog: https://docs.rime.ai/changelog
+
+speechmatics:
+  changelog: https://docs.speechmatics.com/changelog
+  docs:
+    - https://docs.speechmatics.com/
+
+soniox:
+  models: https://soniox.com/docs/stt/models
+  changelog: https://soniox.com/docs/changelog
+
+sarvam:
+  docs:
+    - https://docs.sarvam.ai/
+  notes: llm.py has a hard _SUPPORTED_MODELS allowlist; stt/tts have per-model config tables. The sarvamai SDK is pinned exactly in pyproject.toml.
+
+together:
+  models: https://docs.together.ai/docs/serverless-models
+  changelog: https://docs.together.ai/changelog
+
+fireworks:
+  models: https://fireworks.ai/models
+  docs:
+    - https://docs.fireworks.ai/
+
+ollama:
+  models: https://ollama.com/library
+  changelog: https://github.com/ollama/ollama/releases
+  notes: Local; the probe needs a running server. Judge the default against what Ollama's library recommends for a small chat model.
+
+openrouter:
+  models: https://openrouter.ai/models
+  notes: The catalogue endpoint needs no key.
+
+perplexity:
+  models: https://docs.perplexity.ai/getting-started/models
+  changelog: https://docs.perplexity.ai/changelog
+  notes: No /models endpoint; the service does not support function calling.
+
+nvidia:
+  models: https://build.nvidia.com/models
+  docs:
+    - https://docs.nvidia.com/nim/riva/
+  notes: llm is a thin NIM wrapper; stt/tts use Riva (and SageMaker deployments).
+
+gladia:
+  changelog: https://docs.gladia.io/chapters/introduction/changelog
+
+hume:
+  docs:
+    - https://dev.hume.ai/docs/text-to-speech-tts/overview
+  changelog: https://dev.hume.ai/changelog
+
+inworld:
+  docs:
+    - https://docs.inworld.ai/
+
+ultravox:
+  docs:
+    - https://docs.ultravox.ai/
