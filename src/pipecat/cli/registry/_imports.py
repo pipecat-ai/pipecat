@@ -128,6 +128,9 @@ IMPORTS = {
         "from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService"
     ],
     "elevenlabs_tts": ["from pipecat.services.elevenlabs.tts import ElevenLabsTTSService"],
+    "elevenlabs_dialogue_tts": [
+        "from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService"
+    ],
     "fish_tts": ["from pipecat.services.fish.tts import FishAudioTTSService"],
     "gemini_tts": ["from pipecat.services.google.tts import GeminiTTSService"],
     "google_tts": ["from pipecat.services.google.tts import GoogleTTSService"],

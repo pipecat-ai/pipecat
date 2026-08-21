@@ -792,6 +792,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="elevenlabs_dialogue_tts",
+            label="ElevenLabs Dialogue (v3)",
+            package="pipecat-ai[elevenlabs]",
+            class_name=["ElevenLabsDialogueTTSService"],
+            env_prefix="ELEVENLABS",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="fish_tts",
             label="Fish",
             package="pipecat-ai[fish]",

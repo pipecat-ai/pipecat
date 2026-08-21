@@ -423,6 +423,14 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "elevenlabs_dialogue_tts": (
+        "ElevenLabsDialogueTTSService(\n"
+        '        api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
+        "        settings=ElevenLabsDialogueTTSService.Settings(\n"
+        '            voice=os.getenv("ELEVENLABS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "fish_tts": (
         "FishAudioTTSService(\n"
         '        api_key=os.getenv("FISH_API_KEY"),\n'
