@@ -48,7 +48,7 @@ Each entry is one research unit (`id` like `cartesia/tts`) with its classes, def
 
 ### Step 3: Research in batches
 
-Process units in `--concurrency`-sized batches, in the order `inventory.py` emits them. For each unit in a batch, launch one **`provider-watch-researcher`** subagent (Agent tool, `subagent_type: provider-watch-researcher`) with this payload in the prompt:
+Process units in `--concurrency`-sized batches, in the order `inventory.py` emits them. For each unit in a batch, launch one **`provider-watch-researcher`** subagent with this payload in the prompt. The agent is defined for Claude Code in `.claude/agents/provider-watch-researcher.md` (Agent tool, `subagent_type: provider-watch-researcher`) and for Codex in `.codex/agents/provider-watch-researcher.toml` (spawn the `provider-watch-researcher` agent); in an agent without subagents, do the researcher's work yourself, one unit at a time, by following `RESEARCH_GUIDE.md` with the same payload — the agent definitions are thin shims over that guide.
 
 ```json
 {
@@ -72,7 +72,7 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
 
 Rules for the batch loop:
 
-- Launch the whole batch in one message so the subagents run concurrently; wait for all of them before starting the next batch.
+- Launch the whole batch at once so the subagents run concurrently; wait for all of them before starting the next batch.
 - Each researcher returns exactly one JSON line: `{"service", "status", "default_model", "prs", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `status: error` and the failure in the body, and append a matching line.
 - PR budget: at most 1 PR per unit and 8 per run. Pass `pr_budget_remaining` = 8 − PRs opened so far; once it reaches 0 pass `prs_enabled: false` to later batches.
 - **Publish mode:** after every batch, commit and push the reports checkout (`git add reports && git commit -m "provider-watch: <RUN_DATE> (<unit ids>)" && git push`). A run that dies later keeps what it has done.
