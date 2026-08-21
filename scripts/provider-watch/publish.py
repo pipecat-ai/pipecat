@@ -229,7 +229,15 @@ def render_digest(reports_dir: Path, date: str, highlights: Path | None, reports
 
 
 def worth_an_issue(reports: list[Report]) -> bool:
-    return any(r.meta.get("status") != "up-to-date" or r.meta.get("prs") for r in reports)
+    """Anything to review, consider, or fix — otherwise the digest is just a record."""
+    return any(
+        r.meta.get("prs")
+        or r.meta.get("error")
+        or any(
+            isinstance(g, dict) and g.get("action") == "consider" for g in r.meta.get("gaps") or []
+        )
+        for r in reports
+    )
 
 
 def open_or_update_issue(sh: Shell, reports_repo: str, date: str, body_file: Path) -> str:
