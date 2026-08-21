@@ -774,11 +774,13 @@ class PipelineWorker(BaseWorker):
     async def _drain_pipeline(self) -> None:
         """Wait for in-flight frames to be processed, if any can be.
 
-        A pipeline that never started, or one that has already finished,
-        has nothing to drain and no one left to bounce the flush probe
-        back, so waiting on it would only spend the flush timeout.
+        A pipeline that is not running has no one left to bounce the
+        flush probe back, so waiting on it would only spend the flush
+        timeout. ``_process_push_task`` is created with the worker's
+        tasks and cleared once they are torn down, so it stands for
+        whether there is a pipeline to drain.
         """
-        if not self._pipeline_start_event.is_set() or self.has_finished():
+        if self._process_push_task is None or self.has_finished():
             return
         await self.flush_pipeline()
 
