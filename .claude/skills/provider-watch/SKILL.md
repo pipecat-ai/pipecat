@@ -93,7 +93,7 @@ Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: wha
 ### Step 6: Clean up and summarize
 
 1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the dry-run output.
-2. Print a summary table — unit, default model, PR or branch, changes to consider, error — plus any `providers.yaml` updates the reports propose (for you to apply), the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git show <branch>`), and, when nothing was published, how to publish later: `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize` publishes exactly what this run produced.
+2. Print a summary table — unit, default model, PR or branch, changes to consider, error — plus the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git show <branch>`), and, when nothing was published, how to publish later: `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize` publishes exactly what this run produced.
 
 ## Unattended runs
 

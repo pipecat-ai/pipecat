@@ -459,7 +459,8 @@ class TestSignals:
         result = probe.spec_snapshot("spec.yml", "https://x/spec.yml", tmp_path)
         assert result["error"] == "nope" and not (tmp_path / "spec.yml").exists()
 
-    def test_provider_entry_has_named_specs(self, probe):
-        entry = probe.provider_entry("deepgram")
-        assert all({"name", "url"} <= set(spec) for spec in entry["specs"])
-        assert probe.provider_entry("nosuchprovider") == {}
+    def test_provider_specs_table(self, probe, units):
+        providers = {u.provider for u in units}
+        assert set(probe.PROVIDER_SPECS) <= providers
+        for specs in probe.PROVIDER_SPECS.values():
+            assert specs and all(name and url.startswith("https://") for name, url in specs)
