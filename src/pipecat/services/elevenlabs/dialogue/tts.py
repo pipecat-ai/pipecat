@@ -30,6 +30,7 @@ from pipecat.services.elevenlabs.tts_base import (
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
+    elevenlabs_language_code,
 )
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode
@@ -276,9 +277,11 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if self._seed is not None:
             url += f"&seed={self._seed}"
 
-        language = self._settings.language
-        if language is not None:
-            url += f"&language_code={language}"
+        language_code = elevenlabs_language_code(
+            assert_given(model), assert_given(self._settings.language)
+        )
+        if language_code:
+            url += f"&language_code={language_code}"
 
         return url
 

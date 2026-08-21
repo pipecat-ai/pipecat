@@ -37,12 +37,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.elevenlabs.tts_base import (
+    ELEVENLABS_MODEL_LANGUAGES,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
+    elevenlabs_language_code,
     language_to_elevenlabs_language,
     output_format_from_sample_rate,
 )
@@ -59,6 +61,7 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 # Re-exported so the documented import path for these helpers keeps working.
 __all__ = [
     "ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS",
+    "ELEVENLABS_MODEL_LANGUAGES",
     "ELEVENLABS_MULTILINGUAL_MODELS",
     "ElevenLabsHttpTTSService",
     "ElevenLabsHttpTTSSettings",
@@ -71,15 +74,9 @@ __all__ = [
     "output_format_from_sample_rate",
 ]
 
-# Models that support language codes
-# The following models are excluded as they don't support language codes:
-# - eleven_flash_v2
-# - eleven_turbo_v2
-# - eleven_multilingual_v2
-ELEVENLABS_MULTILINGUAL_MODELS = {
-    "eleven_flash_v2_5",
-    "eleven_turbo_v2_5",
-}
+# Models that support language codes. Which languages each one accepts differs,
+# so the language itself is validated by `elevenlabs_language_code`.
+ELEVENLABS_MULTILINGUAL_MODELS = set(ELEVENLABS_MODEL_LANGUAGES)
 
 # Models that reject the previous_text/next_text context parameters
 ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS = {
@@ -473,15 +470,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         if self._settings.apply_text_normalization is not None:
             url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
 
-        # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
-        language = self._settings.language
-        if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
-            url += f"&language_code={language}"
-            logger.debug(f"Using language code: {language}")
-        elif language is not None:
-            logger.warning(
-                f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
-            )
+        language_code = elevenlabs_language_code(
+            assert_given(model), assert_given(self._settings.language)
+        )
+        if language_code:
+            url += f"&language_code={language_code}"
 
         return url
 
@@ -1014,14 +1007,9 @@ class ElevenLabsHttpTTSService(TTSService):
         if apply_text_normalization is not None:
             payload["apply_text_normalization"] = apply_text_normalization
 
-        language = assert_given(self._settings.language)
-        if model_id in ELEVENLABS_MULTILINGUAL_MODELS and language:
-            payload["language_code"] = language
-            logger.debug(f"Using language code: {language}")
-        elif language:
-            logger.warning(
-                f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
-            )
+        language_code = elevenlabs_language_code(model_id, assert_given(self._settings.language))
+        if language_code:
+            payload["language_code"] = language_code
 
         headers = {
             "xi-api-key": self._api_key,
