@@ -159,8 +159,10 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
 
     lines += [
         "---",
-        "To record a decision about any item above, reply on this issue starting with the unit id "
-        "(e.g. `groq/llm: skip — not worth a Settings field`). The next run reads these comments.",
+        "To record a decision about an item above, reply on this issue naming the unit and enough of "
+        "the item to identify it, one decision per line — e.g. `deepgram/stt, diarize_model: skip, "
+        "the extra= workaround is fine` or `openai/realtime, tool_choice: done in #5400`. "
+        "The next run reads these comments.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
