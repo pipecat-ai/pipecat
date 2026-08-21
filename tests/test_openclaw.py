@@ -336,8 +336,7 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.gateway = await FakeGateway().__aenter__()
-        self.client = OpenClawGatewayClient(url=self.gateway.url, token="test-token")
-        self.processor = OpenClawGatewayService(self.client)
+        self.processor = OpenClawGatewayService(url=self.gateway.url, token="test-token")
 
     async def asyncTearDown(self):
         await self.gateway.__aexit__(None, None, None)
@@ -483,10 +482,9 @@ class TestOpenClawGatewayService(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_unreachable_gateway_is_reported_upstream(self):
         await self.gateway.__aexit__(None, None, None)
-        client = OpenClawGatewayClient(url=self.gateway.url, connect_timeout=1.0)
 
         await run_test(
-            OpenClawGatewayService(client),
+            OpenClawGatewayService(url=self.gateway.url, connect_timeout=1.0),
             frames_to_send=[SleepFrame()],
             expected_down_frames=[],
             expected_up_frames=[ErrorFrame],

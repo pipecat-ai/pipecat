@@ -17,7 +17,17 @@ from pipecat.processors.frame_processor import (
     FrameProcessorSetup,
 )
 from pipecat.services.ai_service import AIService
-from pipecat.services.openclaw.client import OpenClawGatewayClient, OpenClawRun
+from pipecat.services.openclaw.client import (
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_GATEWAY_URL,
+    DEFAULT_MAX_MESSAGE_SIZE,
+    DEFAULT_REQUEST_TIMEOUT,
+    DEFAULT_ROLE,
+    DEFAULT_RUN_TIMEOUT,
+    DEFAULT_SESSION_KEY,
+    OpenClawGatewayClient,
+    OpenClawRun,
+)
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
     OpenClawRunCancelledFrame,
@@ -52,20 +62,59 @@ class OpenClawGatewayService(AIService):
 
     Example::
 
-        service = OpenClawGatewayService(
-            OpenClawGatewayClient(token=os.getenv("OPENCLAW_TOKEN"))
-        )
+        service = OpenClawGatewayService(token=os.getenv("OPENCLAW_TOKEN"))
     """
 
-    def __init__(self, client: OpenClawGatewayClient, **kwargs):
-        """Initialize the service.
+    def __init__(
+        self,
+        *,
+        url: str = DEFAULT_GATEWAY_URL,
+        token: str | None = None,
+        password: str | None = None,
+        session_key: str = DEFAULT_SESSION_KEY,
+        connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+        request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
+        run_timeout: float = DEFAULT_RUN_TIMEOUT,
+        scopes: list[str] | None = None,
+        role: str = DEFAULT_ROLE,
+        max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE,
+        reconnect_on_error: bool = True,
+        **kwargs,
+    ):
+        """Initialize the service and the client it drives.
 
         Args:
-            client: The Gateway client to drive.
+            url: The Gateway websocket, or the port a NemoClaw sandbox
+                republishes it on.
+            token: The Gateway's shared token. Required even on loopback.
+            password: Gateway password, if the deployment uses one instead.
+            session_key: Which OpenClaw session to run in.
+            connect_timeout: Seconds to wait for the handshake.
+            request_timeout: Seconds to wait for a Gateway method to answer.
+            run_timeout: Seconds the agent is given to finish a run.
+            scopes: Handshake scopes.
+            role: Handshake role.
+            max_message_size: Largest websocket frame to accept.
+            reconnect_on_error: Whether to reconnect after the socket fails.
             **kwargs: Additional arguments passed to :class:`AIService`.
+
+        See :class:`~pipecat.services.openclaw.client.OpenClawGatewayClient`
+        for what each of these means to the Gateway.
         """
         super().__init__(settings=ServiceSettings(model=None), **kwargs)
-        self._client = client
+        self._client = OpenClawGatewayClient(
+            url=url,
+            token=token,
+            password=password,
+            session_key=session_key,
+            connect_timeout=connect_timeout,
+            request_timeout=request_timeout,
+            run_timeout=run_timeout,
+            scopes=scopes,
+            role=role,
+            max_message_size=max_message_size,
+            reconnect_on_error=reconnect_on_error,
+        )
         self._run: OpenClawRun | None = None
         self._stream_task: asyncio.Task | None = None
         self._run_ended = True

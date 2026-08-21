@@ -71,6 +71,25 @@ Sessions are durable and hold conversation history, so two runs against the
 same key share context. Tests and parallel callers want distinct keys.
 """
 
+DEFAULT_CONNECT_TIMEOUT = 15.0
+"""Seconds to wait for the handshake.
+
+Sits below a pipeline's setup budget, so a service reports an unreachable
+Gateway itself rather than timing out the whole setup.
+"""
+
+DEFAULT_REQUEST_TIMEOUT = 30.0
+"""Seconds to wait for a Gateway method to answer."""
+
+DEFAULT_RUN_TIMEOUT = 300.0
+"""Seconds the agent is given to finish a run."""
+
+DEFAULT_ROLE = "operator"
+"""Handshake role."""
+
+DEFAULT_MAX_MESSAGE_SIZE = 25 * 1024 * 1024
+"""Largest websocket frame to accept. Agent output can be large."""
+
 MAX_BUFFERED_FRAMES = 100
 """How many unrouted chat frames to hold for replay. See :meth:`_route`."""
 
@@ -206,12 +225,12 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
         token: str | None = None,
         password: str | None = None,
         session_key: str = DEFAULT_SESSION_KEY,
-        connect_timeout: float = 15.0,
-        request_timeout: float = 30.0,
-        run_timeout: float = 300.0,
+        connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+        request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
+        run_timeout: float = DEFAULT_RUN_TIMEOUT,
         scopes: list[str] | None = None,
-        role: str = "operator",
-        max_message_size: int = 25 * 1024 * 1024,
+        role: str = DEFAULT_ROLE,
+        max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE,
         reconnect_on_error: bool = True,
         **kwargs,
     ):

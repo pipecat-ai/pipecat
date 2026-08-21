@@ -35,7 +35,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openclaw.client import (
     DEFAULT_GATEWAY_URL,
     DEFAULT_SESSION_KEY,
-    OpenClawGatewayClient,
 )
 from pipecat.services.openclaw.frames import (
     OpenClawAbortFrame,
@@ -136,7 +135,7 @@ class OpenClawAgentWorker(PipelineWorker):
 
     def __init__(
         self,
-        client: OpenClawGatewayClient,
+        service: OpenClawGatewayService,
         *,
         name: str = WORKER_NAME,
         idle_timeout_secs: float | None = None,
@@ -145,7 +144,7 @@ class OpenClawAgentWorker(PipelineWorker):
         """Initialize the worker.
 
         Args:
-            client: The Gateway client the pipeline drives.
+            service: The Gateway service the pipeline drives.
             name: The name the voice loop addresses jobs to.
             idle_timeout_secs: Off by default. Idleness is measured in bot and
                 user speaking frames, and this pipeline carries neither, so a
@@ -155,7 +154,7 @@ class OpenClawAgentWorker(PipelineWorker):
         """
         pipeline = Pipeline(
             [
-                OpenClawGatewayService(client),
+                service,
                 RunCollector(self._on_run_started, self._on_run_result),
             ]
         )
@@ -265,9 +264,9 @@ def build_openclaw_worker(name: str = WORKER_NAME) -> OpenClawAgentWorker:
     Returns:
         The worker, ready to hand to the runner.
     """
-    client = OpenClawGatewayClient(
+    service = OpenClawGatewayService(
         url=os.getenv("OPENCLAW_GATEWAY_URL", DEFAULT_GATEWAY_URL),
         token=os.getenv("OPENCLAW_TOKEN"),
         session_key=os.getenv("OPENCLAW_SESSION_KEY", DEFAULT_SESSION_KEY),
     )
-    return OpenClawAgentWorker(client, name=name)
+    return OpenClawAgentWorker(service, name=name)
