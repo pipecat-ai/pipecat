@@ -31,7 +31,7 @@ Examples:
 
 1. Parse the arguments. Record `RUN_DATE` as today's date (`YYYY-MM-DD`) and `PIPECAT_COMMIT` as `git rev-parse --short HEAD`.
 2. Pick a scratch directory outside the repo (your session scratchpad if you have one, else `mktemp -d -t provider-watch`). Everything transient — payloads, `run.jsonl`, worktrees — lives there.
-3. Reports checkout: always `./_reports` in this repo (gitignored). If it is missing, `gh repo clone pipecat-ai/provider-watch _reports`; if the clone fails without `--publish` (repo not created yet), `git init _reports` and continue with no history. With `--publish`, run `git -C _reports pull --ff-only` first.
+3. Reports checkout: always `./_reports` in this repo (gitignored). Researchers also snapshot provider API specs under `_reports/specs/<provider>/`, which `publish.py` commits alongside the reports so spec changes show up as diffs in the reports repo. If it is missing, `gh repo clone pipecat-ai/provider-watch _reports`; if the clone fails without `--publish` (repo not created yet), `git init _reports` and continue with no history. With `--publish`, run `git -C _reports pull --ff-only` first.
 4. With `--publish` or `--non-interactive`, stop with a clear error if any of these fails: `gh auth status`, `_reports` exists and is on `main` (publish only), `uv run python scripts/provider-watch/inventory.py --md`.
 5. Decisions: the team records decisions as comments on the digest issues. Collect the comments of the three most recent ones into `<scratch>/decisions.md`:
    ```bash

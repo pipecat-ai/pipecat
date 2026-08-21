@@ -1,16 +1,26 @@
-# Optional research hints per provider directory (src/pipecat/services/<provider>).
+# Research hints per provider directory (src/pipecat/services/<provider>).
 #
-# Everything here is a starting point for the researcher, not a source of truth:
-# URLs move, so verify each one and fall back to WebSearch when a page is gone.
+# This file seeds a unit's first run. After that, the previous report's
+# `sources` are the living record of which URLs work — researchers prefer
+# those, and when a URL here is dead they find the replacement and record it
+# in the report, so nothing in this file needs to track provider docs.
 # Providers without an entry are researched from the unit's docs_url and search.
 #
 # Keys (all optional):
 #   models:    page listing the current model catalogue
-#   changelog: release notes / changelog page (the delta check compares its first entry)
+#   changelog: release notes / changelog page
 #   docs:      other pages worth reading for this provider's Pipecat services
+#   specs:     published API specs fetched by `probe.py signals`, hashed and
+#              snapshotted under _reports/specs/<provider>/<name>; a changed hash
+#              is a change signal and `git diff` on the snapshot shows what moved.
+#              Stainless SDK repos publish `.stats.yml` with the spec hash; Google
+#              APIs publish discovery documents; AWS shapes live in botocore.
 #   notes:     free-form hints (gates in our code, quirks, what to focus on)
 
 openai:
+  specs:
+    - name: openai-openapi.yaml
+      url: https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml
   models: https://platform.openai.com/docs/models
   changelog: https://platform.openai.com/docs/changelog
   docs:
@@ -25,11 +35,21 @@ openai:
     other providers, inherit this implementation.
 
 anthropic:
+  specs:
+    - name: anthropic-sdk.stats.yml
+      url: https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/.stats.yml
   models: https://docs.claude.com/en/docs/about-claude/models/overview
   changelog: https://docs.claude.com/en/release-notes/api
   notes: Prompt caching, extended thinking and tool-use betas are exposed through Settings; check new beta headers.
 
 google:
+  specs:
+    - name: generativelanguage-v1beta.json
+      url: https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
+    - name: speech-v1.json
+      url: https://speech.googleapis.com/$discovery/rest?version=v1
+    - name: texttospeech-v1.json
+      url: https://texttospeech.googleapis.com/$discovery/rest?version=v1
   models: https://ai.google.dev/gemini-api/docs/models
   changelog: https://ai.google.dev/gemini-api/docs/changelog
   docs:
@@ -42,6 +62,11 @@ google:
     variants) have different release notes. Vertex units need location "global" for Gemini 3.
 
 aws:
+  specs:
+    - name: bedrock-runtime.json
+      url: https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/bedrock-runtime/2023-09-30/service-2.json
+    - name: polly.json
+      url: https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/polly/2016-06-10/service-2.json
   models: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
   changelog: https://docs.aws.amazon.com/bedrock/latest/userguide/doc-history.html
   docs:
@@ -58,6 +83,9 @@ azure:
   notes: llm and realtime wrap the OpenAI services; stt/tts/image use the Speech and Image SDKs.
 
 deepgram:
+  specs:
+    - name: deepgram-openapi.yml
+      url: https://raw.githubusercontent.com/deepgram/deepgram-api-specs/main/openapi.yml
   models: https://developers.deepgram.com/docs/models-languages-overview
   changelog: https://deepgram.com/changelog
   docs:
@@ -66,11 +94,17 @@ deepgram:
   notes: Flux (turn-taking STT) is its own unit; SageMaker variants fold into the parent unit.
 
 elevenlabs:
+  specs:
+    - name: elevenlabs-openapi.json
+      url: https://api.elevenlabs.io/openapi.json
   models: https://elevenlabs.io/docs/models
   changelog: https://elevenlabs.io/docs/changelog
   notes: ELEVENLABS_MULTILINGUAL_MODELS and ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS in tts.py gate behaviour per model.
 
 cartesia:
+  specs:
+    - name: cartesia-sdk.stats.yml
+      url: https://raw.githubusercontent.com/cartesia-ai/cartesia-python/main/.stats.yml
   models: https://docs.cartesia.ai/build-with-cartesia/models
   changelog: https://docs.cartesia.ai/changelog
   notes: The WebSocket API version is pinned in the service; check whether a newer version is required for new models.
@@ -81,11 +115,17 @@ assemblyai:
   notes: speech_model is a Literal in models.py and rejects unknown values at construction.
 
 groq:
+  specs:
+    - name: groq-sdk.stats.yml
+      url: https://raw.githubusercontent.com/groq/groq-python/main/.stats.yml
   models: https://console.groq.com/docs/models
   changelog: https://console.groq.com/docs/changelog
   notes: llm and stt are thin wrappers; tts has its own implementation.
 
 mistral:
+  specs:
+    - name: mistral-sdk.gen.lock
+      url: https://raw.githubusercontent.com/mistralai/client-python/main/.speakeasy/gen.lock
   models: https://docs.mistral.ai/getting-started/models/models_overview/
   changelog: https://docs.mistral.ai/getting-started/changelog/
   notes: Voxtral powers the stt and tts units; llm is a thin OpenAI-compatible wrapper.
@@ -157,3 +197,8 @@ inworld:
 ultravox:
   docs:
     - https://docs.ultravox.ai/
+
+cerebras:
+  specs:
+    - name: cerebras-sdk.stats.yml
+      url: https://raw.githubusercontent.com/Cerebras/cerebras-cloud-sdk-python/main/.stats.yml

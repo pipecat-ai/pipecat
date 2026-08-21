@@ -202,8 +202,8 @@ def publish_prs(
 
 
 def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
-    """Commit and push ``reports/`` and ``digests/``; returns whether anything was pushed."""
-    sh.run("git", "add", "-A", "reports", "digests", cwd=reports_dir, check=False)
+    """Commit and push ``reports/``, ``digests/`` and ``specs/``; returns whether anything was pushed."""
+    sh.run("git", "add", "-A", "reports", "digests", "specs", cwd=reports_dir, check=False)
     if sh.ok("git", "diff", "--cached", "--quiet", cwd=reports_dir):
         return False
     sh.run("git", "commit", "-q", "-m", f"provider-watch: {date}", cwd=reports_dir)
