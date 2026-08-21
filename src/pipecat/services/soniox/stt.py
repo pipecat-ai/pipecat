@@ -6,6 +6,7 @@
 
 """Soniox speech-to-text service implementation."""
 
+import asyncio
 import json
 import time
 from collections import Counter
@@ -32,7 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
@@ -47,6 +48,8 @@ FINALIZE_MESSAGE = '{"type": "finalize"}'
 END_TOKEN = "<end>"
 
 FINALIZED_TOKEN = "<fin>"
+
+_FINAL_TRANSCRIPT_TIMEOUT = 5.0
 
 
 class SonioxContextGeneralItem(BaseModel):
@@ -483,9 +486,25 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             frame: The end frame.
         """
-        await super().stop(frame)
-        await self._send_stop_recording()
-        await self._disconnect()
+        # Bypass WebsocketSTTService.stop(), which closes the socket immediately.
+        # Soniox requires an empty end-of-audio message and can send final tokens
+        # before acknowledging it with a `finished` response.
+        await STTService.stop(self, frame)
+
+        # Mark this as an intentional disconnect and stop keepalives without
+        # cancelling the Soniox receive task that drains the final response.
+        await WebsocketSTTService._disconnect(self)
+        try:
+            await self._send_stop_recording()
+            if self._receive_task:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(self._receive_task), timeout=_FINAL_TRANSCRIPT_TIMEOUT
+                    )
+                except TimeoutError:
+                    logger.warning(f"{self}: timed out waiting for final Soniox transcript")
+        finally:
+            await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Soniox STT websocket connection.
