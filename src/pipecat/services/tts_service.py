@@ -165,6 +165,9 @@ class TTSService(AIService):
         # if pause_frame_processing is True, force-resume if no BotStartedSpeakingFrame
         # arrives within this many seconds of pausing
         pause_watchdog_timeout_s: float = 3.0,
+        # number of consecutive TTS contexts that may complete with no audio before the
+        # service is reported unable to do its job; 0 disables the check
+        max_consecutive_zero_audio_contexts: int = 3,
         # if True, append a trailing space to text before sending to TTS
         # (helps prevent some TTS services from vocalizing trailing punctuation)
         append_trailing_space: bool = False,
@@ -219,6 +222,14 @@ class TTSService(AIService):
                 against a context completing with no audio (e.g. a quota-exhausted TTS provider
                 reporting success with zero bytes), or a BotStoppedSpeakingFrame race that leaves
                 the pause permanently latched.
+            max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
+                complete without producing any audio before the service is reported unable
+                to do its job. Catches a provider that accepts requests and stays silent —
+                an unknown voice ID, say — which no error ever surfaces. On reaching the
+                limit the service reports a permanent error, stops being given work, and
+                the pipeline worker applies its
+                :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy`. Set to 0 to let
+                silent contexts go unchecked.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
@@ -305,6 +316,8 @@ class TTSService(AIService):
         # by InterruptibleTTSService to decide whether an interruption needs a
         # reconnect.
         self._bot_speaking: bool = False
+        self._max_consecutive_zero_audio_contexts: int = max_consecutive_zero_audio_contexts
+        self._consecutive_zero_audio_contexts: int = 0
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
@@ -1719,6 +1732,7 @@ class TTSService(AIService):
         queue = self._audio_contexts[context_id]
         running = True
         timestamps_started = False
+        received_audio = False
         should_push_stop_frame = False
         while running:
             try:
@@ -1738,6 +1752,7 @@ class TTSService(AIService):
                     )
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):
+                    received_audio = True
                     # Set the word-timestamp baseline once, on the first audio chunk.
                     if not timestamps_started:
                         await self.stop_ttfb_metrics()
@@ -1782,6 +1797,65 @@ class TTSService(AIService):
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
         await self._maybe_reset_word_timestamps(context_id)
+
+        await self._record_context_audio_outcome(context_id, received_audio)
+
+    async def _record_context_audio_outcome(self, context_id: str, received_audio: bool):
+        """Track whether contexts are producing audio, and act when they stop.
+
+        A provider can accept every request and return no audio at all — an
+        unknown voice ID, say — without ever reporting an error. Enough of those
+        in a row means the service isn't going to speak again, so it is reported
+        unable to do its job: it stops being given work, a
+        :class:`~pipecat.pipeline.service_switcher.ServiceSwitcher` can fail over
+        to another provider, and the pipeline worker applies its
+        :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy`.
+
+        Only contexts that complete are counted; an interrupted context is
+        cancelled before it gets here.
+
+        Args:
+            context_id: The audio context that just completed.
+            received_audio: Whether any audio arrived for that context.
+        """
+        if received_audio:
+            self._consecutive_zero_audio_contexts = 0
+            return
+
+        if not self._max_consecutive_zero_audio_contexts:
+            return
+
+        # An unusable service is deliberately not given work (see
+        # _synthesize_text), so its silent contexts say nothing new.
+        if not self.is_usable:
+            return
+
+        self._consecutive_zero_audio_contexts += 1
+        logger.warning(
+            f"{self} audio context {context_id} completed with no audio "
+            f"({self._consecutive_zero_audio_contexts} in a row)"
+        )
+
+        if self._consecutive_zero_audio_contexts >= self._max_consecutive_zero_audio_contexts:
+            await self.push_error(
+                error_msg=(
+                    f"{self._consecutive_zero_audio_contexts} consecutive TTS contexts "
+                    "completed with no audio"
+                ),
+                force_treat_as_permanent=True,
+            )
+
+    async def set_usable(self, is_usable: bool):
+        """Set whether this service can be given work.
+
+        Args:
+            is_usable: Whether the service can be given work.
+        """
+        # Whatever silence wrote the service off has been dealt with, so the
+        # count of silent contexts starts over.
+        if is_usable:
+            self._consecutive_zero_audio_contexts = 0
+        await super().set_usable(is_usable)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.
