@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.frames.frames import (
+    FunctionCallsStartedFrame,
     MetricsFrame,
     TranscriptionFrame,
     TTSStoppedFrame,
@@ -909,7 +910,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
     - Tool configurations
     - Token usage metrics
     - Performance metrics like TTFB
-    - Aggregated output text
+    - Aggregated output text and function calls
 
     Args:
         func: The LLM method to trace.
@@ -944,6 +945,8 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                         # Store original method and output aggregator
                         original_push_frame = self.push_frame
                         output_text = ""  # Simple string accumulation
+                        output_tool_calls = []
+                        seen_tool_call_ids = set()
 
                         async def traced_push_frame(frame, direction=None):
                             nonlocal output_text
@@ -954,6 +957,15 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                                 and hasattr(frame, "text")
                             ):
                                 output_text += frame.text
+
+                            # The frame is broadcast both ways, so dedupe by id.
+                            if isinstance(frame, FunctionCallsStartedFrame):
+                                for fc in frame.function_calls:
+                                    if fc.tool_call_id not in seen_tool_call_ids:
+                                        seen_tool_call_ids.add(fc.tool_call_id)
+                                        output_tool_calls.append(
+                                            {"name": fc.function_name, "arguments": fc.arguments}
+                                        )
 
                             # Call original
                             if direction is not None:
@@ -1078,6 +1090,15 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                         # stream (e.g. interruption during LLM
                         # generation), rather than only on clean
                         # completion.
+                        if output_tool_calls:
+                            try:
+                                tool_calls_json = json.dumps(output_tool_calls)
+                                current_span.set_attribute("tool_calls", tool_calls_json)
+                                # Tool-only responses would otherwise have no output.
+                                if not output_text:
+                                    current_span.set_attribute("output", tool_calls_json)
+                            except (TypeError, ValueError):
+                                pass
                         if output_text:
                             current_span.set_attribute("output", output_text)
 
