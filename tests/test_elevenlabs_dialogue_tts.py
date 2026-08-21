@@ -371,6 +371,26 @@ def test_dialogue_always_aggregates_sentences():
     assert service._is_streaming_tokens is False
 
 
+def test_dialogue_token_aggregation_is_refused():
+    """Sentence aggregation holds even when the caller asks for tokens."""
+    settings = ElevenLabsDialogueTTSService.Settings(voice="test-voice")
+    service = ElevenLabsDialogueTTSService(
+        api_key="test-key",
+        settings=settings,
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+
+    assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
+    assert service._is_streaming_tokens is False
+
+
+def test_dialogue_non_v3_model_warns_without_raising():
+    """The wrong-model warning names the service, so it needs a constructed one."""
+    service = _make_dialogue_service(model="eleven_flash_v2_5")
+
+    assert service._settings.model == "eleven_flash_v2_5"
+
+
 def test_dialogue_appends_trailing_space_under_sentence_aggregation():
     """Sentence aggregation is what makes the trailing space safe to append."""
     service = _make_dialogue_service()

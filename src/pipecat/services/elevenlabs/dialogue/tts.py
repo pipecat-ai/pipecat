@@ -32,6 +32,7 @@ from pipecat.services.elevenlabs.tts_base import (
     calculate_word_times,
 )
 from pipecat.services.settings import TTSSettings
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Text-to-Dialogue rejects a keepalive that doesn't name a registered context,
@@ -169,6 +170,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         enable_logging: bool | None = None,
         seed: int | None = None,
         settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs Text-to-Dialogue TTS service.
@@ -180,6 +182,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             enable_logging: Whether to enable ElevenLabs server-side logging.
             seed: Seed for reproducible generation.
             settings: Runtime-updatable settings.
+            text_aggregation_mode: How to aggregate incoming text before
+                synthesis. Only :attr:`TextAggregationMode.SENTENCE` is
+                supported; any other value is ignored with a warning.
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
@@ -191,13 +196,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        model = default_settings.model
-        if isinstance(model, str) and not model.startswith("eleven_v3"):
-            logger.warning(
-                f"{self}: Text-to-Dialogue requires an eleven_v3 model, got {model!r}. "
-                "Use ElevenLabsTTSService for Flash, Turbo, and Multilingual models."
-            )
-
         super().__init__(
             api_key=api_key,
             url=url,
@@ -208,10 +206,29 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             # Consecutive inputs are concatenated verbatim, so without a
             # trailing space one input's last word merges into the next's first.
             append_trailing_space=True,
+            # Verbatim concatenation plus the trailing space above means a
+            # token-sized input would insert a space mid-word.
+            text_aggregation_mode=TextAggregationMode.SENTENCE,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
         )
+
+        model = default_settings.model
+        if isinstance(model, str) and not model.startswith("eleven_v3"):
+            logger.warning(
+                f"{self}: Text-to-Dialogue requires an eleven_v3 model, got {model!r}. "
+                "Use ElevenLabsTTSService for Flash, Turbo, and Multilingual models."
+            )
+
+        if (
+            text_aggregation_mode is not None
+            and text_aggregation_mode is not TextAggregationMode.SENTENCE
+        ):
+            logger.warning(
+                f"{self}: Text-to-Dialogue aggregates by sentence; ignoring "
+                f"text_aggregation_mode={text_aggregation_mode}."
+            )
 
         self._seed = seed
 
