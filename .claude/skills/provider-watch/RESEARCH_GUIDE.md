@@ -51,7 +51,7 @@ Everything else is a gap with `action: consider`, listed under "To consider" wit
 
 ### Branch recipe
 
-First, dedupe: `gh pr list --repo pipecat-ai/pipecat --label provider-watch --state open --search "<provider> <unit-suffix>"` and the previous report's `prs`. If an open PR already covers the change, record it (`state: open`, its URL) and do not branch again.
+First, dedupe: `gh pr list --repo pipecat-ai/pipecat --label provider-watch --state all --search "<provider> <unit-suffix>" --json url,state,mergedAt,title` and the previous report's `prs`. An open PR that already covers the change: record it (`state: open`, its URL) and do not branch again. A closed, unmerged PR that covered the same change is a decision against it: record it under `decided` with the PR as `source` and do not propose it again.
 
 Work in a worktree so concurrent researchers never touch the main checkout:
 
