@@ -31,7 +31,7 @@ Build the gap list by answering these, in order, for the unit's classes. Record 
 
 Where to look, in order: `providers.yaml` hints → the unit's `docs_url` on docs.pipecat.ai (what we document today) → provider model/changelog pages → WebSearch for announcements → the source files in `unit.source_files` and their tests under `tests/test_<provider>*`.
 
-Then reconcile with memory: a gap that matches a previous gap keeps its `first_seen`; a gap that matches a `decided` item is not a gap (list it under "Decided" only); a previous gap that no longer holds is dropped. Anything in the previous report you cannot account for, mention in one line so nothing is silently lost.
+Then reconcile with memory: a gap that matches a previous gap keeps its `first_seen` (if the previous report mentions the gap but carries no `first_seen` for it — an older report, or a body-only mention — use that report's `date`); a gap that matches a `decided` item is not a gap (list it under "Decided" only); a previous gap that no longer holds is dropped. Anything in the previous report you cannot account for, mention in one line so nothing is silently lost.
 
 ## Probing
 
