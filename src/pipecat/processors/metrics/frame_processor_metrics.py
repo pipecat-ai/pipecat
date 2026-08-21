@@ -125,6 +125,15 @@ class FrameProcessorMetrics(BaseObject):
             self._last_ttfb_time = 0
             self._should_report_ttfb = not report_only_initial_ttfb
 
+    async def cancel_ttfb_metrics(self):
+        """Abandon the current TTFB measurement without reporting it.
+
+        For a request whose response never came: there is no interval to
+        report, and leaving the measurement open would let the next unrelated
+        output be measured against it.
+        """
+        self._start_ttfb_time = 0
+
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop TTFB measurement and generate metrics frame.
 
@@ -149,6 +158,18 @@ class FrameProcessorMetrics(BaseObject):
             return None
 
         end_time = end_time or time.time()
+
+        if end_time < self._start_ttfb_time:
+            # The output being measured predates the request it is measured
+            # from, so it cannot be a response to it -- a caller measuring to a
+            # stale timestamp, or a wall clock that stepped backwards mid
+            # measurement. Either way there is no interval to report.
+            logger.warning(
+                f"{self._processor_name()} TTFB not reported: output predates the "
+                f"start of the measurement by {self._start_ttfb_time - end_time:.3f}s"
+            )
+            self._start_ttfb_time = 0
+            return None
 
         self._last_ttfb_time = end_time - self._start_ttfb_time
         logger.debug(f"{self._processor_name()} TTFB: {self._last_ttfb_time:.3f}s")
