@@ -256,6 +256,16 @@ class ServiceRegistry:
             include_params=["aws_access_key_id", "aws_session_token", "region"],
         ),
         ServiceDefinition(
+            value="azure_openai_stt",
+            label="Azure OpenAI",
+            package="pipecat-ai[openai]",
+            class_name=["AzureOpenAISTTService"],
+            env_prefix="AZURE_OPENAI_STT",
+            include_params=["api_key", "endpoint"],
+            settings_params=["model"],
+            param_defaults={"model": "gpt-4o-transcribe"},
+        ),
+        ServiceDefinition(
             value="azure_stt",
             label="Azure Speech",
             package="pipecat-ai[azure]",
