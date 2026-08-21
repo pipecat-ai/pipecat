@@ -2,7 +2,7 @@
 name: provider-watch
 description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and open draft PRs for clear-cut updates
 disable-model-invocation: true
-argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--reports-path P] [--ci]"
+argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--ci]"
 ---
 
 Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit in the reports repo, a digest, and draft PRs on pipecat for changes the researcher is confident about. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
@@ -10,7 +10,7 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 ## Arguments
 
 ```
-/provider-watch [--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--reports-path P] [--ci]
+/provider-watch [--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--ci]
 ```
 
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
@@ -18,14 +18,13 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
 - `--no-prs` — never create branches or PRs. Changes that meet the PR criteria are written up under "PRs withheld" (status `prs-withheld`) so a test run shows what a real run would have opened.
 - `--publish` / `--local` — push reports, open PRs and the digest issue / write everything locally and push nothing. Without either, ask once (Step 1).
-- `--reports-path P` — existing checkout of the reports repo. Default: `./_reports` if present, else a fresh clone in the scratch dir.
 - `--ci` — unattended mode: never ask questions, implies `--publish`, fail fast if prerequisites are missing.
 
 Examples:
 
 - `/provider-watch --only deepgram,groq --limit 2 --concurrency 1 --no-prs` — cheap local smoke test
 - `/provider-watch --only ollama --local` — exercise the PR path without pushing
-- `/provider-watch --ci --reports-path ./_reports` — what the weekly workflow runs
+- `/provider-watch --ci` — what the weekly workflow runs
 
 ## Instructions
 
@@ -34,7 +33,7 @@ Examples:
 1. Parse the arguments. Record `RUN_DATE` as today's date (`YYYY-MM-DD`) and `PIPECAT_COMMIT` as `git rev-parse --short HEAD`.
 2. Pick a scratch directory outside the repo (your session scratchpad if you have one, else `mktemp -d -t provider-watch`). Everything transient — payloads, `run.jsonl`, worktrees — lives there.
 3. Mode: `--ci` or `--publish` ⇒ **publish**; `--local` ⇒ **local-only**. Otherwise ask the user exactly one question: *"Write reports locally only (default — no push, no PRs, no issue; PR branches are created but not pushed), or publish?"* Treat no answer as local-only.
-4. Reports checkout: `--reports-path`, else `./_reports` if it exists, else `gh repo clone pipecat-ai/provider-watch <scratch>/provider-watch-reports`. If the clone fails in local-only mode (repo not created yet), `git init <scratch>/provider-watch-reports` and continue with no history. In publish mode run `git pull --ff-only` first.
+4. Reports checkout: always `./_reports` in this repo (gitignored). If it is missing, `gh repo clone pipecat-ai/provider-watch _reports`; if the clone fails in local-only mode (repo not created yet), `git init _reports` and continue with no history. In publish mode run `git -C _reports pull --ff-only` first.
 5. In `--ci` mode, stop with a clear error if any of these is missing: `gh auth status` succeeds, the reports checkout exists and is on `main`, `uv run python scripts/provider-watch/inventory.py --md` runs.
 
 ### Step 2: Build the unit list
@@ -55,7 +54,7 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
   "run_date": "<RUN_DATE>",
   "pipecat_commit": "<PIPECAT_COMMIT>",
   "repo_root": "<absolute path of this checkout>",
-  "reports_path": "<absolute path of the reports checkout>",
+  "reports_path": "<absolute path of ./_reports>",
   "report_path": "reports/<provider>/<unit-suffix>/<RUN_DATE>.md",
   "report_file": "<reports_path>/reports/<provider>/<unit-suffix>/<RUN_DATE>.md",
   "previous_report_file": "<absolute path of the newest existing reports/<provider>/<unit-suffix>/*.md, or null>",
@@ -100,7 +99,7 @@ If an issue with that title already exists (re-run), update its body with `gh is
 ### Step 6: Clean up and summarize
 
 1. `git worktree prune` in this checkout, and remove `<scratch>/wt-*` directories (local-only mode keeps the branches; the worktrees can go).
-2. Print a summary table — unit, status, default model, PRs — and the paths of the digest and any local branches. In local-only mode remind the user nothing was pushed.
+2. Print a summary table — unit, status, default model, PRs — and the paths of the digest (under `_reports/digests/`) and any local branches. In local-only mode remind the user nothing was pushed.
 
 ## Unattended (`--ci`) behaviour
 

@@ -1,6 +1,9 @@
 .vscode
 env/
 __pycache__/
+
+# provider-watch reports checkout (see .claude/skills/provider-watch)
+_reports/
 *~
 venv
 .venv
