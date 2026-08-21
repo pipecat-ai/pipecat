@@ -157,6 +157,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         project=None,
         default_headers: Mapping[str, str] | None = None,
         service_tier: str | None = None,
+        prompt_cache_key: str | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         retry_timeout_secs: float | None = 5.0,
@@ -178,6 +179,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            prompt_cache_key: Optional cache-routing key passed through to OpenAI's
+                prompt caching (see OpenAI's prompt caching guide). Reusing the same
+                key for requests that share a long common prompt prefix improves
+                cache hit rates. Only sent when set; requires an ``openai`` SDK
+                version that supports ``prompt_cache_key``.
             params: Input parameters for model configuration and behavior.
 
                 .. deprecated:: 0.0.105
@@ -236,6 +242,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             **kwargs,
         )
         self._service_tier = service_tier
+        self._prompt_cache_key = prompt_cache_key
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self._full_model_name: str = ""
@@ -376,6 +383,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             if self._service_tier is not None
             else OPENAI_NOT_GIVEN,
         }
+
+        # Only include prompt_cache_key when set: the parameter requires a newer
+        # openai SDK than this package's minimum, so an unconditional (even
+        # NOT_GIVEN) kwarg would break older installs.
+        if self._prompt_cache_key is not None:
+            params["prompt_cache_key"] = self._prompt_cache_key
 
         # Messages, tools, tool_choice
         params.update(params_from_context)
