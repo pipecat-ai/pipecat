@@ -2,7 +2,7 @@
 name: provider-watch
 description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and open draft PRs for clear-cut updates
 disable-model-invocation: true
-argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--no-prs] [--no-probe] [--publish|--local] [--reports-path P] [--ci]"
+argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--reports-path P] [--ci]"
 ---
 
 Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit in the reports repo, a digest, and draft PRs on pipecat for changes the researcher is confident about. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
@@ -10,14 +10,13 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 ## Arguments
 
 ```
-/provider-watch [--only a,b] [--limit N] [--concurrency N] [--no-prs] [--no-probe] [--publish|--local] [--reports-path P] [--ci]
+/provider-watch [--only a,b] [--limit N] [--concurrency N] [--no-prs] [--publish|--local] [--reports-path P] [--ci]
 ```
 
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
 - `--limit N` — research only the first N selected units (deterministic order). For test runs.
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
 - `--no-prs` — never create branches or PRs. Changes that meet the PR criteria are written up under "PRs withheld" (status `prs-withheld`) so a test run shows what a real run would have opened.
-- `--no-probe` — skip live provider calls (`probe.py`, ad-hoc scripts, evals). Implies `--no-prs`: a PR needs a passing probe.
 - `--publish` / `--local` — push reports, open PRs and the digest issue / write everything locally and push nothing. Without either, ask once (Step 1).
 - `--reports-path P` — existing checkout of the reports repo. Default: `./_reports` if present, else a fresh clone in the scratch dir.
 - `--ci` — unattended mode: never ask questions, implies `--publish`, fail fast if prerequisites are missing.
@@ -63,7 +62,6 @@ Process units in `--concurrency`-sized batches, in the order `inventory.py` emit
   "scratch_dir": "<scratch>",
   "mode": "publish" | "local-only",
   "prs_enabled": true | false,
-  "probe_enabled": true | false,
   "pr_budget_remaining": <int>
 }
 ```

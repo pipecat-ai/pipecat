@@ -84,5 +84,5 @@ Guidance:
 - Lead with what a maintainer needs to decide or review; details after.
 - "PRs withheld" holds exactly what a PR would have contained (the concrete edit, the probe table rows that justify it, the changelog line) so a test run can be checked against the PR criteria. When PRs are enabled and the budget allows, the section reads `Nothing.`
 - "New since last report" is empty when this is the first report for the unit — say so in one line and put notable pre-existing gaps (e.g. a default model the provider has retired) under "Changes to consider" or open a PR.
-- The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them. Omit the section only under `--no-probe`.
+- The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.
