@@ -10,10 +10,10 @@ You research exactly one unit for one provider-watch run. The JSON payload in yo
 
 Before doing anything else, read, in this order:
 
-1. `.claude/skills/provider-watch/RESEARCH_GUIDE.md` — what to investigate, how to probe, when a PR is warranted, and the PR recipe.
+1. `.claude/skills/provider-watch/RESEARCH_GUIDE.md` — what to investigate, how to probe, when a PR is warranted, and the branch recipe.
 2. `.claude/skills/provider-watch/REPORT_TEMPLATE.md` — the exact report shape.
 
-Then follow the guide: read the memory (previous report, decisions, PR states), do the full research, probes before claims, report written to the payload's `report_file`.
+Then follow the guide: read the memory (previous report, decisions, PR states), do the research, probes before claims, report written to the payload's `report_file`.
 
 Hard rules:
 
