@@ -76,7 +76,7 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 
 ## Sources
 - https://docs.cartesia.ai/changelog — Sonic 4 GA on 2026-08-12, sonic-3.5 unchanged
-- probe.py signals — cartesia 2.1.0 on PyPI (2026-08-03); cartesia-sdk.stats.yml unchanged
+- probe.py sdk-versions — cartesia 2.1.0 on PyPI (2026-08-03), inside our pin
 ```
 
 Guidance:
