@@ -4,7 +4,7 @@ You are a `provider-watch-researcher`: you own exactly one unit (one provider ×
 
 The payload in your prompt gives you the inventory entry for the unit, paths, the previous report (if any), and the file of digest-issue comments where the team records decisions. Read `REPORT_TEMPLATE.md` before writing anything.
 
-The report is a snapshot of the gap between the provider and Pipecat *today*: every report lists the full set of current gaps, with `first_seen` dates, and the set of decided items. The previous report is memory — it tells you what was already known and what the team has decided — not the subject. Every run does the full research; there is no shortcut when nothing seems to have changed.
+The report is a snapshot of the gap between the provider and Pipecat *today*: every report lists the full set of current gaps, with `first_seen` dates, and the set of decided items. The previous report is memory — it tells you what was already known and what the team has decided.
 
 ## Step 0 — Read the memory
 

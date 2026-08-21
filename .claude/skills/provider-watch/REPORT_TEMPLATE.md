@@ -7,8 +7,7 @@ short, concrete, no filler. A section with nothing to say contains the single
 word `Nothing.`
 
 A report is a snapshot of the gap between what the provider offers and what
-Pipecat handles today — not a diff against the previous report. Every report
-is complete on its own.
+Pipecat handles today, complete on its own.
 
 ## Frontmatter
 
@@ -49,7 +48,7 @@ providers_yaml_updates:                    # optional: corrections a maintainer 
 ---
 ```
 
-- `gaps` is the full current list, not just what is new this run. Keep `first_seen` from the previous report when the item is the same gap, so the digest can show how long it has been open. `action` is `pr` (a `prs` entry exists for it) or `consider` (needs a maintainer's call or more work). A `note` is optional — use it for "re-check when GA" and similar.
+- `gaps` is the full current list. Keep `first_seen` from the previous report when the item is the same gap, so the digest can show how long it has been open. `action` is `pr` (a `prs` entry exists for it) or `consider` (needs a maintainer's call or more work). A `note` is optional — use it for "re-check when GA" and similar.
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
 - `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
