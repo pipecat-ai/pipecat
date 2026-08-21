@@ -83,7 +83,7 @@ Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: wha
 ### Step 6: Clean up and summarize
 
 1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the dry-run output.
-2. Print a summary table — unit, status, default model, PR or branch — plus the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git diff main...<branch>`), and, when nothing was published, how to publish later: re-run with `--publish` (the local reports are the baseline, so it is cheap) or run `publish.py --date <RUN_DATE> --finalize` by hand.
+2. Print a summary table — unit, status, default model, PR or branch — plus the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git show <branch>`), and, when nothing was published, how to publish later: re-run with `--publish` (the local reports are the baseline, so it is cheap) or run `publish.py --date <RUN_DATE> --finalize` by hand.
 
 ## Unattended runs
 
