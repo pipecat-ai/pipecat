@@ -263,6 +263,66 @@ class TestInactiveWorkerGating(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(isinstance(m, BusJobRequestMessage) for m in seen))
 
 
+class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
+    """end() and activate_worker() wait for in-flight frames."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    def _spy_on_flush(self, worker) -> list:
+        flushed = []
+        real = worker.flush_pipeline
+
+        async def spy(timeout: float = 5.0):
+            result = await real(timeout)
+            flushed.append(result)
+            return result
+
+        worker.flush_pipeline = spy  # type: ignore[method-assign]
+        return flushed
+
+    async def _run_until(self, worker, action):
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker)
+
+        async def drive():
+            await asyncio.sleep(0.05)
+            await action()
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), drive()), timeout=10.0)
+
+    async def test_end_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.end(reason="done"))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_activate_worker_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.activate_worker("peer"))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_end_skips_the_drain_when_nothing_is_running(self):
+        """Nothing would bounce the probe back, so waiting would only time out."""
+        worker = make_stub_pipeline_task("never-started")
+        await worker.attach(
+            registry=create_test_registry(),
+            bus=self.bus,
+            worker_runner=WorkerRunner(bus=self.bus, handle_sigint=False),
+        )
+        flushed = self._spy_on_flush(worker)
+
+        await worker.end(reason="done")
+
+        self.assertEqual(flushed, [])
+
+
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
