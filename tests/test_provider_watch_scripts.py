@@ -463,3 +463,107 @@ class TestSignals:
         hints = probe.provider_hints("deepgram")
         assert all({"name", "url"} <= set(spec) for spec in hints["specs"])
         assert probe.provider_hints("nosuchprovider") == {}
+
+
+class TestHints:
+    """publish.py: report hints become one providers.yaml PR."""
+
+    @pytest.fixture
+    def publish(self):
+        import publish
+
+        return publish
+
+    def test_merge_hints(self, publish):
+        data = {"groq": {"models": "https://old", "specs": [{"name": "a", "url": "https://a"}]}}
+        changed = publish.merge_hints(
+            data,
+            "groq",
+            {
+                "changelog": "https://cl",
+                "specs": [{"name": "a", "url": "https://a"}, {"name": "b", "url": "https://b"}],
+            },
+        )
+        assert changed
+        assert data["groq"]["changelog"] == "https://cl"
+        assert [s["name"] for s in data["groq"]["specs"]] == ["a", "b"]
+        assert not publish.merge_hints(data, "groq", {"changelog": "https://cl"})
+        assert publish.merge_hints(data, "newprov", {"models": "https://m"}) and data[
+            "newprov"
+        ] == {"models": "https://m"}
+
+    def test_render_keeps_header_and_regenerates_body(self, publish):
+        original = "# header line 1\n# header line 2\n\nopenai:\n  models: https://old\n\ngroq:\n  notes: hi\n"
+        data = {"openai": {"models": "https://new"}, "groq": {"notes": "hi"}}
+        text = publish.render_providers_yaml(original, data)
+        assert text.startswith(
+            "# header line 1\n# header line 2\n\nopenai:\n  models: https://new\n\ngroq:\n  notes: hi\n"
+        )
+        import yaml
+
+        assert yaml.safe_load(text) == data
+
+    def test_publish_hints_opens_one_pr(self, publish, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / publish.PROVIDERS_YAML).parent.mkdir(parents=True)
+        (repo / publish.PROVIDERS_YAML).write_text("# hdr\n\ngroq:\n  models: https://old\n")
+        reports_dir = tmp_path / "_reports"
+        r = reports_dir / "reports" / "groq" / "llm"
+        r.mkdir(parents=True)
+        (r / "2026-08-20.md").write_text(
+            "---\nservice: groq/llm\nhints:\n  models: https://new\n---\n"
+        )
+        (reports_dir / "reports" / "openai" / "llm").mkdir(parents=True)
+        (reports_dir / "reports" / "openai" / "llm" / "2026-08-20.md").write_text(
+            "---\nservice: openai/llm\n---\n"
+        )
+
+        class Sh(TestPublish.FakeShell):
+            def run(self, *args, cwd=None, check=True):
+                if args[:3] == ("git", "worktree", "add"):
+                    wt = pathlib.Path(args[3])
+                    (wt / publish.PROVIDERS_YAML).parent.mkdir(parents=True)
+                    self.calls.append(args)
+                    return ""
+                return super().run(*args, cwd=cwd, check=check)
+
+        import pathlib
+
+        sh = Sh()
+        url = publish.publish_hints(
+            publish.load_reports(reports_dir, "2026-08-20"),
+            sh=sh,
+            repo_root=repo,
+            pipecat_repo="p/p",
+            date="2026-08-20",
+            scratch=tmp_path / "scratch",
+        )
+        assert url == "https://github.com/pipecat-ai/pipecat/pull/101"
+        written = (
+            tmp_path / "scratch" / "wt-providers-2026-08-20" / publish.PROVIDERS_YAML
+        ).read_text()
+        assert written.startswith("# hdr\n\ngroq:\n  models: https://new\n")
+        assert (
+            (repo / publish.PROVIDERS_YAML).read_text().endswith("https://old\n")
+        )  # main checkout untouched
+        create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
+        assert create[create.index("--title") + 1] == "Update provider-watch hints for groq"
+        assert any(c[:3] == ("git", "worktree", "remove") for c in sh.calls)
+
+    def test_no_hints_no_pr(self, publish, tmp_path):
+        reports_dir = tmp_path / "_reports" / "reports" / "groq" / "llm"
+        reports_dir.mkdir(parents=True)
+        (reports_dir / "2026-08-20.md").write_text("---\nservice: groq/llm\n---\n")
+        sh = TestPublish.FakeShell()
+        assert (
+            publish.publish_hints(
+                publish.load_reports(tmp_path / "_reports", "2026-08-20"),
+                sh=sh,
+                repo_root=tmp_path,
+                pipecat_repo="p/p",
+                date="2026-08-20",
+                scratch=tmp_path,
+            )
+            is None
+        )
+        assert not sh.calls

@@ -1,10 +1,12 @@
 # Research hints per provider directory (src/pipecat/services/<provider>).
 #
-# This file seeds a unit's first run. After that, the previous report's
-# `sources` are the living record of which URLs work — researchers prefer
-# those, and when a URL here is dead they find the replacement and record it
-# in the report, so nothing in this file needs to track provider docs.
-# Providers without an entry are researched from the unit's docs_url and search.
+# Maintained by the bot as much as by people: when a researcher finds a URL
+# here dead, a better page, or a spec worth tracking, it records the
+# correction in its report's `hints`, and publish.py folds every run's hints
+# into this file on one draft PR. Providers without an entry are researched
+# from the unit's docs_url and web search.
+#
+# Only this header comment survives a regeneration; keep prose in `notes:`.
 #
 # Keys (all optional):
 #   models:    page listing the current model catalogue
@@ -28,11 +30,7 @@ openai:
     - https://platform.openai.com/docs/guides/speech-to-text
     - https://platform.openai.com/docs/guides/text-to-speech
     - https://platform.openai.com/docs/api-reference/responses
-  notes: >
-    Chat Completions (llm), Responses (responses-llm), Realtime (realtime), STT (incl. the
-    realtime transcription session), TTS and image generation are separate units; research
-    each against its own API reference. Azure, and the thin OpenAI-compatible wrappers under
-    other providers, inherit this implementation.
+  notes: Chat Completions (llm), Responses (responses-llm), Realtime (realtime), STT (incl. the realtime transcription session), TTS and image generation are separate units; research each against its own API reference. Azure, and the thin OpenAI-compatible wrappers under other providers, inherit this implementation.
 
 anthropic:
   specs:
@@ -57,9 +55,7 @@ google:
     - https://cloud.google.com/speech-to-text/docs/release-notes
     - https://cloud.google.com/text-to-speech/docs/release-notes
     - https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions
-  notes: >
-    Gemini Developer API (llm, realtime, image, Gemini TTS) and Google Cloud (stt, tts, vertex
-    variants) have different release notes. Vertex units need location "global" for Gemini 3.
+  notes: Gemini Developer API (llm, realtime, image, Gemini TTS) and Google Cloud (stt, tts, vertex variants) have different release notes. Vertex units need location "global" for Gemini 3.
 
 aws:
   specs:

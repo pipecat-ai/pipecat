@@ -77,7 +77,7 @@ Rules for the batch loop:
 - Launch the whole batch at once so the subagents run concurrently; wait for all of them before starting the next batch.
 - Researchers only produce local artifacts: the report, and at most one committed `provider-watch/*` branch in a worktree under `<scratch>`. They never push or open PRs.
 - Each researcher returns exactly one JSON line: `{"service", "default_model", "prs", "gaps", "error", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `error` set to what happened (no secrets), and append a matching line.
-- **With `--publish`:** after every batch run `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>`. It pushes the finished units' branches, opens their draft PRs (up to 8 per run; the rest stay branches marked `capped`), rewrites their reports with the PR URLs, and pushes `_reports`. It is idempotent, so a run that dies keeps everything published so far and a re-run picks up the rest.
+- **With `--publish`:** after every batch run `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>`. It pushes the finished units' branches, opens their draft PRs (up to 8 per run; the rest stay branches marked `capped`), rewrites their reports with the PR URLs, folds any `hints` the reports carry into `providers.yaml` on one extra draft PR, and pushes `_reports`. It is idempotent, so a run that dies keeps everything published so far and a re-run picks up the rest.
 - If `git status` in this checkout shows changes you did not make, stop and report it.
 
 ### Step 4: Highlights
@@ -93,7 +93,7 @@ Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: wha
 ### Step 6: Clean up and summarize
 
 1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the dry-run output.
-2. Print a summary table — unit, default model, PR or branch, changes to consider, error — plus the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git show <branch>`), and, when nothing was published, how to publish later: re-run with `--publish` (the local reports are the baseline, so it is cheap) or run `publish.py --date <RUN_DATE> --finalize` by hand.
+2. Print a summary table — unit, default model, PR or branch, changes to consider, error — plus any proposed `providers.yaml` updates, the digest path (`_reports/digests/<RUN_DATE>.md`), the review command for each branch (`git show <branch>`), and, when nothing was published, how to publish later: re-run with `--publish` (the local reports are the baseline, so it is cheap) or run `publish.py --date <RUN_DATE> --finalize` by hand.
 
 ## Unattended runs
 

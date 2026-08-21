@@ -21,6 +21,11 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
+Corrections researchers recorded under ``hints`` (a replacement for a dead URL,
+a spec worth tracking) are merged into ``providers.yaml`` on one branch per run
+and opened as one draft PR outside the cap, so the file stays current without
+anyone editing it by hand.
+
 Then commit and push ``_reports``. With ``--finalize`` it also renders the
 digest and opens (or updates) the digest issue on the reports repo when there
 is anything to show. Run::
@@ -48,8 +53,11 @@ import digest  # noqa: E402
 
 REPO_ROOT = HERE.parents[1]
 DEFAULT_REPORTS = REPO_ROOT / "_reports"
+PROVIDERS_YAML = Path(".claude/skills/provider-watch/providers.yaml")
 PR_LABEL = "provider-watch"
 DEFAULT_PR_CAP = 8
+HINT_SCALARS = ("models", "changelog", "notes")
+HINT_LISTS = ("docs", "specs")
 
 # The line a researcher writes under "## PRs" for a local branch; rewritten to
 # the PR URL once the PR exists.
@@ -100,6 +108,7 @@ class Outcome:
     adopted: list[str] = field(default_factory=list)
     capped: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    hints_pr: str | None = None
     reports_pushed: bool = False
     issue_url: str | None = None
 
@@ -199,6 +208,147 @@ def publish_prs(
         if changed:
             report.save()
     return outcome
+
+
+# --------------------------------------------------------------------- hints
+
+
+def merge_hints(data: dict, provider: str, hints: dict) -> bool:
+    """Fold one report's ``hints`` into the providers.yaml mapping; True if anything changed."""
+    entry = data.get(provider) or {}
+    changed = False
+    for key in HINT_SCALARS:
+        if hints.get(key) and hints[key] != entry.get(key):
+            entry[key] = hints[key]
+            changed = True
+    for key in HINT_LISTS:
+        for item in hints.get(key) or []:
+            existing = entry.setdefault(key, [])
+            if item not in existing:
+                existing.append(item)
+                changed = True
+    if changed:
+        data[provider] = entry
+    return changed
+
+
+class _IndentedDumper(yaml.SafeDumper):
+    """Indents list items under their key, the way the file is written by hand."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+
+def _strip_strings(value):
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return [_strip_strings(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _strip_strings(v) for k, v in value.items()}
+    return value
+
+
+def render_providers_yaml(original: str, data: dict) -> str:
+    """Header comment block kept verbatim; the mapping regenerated below it."""
+    header_lines = []
+    for line in original.splitlines():
+        if line.startswith("#") or not line.strip():
+            header_lines.append(line)
+        else:
+            break
+    header = "\n".join(header_lines).rstrip() + "\n\n"
+    body = yaml.dump(
+        _strip_strings(data),
+        Dumper=_IndentedDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        width=1000,
+    )
+    # One blank line between providers keeps the file readable.
+    spaced = "\n".join(
+        ("\n" + line) if (line and not line.startswith(" ") and i) else line
+        for i, line in enumerate(body.rstrip().splitlines())
+    )
+    return header + spaced + "\n"
+
+
+def publish_hints(
+    reports: list[Report],
+    *,
+    sh: Shell,
+    repo_root: Path,
+    pipecat_repo: str,
+    date: str,
+    scratch: Path,
+) -> str | None:
+    """Turn the run's hint corrections into one draft PR against providers.yaml.
+
+    Returns the PR URL, or None when no report proposed anything new.
+    """
+    proposals = [
+        (r.meta["service"].split("/")[0], r.meta["hints"])
+        for r in reports
+        if isinstance(r.meta.get("hints"), dict) and r.meta.get("service")
+    ]
+    if not proposals:
+        return None
+    yaml_path = repo_root / PROVIDERS_YAML
+    original = yaml_path.read_text()
+    data = yaml.safe_load(original) or {}
+    providers = sorted({p for p, h in proposals if merge_hints(data, p, h)})
+    if not providers:
+        return None
+
+    branch = f"provider-watch/providers-{date}"
+    existing = _open_pr_for_branch(sh, pipecat_repo, branch)
+    if existing:
+        return existing
+    base = (
+        "origin/main"
+        if sh.ok("git", "rev-parse", "--verify", "--quiet", "origin/main", cwd=repo_root)
+        else "main"
+    )
+    worktree = scratch / f"wt-providers-{date}"
+    title = f"Update provider-watch hints for {', '.join(providers)}"
+    sh.run("git", "worktree", "add", str(worktree), "-b", branch, base, cwd=repo_root)
+    try:
+        (worktree / PROVIDERS_YAML).write_text(render_providers_yaml(original, data))
+        sh.run("git", "add", str(PROVIDERS_YAML), cwd=worktree)
+        sh.run(
+            "git",
+            "commit",
+            "-q",
+            "-m",
+            f"{title}\n\nReplacement URLs and specs the researchers recorded this run.",
+            cwd=worktree,
+        )
+        sh.run("git", "push", "-u", "origin", branch, cwd=worktree)
+        url = (
+            sh.run(
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                pipecat_repo,
+                "--draft",
+                "--label",
+                PR_LABEL,
+                "--head",
+                branch,
+                "--title",
+                title,
+                "--body",
+                f"Replacement URLs and specs the provider-watch researchers recorded on {date}; "
+                "each provider's report for that date says why.",
+                cwd=worktree,
+            )
+            .strip()
+            .splitlines()[-1]
+        )
+    finally:
+        sh.run("git", "worktree", "remove", "--force", str(worktree), cwd=repo_root, check=False)
+    return url
 
 
 def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
@@ -304,6 +454,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--highlights", type=Path, help="Markdown inserted at the top of the digest"
     )
+    parser.add_argument(
+        "--scratch", type=Path, default=Path("/tmp"), help="where temporary worktrees go"
+    )
     args = parser.parse_args(argv)
 
     sh = Shell()
@@ -316,6 +469,14 @@ def main(argv: list[str] | None = None) -> int:
         reports_repo=args.reports_repo,
         date=args.date,
         cap=args.pr_cap,
+    )
+    outcome.hints_pr = publish_hints(
+        reports,
+        sh=sh,
+        repo_root=args.repo_root,
+        pipecat_repo=args.pipecat_repo,
+        date=args.date,
+        scratch=args.scratch,
     )
     if args.finalize:
         render_digest(args.reports, args.date, args.highlights, args.reports_repo)
