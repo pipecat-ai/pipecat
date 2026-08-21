@@ -50,6 +50,7 @@ A Pipecat **worker** is a unit of work attached to a shared bus. Workers exchang
 | [`parallel-debate/`](parallel-debate/)        | Three `LLMContextWorker`s (advocate / critic / analyst) fan out via `job_group`.  |
 | [`code-assistant/`](code-assistant/)          | Voice access to your codebase via a Claude Agent SDK worker behind `job(...)`.    |
 | [`sensor-controller/`](sensor-controller/)    | Voice agent forwards questions to a sidecar `PipelineWorker` owning a simulated sensor. |
+| [`openclaw-agent/`](openclaw-agent/)          | Voice loop stays responsive while an OpenClaw agent works; steer or stop it mid-task. |
 
 ### Distributed (separate processes, network bus)
 
