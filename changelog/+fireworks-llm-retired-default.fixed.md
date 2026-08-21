@@ -1,0 +1,1 @@
+- Fixed `FireworksLLMService` defaulting to `accounts/fireworks/models/firefunction-v2`, which Fireworks no longer serves; the default is now `accounts/fireworks/models/gpt-oss-20b`.
