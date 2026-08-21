@@ -35,6 +35,174 @@ from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
+#: Languages the Flash and Turbo v2.5 models accept as a ``language_code``.
+ELEVENLABS_V2_5_LANGUAGES: frozenset[str] = frozenset(
+    {
+        "ar",
+        "bg",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "fi",
+        "fil",
+        "fr",
+        "hi",
+        "hr",
+        "hu",
+        "id",
+        "it",
+        "ja",
+        "ko",
+        "ms",
+        "nl",
+        "no",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sk",
+        "sv",
+        "ta",
+        "tr",
+        "uk",
+        "vi",
+        "zh",
+    }
+)
+
+#: Languages the Eleven v3 models accept as a ``language_code``. A superset of
+#: :data:`ELEVENLABS_V2_5_LANGUAGES`.
+ELEVENLABS_V3_LANGUAGES: frozenset[str] = frozenset(
+    {
+        "af",
+        "ar",
+        "as",
+        "az",
+        "be",
+        "bg",
+        "bn",
+        "bs",
+        "ca",
+        "ceb",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "fa",
+        "fi",
+        "fil",
+        "fr",
+        "ga",
+        "gl",
+        "gu",
+        "ha",
+        "he",
+        "hi",
+        "hr",
+        "hu",
+        "hy",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jv",
+        "ka",
+        "kk",
+        "kn",
+        "ko",
+        "ky",
+        "lb",
+        "ln",
+        "lt",
+        "lv",
+        "mk",
+        "ml",
+        "mr",
+        "ms",
+        "ne",
+        "nl",
+        "no",
+        "ny",
+        "pa",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "ru",
+        "sd",
+        "sk",
+        "sl",
+        "so",
+        "sr",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "th",
+        "tr",
+        "uk",
+        "ur",
+        "vi",
+        "zh",
+    }
+)
+
+#: Models that accept a ``language_code``, and the languages each one takes.
+#: Sending a language a model doesn't cover is rejected with a 400, so the
+#: language is checked against this mapping rather than only the model id.
+#:
+#: Models absent from the mapping take no language code at all. For
+#: ``eleven_multilingual_v2`` that is deliberate: ElevenLabs documents
+#: ``language_code`` as unsupported for it, and omitting the key is how its
+#: auto-detection is meant to be used.
+ELEVENLABS_MODEL_LANGUAGES: dict[str, frozenset[str]] = {
+    "eleven_flash_v2_5": ELEVENLABS_V2_5_LANGUAGES,
+    "eleven_turbo_v2_5": ELEVENLABS_V2_5_LANGUAGES,
+    "eleven_v3": ELEVENLABS_V3_LANGUAGES,
+    "eleven_v3_conversational": ELEVENLABS_V3_LANGUAGES,
+}
+
+
+def elevenlabs_language_code(model: str | None, language: str | None) -> str | None:
+    """Resolve the ``language_code`` to send for a model.
+
+    Args:
+        model: The ElevenLabs model the request will use.
+        language: An ElevenLabs language code, or None to send none.
+
+    Returns:
+        The language code to send, or None if it can't be used - either because
+        the model takes no language code or because it doesn't cover this
+        language. Both cases are logged.
+    """
+    if not language:
+        return None
+
+    supported = ELEVENLABS_MODEL_LANGUAGES.get(model or "")
+    if supported is None:
+        logger.warning(
+            f"Language code [{language}] not applied. Language codes can only be used with: "
+            f"{', '.join(sorted(ELEVENLABS_MODEL_LANGUAGES))}"
+        )
+        return None
+
+    if language not in supported:
+        logger.warning(
+            f"Language code [{language}] not applied. {model} supports "
+            f"{len(supported)} languages, which don't include [{language}]."
+        )
+        return None
+
+    logger.debug(f"Using language code: {language}")
+    return language
+
 
 def language_to_elevenlabs_language(language: Language) -> str:
     """Convert a Language enum to ElevenLabs language code.
@@ -49,36 +217,78 @@ def language_to_elevenlabs_language(language: Language) -> str:
         ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
+        Language.AF: "af",
         Language.AR: "ar",
+        Language.AS: "as",
+        Language.AZ: "az",
+        Language.BE: "be",
         Language.BG: "bg",
+        Language.BN: "bn",
+        Language.BS: "bs",
+        Language.CA: "ca",
+        Language.CEB: "ceb",
         Language.CS: "cs",
+        Language.CY: "cy",
         Language.DA: "da",
         Language.DE: "de",
         Language.EL: "el",
         Language.EN: "en",
         Language.ES: "es",
+        Language.ET: "et",
+        Language.FA: "fa",
         Language.FI: "fi",
         Language.FIL: "fil",
         Language.FR: "fr",
+        Language.GA: "ga",
+        Language.GL: "gl",
+        Language.GU: "gu",
+        Language.HA: "ha",
+        Language.HE: "he",
         Language.HI: "hi",
         Language.HR: "hr",
         Language.HU: "hu",
+        Language.HY: "hy",
         Language.ID: "id",
+        Language.IS: "is",
         Language.IT: "it",
         Language.JA: "ja",
+        Language.JV: "jv",
+        Language.KA: "ka",
+        Language.KK: "kk",
+        Language.KN: "kn",
         Language.KO: "ko",
+        Language.KY: "ky",
+        Language.LB: "lb",
+        Language.LN: "ln",
+        Language.LT: "lt",
+        Language.LV: "lv",
+        Language.MK: "mk",
+        Language.ML: "ml",
+        Language.MR: "mr",
         Language.MS: "ms",
+        Language.NE: "ne",
         Language.NL: "nl",
         Language.NO: "no",
+        Language.NY: "ny",
+        Language.PA: "pa",
         Language.PL: "pl",
+        Language.PS: "ps",
         Language.PT: "pt",
         Language.RO: "ro",
         Language.RU: "ru",
+        Language.SD: "sd",
         Language.SK: "sk",
+        Language.SL: "sl",
+        Language.SO: "so",
+        Language.SR: "sr",
         Language.SV: "sv",
+        Language.SW: "sw",
         Language.TA: "ta",
+        Language.TE: "te",
+        Language.TH: "th",
         Language.TR: "tr",
         Language.UK: "uk",
+        Language.UR: "ur",
         Language.VI: "vi",
         Language.ZH: "zh",
     }

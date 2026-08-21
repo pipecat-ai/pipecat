@@ -23,6 +23,13 @@ from pipecat.services.elevenlabs.tts import (
     _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
 )
+from pipecat.services.elevenlabs.tts_base import (
+    ELEVENLABS_MODEL_LANGUAGES,
+    ELEVENLABS_V2_5_LANGUAGES,
+    ELEVENLABS_V3_LANGUAGES,
+    elevenlabs_language_code,
+    language_to_elevenlabs_language,
+)
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
@@ -443,3 +450,43 @@ async def test_disconnect_does_not_push_error_when_server_closed_first():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_v3_language_set_extends_the_v2_5_set():
+    """Eleven v3 adds languages; it never drops one Flash and Turbo support."""
+    assert ELEVENLABS_V2_5_LANGUAGES < ELEVENLABS_V3_LANGUAGES
+    assert len(ELEVENLABS_V2_5_LANGUAGES) == 32
+    assert len(ELEVENLABS_V3_LANGUAGES) == 74
+
+
+def test_language_code_is_gated_by_model():
+    """A language the model doesn't cover is dropped rather than sent."""
+    # Welsh is v3-only.
+    assert elevenlabs_language_code("eleven_v3_conversational", "cy") == "cy"
+    assert elevenlabs_language_code("eleven_flash_v2_5", "cy") is None
+    # German is common to both.
+    assert elevenlabs_language_code("eleven_flash_v2_5", "de") == "de"
+    assert elevenlabs_language_code("eleven_v3", "de") == "de"
+
+
+def test_models_without_language_support_send_no_code():
+    """Models absent from the mapping take no language code at all."""
+    assert "eleven_multilingual_v2" not in ELEVENLABS_MODEL_LANGUAGES
+    assert elevenlabs_language_code("eleven_multilingual_v2", "de") is None
+    assert elevenlabs_language_code(None, "de") is None
+
+
+def test_no_language_requested_is_not_a_warning_case():
+    """Omitting a language is normal, not a mismatch."""
+    assert elevenlabs_language_code("eleven_v3", None) is None
+    assert elevenlabs_language_code("eleven_v3", "") is None
+
+
+def test_every_mapped_language_is_accepted_by_some_model():
+    """The enum map and the per-model sets can't drift apart."""
+    from pipecat.transcriptions.language import Language
+
+    for language in Language:
+        code = language_to_elevenlabs_language(language)
+        if code in ELEVENLABS_V3_LANGUAGES:
+            assert elevenlabs_language_code("eleven_v3", code) == code
