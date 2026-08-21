@@ -128,8 +128,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
                 in-process :class:`AsyncQueueBus`.
             handle_sigint: Whether to automatically handle SIGINT signals.
             handle_sigterm: Whether to automatically handle SIGTERM signals.
-            force_gc: Whether to force garbage collection after the main
-                worker completes.
+            force_gc: Whether to force garbage collection once every worker
+                has been torn down.
             check_dangling_tasks: Whether to warn about tasks left running on
                 the shared task manager once every worker has finished.
             task_manager: Optional task manager for handling asyncio tasks.
@@ -205,9 +205,12 @@ class WorkerRunner(BaseObject, BusSubscriber):
         queued and started during run setup; if the runner is already
         running, each worker starts immediately.
 
-        Added workers run alongside the main worker and are cancelled
-        when the main worker finishes (or when :meth:`end` /
-        :meth:`cancel` is called).
+        Every added worker is a peer: the runner privileges none of them.
+        They run concurrently, and whichever are still running when the
+        runner ends are cancelled. With ``auto_end=True`` the runner ends
+        once every root worker has finished, so a worker that never
+        finishes on its own, such as a bus-only one waiting for messages,
+        keeps it up until :meth:`end` or :meth:`cancel` is called.
 
         Args:
             *workers: One or more workers to add.
@@ -274,9 +277,9 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._auto_end = auto_end
         self._shutdown_event.clear()
 
-        # Treat the main worker as any other added worker: ``add_workers`` attaches
-        # it to the bus and registry, and ``_setup_session`` then starts every
-        # entry (main and pre-added) through the same code path.
+        # A worker passed here is added like any other: ``add_workers``
+        # attaches it to the bus and registry, and ``_setup_session`` then
+        # starts every entry through the same code path.
         if worker is not None:
             await self.add_workers(worker)
 

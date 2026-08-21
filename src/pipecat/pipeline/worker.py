@@ -762,8 +762,8 @@ class PipelineWorker(BaseWorker):
                 await self._cleanup(cleanup_pipeline=True)
                 return
 
-            # Create all main tasks and wait for the main push worker. This is the
-            # worker that pushes frames to the very beginning of our pipeline (i.e. to
+            # Create the worker's tasks and wait for the push task, which
+            # feeds frames to the very beginning of our pipeline (i.e. to
             # our controlled source processor).
             await self._create_tasks()
 
@@ -1096,7 +1096,7 @@ class PipelineWorker(BaseWorker):
 
     async def _wait_for_pipeline_finished(self):
         await self._finished_event.wait()
-        # Make sure we wait for the main worker to complete.
+        # Make sure we wait for the push task to complete.
         if self._process_push_task:
             await self._process_push_task
             self._process_push_task = None
