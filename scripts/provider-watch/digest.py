@@ -8,9 +8,10 @@
 """Render a run digest from the provider-watch reports written on a given date.
 
 Reads the YAML frontmatter of every ``reports/<provider>/<unit>/<date>.md`` in a
-reports checkout and renders one Markdown page grouping units by status, listing
-opened PRs, errors and open items, and linking each report. An optional
-highlights file is inserted at the top. Run::
+reports checkout and renders one Markdown page: PRs to review, branches awaiting
+a PR, changes to consider (with how long each gap has been open), units that
+could not be researched, and units with nothing new — each linking its report.
+An optional highlights file is inserted at the top. Run::
 
     uv run python scripts/provider-watch/digest.py --reports ./_reports --date 2026-08-20 \\
         --highlights highlights.md --out ./_reports/digests/2026-08-20.md
@@ -20,19 +21,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date as _date
 from pathlib import Path
 
 import yaml
-
-STATUS_ORDER = ["pr-proposed", "needs-judgement", "new-upstream", "blocked", "error", "up-to-date"]
-STATUS_LABELS = {
-    "pr-proposed": "PRs proposed",
-    "needs-judgement": "Changes to consider",
-    "new-upstream": "New upstream, no action proposed",
-    "blocked": "Blocked",
-    "error": "Errors",
-    "up-to-date": "Up to date",
-}
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -52,7 +44,8 @@ def load_reports(reports_dir: Path, date: str) -> list[dict]:
     for path in sorted(reports_dir.glob(f"reports/*/*/{date}.md")):
         meta = parse_frontmatter(path.read_text())
         meta.setdefault("service", "/".join(path.parts[-3:-1]))
-        meta.setdefault("status", "error")
+        if not meta.get("error") and not path.read_text().startswith("---"):
+            meta["error"] = "report has no frontmatter"
         meta["_path"] = path.relative_to(reports_dir).as_posix()
         found.append(meta)
     return found
@@ -72,25 +65,49 @@ def _link(report: dict, repo_url: str | None) -> str:
     )
 
 
+def _age(first_seen, date: str) -> str:
+    """``(since 2026-08-06, 2 weeks)`` for a gap first seen before this run."""
+    try:
+        seen = _date.fromisoformat(str(first_seen))
+        days = (_date.fromisoformat(date) - seen).days
+    except (TypeError, ValueError):
+        return ""
+    if days < 7:
+        return ""
+    weeks = days // 7
+    return f" (since {seen}, {weeks} week{'s' if weeks != 1 else ''})"
+
+
 def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: str | None) -> str:
-    by_status: dict[str, list[dict]] = {}
-    for report in reports:
-        by_status.setdefault(str(report.get("status")), []).append(report)
+    prs = [(r, pr) for r in reports for pr in (r.get("prs") or []) if isinstance(pr, dict)]
+    open_prs = [(r, pr) for r, pr in prs if pr.get("state") in {"open", "merged", "closed"}]
+    branches = [(r, pr) for r, pr in prs if pr.get("state") == "branch"]
+    considerations = [
+        (r, gap)
+        for r in reports
+        for gap in (r.get("gaps") or [])
+        if isinstance(gap, dict) and gap.get("action") == "consider"
+    ]
+    errors = [r for r in reports if r.get("error")]
+    quiet = [
+        r
+        for r in reports
+        if not r.get("prs")
+        and not r.get("error")
+        and not any(
+            isinstance(g, dict) and g.get("action") == "consider" for g in r.get("gaps") or []
+        )
+    ]
 
     lines = [f"# Provider watch — {date}", ""]
     if highlights:
         lines += [highlights.strip(), ""]
+    lines += [
+        f"**{len(reports)} units researched** — {len(open_prs)} PRs, {len(branches)} branches, "
+        f"{len(considerations)} changes to consider, {len(errors)} errors, {len(quiet)} with nothing new.",
+        "",
+    ]
 
-    counts = ", ".join(
-        f"{len(by_status[s])} {s}"
-        for s in STATUS_ORDER + sorted(set(by_status) - set(STATUS_ORDER))
-        if s in by_status
-    )
-    lines += [f"**{len(reports)} units researched** — {counts or 'none'}.", ""]
-
-    prs = [(r, pr) for r in reports for pr in (r.get("prs") or []) if isinstance(pr, dict)]
-    open_prs = [(r, pr) for r, pr in prs if pr.get("state") in {"open", "merged", "closed"}]
-    branches = [(r, pr) for r, pr in prs if pr.get("state") == "branch"]
     if open_prs:
         lines += ["## PRs to review", ""]
         for report, pr in open_prs:
@@ -109,30 +126,26 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
                 f"- {_link(report, repo_url)} — `{branch}` — review: `git show {branch}`{_summary(pr)}"
             )
         lines.append("")
-
-    for status in STATUS_ORDER + sorted(set(by_status) - set(STATUS_ORDER)):
-        group = by_status.get(status)
-        if not group or status in {"pr-proposed", "up-to-date"}:
-            continue
-        lines += [f"## {STATUS_LABELS.get(status, status)}", ""]
-        for report in group:
-            summary = str(report.get("summary") or "").strip()
+    if considerations:
+        lines += ["## Changes to consider", ""]
+        for report, gap in considerations:
+            note = f" — {gap['note']}" if gap.get("note") else ""
             lines.append(
-                f"- {_link(report, repo_url)} — {report.get('default_model') or '—'}"
-                + (f": {summary}" if summary else "")
+                f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}{note}"
             )
         lines.append("")
-
-    open_items = [(r, item) for r in reports for item in (r.get("open_items") or [])]
-    if open_items:
-        lines += ["## Open items", ""]
-        lines += [f"- {_link(r, repo_url)} — {item}" for r, item in open_items]
+    if errors:
+        lines += ["## Did not complete", ""]
+        lines += [f"- {_link(r, repo_url)} — {r['error']}" for r in errors]
         lines.append("")
+    if quiet:
+        lines += ["## Nothing new", "", ", ".join(_link(r, repo_url) for r in quiet), ""]
 
-    up_to_date = by_status.get("up-to-date") or []
-    if up_to_date:
-        lines += ["## Up to date", "", ", ".join(_link(r, repo_url) for r in up_to_date), ""]
-
+    lines += [
+        "---",
+        "To record a decision about any item above, reply on this issue starting with the unit id "
+        "(e.g. `groq/llm: skip — not worth a Settings field`). The next run reads these comments.",
+    ]
     return "\n".join(lines).rstrip() + "\n"
 
 

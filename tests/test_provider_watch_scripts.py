@@ -130,50 +130,65 @@ class TestDigest:
 
         write(
             "openai/llm",
-            "---\nservice: openai/llm\nstatus: pr-proposed\ndefault_model: gpt-4.1\n"
-            "summary: gpt-5 is GA and faster\nprs:\n  - url: https://github.com/pipecat-ai/pipecat/pull/1\n"
-            "    state: open\n    summary: bump default to gpt-5\n---\n# OpenAI LLM\n",
+            "---\nservice: openai/llm\ndefault_model: gpt-4.1\nsummary: gpt-5 is GA and faster\n"
+            "gaps:\n  - item: gpt-5 supersedes gpt-4.1\n    first_seen: 2026-08-20\n    action: pr\n"
+            "prs:\n  - url: https://github.com/pipecat-ai/pipecat/pull/1\n    state: open\n"
+            "    summary: bump default to gpt-5\nerror: null\n---\n# OpenAI LLM\n",
         )
         write(
             "cartesia/tts",
-            "---\nservice: cartesia/tts\nstatus: needs-judgement\ndefault_model: sonic-3.5\n"
-            "open_items:\n  - sonic-4 preview needs a voice migration\n---\n",
+            "---\nservice: cartesia/tts\ndefault_model: sonic-3.5\n"
+            "gaps:\n  - item: sonic-4 preview needs a voice migration\n    first_seen: 2026-07-30\n"
+            "    action: consider\n    note: re-check when GA\nprs: []\nerror: null\n---\n",
         )
         write(
             "groq/llm",
-            "---\nservice: groq/llm\nstatus: up-to-date\ndefault_model: openai/gpt-oss-120b\n---\n",
+            "---\nservice: groq/llm\ndefault_model: openai/gpt-oss-120b\ngaps: []\nprs: []\nerror: null\n---\n",
         )
         write(
             "fireworks/llm",
-            "---\nservice: fireworks/llm\nstatus: pr-proposed\n"
-            "default_model: accounts/fireworks/models/firefunction-v2\n"
-            "summary: default retired; gpt-oss-120b passes the probe\n"
+            "---\nservice: fireworks/llm\ndefault_model: accounts/fireworks/models/firefunction-v2\n"
+            "gaps:\n  - item: firefunction-v2 is retired\n    first_seen: 2026-08-20\n    action: pr\n"
             "prs:\n  - branch: provider-watch/fireworks-llm-default\n    state: branch\n"
-            "    summary: Default FireworksLLMService to gpt-oss-120b\n---\n"
+            "    summary: Default FireworksLLMService to gpt-oss-120b\nerror: null\n---\n"
             "\n## PRs\n- `provider-watch/fireworks-llm-default` — review: "
             "`git show provider-watch/fireworks-llm-default` — Default FireworksLLMService to gpt-oss-120b\n",
         )
+        write("mistral/stt", "---\nservice: mistral/stt\nerror: missing MISTRAL_API_KEY\n---\n")
         write("broken/tts", "no frontmatter at all\n")
         return tmp_path
 
-    def test_render_groups_by_status(self, reports_dir):
+    def test_render_sections(self, reports_dir):
         reports = digest.load_reports(reports_dir, "2026-08-20")
         text = digest.render(
             reports, date="2026-08-20", highlights="- Big week for LLMs", repo_url="https://x/y"
         )
 
         assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
-        assert "**5 units researched**" in text
-        assert "## PRs to review" in text
-        assert "https://github.com/pipecat-ai/pipecat/pull/1 — bump default to gpt-5" in text
-        assert "## Branches not opened as PRs (dry run)" in text
-        assert "`git show provider-watch/fireworks-llm-default`" in text
-        assert "## Changes to consider" in text
-        assert "## Open items" in text and "— sonic-4 preview needs a voice migration" in text
-        assert "## Errors" in text and "`broken/tts`" not in text and "broken/tts" in text
-        assert text.rstrip().endswith(
-            "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
+        assert (
+            "**6 units researched** — 1 PRs, 1 branches, 1 changes to consider, 2 errors, 1 with nothing new."
+            in text
         )
+        sections = [line for line in text.splitlines() if line.startswith("## ")]
+        assert sections == [
+            "## PRs to review",
+            "## Branches not opened as PRs (dry run)",
+            "## Changes to consider",
+            "## Did not complete",
+            "## Nothing new",
+        ]
+        assert "https://github.com/pipecat-ai/pipecat/pull/1 — bump default to gpt-5" in text
+        assert "`git show provider-watch/fireworks-llm-default`" in text
+        assert (
+            "sonic-4 preview needs a voice migration (since 2026-07-30, 3 weeks) — re-check when GA"
+            in text
+        )
+        assert "missing MISTRAL_API_KEY" in text and "report has no frontmatter" in text
+        assert (
+            "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
+            in text.split("## Nothing new")[1]
+        )
+        assert text.rstrip().endswith("The next run reads these comments.")
 
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
@@ -289,7 +304,7 @@ class TestPublish:
             path = tmp_path / "reports" / unit / "2026-08-20.md"
             path.parent.mkdir(parents=True)
             path.write_text(
-                f"---\nservice: {unit}\nstatus: pr-proposed\nprs:\n  - branch: {branch}\n"
+                f"---\nservice: {unit}\nprs:\n  - branch: {branch}\n"
                 f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
                 f"- `{branch}` — review: `git show {branch}` — s\n"
             )
@@ -364,6 +379,18 @@ class TestPublish:
         publish.publish_prs(publish.load_reports(tmp_path, "2026-08-20"), **kwargs)
         after = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
         assert before == 3 and after == 3
+
+    def test_worth_an_issue(self, reports_dir, tmp_path):
+        _, publish = reports_dir
+        assert publish.worth_an_issue(publish.load_reports(tmp_path, "2026-08-20"))
+        quiet = tmp_path / "quiet" / "reports" / "groq" / "llm"
+        quiet.mkdir(parents=True)
+        (quiet / "2026-08-20.md").write_text(
+            "---\nservice: groq/llm\ngaps: []\nprs: []\nerror: null\n---\n"
+        )
+        assert not publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
+        (quiet / "2026-08-20.md").write_text("---\nservice: groq/llm\nerror: boom\n---\n")
+        assert publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
 
     def test_missing_branch_is_skipped(self, reports_dir):
         tmp_path, publish = reports_dir

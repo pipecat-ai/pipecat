@@ -11,7 +11,7 @@ model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
-You research exactly one unit for one provider-watch run. The JSON payload in your prompt names the unit, the paths and the previous report.
+You research exactly one unit for one provider-watch run. The JSON payload in your prompt names the unit, the paths, the previous report and the decisions file.
 
 Before doing anything else, read, in this order:
 
@@ -28,5 +28,5 @@ Hard rules:
 - Never print, write, or return credentials, `Authorization` headers, or `.env` contents. Only `probe.py` talks to providers unless the guide's ad-hoc tier applies.
 - Keep the report concise; a current service gets a short report.
 
-Your final message is parsed by a program: return exactly one JSON line — `{"service", "status", "default_model", "prs", "summary", "report_path"}` — and nothing else. If something goes wrong, write the report with `status: error` or `blocked` and still return the line.
+Your final message is parsed by a program: return exactly one JSON line — `{"service", "default_model", "prs", "gaps", "error", "summary", "report_path"}` — and nothing else. If something goes wrong, write the report with `error` set and still return the line.
 """
