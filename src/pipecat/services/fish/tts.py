@@ -122,7 +122,6 @@ class FishAudioTTSService(InterruptibleTTSService):
         sample_rate: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
-        max_consecutive_zero_audio_contexts: int = 1,
         **kwargs,
     ):
         """Initialize the Fish Audio TTS service.
@@ -151,12 +150,6 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
-                complete without producing any audio before the service is reported unable
-                to do its job. Defaults to 1: Fish Audio answers a request naming a voice
-                it doesn't know with silence rather than an error, so one silent context
-                already says the service can't speak. See
-                :class:`~pipecat.services.tts_service.TTSService`.
             **kwargs: Additional arguments passed to the parent service.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -203,7 +196,6 @@ class FishAudioTTSService(InterruptibleTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             settings=default_settings,
-            max_consecutive_zero_audio_contexts=max_consecutive_zero_audio_contexts,
             **kwargs,
         )
 
