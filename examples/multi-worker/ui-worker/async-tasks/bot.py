@@ -10,7 +10,7 @@ The user asks the assistant to research a topic. The main pipeline's own
 LLM calls the ``research`` tool, which dispatches three peer workers
 (Wikipedia, news, scholarly papers) in parallel via a ``BaseUIWorker``
 dispatcher registered on the runner:
-``request_job_group(..., ui=UIJobGroupOptions(...))`` — no LLM in the
+``request_job_group(...)`` on a ``BaseUIWorker``, with no LLM in the
 dispatch path, no ``UIWorker`` required. Each peer emits progress updates while it works; the group's
 lifecycle reaches the client as ``ui-job-group`` envelopes
 (``group_started``, ``job_update``, ``job_completed``,
@@ -27,7 +27,7 @@ Architecture::
         └── research(query) tool
               └── ui_jobs.request_job_group(          # found by name on the runner
                       "wikipedia", "news", "scholar",
-                      payload={"query": query}, ui=UIJobGroupOptions(label=...))
+                      params=JobGroupParams(payload=..., label=...))
 
     ui_jobs (BaseUIWorker): the client-visible job-group dispatcher (no LLM)
 
@@ -70,6 +70,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.pipeline.job_context import JobGroupParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -85,7 +86,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.base_ui_worker import BaseUIWorker, UIJobGroupOptions
+from pipecat.workers.base_ui_worker import BaseUIWorker
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.runner import WorkerRunner
 
@@ -215,8 +216,10 @@ async def research(params: FunctionCallParams, query: str):
         "wikipedia",
         "news",
         "scholar",
-        payload={"query": query},
-        ui=UIJobGroupOptions(label=f"Research: {query}"),
+        params=JobGroupParams(
+            payload={"query": query},
+            label=f"Research: {query}",
+        ),
     )
     await params.result_callback(
         {

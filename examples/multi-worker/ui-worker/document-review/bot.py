@@ -31,7 +31,7 @@ Architecture::
     ReviewWorker (ReplyToolMixin + UIWorker, keep_history=True):
       ├── inherited: reply(answer, scroll_to, highlight, select_text, fills, click)
       ├── @tool start_review(answer, paragraph_ref, paragraph_text)
-      │     └── request_job_group("clarity", "tone", ui=UIJobGroupOptions(...))
+      │     └── request_job_group("clarity", "tone", params=JobGroupParams(...))
       ├── @ui_event("note_click") → scroll_to + select_text(ref)
       └── on_job_response → emit add_note for each reviewer that completes
 
@@ -69,7 +69,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage, BusJobResponseMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.job_context import JobError, JobStatus
+from pipecat.pipeline.job_context import JobError, JobGroupParams, JobStatus
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -85,7 +85,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.base_ui_worker import UIJobGroupOptions
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
@@ -371,8 +370,10 @@ class ReviewWorker(ReplyToolMixin, UIWorker):
         job_id = await self.request_job_group(
             "clarity",
             "tone",
-            payload={"ref": paragraph_ref, "text": paragraph_text},
-            ui=UIJobGroupOptions(label=f"Reviewing ¶ {paragraph_ref}"),
+            params=JobGroupParams(
+                payload={"ref": paragraph_ref, "text": paragraph_text},
+                label=f"Reviewing ¶ {paragraph_ref}",
+            ),
         )
         # Remember which paragraph this review is for so we can attach
         # each worker's response to the right note.

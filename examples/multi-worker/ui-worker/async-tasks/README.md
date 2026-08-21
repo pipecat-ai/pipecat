@@ -8,13 +8,12 @@ page, and lets the user cancel mid-flight — with a single LLM and no
 ## What it shows
 
 - **Client-visible job groups without an LLM**: `BaseUIWorker` is a
-  plain bus worker; pass `ui=UIJobGroupOptions(label=...)` to its
-  `job_group(...)` or `request_job_group(...)` and every job lifecycle
-  event is forwarded to the client automatically. The voice LLM's
-  `research` tool calls `ui_jobs.request_job_group("wikipedia", "news",
-  "scholar", payload=..., ui=UIJobGroupOptions(label=...))` on the
-  dispatcher it looks up with `params.worker_runner.get_worker("ui-jobs")`,
-  and the worker does the rest.
+  plain bus worker, and every group it dispatches forwards its whole
+  lifecycle to the client automatically. The voice LLM's `research` tool
+  calls `ui_jobs.request_job_group("wikipedia", "news", "scholar",
+  params=JobGroupParams(payload=..., label=...))` on the dispatcher it
+  looks up with `params.worker_runner.get_worker("ui-jobs")`, and the
+  worker does the rest.
 - The four **`ui-job-group` envelopes** the worker forwards (`group_started`,
   `job_update`, `job_completed`, `group_completed`) and the
   client-side `RTVIEvent.UIJobGroup` event for consuming them. The client
