@@ -26,6 +26,7 @@ from pipecat.bus import (
     BusJobUpdateMessage,
     BusTTSSpeakMessage,
 )
+from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
@@ -156,6 +157,110 @@ class TestWorkerRunnerAccess(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(asyncio.gather(runner.run(), end_after_start()), timeout=10.0)
 
         self.assertIs(probe.peer, helper)
+
+
+class TestInactiveWorkerGating(unittest.IsolatedAsyncioTestCase):
+    """What an inactive worker is and is not handed off the bus."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+        self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+
+    async def _worker(self, *, active: bool) -> BaseWorker:
+        worker = BaseWorker("gated", active=active)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
+        await worker.setup(self.tm)
+        return worker
+
+    async def test_inactive_worker_never_sees_a_job_request(self):
+        """End to end: the bus drops it, so no handler runs."""
+        worker = await self._worker(active=False)
+        handled = []
+
+        async def on_job_request(message):
+            handled.append(message)
+
+        worker.on_job_request = on_job_request  # type: ignore[method-assign]
+        await self.bus.start()
+
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(handled, [])
+
+    async def test_active_worker_sees_a_job_request(self):
+        worker = await self._worker(active=True)
+        handled = []
+
+        async def on_job_request(message):
+            handled.append(message)
+
+        worker.on_job_request = on_job_request  # type: ignore[method-assign]
+        await self.bus.start()
+
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(handled), 1)
+
+    async def test_inactive_worker_still_takes_activation_and_shutdown(self):
+        """Otherwise nothing could start it, and nothing could stop it."""
+        worker = await self._worker(active=False)
+
+        for message in (
+            BusActivateWorkerMessage(source="other", target="gated"),
+            BusEndWorkerMessage(source="other", target="gated"),
+            BusCancelWorkerMessage(source="other", target="gated"),
+        ):
+            with self.subTest(message=type(message).__name__):
+                self.assertTrue(worker.accepts_bus_message(message))
+
+    async def test_activation_over_the_bus_opens_the_gate(self):
+        worker = await self._worker(active=False)
+        await worker.start()
+
+        await worker.on_bus_message(BusActivateWorkerMessage(source="other", target="gated"))
+
+        self.assertTrue(worker.active)
+        self.assertTrue(
+            worker.accepts_bus_message(
+                BusJobRequestMessage(source="other", target="gated", job_id="j1")
+            )
+        )
+
+    async def test_deactivation_closes_it_again(self):
+        worker = await self._worker(active=True)
+        await worker.start()
+
+        await worker.on_bus_message(BusDeactivateWorkerMessage(source="other", target="gated"))
+
+        self.assertFalse(worker.active)
+        self.assertFalse(
+            worker.accepts_bus_message(
+                BusJobRequestMessage(source="other", target="gated", job_id="j1")
+            )
+        )
+
+    async def test_a_plain_subscriber_is_never_gated(self):
+        """Observation is its own subscription, so it sees everything."""
+        seen = []
+
+        class Observer(BusSubscriber):
+            @property
+            def name(self) -> str:
+                return "observer"
+
+            async def on_bus_message(self, message):
+                seen.append(message)
+
+        observer = Observer()
+        await self.bus.subscribe(observer)
+        await self.bus.start()
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertTrue(any(isinstance(m, BusJobRequestMessage) for m in seen))
 
 
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):

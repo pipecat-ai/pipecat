@@ -173,8 +173,8 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             worker: The owning worker; the edge reads ``worker.bus`` lazily
                 so the bus only needs to be set (via
                 :meth:`PipelineWorker.attach`) by the time the processor is
-                set up. ``worker.name`` is the message source and
-                ``worker.active`` gates inbound frames.
+                set up. ``worker.name`` is the message source, and the
+                worker decides which bus messages this edge accepts.
             direction: Direction this edge captures and forwards to the
                 bus. Inbound frames from the bus travelling in the
                 opposite direction are injected here.
@@ -216,6 +216,20 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             BusFrameMessage(source=self._task.name, frame=frame, direction=direction)
         )
 
+    def accepts_bus_message(self, message: BusMessage) -> bool:
+        """Take bus messages only while the owning worker is active.
+
+        This edge subscribes in its own right, so it has to answer for
+        the worker it belongs to rather than for itself.
+
+        Args:
+            message: The bus message about to be delivered.
+
+        Returns:
+            Whether to deliver the message.
+        """
+        return self._task.accepts_bus_message(message)
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Inject incoming bus frames into the pipeline."""
         if not isinstance(message, BusFrameMessage):
@@ -223,8 +237,6 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         if message.source == self._task.name:
             return
         if message.direction == self._direction:
-            return
-        if not self._task.active:
             return
         if message.target and message.target != self._task.name:
             return
