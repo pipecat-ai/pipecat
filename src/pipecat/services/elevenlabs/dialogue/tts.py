@@ -121,21 +121,12 @@ class _DialogueContext:
             It rejects any message for a context that has no ``voices``
             registration, and a closed context counts as unregistered.
         new_turn_pending: Whether the next input should reset prosody.
-        has_unflushed_text: Whether text has been sent since the last flush.
-            Flushing without new text would add a batch the server never
-            acknowledges, unbalancing ``outstanding_batches``.
-        outstanding_batches: Flushed generation batches not yet acknowledged.
-        close_when_drained: Whether the turn has ended and the context should
-            close once its batches are done.
         alignment_started: Whether an alignment message has been seen, so
             leading spaces are only stripped from the first one.
     """
 
     registered: bool = True
     new_turn_pending: bool = True
-    has_unflushed_text: bool = False
-    outstanding_batches: int = 0
-    close_when_drained: bool = False
     alignment_started: bool = False
 
 
@@ -241,11 +232,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         point the server starts generating on its own, so a turn is usually
         under way before the end-of-turn flush covers what is left.
 
-        Each flush starts one generation batch, which the server acknowledges
-        with an ``is_final_audio_for_turn``. A flush with no new text behind it
-        is skipped so that batches sent and batches acknowledged stay in step —
-        :meth:`_maybe_close_drained_context` relies on that balance.
-
         Args:
             context_id: The specific context to flush. If None, falls back to the
                 currently active context.
@@ -254,14 +240,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if not flush_id or not self._websocket:
             return
         context = self._contexts.get(flush_id)
-        if not context or not context.registered or not context.has_unflushed_text:
+        if not context or not context.registered:
             return
 
-        context.has_unflushed_text = False
-        context.outstanding_batches += 1
-        logger.trace(
-            f"{self}: flushing context {flush_id} ({context.outstanding_batches} outstanding)"
-        )
+        logger.trace(f"{self}: flushing context {flush_id}")
         await self._websocket.send(json.dumps({"context_id": flush_id, "flush": True}))
 
     def _build_websocket_url(self) -> str:
@@ -294,14 +276,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     async def _close_context(self, context_id: str):
         """Close a server-side context to free its slot.
 
-        A close discards flushed batches the server hasn't started generating,
-        so it is only safe once the turn has drained — see
-        :meth:`on_turn_context_completed`. On an interruption that discarding is
-        the point.
-
-        Generation already under way cannot be cancelled, so a context closed
-        mid-generation still drains audio for the text it has — one aggregated
-        chunk at most. Removing the audio context discards it.
+        A close generates whatever text the context still holds, streams that
+        audio, and ends with an ``is_final``. A context closed on an
+        interruption therefore keeps producing audio for a while; removing the
+        audio context discards it.
         """
         context = self._contexts.get(context_id)
         if not context or not context.registered:
@@ -324,32 +302,11 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         self._contexts.pop(context_id, None)
 
     async def on_turn_context_completed(self):
-        """Close the turn's context once the server has generated all of its text.
-
-        The base class flushes whatever text is left as part of completing the
-        turn. Closing then has to wait for the server to work through every
-        batch: a close discards batches that haven't started generating, which
-        would truncate the turn to the audio produced so far.
-        """
+        """Close the turn's context, which generates any text still buffered in it."""
         context_id = self._turn_context_id
         await super().on_turn_context_completed()
-        if not context_id:
-            return
-
-        context = self._contexts.get(context_id)
-        if not context:
-            return
-        context.close_when_drained = True
-        await self._maybe_close_drained_context(context_id)
-
-    async def _maybe_close_drained_context(self, context_id: str):
-        """Close a finished context once its flushed batches have all come back."""
-        context = self._contexts.get(context_id)
-        if not context or not context.close_when_drained or context.outstanding_batches > 0:
-            return
-
-        context.close_when_drained = False
-        await self._close_context(context_id)
+        if context_id:
+            await self._close_context(context_id)
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs Text-to-Dialogue."""
@@ -372,19 +329,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if received_ctx_id == _KEEPALIVE_CONTEXT_ID:
             return
 
-        # One acknowledgement per explicit flush. Batches the server starts
-        # on its own, once enough text has accumulated, are not acknowledged,
-        # so the count only ever tracks flushes we sent.
-        if msg.get("is_final_audio_for_turn") is True:
-            context = self._contexts.get(received_ctx_id)
-            if context:
-                context.outstanding_batches = max(0, context.outstanding_batches - 1)
-                await self._maybe_close_drained_context(received_ctx_id)
-            return
-
         # `is_final` marks the end of a context. `is_final_audio_for_turn`
-        # arrives repeatedly within a turn — once per generation batch — so
-        # it can't be used to end one.
+        # arrives each time the server finishes a batch of generation, several
+        # times within a turn, so it can't be used to end one.
         if msg.get("is_final") is True:
             logger.debug(f"Received final message for context {received_ctx_id}")
             self._contexts.pop(received_ctx_id, None)
@@ -510,7 +457,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
         new_turn = context.new_turn_pending
         context.new_turn_pending = False
-        context.has_unflushed_text = True
         logger.trace(f"{self}: input for context {context_id} (new_turn={new_turn}): {text!r}")
         msg = {
             "context_id": context_id,
