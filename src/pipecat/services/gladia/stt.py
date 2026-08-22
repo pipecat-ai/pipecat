@@ -44,7 +44,7 @@ from pipecat.services.gladia.config import (
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
@@ -197,6 +197,9 @@ class GladiaSTTSettings(STTSettings):
     )
     messages_config: MessagesConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_vad: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+_FINAL_TRANSCRIPT_TIMEOUT = 5.0
 
 
 class GladiaSTTService(WebsocketSTTService):
@@ -470,9 +473,25 @@ class GladiaSTTService(WebsocketSTTService):
         Args:
             frame: The end frame triggering service shutdown.
         """
-        await super().stop(frame)
-        await self._send_stop_recording()
-        await self._disconnect()
+        # Bypass WebsocketSTTService.stop(), which closes the socket immediately.
+        # Gladia needs the stop_recording message and can send trailing final
+        # transcripts before it closes the stream.
+        await STTService.stop(self, frame)
+
+        # Mark this as an intentional disconnect and stop keepalives without
+        # cancelling the receive task that drains the trailing transcripts.
+        await WebsocketSTTService._disconnect(self)
+        try:
+            await self._send_stop_recording()
+            if self._receive_task:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(self._receive_task), timeout=_FINAL_TRANSCRIPT_TIMEOUT
+                    )
+                except TimeoutError:
+                    logger.warning(f"{self}: timed out waiting for final Gladia transcript")
+        finally:
+            await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Gladia STT websocket connection.
