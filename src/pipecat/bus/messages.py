@@ -12,12 +12,13 @@ between workers and the runner.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.registry.types import WorkerRegistryEntry
+from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
     from pipecat.pipeline.job_context import JobStatus
@@ -43,11 +44,17 @@ class BusMessage:
         target: Name of the intended recipient worker, or None for broadcast.
     """
 
+    id: int = field(init=False)
+    name: str = field(init=False)
     source: str
     target: str | None = None
 
+    def __post_init__(self):
+        self.id: int = obj_id()
+        self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+
     def __str__(self):
-        return f"{type(self).__name__} (source={self.source}, target={self.target})"
+        return f"{self.name} (source={self.source}, target={self.target})"
 
 
 class BusLocalMessage:
@@ -95,6 +102,11 @@ class BusFrameMessage(BusDataMessage):
     frame: Frame
     direction: FrameDirection
     bridge: str | None = None
+
+    def __str__(self):
+        return (
+            f"{self.name}(frame: {self.frame}, direction: {self.direction}, bridge: {self.bridge})"
+        )
 
 
 # ---------------------------------------------------------------------------
