@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     Frame,
@@ -326,7 +328,10 @@ class LLMWorker(PipelineWorker):
             # self.queue_frame would park the frame instead of queueing it,
             # and the flush below would return before the output is delivered.
             await super().queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
-            await self.flush_pipeline()
+            if not await self.flush_pipeline():
+                logger.warning(
+                    f"{self}: settling the function call before its output was delivered"
+                )
 
         if not result_callback:
             return

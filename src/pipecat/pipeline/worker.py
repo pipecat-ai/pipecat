@@ -418,6 +418,9 @@ class PipelineWorker(BaseWorker):
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
+        # Frames that have reached the sink. A flush watches this to tell a
+        # pipeline that is still working from one that is stuck.
+        self._frames_reaching_sink: int = 0
         self._setup_timeout_secs = setup_timeout_secs
         self._start_timeout_secs = start_timeout_secs
         self._clock = clock or SystemClock()
@@ -794,7 +797,10 @@ class PipelineWorker(BaseWorker):
         """
         if self._process_push_task is None or self.has_finished():
             return
-        await self.flush_pipeline()
+        if not await self.flush_pipeline():
+            logger.warning(
+                f"{self}: proceeding without draining; whatever is still in flight will be cut off"
+            )
 
     async def cancel(self, *, reason: str | None = None):
         """Request the running pipeline to cancel.
@@ -899,21 +905,26 @@ class PipelineWorker(BaseWorker):
         override (e.g. tool-call deferral).
 
         Args:
-            timeout: Seconds to wait before giving up. On timeout a warning is
-                logged and ``False`` is returned rather than blocking forever
-                (e.g. if a processor swallows the probe).
+            timeout: Seconds of no frames reaching the sink before giving up.
+                A pipeline still working keeps the wait alive, however long it
+                takes; one that is stuck, or that nobody will answer, gives up
+                after this much quiet. On giving up a warning is logged and
+                ``False`` is returned rather than blocking forever.
 
         Returns:
-            True if the pipeline drained, False if the wait timed out.
+            True if the pipeline drained, False if it went quiet first.
         """
         event = asyncio.Event()
         await self._push_queue.put(PipelineFlushFrame(event=event))
-        try:
-            await asyncio.wait_for(event.wait(), timeout)
-            return True
-        except TimeoutError:
-            logger.warning(f"{self}: pipeline flush timed out after {timeout}s")
-            return False
+        while True:
+            before = self._frames_reaching_sink
+            try:
+                await asyncio.wait_for(event.wait(), timeout)
+                return True
+            except TimeoutError:
+                if self._frames_reaching_sink == before:
+                    logger.warning(f"{self}: pipeline flush gave up after {timeout}s of no frames")
+                    return False
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
@@ -1419,6 +1430,11 @@ class PipelineWorker(BaseWorker):
         """
         if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
+
+        # Heartbeats don't count: they arrive whether or not the pipeline is
+        # doing anything, so counting them would make it always look busy.
+        if not isinstance(frame, HeartbeatFrame):
+            self._frames_reaching_sink += 1
 
         if isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
             # The flush probe reached the sink. Bounce the same instance back
