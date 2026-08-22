@@ -10,6 +10,7 @@ Provides the `LLMWorker` class that extends `PipelineWorker` with an LLM
 pipeline and automatic tool registration.
 """
 
+import contextvars
 import functools
 from collections import deque
 from collections.abc import Callable
@@ -46,6 +47,18 @@ class LLMWorkerActivationArgs(WorkerActivationArgs):
 
     messages: list | None = None
     run_llm: bool | None = None
+
+
+#: The worker whose ``@tool`` handler is running, for the duration of that
+#: handler. A context variable rather than a counter so it answers "did this
+#: come from a tool", not "is a tool running somewhere": the bus dispatch tasks
+#: were created before any tool and carry a context where this is unset, so
+#: their frames are never mistaken for a handler's. It holds the worker rather
+#: than a flag because a handler can reach another worker, and only the worker
+#: running the tool will release what it holds.
+_IN_TOOL_CALL: contextvars.ContextVar["LLMWorker | None"] = contextvars.ContextVar(
+    "pipecat_in_tool_call", default=None
+)
 
 
 class LLMWorker(PipelineWorker):
@@ -154,18 +167,22 @@ class LLMWorker(PipelineWorker):
     async def queue_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
-        """Queue a frame, deferring delivery until all tools complete (if any).
+        """Queue a frame, holding it if a tool handler queued it.
 
-        When tool calls are in progress, the frame is held in an internal
-        queue and delivered automatically once the last tool finishes.
-        When no tools are active, the frame is queued immediately.
+        A frame queued from inside one of this worker's ``@tool`` handlers,
+        or from anything that handler awaits, is held and delivered once the
+        last tool finishes. Frames from anywhere else are queued
+        immediately: the worker's own traffic and frames arriving over the
+        bus, which run outside any handler's context, and frames a handler
+        on a different worker queues here, which this worker would never
+        release.
 
         Args:
             frame: Any ``Frame`` to deliver.
             direction: Direction the frame should travel. Defaults to
                 ``FrameDirection.DOWNSTREAM``.
         """
-        if self._defer_tool_frames and self._tool_call_inflight > 0 and not self._closing:
+        if self._defer_tool_frames and _IN_TOOL_CALL.get() is self and not self._closing:
             self._deferred_frames.append((frame, direction))
         else:
             await super().queue_frame(frame, direction)
@@ -266,9 +283,11 @@ class LLMWorker(PipelineWorker):
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
             self._tool_call_inflight += 1
+            token = _IN_TOOL_CALL.set(self)
             try:
                 return await method(params, *args, **kwargs)
             finally:
+                _IN_TOOL_CALL.reset(token)
                 self._tool_call_inflight = max(0, self._tool_call_inflight - 1)
                 if not self._closing and self._tool_call_inflight == 0:
                     await self._flush_deferred_frames()
