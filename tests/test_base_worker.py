@@ -85,12 +85,18 @@ def capture_bus(bus):
 
 
 def make_stub_pipeline_task(name, *, bridged=None, active=True):
-    """Create a PipelineWorker with an IdentityFilter pipeline."""
+    """Create a PipelineWorker with an IdentityFilter pipeline.
+
+    Answers its own flush probes even when bridged: these workers have no
+    transport peer to answer for them, so leaving it off would make every
+    drain wait out its timeout.
+    """
     return PipelineWorker(
         Pipeline([IdentityFilter()]),
         name=name,
         bridged=bridged,
         cancel_on_idle_timeout=False,
+        handle_flush_frame=True,
     )
 
 

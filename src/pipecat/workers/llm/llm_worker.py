@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    PipelineFlushFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -122,7 +121,6 @@ class LLMWorker(PipelineWorker):
             pipeline,
             name=name,
             bridged=bridged,
-            exclude_frames=(PipelineFlushFrame,),
             enable_rtvi=bridged is None,
             idle_timeout_secs=None,
             params=PipelineParams(

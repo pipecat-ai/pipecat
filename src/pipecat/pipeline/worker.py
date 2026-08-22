@@ -287,6 +287,7 @@ class PipelineWorker(BaseWorker):
         conversation_id: str | None = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
+        handle_flush_frame: bool | None = None,
         enable_rtvi: bool = True,
         exclude_frames: tuple[type[Frame], ...] | None = None,
         idle_timeout_frames: tuple[type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
@@ -324,6 +325,14 @@ class PipelineWorker(BaseWorker):
                 bridges. A tuple of names like ``("voice",)`` accepts
                 only frames from those bridges. The bus comes from
                 :meth:`attach` (called by the runner).
+            handle_flush_frame: Whether this worker answers a flush probe,
+                bouncing it at the sink and completing it at the source.
+                Defaults to whether the pipeline is unbridged, so a worker
+                wired into someone else's topology leaves the probe to
+                travel on and be completed by the pipeline that owns the
+                transport. A bridged worker with no such peer never
+                completes a flush and every
+                :meth:`flush_pipeline` call waits out its timeout.
             cancel_on_idle_timeout: Whether reaching the idle timeout should
                 cancel the pipeline worker. When ``False``, the idle event
                 still fires ``on_idle_timeout`` but the worker is left alone
@@ -390,6 +399,9 @@ class PipelineWorker(BaseWorker):
             check_dangling_tasks=check_dangling_tasks,
         )
         self._bridged = bridged
+        self._handle_flush_frame = (
+            handle_flush_frame if handle_flush_frame is not None else bridged is None
+        )
         if tool_resources is not None:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
@@ -1336,7 +1348,7 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
-        if isinstance(frame, PipelineFlushFrame):
+        if isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
             # The flush probe completed its round-trip (down to the sink, back up
             # to the source). Everything queued ahead of it has been processed;
             # release whoever is awaiting it.
@@ -1408,7 +1420,7 @@ class PipelineWorker(BaseWorker):
         if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
-        if isinstance(frame, PipelineFlushFrame):
+        if isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
             # The flush probe reached the sink. Bounce the same instance back
             # upstream so it returns to the source (carrying its event) and the
             # round-trip drains both directions.
