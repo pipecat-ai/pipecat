@@ -10,7 +10,12 @@ import aiohttp
 import pytest
 from aiohttp import web
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.elevenlabs.stt import (
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
@@ -33,6 +38,28 @@ TIMESTAMPED_COMMITTED_MESSAGE = {
     "words": [{"text": "Hello.", "start": 0.0, "end": 0.5, "type": "word"}],
 }
 
+INTERIM_TEXT = "Hello. How's your day going?"
+
+PARTIAL_MESSAGE = {
+    "message_type": "partial_transcript",
+    "text": INTERIM_TEXT,
+}
+
+COMMITTED_TRANSCRIPT_MESSAGE = {
+    "message_type": "committed_transcript",
+    "text": INTERIM_TEXT,
+}
+
+GROWN_PARTIAL_MESSAGE = {
+    "message_type": "partial_transcript",
+    "text": "Hello. How's your day going? Good so far.",
+}
+
+NEW_PARTIAL_MESSAGE = {
+    "message_type": "partial_transcript",
+    "text": "Good.",
+}
+
 
 def _capture_transcriptions(service: ElevenLabsRealtimeSTTService) -> list[TranscriptionFrame]:
     """Collect the TranscriptionFrames a service pushes."""
@@ -40,6 +67,18 @@ def _capture_transcriptions(service: ElevenLabsRealtimeSTTService) -> list[Trans
 
     async def push_frame(frame, direction=None):
         if isinstance(frame, TranscriptionFrame):
+            captured.append(frame)
+
+    service.push_frame = push_frame
+    return captured
+
+
+def _capture_interims(service: ElevenLabsRealtimeSTTService) -> list[InterimTranscriptionFrame]:
+    """Collect the InterimTranscriptionFrames a service pushes."""
+    captured: list[InterimTranscriptionFrame] = []
+
+    async def push_frame(frame, direction=None):
+        if isinstance(frame, InterimTranscriptionFrame):
             captured.append(frame)
 
     service.push_frame = push_frame
@@ -257,3 +296,118 @@ async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
     assert len(captured) == 1
     assert captured[0].text == COMMITTED_TEXT
     assert captured[0].language is None
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_repeated_partial_is_suppressed():
+    """An identical repeat of the last partial carries no new information."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(PARTIAL_MESSAGE)
+
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_post_commit_echo_partial_is_suppressed():
+    """The server echoes just-committed text as a stale partial shortly after commit."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(COMMITTED_TRANSCRIPT_MESSAGE)
+    await service._process_response(PARTIAL_MESSAGE)
+
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_new_partial_after_commit_is_emitted():
+    """Genuinely new text after a commit is a new user turn and must pass through."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(COMMITTED_TRANSCRIPT_MESSAGE)
+    await service._process_response(NEW_PARTIAL_MESSAGE)
+
+    assert [f.text for f in captured] == [INTERIM_TEXT, NEW_PARTIAL_MESSAGE["text"]]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_changed_partial_text_is_emitted():
+    """Partial progression within a turn (text grows/changes) must pass through."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(GROWN_PARTIAL_MESSAGE)
+
+    assert [f.text for f in captured] == [INTERIM_TEXT, GROWN_PARTIAL_MESSAGE["text"]]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_partial_state_resets_on_reconnect(monkeypatch):
+    """A reconnect must not carry stale partial/committed text into the new session."""
+
+    async def fake_websocket_connect(url, *, additional_headers, **kwargs):
+        return object()
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect",
+        fake_websocket_connect,
+    )
+
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    service._audio_format = audio_format_from_sample_rate(16000)
+    service.create_task = lambda coro, name=None: coro.close()
+
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(COMMITTED_TRANSCRIPT_MESSAGE)
+    assert len(captured) == 1
+
+    await service._connect()
+
+    # The same text arrives fresh in the new session and must not be
+    # suppressed as a stale echo from the previous one.
+    await service._process_response(PARTIAL_MESSAGE)
+
+    assert len(captured) == 2
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_genuine_repeat_after_vad_start_is_emitted():
+    """A VAD-detected turn start clears the markers, so a real repeat utterance fires."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    # Turn 1: user says "Hello. How's your day going?"
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(COMMITTED_TRANSCRIPT_MESSAGE)
+
+    # Turn 2 begins: VAD detects real speech, not a phantom re-send.
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    # The user genuinely says the same thing again.
+    await service._process_response(PARTIAL_MESSAGE)
+
+    assert [f.text for f in captured] == [INTERIM_TEXT, INTERIM_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_post_commit_echo_without_vad_start_still_suppressed():
+    """Without a VAD-detected turn start, the post-commit echo is still a stale re-send."""
+    service = ElevenLabsRealtimeSTTService(api_key="test-key", sample_rate=16000)
+    captured = _capture_interims(service)
+
+    await service._process_response(PARTIAL_MESSAGE)
+    await service._process_response(COMMITTED_TRANSCRIPT_MESSAGE)
+
+    # No VADUserStartedSpeakingFrame here -- this is the phantom post-commit echo.
+    await service._process_response(PARTIAL_MESSAGE)
+
+    assert len(captured) == 1
