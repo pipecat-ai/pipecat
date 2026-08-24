@@ -140,6 +140,7 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.runner.vonage import configure as configure_vonage
+from pipecat.utils.file_storage import FileStorage, LocalFileStorage
 from pipecat.utils.security.allowed_origins import is_origin_allowed
 
 try:
@@ -192,7 +193,7 @@ TRANSPORT_INSTALL_HINTS = {
 PIPECAT_ROOM_EXP_HOURS = 4.0
 
 RUNNER_DOWNLOADS_FOLDER: str | None = None
-RUNNER_UPLOADS_FOLDER: str | None = None
+RUNNER_FILE_STORAGE: FileStorage | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
@@ -551,25 +552,6 @@ async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
-def _trim_uploads_folder(folder: Path, max_files: int):
-    """Keep only the most recent max_files files in folder; delete oldest by mtime."""
-    if max_files <= 0:
-        return
-    try:
-        files = [p for p in folder.iterdir() if p.is_file()]
-        if len(files) <= max_files:
-            return
-        by_mtime = sorted(files, key=lambda p: p.stat().st_mtime)
-        for p in by_mtime[: len(files) - max_files]:
-            try:
-                p.unlink()
-                logger.debug(f"Trimmed upload {p.name} from {folder}")
-            except OSError as e:
-                logger.warning(f"Failed to trim upload {p}: {e}")
-    except OSError as e:
-        logger.warning(f"Failed to list uploads folder {folder}: {e}")
-
-
 async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
     """Run a bot for plain WebSocket transport."""
     bot_module = _get_bot_module()
@@ -667,8 +649,8 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
-    if args.uploads_folder:
-        _setup_file_uploads_route(app, args)
+    if RUNNER_FILE_STORAGE is not None:
+        _setup_file_uploads_route(app)
 
 
 def _setup_unified_start_route(
@@ -1517,30 +1499,23 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
-def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
+def _setup_file_uploads_route(app: FastAPI):
     @app.post("/files")
-    async def upload_file(file: UploadFile = File(...)):
+    async def upload_file(file: UploadFile = File(...)):  # noqa: B008
         """Handle file uploads from clients. Requires --uploads-folder to be set."""
-        if not args.uploads_folder:
+        if RUNNER_FILE_STORAGE is None:
             raise HTTPException(
                 503,
                 "File upload is disabled: start the runner with -u/--uploads-folder to set the uploads directory.",
             )
-        folder = Path(args.uploads_folder)
-        folder.mkdir(parents=True, exist_ok=True)
-        # Always save as UUID so uploads are not discoverable by guessing filenames
-        safe_name = uuid.uuid4().hex
-        file_path = folder / safe_name
+        contents = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(contents) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"File exceeds {_MAX_UPLOAD_BYTES} byte limit")
         try:
-            contents = await file.read(_MAX_UPLOAD_BYTES + 1)
-            if len(contents) > _MAX_UPLOAD_BYTES:
-                raise HTTPException(413, f"File exceeds {_MAX_UPLOAD_BYTES} byte limit")
-            file_path.write_bytes(contents)
-            logger.debug(f"Uploaded file to {file_path}")
+            file_id = await RUNNER_FILE_STORAGE.save(file.filename or "", contents)
         except OSError as e:
             logger.error(f"Failed to save upload: {e}")
             raise HTTPException(500, "Failed to save file") from e
-        _trim_uploads_folder(folder, args.uploads_folder_max_files)
         # Use original filename only for format/mime in response
         original_name = Path(file.filename or "").name
         media_type, _ = mimetypes.guess_type(original_name, strict=False)
@@ -1548,7 +1523,7 @@ def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
         # Return the file as a URL that can be used in the client, matching the format of RTVIFile
         return {
             "name": original_name,
-            "source": {"type": "id", "id": f"pipecat:{safe_name}"},
+            "source": {"type": "id", "id": file_id},
             "format": media_type,
         }
 
@@ -1728,9 +1703,13 @@ def runner_downloads_folder() -> str | None:
     return RUNNER_DOWNLOADS_FOLDER
 
 
-def runner_uploads_folder() -> str | None:
-    """Returns the folder where client uploads are stored (short-lived)."""
-    return RUNNER_UPLOADS_FOLDER
+def runner_file_storage() -> FileStorage | None:
+    """Returns the storage backend for client uploads, or None if uploads are disabled.
+
+    Pass this to ``RTVIProcessor(file_storage=...)`` so it resolves the same
+    ``pipecat:<id>`` references produced by the runner's ``POST /files`` endpoint.
+    """
+    return RUNNER_FILE_STORAGE
 
 
 def runner_host() -> str:
@@ -1782,7 +1761,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             ones. Custom args are accessible via `runner_args.cli_args`.
 
     """
-    global RUNNER_DOWNLOADS_FOLDER, RUNNER_UPLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
+    global RUNNER_DOWNLOADS_FOLDER, RUNNER_FILE_STORAGE, RUNNER_HOST, RUNNER_PORT
 
     if not parser:
         parser = argparse.ArgumentParser(description="Pipecat Development Runner")
@@ -2093,7 +2072,8 @@ def main(parser: argparse.ArgumentParser | None = None):
         return
 
     RUNNER_DOWNLOADS_FOLDER = args.downloads_folder
-    RUNNER_UPLOADS_FOLDER = args.uploads_folder
+    if args.uploads_folder:
+        RUNNER_FILE_STORAGE = LocalFileStorage(args.uploads_folder, args.uploads_folder_max_files)
     RUNNER_HOST = args.host
     RUNNER_PORT = args.port
 

@@ -8,12 +8,9 @@
 
 import asyncio
 import base64
-import os
-import re
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
-import aiofiles
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -51,6 +48,7 @@ from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.file_storage import FileStorage
 
 
 class RTVIProcessor(FrameProcessor):
@@ -65,7 +63,7 @@ class RTVIProcessor(FrameProcessor):
         self,
         *,
         transport: BaseTransport | None = None,
-        uploads_folder: str | None = None,
+        file_storage: FileStorage | None = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -81,15 +79,16 @@ class RTVIProcessor(FrameProcessor):
                     :class:`InputTransportStartAudioStreamingFrame`) pushed
                     downstream. For client-ready audio gating, set
                     ``audio_in_stream_on_start=False`` on the transport params.
-            uploads_folder: Path to folder where client uploads (e.g. POST /files) are
-                stored; required for send-file messages that reference an uploaded
-                file ID (``pipecat:<id>``). Use runner_uploads_folder() when using
-                the development runner.
+            file_storage: Storage backend used to resolve send-file messages that
+                reference an uploaded file ID (``pipecat:<id>``). Required for
+                those messages; not needed for inline (``bytes``) or URL file
+                sources. Use ``runner_file_storage()`` when using the development
+                runner, so it shares storage with the ``POST /files`` upload route.
 
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._folder = uploads_folder or ""
+        self._file_storage = file_storage
 
         self._bot_ready = False
         self._client_ready = False
@@ -558,38 +557,24 @@ class RTVIProcessor(FrameProcessor):
                 else:
                     source = fs.url
             case RTVI.FileId() as fs:
-                if not fs.id.startswith("pipecat:"):
-                    logger.warning(f"Unsupported file ID: {fs.id}")
-                    await self._send_error_response(message_id, f"Unsupported file ID: {fs.id}")
-                    return
-                if not self._folder:
+                if self._file_storage is None:
                     logger.warning(
-                        "Send-file with a pipecat id requires uploads_folder on RTVIProcessor "
-                        "(e.g. uploads_folder=runner_uploads_folder())."
+                        "Send-file with a file ID requires file_storage on RTVIProcessor "
+                        "(e.g. file_storage=runner_file_storage())."
                     )
-                    await self._send_error_response(message_id, "Uploads folder not set")
+                    await self._send_error_response(message_id, "File storage not set")
                     return
-                suffix = fs.id.removeprefix("pipecat:")
-                if not re.fullmatch(r"[0-9a-f]{32}", suffix):
-                    logger.warning(f"Invalid file ID format: {fs.id}")
-                    await self._send_error_response(message_id, "Invalid file ID")
-                    return
-                # read bytes from file system, encode to base64, then delete the file
+                # read bytes from storage, encode to base64, then delete the file
                 type = "bytes"
-                file_path = os.path.join(self._folder, suffix)
                 try:
-                    async with aiofiles.open(file_path, "rb") as f:
-                        raw_bytes = await f.read()
-                except OSError as e:
-                    logger.warning(f"Failed to read uploaded file {file_path}: {e}")
+                    raw_bytes = await self._file_storage.load(fs.id)
+                except FileNotFoundError:
+                    logger.warning(f"Uploaded file not found for ID: {fs.id}")
                     await self._send_error_response(message_id, "File not found")
                     return
                 encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
                 source = f"data:{file.format};base64,{encoded_file}"
-                try:
-                    await asyncio.to_thread(os.remove, file_path)
-                except OSError as e:
-                    logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
+                await self._file_storage.delete(fs.id)
             case _:
                 logger.warning(f"Unsupported file source type: {file.source.type}")
                 return
