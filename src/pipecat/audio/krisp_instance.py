@@ -97,11 +97,18 @@ def krisp_sdk_uses_nanobind_bindings() -> bool:
 
 
 class KrispVivaSDKManager:
-    """Singleton manager for Krisp VIVA SDK with reference counting."""
+    """Singleton manager for the process-lifetime Krisp VIVA SDK.
+
+    ``globalInit`` runs on the first ``acquire()``. ``globalDestroy`` is deferred
+    to process exit (``atexit``). Per-call teardown only drops the reference
+    count — destroying the SDK while native ``process()`` or session destructors
+    are still running segfaults in ``libkrisp-audio-sdk``.
+    """
 
     _initialized = False
     _lock = Lock()
     _reference_count = 0
+    _atexit_registered = False
 
     @staticmethod
     def _license_callback(error, error_message):
@@ -127,8 +134,10 @@ class KrispVivaSDKManager:
             Exception: If SDK initialization fails (propagated from krisp_audio)
         """
         with cls._lock:
-            # Initialize SDK on first acquire
-            if cls._reference_count == 0:
+            # Initialize once per process. Subsequent acquire/release cycles at
+            # refcount 0 must not call globalInit/globalDestroy — Krisp's
+            # contract is one init/destroy pair per process.
+            if not cls._initialized:
                 try:
                     key = api_key or os.environ.get("KRISP_VIVA_API_KEY", "")
                     try:
@@ -152,8 +161,9 @@ class KrispVivaSDKManager:
                         f"{SDK_VERSION.major}.{SDK_VERSION.minor}.{SDK_VERSION.patch}"
                     )
 
-                    # Register cleanup on program exit (failsafe)
-                    atexit.register(cls._force_cleanup)
+                    if not cls._atexit_registered:
+                        atexit.register(cls._force_cleanup)
+                        cls._atexit_registered = True
 
                 except Exception as e:
                     cls._initialized = False
@@ -165,24 +175,15 @@ class KrispVivaSDKManager:
 
     @classmethod
     def release(cls):
-        """Release a reference to the SDK (destroys if last reference).
+        """Release a reference to the SDK.
 
-        Call this when destroying a filter instance.
+        Call this when destroying a filter or analyzer instance. Does not call
+        ``globalDestroy``; the native SDK stays initialized until process exit.
         """
         with cls._lock:
             if cls._reference_count > 0:
                 cls._reference_count -= 1
                 logger.debug(f"Krisp SDK reference count: {cls._reference_count}")
-
-                # Destroy SDK when last reference is released
-                if cls._reference_count == 0 and cls._initialized:
-                    try:
-                        krisp_audio.globalDestroy()
-                        cls._initialized = False
-                        logger.debug("Krisp Audio SDK destroyed (all references released)")
-                    except Exception as e:
-                        logger.error(f"Error during Krisp SDK cleanup: {e}")
-                        cls._initialized = False
 
     @classmethod
     def get_reference_count(cls) -> int:
@@ -208,12 +209,19 @@ class KrispVivaSDKManager:
     def _force_cleanup(cls):
         """Force cleanup on program exit (failsafe)."""
         with cls._lock:
-            if cls._initialized:
-                try:
+            if not cls._initialized:
+                return
+            try:
+                if cls._reference_count > 0:
                     logger.warning(
                         f"Force cleaning up Krisp SDK at exit (ref count: {cls._reference_count})"
                     )
-                    krisp_audio.globalDestroy()
-                    cls._initialized = False
-                except Exception as e:
+                krisp_audio.globalDestroy()
+            except Exception as e:
+                try:
                     logger.error(f"Error during forced Krisp SDK cleanup: {e}")
+                except Exception:
+                    pass
+            finally:
+                cls._initialized = False
+                cls._reference_count = 0

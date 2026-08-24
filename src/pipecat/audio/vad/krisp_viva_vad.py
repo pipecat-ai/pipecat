@@ -61,40 +61,31 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
 
         logger.debug("Loading Krisp VIVA VAD model...")
 
-        try:
-            # Set model path, checking environment if not specified
-            if model_path:
-                self._model_path = model_path
-            else:
-                self._model_path = os.getenv("KRISP_VIVA_VAD_MODEL_PATH")
-                if not self._model_path:
-                    logger.error(
-                        "Model path is not provided and KRISP_VIVA_VAD_MODEL_PATH is not set."
-                    )
-                    raise ValueError("Model path for KrispVivaVADAnalyzer must be provided.")
+        # Set model path, checking environment if not specified
+        if model_path:
+            self._model_path = model_path
+        else:
+            self._model_path = os.getenv("KRISP_VIVA_VAD_MODEL_PATH")
+            if not self._model_path:
+                logger.error("Model path is not provided and KRISP_VIVA_VAD_MODEL_PATH is not set.")
+                raise ValueError("Model path for KrispVivaVADAnalyzer must be provided.")
 
-            if not self._model_path.endswith(".kef"):
-                raise Exception("Model is expected with .kef extension")
+        if not self._model_path.endswith(".kef"):
+            raise Exception("Model is expected with .kef extension")
 
-            if not os.path.isfile(self._model_path):
-                raise FileNotFoundError(f"Model file not found: {self._model_path}")
+        if not os.path.isfile(self._model_path):
+            raise FileNotFoundError(f"Model file not found: {self._model_path}")
 
-            self._session = None
-            self._frame_duration_ms = frame_duration
-            self._samples_per_frame = None
-            # Calculate samples per frame if sample_rate is provided
-            if sample_rate is not None:
-                self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
+        self._session = None
+        self._frame_duration_ms = frame_duration
+        self._samples_per_frame = None
+        # Calculate samples per frame if sample_rate is provided
+        if sample_rate is not None:
+            self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
 
-            # Acquire SDK reference (will initialize on first call)
-            KrispVivaSDKManager.acquire()
+        KrispVivaSDKManager.acquire()
 
-            logger.debug("Loaded Krisp VIVA VAD")
-
-        except Exception:
-            # If initialization fails, release the SDK reference
-            KrispVivaSDKManager.release()
-            raise
+        logger.debug("Loaded Krisp VIVA VAD")
 
     def _create_session(self, sample_rate: int, frame_duration: int):
         """Create a Krisp VAD session with a specific sample rate.
@@ -207,7 +198,11 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
             return 0.0
 
     async def cleanup(self):
-        """Cleanup analyzer resources."""
+        """Cleanup analyzer resources.
+
+        Drops the native session only after the executor has drained, so an
+        in-flight ``session.process()`` cannot race destructor / SDK teardown.
+        """
         await super().cleanup()
         try:
             self._session = None

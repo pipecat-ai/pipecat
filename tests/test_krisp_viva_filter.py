@@ -134,10 +134,10 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter()
 
             self.assertIn("Model path", str(context.exception))
-            # SDK acquire not called during initialization (happens in start())
-            # But release() is called in exception handler even though acquire() wasn't called
+            # Constructor never acquires, so a failed init must not release
+            # a reference owned by another live instance.
             self.mock_sdk_manager.acquire.assert_not_called()
-            self.mock_sdk_manager.release.assert_called_once()
+            self.mock_sdk_manager.release.assert_not_called()
 
     async def test_initialization_with_invalid_extension(self):
         """Test filter initialization fails with non-.kef file."""
@@ -150,10 +150,8 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter(model_path=tmp_path)
 
             self.assertIn(".kef extension", str(context.exception))
-            # SDK acquire not called during initialization (happens in start())
-            # But release() is called in exception handler even though acquire() wasn't called
             self.mock_sdk_manager.acquire.assert_not_called()
-            self.mock_sdk_manager.release.assert_called_once()
+            self.mock_sdk_manager.release.assert_not_called()
         finally:
             os.unlink(tmp_path)
 
@@ -162,10 +160,8 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FileNotFoundError):
             KrispVivaFilter(model_path="/nonexistent/path/model.kef")
 
-        # SDK acquire not called during initialization (happens in start())
-        # But release() is called in exception handler even though acquire() wasn't called
         self.mock_sdk_manager.acquire.assert_not_called()
-        self.mock_sdk_manager.release.assert_called_once()
+        self.mock_sdk_manager.release.assert_not_called()
 
     async def test_initialization_with_custom_noise_level(self):
         """Test filter initialization with custom noise suppression level."""

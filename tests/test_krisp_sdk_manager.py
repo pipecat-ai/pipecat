@@ -108,15 +108,16 @@ class TestKrispVivaSDKManager:
         # globalDestroy should NOT be called yet
         mock_krisp_audio.globalDestroy.assert_not_called()
 
-        # Release second reference
+        # Release second (last) reference. The SDK is process-lifetime: last
+        # release must not call globalDestroy while other native work may still
+        # be in flight on Krisp's own threads.
         KrispVivaSDKManager.release()
         assert KrispVivaSDKManager.get_reference_count() == initial_count
-
-        # globalDestroy should be called now
-        mock_krisp_audio.globalDestroy.assert_called_once()
+        assert KrispVivaSDKManager.is_initialized()
+        mock_krisp_audio.globalDestroy.assert_not_called()
 
     def test_multiple_acquire_release_cycles(self):
-        """Test multiple acquire/release cycles."""
+        """Test multiple acquire/release cycles keep a single process-lifetime init."""
         initial_count = KrispVivaSDKManager.get_reference_count()
 
         for i in range(3):
@@ -125,10 +126,54 @@ class TestKrispVivaSDKManager:
             assert KrispVivaSDKManager.is_initialized()
             KrispVivaSDKManager.release()
             assert KrispVivaSDKManager.get_reference_count() == initial_count
+            assert KrispVivaSDKManager.is_initialized()
 
-        # Verify globalInit/globalDestroy were called for each cycle
-        assert mock_krisp_audio.globalInit.call_count == 3
-        assert mock_krisp_audio.globalDestroy.call_count == 3
+        # globalInit once for the process; globalDestroy is deferred to atexit
+        assert mock_krisp_audio.globalInit.call_count == 1
+        mock_krisp_audio.globalDestroy.assert_not_called()
+
+    def test_last_release_does_not_call_global_destroy(self):
+        """Dropping the last live session must not tear down the native SDK."""
+        KrispVivaSDKManager.acquire()
+        KrispVivaSDKManager.release()
+
+        mock_krisp_audio.globalDestroy.assert_not_called()
+        assert KrispVivaSDKManager.is_initialized()
+        assert KrispVivaSDKManager.get_reference_count() == 0
+
+    def test_reacquire_does_not_reinitialize(self):
+        """A later call after refcount 0 reuses the already-initialized SDK."""
+        KrispVivaSDKManager.acquire()
+        KrispVivaSDKManager.release()
+        mock_krisp_audio.globalInit.reset_mock()
+
+        KrispVivaSDKManager.acquire()
+
+        mock_krisp_audio.globalInit.assert_not_called()
+        assert KrispVivaSDKManager.get_reference_count() == 1
+        assert KrispVivaSDKManager.is_initialized()
+
+    def test_force_cleanup_destroys_initialized_sdk(self):
+        """Process-exit cleanup is the only path that calls globalDestroy."""
+        KrispVivaSDKManager.acquire()
+        KrispVivaSDKManager.release()
+        mock_krisp_audio.globalDestroy.assert_not_called()
+
+        KrispVivaSDKManager._force_cleanup()
+
+        mock_krisp_audio.globalDestroy.assert_called_once()
+        assert not KrispVivaSDKManager.is_initialized()
+
+    def test_acquire_after_force_cleanup_reinitializes(self):
+        """After process-exit cleanup, a new acquire may initialize again."""
+        KrispVivaSDKManager.acquire()
+        KrispVivaSDKManager._force_cleanup()
+        mock_krisp_audio.globalInit.reset_mock()
+
+        KrispVivaSDKManager.acquire()
+
+        mock_krisp_audio.globalInit.assert_called_once()
+        assert KrispVivaSDKManager.is_initialized()
 
     def test_sdk_initialization_failure(self):
         """Test that SDK initialization failures are handled properly."""
@@ -163,9 +208,9 @@ class TestKrispVivaSDKManager:
         KrispVivaSDKManager.acquire()
         assert KrispVivaSDKManager.is_initialized()
 
-        # After release, should not be initialized
+        # After release, the process-lifetime SDK stays initialized
         KrispVivaSDKManager.release()
-        assert not KrispVivaSDKManager.is_initialized()
+        assert KrispVivaSDKManager.is_initialized()
 
 
 class TestSampleRateConversion:

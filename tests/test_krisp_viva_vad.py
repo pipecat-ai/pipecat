@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -129,10 +130,10 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
                 KrispVivaVadAnalyzer()
 
             self.assertIn("Model path", str(context.exception))
-            # acquire() is not called because exception is raised before it
+            # acquire() is not called because exception is raised before it,
+            # so release() must not decrement a reference owned by another instance.
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in the initialization exception handler
-            self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+            self.mock_sdk_manager.release.assert_not_called()
 
     def test_initialization_with_invalid_extension(self):
         """Test analyzer initialization fails with non-.kef file."""
@@ -145,10 +146,8 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
                 KrispVivaVadAnalyzer(model_path=tmp_path)
 
             self.assertIn(".kef extension", str(context.exception))
-            # acquire() is not called because exception is raised before it
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in the initialization exception handler
-            self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+            self.mock_sdk_manager.release.assert_not_called()
         finally:
             os.unlink(tmp_path)
 
@@ -157,10 +156,8 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             KrispVivaVadAnalyzer(model_path="/nonexistent/path/model.kef")
 
-        # acquire() is not called because exception is raised before it
         self.mock_sdk_manager.acquire.assert_not_called()
-        # release() is called in the initialization exception handler
-        self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+        self.mock_sdk_manager.release.assert_not_called()
 
     def test_initialization_with_custom_frame_duration(self):
         """Test analyzer initialization with custom frame duration."""
@@ -360,6 +357,62 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
         # Verify SDK was released and session was cleared
         self.mock_sdk_manager.release.assert_called_once()
         self.assertIsNone(analyzer._session)
+
+    def test_cleanup_drains_executor_before_dropping_session(self):
+        """cleanup() must wait for in-flight session.process() before dropping the session.
+
+        VAD analysis runs on a single-worker executor. Pipeline cancel does not
+        abort a running native process() call; dropping the session (or calling
+        globalDestroy) while that call is in flight segfaults in the SDK.
+        """
+        analyzer = KrispVivaVadAnalyzer(model_path=self.model_path)
+        analyzer.set_sample_rate(16000)
+
+        started = threading.Event()
+        finish = threading.Event()
+        cleanup_done = threading.Event()
+        session_alive_in_process = []
+
+        def slow_process(audio):
+            started.set()
+            finish.wait(timeout=5)
+            session_alive_in_process.append(analyzer._session is not None)
+            return 0.75
+
+        self.mock_session.process.side_effect = slow_process
+
+        samples = np.zeros(160, dtype=np.int16).tobytes()
+        future = analyzer._executor.submit(analyzer.voice_confidence, samples)
+        self.assertTrue(started.wait(timeout=2))
+
+        def run_cleanup():
+            asyncio.run(analyzer.cleanup())
+            cleanup_done.set()
+
+        cleanup_thread = threading.Thread(target=run_cleanup)
+        cleanup_thread.start()
+
+        # wait=False returns immediately and drops the session while process()
+        # is still blocked. A correct drain keeps cleanup parked in shutdown().
+        finished_early = cleanup_done.wait(timeout=0.2)
+        session_while_blocked = analyzer._session is not None
+
+        finish.set()
+        cleanup_thread.join(timeout=5)
+        confidence = future.result(timeout=2)
+
+        self.assertFalse(
+            finished_early,
+            "cleanup returned while executor process() was still running",
+        )
+        self.assertTrue(
+            session_while_blocked,
+            "session was dropped while executor process() was still running",
+        )
+        self.assertEqual(session_alive_in_process, [True])
+        self.assertEqual(confidence, 0.75)
+        self.assertIsNone(analyzer._session)
+        self.mock_sdk_manager.release.assert_called()
 
     def test_initialization_with_vad_params(self):
         """Test analyzer initialization with VAD parameters."""

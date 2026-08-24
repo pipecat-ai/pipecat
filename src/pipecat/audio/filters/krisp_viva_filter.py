@@ -84,70 +84,62 @@ class KrispVivaFilter(BaseAudioFilter):
 
         self._api_key = api_key
 
-        try:
-            # Set model path, checking environment if not specified
-            if model_path:
-                self._model_path = model_path
-            else:
-                # Check new environment variable first
-                self._model_path = os.getenv("KRISP_VIVA_FILTER_MODEL_PATH")
-                # Fall back to old environment variable for backward compatibility
-                if not self._model_path:
-                    self._model_path = os.getenv("KRISP_VIVA_MODEL_PATH")
-                    if self._model_path:
-                        logger.warning(
-                            "KRISP_VIVA_MODEL_PATH is deprecated. "
-                            "Please use KRISP_VIVA_FILTER_MODEL_PATH instead."
-                        )
+        # Set model path, checking environment if not specified
+        if model_path:
+            self._model_path = model_path
+        else:
+            # Check new environment variable first
+            self._model_path = os.getenv("KRISP_VIVA_FILTER_MODEL_PATH")
+            # Fall back to old environment variable for backward compatibility
             if not self._model_path:
-                logger.error(
-                    "Model path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set."
-                )
-                raise ValueError("Model path for KrispAudioProcessor must be provided.")
+                self._model_path = os.getenv("KRISP_VIVA_MODEL_PATH")
+                if self._model_path:
+                    logger.warning(
+                        "KRISP_VIVA_MODEL_PATH is deprecated. "
+                        "Please use KRISP_VIVA_FILTER_MODEL_PATH instead."
+                    )
+        if not self._model_path:
+            logger.error("Model path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set.")
+            raise ValueError("Model path for KrispAudioProcessor must be provided.")
 
-            if not self._model_path.endswith(".kef"):
-                raise Exception("Model is expected with .kef extension")
+        if not self._model_path.endswith(".kef"):
+            raise Exception("Model is expected with .kef extension")
 
-            if not os.path.isfile(self._model_path):
-                raise FileNotFoundError(f"Model file not found: {self._model_path}")
+        if not os.path.isfile(self._model_path):
+            raise FileNotFoundError(f"Model file not found: {self._model_path}")
 
-            # Resolve TTS detection model path (optional)
-            if tts_model_path:
-                self._tts_model_path = tts_model_path
-            else:
-                self._tts_model_path = os.getenv("KRISP_VIVA_TTS_MODEL_PATH")
-            if self._tts_model_path:
-                if not self._tts_model_path.endswith(".kef"):
-                    raise Exception("TTS model is expected with .kef extension")
-                if not os.path.isfile(self._tts_model_path):
-                    raise FileNotFoundError(f"TTS model file not found: {self._tts_model_path}")
+        # Resolve TTS detection model path (optional)
+        if tts_model_path:
+            self._tts_model_path = tts_model_path
+        else:
+            self._tts_model_path = os.getenv("KRISP_VIVA_TTS_MODEL_PATH")
+        if self._tts_model_path:
+            if not self._tts_model_path.endswith(".kef"):
+                raise Exception("TTS model is expected with .kef extension")
+            if not os.path.isfile(self._tts_model_path):
+                raise FileNotFoundError(f"TTS model file not found: {self._tts_model_path}")
 
-            self._session = None
-            self._tts_detector = None
-            self._sdk_acquired = False
-            self._samples_per_frame = None
-            self._uses_nanobind_bindings = krisp_sdk_uses_nanobind_bindings()
-            self._noise_suppression_level = (
-                float(noise_suppression_level)
-                if self._uses_nanobind_bindings
-                else int(noise_suppression_level)
-            )
-            self._frame_duration_ms = frame_duration
-            self._audio_buffer = bytearray()
-            self._filtering = True
+        self._session = None
+        self._tts_detector = None
+        self._sdk_acquired = False
+        self._samples_per_frame = None
+        self._uses_nanobind_bindings = krisp_sdk_uses_nanobind_bindings()
+        self._noise_suppression_level = (
+            float(noise_suppression_level)
+            if self._uses_nanobind_bindings
+            else int(noise_suppression_level)
+        )
+        self._frame_duration_ms = frame_duration
+        self._audio_buffer = bytearray()
+        self._filtering = True
 
-            # TTS detection state (active only when tts_model_path is set)
-            self._tts_threshold = tts_threshold
-            self._tts_detection_timeout = tts_detection_timeout
-            self._tts_detection_active = False
-            self._tts_elapsed_s: float = 0.0
-            self._tts_ever_detected = False
-            self._tts_last_detected_s: float | None = None
-
-        except Exception:
-            # If initialization fails, release the SDK reference
-            KrispVivaSDKManager.release()
-            raise
+        # TTS detection state (active only when tts_model_path is set)
+        self._tts_threshold = tts_threshold
+        self._tts_detection_timeout = tts_detection_timeout
+        self._tts_detection_active = False
+        self._tts_elapsed_s: float = 0.0
+        self._tts_ever_detected = False
+        self._tts_last_detected_s: float | None = None
 
     def _create_session(self, sample_rate: int, frame_duration: int):
         """Create a Krisp session with a specific sample rate.

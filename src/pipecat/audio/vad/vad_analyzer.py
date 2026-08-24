@@ -250,6 +250,8 @@ class VADAnalyzer(ABC):
     async def cleanup(self):
         """Release the analyzer's resources, including the thread it runs the model on.
 
-        This method should be called when the object is no longer needed.
+        Waits for any in-flight ``voice_confidence()`` call to finish. Futures
+        cannot cancel a running native ``process()``; dropping the session
+        while that call is still on the executor races the SDK.
         """
-        self._executor.shutdown(wait=False)
+        await asyncio.to_thread(self._executor.shutdown, wait=True, cancel_futures=True)
