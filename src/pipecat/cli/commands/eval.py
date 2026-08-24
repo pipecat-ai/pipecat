@@ -145,12 +145,12 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
             expanded.append(path)
             continue
 
-        scenario_paths = sorted(path.glob("*.yaml"))
+        scenario_paths = sorted(
+            scenario_path for scenario_path in path.glob("*.yaml") if scenario_path.is_file()
+        )
         if not scenario_paths:
             raise typer.BadParameter(f"No .yaml scenario files found in {path}")
-        expanded.extend(
-            scenario_path for scenario_path in scenario_paths if scenario_path.is_file()
-        )
+        expanded.extend(scenario_paths)
     return expanded
 
 
