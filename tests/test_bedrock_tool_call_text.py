@@ -122,7 +122,7 @@ async def test_bedrock_text_is_preserved_by_default_after_a_tool_call():
 async def test_bedrock_text_after_a_tool_call_can_be_suppressed():
     service = _service(
         [_text("Before."), _tool_start(), _tool_args(), _tool_stop(), _text("After.")],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -135,7 +135,7 @@ async def test_bedrock_text_after_a_tool_call_can_be_suppressed():
 async def test_bedrock_suppression_state_resets_for_the_next_response():
     service = _service(
         [_tool_start(), _tool_args(), _tool_stop(), _text("Suppressed.")],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []

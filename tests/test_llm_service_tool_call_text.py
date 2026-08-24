@@ -70,7 +70,7 @@ async def test_text_is_pushed_when_policy_is_preserve_even_after_detection():
 
 @pytest.mark.asyncio
 async def test_text_is_pushed_when_suppress_but_no_tool_call_detected():
-    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
 
     pushed = await _capture_push(service, lambda: service._push_llm_text("before"))
     assert pushed == ["before"]
@@ -78,7 +78,7 @@ async def test_text_is_pushed_when_suppress_but_no_tool_call_detected():
 
 @pytest.mark.asyncio
 async def test_text_is_dropped_when_suppress_and_tool_call_detected():
-    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     service._note_tool_call_detected()
 
     pushed = await _capture_push(service, lambda: service._push_llm_text("after"))
@@ -87,7 +87,7 @@ async def test_text_is_dropped_when_suppress_and_tool_call_detected():
 
 @pytest.mark.asyncio
 async def test_note_tool_call_detected_sets_the_flag():
-    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     assert service._tool_call_detected is False
     service._note_tool_call_detected()
     assert service._tool_call_detected is True
@@ -95,7 +95,7 @@ async def test_note_tool_call_detected_sets_the_flag():
 
 @pytest.mark.asyncio
 async def test_full_response_start_frame_resets_the_flag():
-    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _LLMService(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     service._note_tool_call_detected()
     assert service._tool_call_detected is True
 

@@ -113,7 +113,7 @@ async def test_text_after_a_tool_call_can_be_suppressed():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -133,7 +133,7 @@ async def test_any_tool_call_delta_starts_suppression():
             ),
             _chunk(content="After an id-only tool delta."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -153,7 +153,7 @@ async def test_parallel_tool_calls_are_unchanged_when_text_is_suppressed():
             ),
             _chunk(content="After."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -171,7 +171,7 @@ async def test_suppression_state_resets_for_the_next_response():
             _chunk(tool_calls=[_tool_call()]),
             _chunk(content="Suppressed."),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []
@@ -206,7 +206,7 @@ async def test_policy_can_be_updated_between_responses():
     assert pushed == ["After."]
 
     await service._update_settings(
-        OpenAILLMService.Settings(tool_call_text_policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+        OpenAILLMService.Settings(tool_call_text_policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     )
     service.get_chat_completions = AsyncMock(return_value=_FakeStream(chunks))
     pushed = await _run_and_collect(service, _context())
@@ -218,7 +218,7 @@ async def test_policy_can_be_updated_between_responses():
     "policy",
     [
         ToolCallTextPolicy.PRESERVE,
-        ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     ],
 )
 async def test_tool_call_takes_precedence_over_content_in_the_same_delta(policy):

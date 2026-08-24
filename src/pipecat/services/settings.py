@@ -63,12 +63,12 @@ class ToolCallTextPolicy(StrEnum):
 
     Parameters:
         PRESERVE: Preserve streamed text before and after tool-call detection.
-        SUPPRESS_AFTER_TOOL_CALL: Preserve text before tool-call detection and suppress
+        SUPPRESS_AFTER_TOOL_CALL_DETECTED: Preserve text before tool-call detection and suppress
             subsequent text in the same response.
     """
 
     PRESERVE = "preserve"
-    SUPPRESS_AFTER_TOOL_CALL = "suppress_after_tool_call"
+    SUPPRESS_AFTER_TOOL_CALL_DETECTED = "suppress_after_tool_call_detected"
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ class LLMSettings(ServiceSettings):
                 be removed in 2.0.0.
         tool_call_text_policy: Policy for text emitted in the same response as a
             tool call. ``PRESERVE`` keeps streamed text before and after
-            tool-call detection; ``SUPPRESS_AFTER_TOOL_CALL`` keeps text before
+            tool-call detection; ``SUPPRESS_AFTER_TOOL_CALL_DETECTED`` keeps text before
             the first tool call and suppresses subsequent text in the same
             response. Set to ``None`` for services that don't stream
             TTS-bound text (e.g. realtime speech-to-speech services).

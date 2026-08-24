@@ -132,7 +132,7 @@ async def test_google_text_after_a_tool_call_can_be_suppressed():
             _chunk([_text_part("Before."), _function_call_part()]),
             _chunk([_text_part("After.")]),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed = await _run_and_collect(service, _context())
@@ -148,7 +148,7 @@ async def test_google_suppression_state_resets_for_the_next_response():
             _chunk([_function_call_part()]),
             _chunk([_text_part("Suppressed.")]),
         ],
-        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL,
+        policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED,
     )
 
     pushed: list[str] = []

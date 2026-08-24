@@ -749,14 +749,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Text is suppressed once a tool call has been detected in the current
         response when ``tool_call_text_policy`` is
-        :attr:`ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL`. Providers signal
+        :attr:`ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED`. Providers signal
         detection via :meth:`_note_tool_call_detected`.
 
         Args:
             text: The text content from the LLM to push.
         """
         if (
-            self._settings.tool_call_text_policy == ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL
+            self._settings.tool_call_text_policy == ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED
             and self._tool_call_detected
         ):
             return

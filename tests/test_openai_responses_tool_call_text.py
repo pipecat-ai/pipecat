@@ -151,7 +151,7 @@ async def test_responses_text_is_preserved_by_default_around_a_tool_call():
 
 @pytest.mark.asyncio
 async def test_responses_text_after_a_tool_call_can_be_suppressed():
-    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     pushed = await _run_and_collect(
         service,
         [
@@ -169,7 +169,7 @@ async def test_responses_text_after_a_tool_call_can_be_suppressed():
 
 @pytest.mark.asyncio
 async def test_responses_suppression_state_resets_for_the_next_response():
-    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL)
+    service = _service(policy=ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED)
     pushed: list[str] = []
 
     async def fake_push(self_, frame, direction=FrameDirection.DOWNSTREAM):
