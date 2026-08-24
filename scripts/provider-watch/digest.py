@@ -163,7 +163,8 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         "the item to identify it, one decision per line — e.g. `deepgram/stt, diarize_model: skip, "
         "the extra= workaround is fine` or `openai/realtime, tool_choice: tracked in #5400, stop reporting`. "
         "Fixes need no comment: the next run sees the code change. It reads these comments for "
-        "everything it cannot see — won't do, later, tracked elsewhere.",
+        "everything it cannot see — won't do, later, tracked elsewhere — and records each "
+        "decision in the unit's `decisions.md`, beside its reports.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -175,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--highlights", type=Path, help="Markdown inserted under the title")
     parser.add_argument(
         "--repo-url",
-        default="https://github.com/pipecat-ai/provider-watch",
+        default="https://github.com/pipecat-ai/provider-watch-reports",
         help="link base; empty for plain names",
     )
     parser.add_argument("--out", type=Path, help="write here instead of stdout")

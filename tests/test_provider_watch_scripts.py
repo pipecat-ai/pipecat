@@ -196,7 +196,7 @@ class TestDigest:
             "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
             in text.split("## Nothing new")[1]
         )
-        assert text.rstrip().endswith("won't do, later, tracked elsewhere.")
+        assert text.rstrip().endswith("decision in the unit's `decisions.md`, beside its reports.")
 
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
@@ -293,7 +293,7 @@ class TestPublish:
             if args[:3] == ("gh", "issue", "list"):
                 return "[]"
             if args[:3] == ("gh", "issue", "create"):
-                return "https://github.com/pipecat-ai/provider-watch/issues/1\n"
+                return "https://github.com/pipecat-ai/provider-watch-reports/issues/1\n"
             return ""
 
         def ok(self, *args, cwd=None):
@@ -340,7 +340,7 @@ class TestPublish:
             sh=sh,
             repo_root=tmp_path,
             pipecat_repo="pipecat-ai/pipecat",
-            reports_repo="pipecat-ai/provider-watch",
+            reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
             cap=1,
         )

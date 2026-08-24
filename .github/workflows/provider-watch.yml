@@ -1,7 +1,7 @@
 name: Provider watch
 
 # Weekly provider research: runs the /provider-watch skill, which researches
-# every service unit, writes reports to pipecat-ai/provider-watch, opens draft
+# every service unit, writes reports to pipecat-ai/provider-watch-reports, opens draft
 # PRs here for clear-cut updates, and files a digest issue on the reports repo.
 
 on:
@@ -50,7 +50,7 @@ jobs:
           owner: pipecat-ai
           repositories: |
             pipecat
-            provider-watch
+            provider-watch-reports
 
       - name: Checkout pipecat
         uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
       - name: Checkout reports
         uses: actions/checkout@v4
         with:
-          repository: pipecat-ai/provider-watch
+          repository: pipecat-ai/provider-watch-reports
           token: ${{ steps.app-token.outputs.token }}
           path: _reports
 
@@ -138,7 +138,7 @@ jobs:
             including its "Unattended runs" section. The reports repo is checked
             out at `./_reports` on `main`; `gh` is authenticated with a token
             that can push to pipecat-ai/pipecat branches, open pull requests
-            there, and push/open issues on pipecat-ai/provider-watch. Use
+            there, and push/open issues on pipecat-ai/provider-watch-reports. Use
             `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
 
             Without `--publish` this is a dry run: write reports into

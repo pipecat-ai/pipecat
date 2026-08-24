@@ -35,11 +35,6 @@ prs:                                       # see below
   - branch: provider-watch/cartesia-tts-sonic-4
     state: branch
     summary: Default CartesiaTTSService to sonic-4
-decided:                                   # things the team said not to do, defer, or track elsewhere
-  - item: Add a `pronunciation` Settings field
-    decision: wontfix — covered by pronunciation_dict_id
-    source: https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1
-    date: 2026-08-13
 error: null                                # or one line: why the unit could not be researched
 ---
 ```
@@ -50,7 +45,7 @@ error: null                                # or one line: why the unit could not
   - `medium` — a capability users plausibly want that the service cannot express: a missing `Settings` field, a model an allowlist blocks, an SDK pin behind the provider's current major.
   - `low` — hygiene: naming, docs that live in another repo, preview-only models to re-check, enum cleanup.
 - `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
-- `decided` carries forward from the previous report and grows from digest-issue comments and closed PRs. A decided item is not a gap. A decision with a revisit date ("later — revisit in Q4") becomes a gap again once the date passes.
+- An item covered by a decision in force (see "The decisions file" below) is not a gap and does not appear in the report.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
 
 ## Body
@@ -69,9 +64,6 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 ### To consider
 - **Emotion controls** (medium, since 2026-08-06) — Cartesia's `emotion` request field is not reachable from `Settings`; a field plus a pass-through in `_build_request` would do it, but check whether every sonic-4 voice supports it.
 
-### Decided
-- Add a `pronunciation` field — wontfix, covered by `pronunciation_dict_id` ([comment](https://github.com/pipecat-ai/provider-watch/issues/12#issuecomment-1), 2026-08-13)
-
 ## Verification
 
 | model     | class              | ok | latency                          | note |
@@ -86,9 +78,29 @@ One-line verdict, e.g. "Sonic 4 should replace sonic-3.5 as the default; branch 
 
 Guidance:
 
-- Lead with what a maintainer needs to decide or review; details after. Every gap appears exactly once, under the bucket matching its `action`, "To consider" items ordered high → medium → low with the priority in the lead-in; decided items appear only under "Decided", in one line each.
+- Lead with what a maintainer needs to decide or review; details after. Every gap appears exactly once, under the bucket matching its `action`, "To consider" items ordered high → medium → low with the priority in the lead-in.
 - A branch line under "PRs" must use exactly the form ``- `<branch>` — review: `git show <branch>` — <summary>``; `publish.py` rewrites that prefix to the PR URL once the PR exists. A PR found during dedupe is listed by URL.
 - The Verification table lists every probe that ran, including failures and the current default when you compared against it. Quote TTFAT (and thinking time) for LLMs and TTFB otherwise, as `probe.py` reports them.
 - "Sources" is one line per page, endpoint, spec and SDK you relied on and what it told you; the next researcher starts from it.
 - Frontmatter is YAML: quote any value that starts with a backtick, `*`, `&`, `[`, `{`, `#`, `|`, `>`, `%`, `@` or contains `: ` — e.g. `note: "`extra` covers it"` — or the report fails to parse and is listed as an error.
 - Never include credentials, `Authorization` headers, or raw provider error dumps that could contain them.
+
+## The decisions file
+
+`reports/<provider>/<unit-suffix>/decisions.md` sits beside the unit's dated reports and holds
+the decisions currently in force — the reason a known gap is not listed in the report. One
+bullet per decision:
+
+```markdown
+# Decisions — cartesia/tts
+
+- Add a `pronunciation` Settings field — wontfix, covered by `pronunciation_dict_id` ([comment](https://github.com/pipecat-ai/provider-watch-reports/issues/12#issuecomment-1), 2026-08-13)
+- Expose `flush_id` — later, revisit after 2026-11-01 ([comment](https://github.com/pipecat-ai/provider-watch-reports/issues/14#issuecomment-2), 2026-08-20)
+```
+
+- Append an entry when a digest-issue comment or a closed-unmerged PR decides an item: the item
+  as the report named it, the decision in the commenter's words, and the comment or PR as the
+  linked source, with the date.
+- Delete an entry when it stops being in force — its revisit date has passed (the item is a gap
+  again) or a code change made it moot. Git history is the archive; the file holds only what
+  currently applies.

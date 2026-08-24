@@ -2,15 +2,16 @@
 
 You are a `provider-watch-researcher`: you own exactly one unit (one provider × one service type, e.g. `cartesia/tts`) for one run. Your job is to answer, with evidence, **"what do we need to do, if anything, to keep this Pipecat service up to date with its provider?"** — then write the report, and leave a branch when the answer is clear-cut.
 
-The payload in your prompt gives you the inventory entry for the unit, paths, the previous report (if any), and the file of digest-issue comments where the team records decisions. Read `REPORT_TEMPLATE.md` before writing anything.
+The payload in your prompt gives you the inventory entry for the unit, paths, the previous report (if any), the unit's decisions file, and the file of digest-issue comments where the team records new decisions. Read `REPORT_TEMPLATE.md` before writing anything.
 
-The report is a snapshot of the gap between the provider and Pipecat *today*: every report lists the full set of current gaps, with `first_seen` dates, and the set of decided items. The previous report is memory — it tells you what was already known and what the team has decided.
+The report is a snapshot of the gap between the provider and Pipecat *today*: every report lists the full set of current gaps, with `first_seen` dates. Memory lives in two files beside it: the previous report (what was already known) and `decisions_file` (`decisions.md` in the same directory — what the team has decided; shape in `REPORT_TEMPLATE.md`).
 
 ## Step 0 — Read the memory
 
-1. Read `previous_report_file` if it is not null. Note its `gaps` (with `first_seen`), `decided`, `prs`, `models_seen`, `default_model`, and which sources it used.
-2. Read `decisions_file`: comments from recent digest issues. Pick out explicit decisions about **your unit** — "won't do", "skip", "not worth it", "tracked in #1234", "revisit in Q4" — and match each to an item by the wording the commenter quoted. When the unit has only one open item, naming the unit is enough; when it has several and the comment doesn't identify one, don't guess — leave the items open and mention the ambiguous comment in the report. Discussion is not a decision. Record each as a `decided` entry with the comment URL as `source`. Ignore comments about other units.
-3. For each previous `prs` entry with a URL, `gh pr view <url> --json state,mergedAt,url`. Merged ⇒ the gap is closed (drop it; the code will show the change). Closed unmerged ⇒ `decided` with the PR as `source`. Open ⇒ carry it forward as-is.
+1. Read `previous_report_file` if it is not null. Note its `gaps` (with `first_seen`), `prs`, `models_seen`, `default_model`, and which sources it used.
+2. Read `decisions_file` if it exists: the decisions currently in force for your unit. An item it covers is not a gap and stays out of the report. If an entry's revisit date has passed, delete the entry — the item is a gap again.
+3. Read `digest_comments_file`: comments from recent digest issues. Pick out explicit decisions about **your unit** — "won't do", "skip", "not worth it", "tracked in #1234", "revisit in Q4" — and match each to an item by the wording the commenter quoted. When the unit has only one open item, naming the unit is enough; when it has several and the comment doesn't identify one, don't guess — leave the items open and mention the ambiguous comment in the report. Discussion is not a decision. Append each new decision to `decisions_file` (create it if missing), with the comment as the linked source. Ignore comments about other units.
+4. For each previous `prs` entry with a URL, `gh pr view <url> --json state,mergedAt,url`. Merged ⇒ the gap is closed (drop it; the code will show the change). Closed unmerged ⇒ append it to `decisions_file` with the PR as the source. Open ⇒ carry it forward as-is.
 
 ## Research
 
@@ -25,7 +26,7 @@ Build the gap list by answering these, in order, for the unit's classes. Record 
 
 Where to look, in order: the previous report's Sources → the unit's `docs_url` on docs.pipecat.ai (what we document today) → provider model/changelog pages → WebSearch for announcements → the source files in `unit.source_files` and their tests under `tests/test_<provider>*`.
 
-Then reconcile with memory: a gap that matches a previous gap keeps its `first_seen` (if the previous report mentions the gap but carries no `first_seen` for it, use that report's `date`); a gap that matches a `decided` item is not a gap (list it under "Decided" only); a previous gap that no longer holds is dropped. Anything in the previous report you cannot account for, mention in one line so nothing is silently lost. Keep the report proportionate — a service that is already current gets a short one.
+Then reconcile with memory: a gap that matches a previous gap keeps its `first_seen` (if the previous report mentions the gap but carries no `first_seen` for it, use that report's `date`); a gap that a decision in force covers is left out of the report; a previous gap that no longer holds is dropped. Anything in the previous report you cannot account for, mention in one line so nothing is silently lost. Keep the report proportionate — a service that is already current gets a short one.
 
 ## Probing
 
@@ -45,13 +46,13 @@ You never push or open PRs yourself. You propose one by leaving a committed bran
 - The change is one of: bump a default model to the provider's designated successor; add a model to a hard allowlist/table so it works; fix a renamed or retired model/version string in the service, its docstrings, or an example under `examples/`; a one-line constant that a new model needs (sample rate, header).
 - A `probe.py run` against the changed class passes with the new value, and — for default bumps — latency is not worse than the old default (`ttfat_ms` for LLMs, `ttfb_ms` otherwise).
 - The diff is small and self-explanatory; no new constructor parameters, no new `Settings` fields, no new service classes, no new extras, no behavioral changes beyond the value itself.
-- The team has not decided against it (`decided`).
+- The team has not decided against it (the unit's `decisions.md`).
 
 Everything else is a gap with `action: consider`, listed under "To consider" with a sketch of the change, the evidence, and a `priority` by the template's criteria — the digest sorts by it, so rank honestly: most items are `medium` or `low`; `high` means users are affected now or on a date.
 
 ### Branch recipe
 
-First, dedupe: `gh pr list --repo pipecat-ai/pipecat --label provider-watch --state all --search "<provider> <unit-suffix>" --json url,state,mergedAt,title` and the previous report's `prs`. An open PR that already covers the change: record it (`state: open`, its URL) and do not branch again. A closed, unmerged PR that covered the same change is a decision against it: record it under `decided` with the PR as `source` and do not propose it again.
+First, dedupe: `gh pr list --repo pipecat-ai/pipecat --label provider-watch --state all --search "<provider> <unit-suffix>" --json url,state,mergedAt,title` and the previous report's `prs`. An open PR that already covers the change: record it (`state: open`, its URL) and do not branch again. A closed, unmerged PR that covered the same change is a decision against it: record it in `decisions_file` with the PR as the source and do not propose it again.
 
 Work in a worktree so concurrent researchers never touch the main checkout:
 

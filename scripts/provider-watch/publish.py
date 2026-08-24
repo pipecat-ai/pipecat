@@ -203,7 +203,10 @@ def publish_prs(
 
 def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
     """Commit and push ``reports/`` and ``digests/``; returns whether anything was pushed."""
-    sh.run("git", "add", "-A", "reports", "digests", cwd=reports_dir, check=False)
+    present = [d for d in ("reports", "digests") if (reports_dir / d).is_dir()]
+    if not present:
+        return False
+    sh.run("git", "add", "-A", *present, cwd=reports_dir, check=False)
     if sh.ok("git", "diff", "--cached", "--quiet", cwd=reports_dir):
         return False
     sh.run("git", "commit", "-q", "-m", f"provider-watch: {date}", cwd=reports_dir)
@@ -296,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "--repo-root", type=Path, default=REPO_ROOT, help="pipecat checkout holding the branches"
     )
     parser.add_argument("--pipecat-repo", default="pipecat-ai/pipecat")
-    parser.add_argument("--reports-repo", default="pipecat-ai/provider-watch")
+    parser.add_argument("--reports-repo", default="pipecat-ai/provider-watch-reports")
     parser.add_argument("--pr-cap", type=int, default=DEFAULT_PR_CAP, help="max PRs opened per run")
     parser.add_argument(
         "--finalize", action="store_true", help="also render the digest and open/update the issue"
