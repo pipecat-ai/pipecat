@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     OutputTransportMessageUrgentFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
 )
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
-_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
+_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame, PipelineFlushFrame)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
@@ -100,8 +101,10 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             await self.push_frame(frame, direction)
             return
 
-        # Urgent transport frames pass through directly. They need to
-        # reach the transport even when no child worker is active yet.
+        # Frames that belong to this pipeline rather than to a peer: urgent
+        # transport frames have to reach the transport even with no peer
+        # active, and a flush probe is asking about this pipeline, so it
+        # continues to the sink that answers it.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
