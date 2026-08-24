@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
@@ -27,6 +28,7 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETION_INSTRUCTIONS,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
+    IncompleteType,
     TurnMarker,
     UserTurnCompletionConfig,
     UserTurnCompletionLLMServiceMixin,
@@ -312,9 +314,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertTrue(processor._user_turn_completion_voiced)
 
         # The user resumes speaking within the same still-open turn (no new
-        # UserStartedSpeakingFrame, since the turn never closed).
+        # UserStartedSpeakingFrame, since the turn never closed), then pauses.
         with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
             await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         # A second, legitimate inference completes once the user pauses again.
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Second answer")
@@ -322,6 +325,53 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(texts, ["First answer", "Second answer"])
+
+    async def test_complete_while_user_speaking_is_treated_as_incomplete(self):
+        """A ✓ that resolves while VAD hears the user is stale and handled as ○.
+
+        Sequence: an inference is triggered, the user resumes speaking before it
+        resolves, then the LLM answers ✓. The controller would refuse to close
+        the turn (user still speaking), and no interruption can fire inside an
+        already-open turn, so voicing the response would talk over the user
+        with no way to stop it. Instead: no text, no completion broadcast, a ○
+        marker in context, and the short re-prompt timeout armed.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+        processor._start_incomplete_timeout = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Stale answer")
+        # Any continuation of the stale response stays suppressed.
+        await processor._push_turn_text(" and more")
+
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        self.assertEqual(
+            [f for f in pushed_frames if isinstance(f, UserTurnInferenceCompletedFrame)], []
+        )
+        marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
+        self.assertEqual(len(marker_frames), 1)
+        self.assertEqual(marker_frames[0].marker, USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertTrue(marker_frames[0].append_to_context_immediately)
+        self.assertEqual(processor._turn_marker, TurnMarker.INCOMPLETE)
+        self.assertFalse(processor._user_turn_completion_voiced)
+        processor._start_incomplete_timeout.assert_awaited_once_with(IncompleteType.SHORT)
+
+        # Once the user pauses, the next ✓ is voiced normally.
+        await processor._turn_reset()
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        pushed_frames.clear()
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Real answer")
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)], ["Real answer"]
+        )
 
     async def test_function_call_resets_completion_latch(self):
         """A FunctionCallsStartedFrame lets the post-tool inference voice a completion.
