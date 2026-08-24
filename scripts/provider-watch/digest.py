@@ -164,7 +164,8 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         "the extra= workaround is fine` or `openai/realtime, tool_choice: tracked in #5400, stop reporting`. "
         "Fixes need no comment: the next run sees the code change. It reads these comments for "
         "everything it cannot see — won't do, later, tracked elsewhere — and records each "
-        "decision in the unit's `decisions.md`, beside its reports.",
+        "decision in the unit's `decisions.md`, beside its reports."
+        + (f" Full triage workflow: the [README]({repo_url}#the-weekly-loop)." if repo_url else ""),
     ]
     return "\n".join(lines).rstrip() + "\n"
 

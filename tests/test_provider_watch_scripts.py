@@ -196,7 +196,7 @@ class TestDigest:
             "[groq/llm](https://x/y/blob/main/reports/groq/llm/2026-08-20.md)"
             in text.split("## Nothing new")[1]
         )
-        assert text.rstrip().endswith("decision in the unit's `decisions.md`, beside its reports.")
+        assert text.rstrip().endswith("#the-weekly-loop).")
 
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
