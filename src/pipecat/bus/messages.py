@@ -40,6 +40,8 @@ class BusMessage:
     delivered ahead of queued data messages).
 
     Parameters:
+        id: Unique identifier for the message instance.
+        name: Human-readable name combining class name and instance count.
         source: Name of the worker or component that sent this message.
         target: Name of the intended recipient worker, or None for broadcast.
     """

@@ -295,9 +295,7 @@ class LLMWorker(PipelineWorker):
         return wrapper
 
     async def _flush_deferred_frames(self) -> None:
-        # Wait until the function result frame is really processed. flush_pipeline
-        # injects the probe straight into the pipeline, bypassing our queue_frame
-        # deferral override.
+        # Wait until the function result frame is really processed.
         await self.flush_pipeline()
 
         frames = list(self._deferred_frames)
