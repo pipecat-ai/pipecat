@@ -373,6 +373,14 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "gandr_tts": (
+        "GandrTTSService(\n"
+        '        api_key=os.getenv("GANDR_API_KEY"),\n'
+        "        params=GandrTTSService.InputParams(\n"
+        '            voice_id=os.getenv("GANDR_VOICE_ID", "gandr-mia"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cartesia_tts": (
         "CartesiaTTSService(\n"
         '        api_key=os.getenv("CARTESIA_API_KEY"),\n'

@@ -38,6 +38,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-bland-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-gandr.py
+    scenarios: [capital_question]
   - bot: voice/voice-camb.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia.py

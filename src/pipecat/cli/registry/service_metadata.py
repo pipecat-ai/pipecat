@@ -737,6 +737,14 @@ class ServiceRegistry:
             param_defaults={"voice": "2f29fdbb-c55e-4add-9c7c-93437ebf379d"},
         ),
         ServiceDefinition(
+            value="gandr_tts",
+            label="Gandr",
+            package="pipecat-ai[gandr]",
+            class_name=["GandrTTSService"],
+            env_prefix="GANDR",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="cartesia_tts",
             label="Cartesia",
             package="pipecat-ai[cartesia]",
