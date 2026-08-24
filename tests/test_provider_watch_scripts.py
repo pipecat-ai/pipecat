@@ -269,10 +269,11 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(self, open_prs=None, branches=None):
+        def __init__(self, open_prs=None, branches=None, commits=None):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
+            self.commits = commits or {}  # branch -> [(subject, body), ...]
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
@@ -284,7 +285,14 @@ class TestPublish:
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
+            if args[:2] == ("git", "rev-list"):
+                branch = args[-1].split("..")[-1]
+                return "\n".join(f"{branch}@{i}" for i in range(len(self.commits.get(branch, ()))))
             if args[:2] == ("git", "log"):
+                ref, _, index = args[-1].rpartition("@")
+                if ref in self.commits:
+                    subject, body = self.commits[ref][int(index)]
+                    return (subject if "--format=%s" in args else body) + "\n"
                 return (
                     "Default FireworksLLMService to gpt-oss-120b\n"
                     if "--format=%s" in args
@@ -364,6 +372,44 @@ class TestPublish:
         assert "--draft" in create and "--label" in create
         assert create[create.index("--title") + 1] == "Default FireworksLLMService to gpt-oss-120b"
         assert "reports/fireworks/llm/2026-08-20.md" in create[create.index("--body") + 1]
+
+    def test_multi_commit_branch_stitches_pr(self, tmp_path):
+        import publish
+
+        branch = "provider-watch/cartesia-tts-updates"
+        path = tmp_path / "reports/cartesia/tts/2026-08-20.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
+            f"    state: branch\n    summary: Track Cartesia's sonic-4 rollout\n---\n\n"
+            f"# R\n\n## PRs\n- `{branch}` — review: `git show {branch}` — s\n"
+        )
+        sh = self.FakeShell(
+            branches=[branch],
+            commits={
+                branch: [
+                    ("Default CartesiaTTSService to sonic-4", "Sonic body."),
+                    ("Fix the retired sonic-2 in the eval fallback", "Eval body."),
+                ]
+            },
+        )
+        reports = publish.load_reports(tmp_path, "2026-08-20")
+        outcome = publish.publish_prs(
+            reports,
+            sh=sh,
+            repo_root=tmp_path,
+            pipecat_repo="pipecat-ai/pipecat",
+            reports_repo="pipecat-ai/provider-watch-reports",
+            date="2026-08-20",
+            cap=8,
+        )
+        assert len(outcome.opened) == 1
+        create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
+        assert create[create.index("--title") + 1] == "Track Cartesia's sonic-4 rollout"
+        body = create[create.index("--body") + 1]
+        assert "## Default CartesiaTTSService to sonic-4\n\nSonic body." in body
+        assert "## Fix the retired sonic-2 in the eval fallback\n\nEval body." in body
+        assert body.index("sonic-4") < body.index("retired sonic-2")
 
     def test_second_pass_is_a_no_op(self, reports_dir):
         tmp_path, publish = reports_dir

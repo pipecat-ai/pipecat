@@ -41,7 +41,7 @@ Probes cost real money on real accounts: at most a few calls per model, no retri
 
 ## When to propose a PR
 
-You never push or open PRs yourself. You propose one by leaving a committed branch in the repo; the orchestrator publishes it (or, on a dry run, the maintainer reviews the branch locally). Propose a PR — at most one per unit per run — when **all** of these hold:
+You never push or open PRs yourself. You propose one by leaving a committed branch in the repo; the orchestrator publishes it (or, on a dry run, the maintainer reviews the branch locally). Propose at most one PR per unit per run — a single branch carrying every qualifying change, one commit per independent item (a default bump and an unrelated retired example string are two commits). A change qualifies when **all** of these hold:
 
 - The change is one of: bump a default model to the provider's designated successor; add a model to a hard allowlist/table so it works; fix a renamed or retired model/version string in the service, its docstrings, or an example under `examples/`; a one-line constant that a new model needs (sample rate, header).
 - A `probe.py run` against the changed class passes with the new value, and — for default bumps — latency is not worse than the old default (`ttfat_ms` for LLMs, `ttfb_ms` otherwise).
@@ -69,13 +69,13 @@ fi
 cd <scratch_dir>/wt-<provider>-<unit-suffix>
 ```
 
-In the worktree:
+In the worktree, cycling steps 1–4 once per item:
 
-1. Make the change. Update the docstring `Defaults to "..."` text and any test fixtures that pin the old value. If you resumed an existing branch, check whether the change is already there before editing.
-2. Add a changelog fragment `changelog/+<short-slug>.changed.md` (or `.fixed.md`) — one line, user-facing, per `CONTRIBUTING.md`: `- \`CartesiaTTSService\` now defaults to \`sonic-4\`, Cartesia's successor to \`sonic-3.5\`.`
+1. Make the item's change. Update the docstring `Defaults to "..."` text and any test fixtures that pin the old value. If you resumed an existing branch, check whether the change is already there before editing.
+2. Add the item's changelog fragment `changelog/+<short-slug>.changed.md` (or `.fixed.md`) — one line, user-facing, per `CONTRIBUTING.md`: `- \`CartesiaTTSService\` now defaults to \`sonic-4\`, Cartesia's successor to \`sonic-3.5\`.`
 3. Lint and test with the main checkout's environment: `<repo_root>/.venv/bin/python -m ruff format . && <repo_root>/.venv/bin/python -m ruff check . && <repo_root>/.venv/bin/python -m pytest tests/test_<provider>*.py -q` (pytest's `pythonpath = ["src"]` makes the worktree's sources win over the installed package).
-4. Commit — one commit. The message becomes the PR: the subject is the PR title (imperative, e.g. `Default CartesiaTTSService to sonic-4`); the body is the PR description — what the code does now and why, citing the provider's statement, written per AGENTS.md "Writing for Future Readers". Put the probe evidence in the report, not the commit; the PR links to the report. No trailers.
-5. Stop. Do not push, do not run `gh pr create`. Record the branch in the report's `prs` as `{branch: <BRANCH>, state: branch, summary: <one line>}`, the gap with `action: pr`, and the branch line under "PRs" in the form the template shows.
+4. Commit — one commit per independent item, its changelog fragment included. Each message documents its item: an imperative subject (e.g. `Default CartesiaTTSService to sonic-4`) and a body saying what the code does now and why, citing the provider's statement, per AGENTS.md "Writing for Future Readers". The branch becomes the PR: a single commit verbatim (subject = title, body = description); with several commits the PR title is the `prs` entry's `summary` and the body stitches the messages, one section per commit — so write the summary to cover the set. Put the probe evidence in the report, not the commits; the PR links to the report. No trailers.
+5. Stop. Do not push, do not run `gh pr create`. Record the branch in the report's `prs` as `{branch: <BRANCH>, state: branch, summary: <one line covering everything on the branch>}`, the gap with `action: pr`, and the branch line under "PRs" in the form the template shows.
 
 ## Writing the report
 

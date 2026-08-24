@@ -17,7 +17,9 @@ PR URL are left alone, and the digest issue is edited rather than duplicated.
 For each report whose ``prs`` list has an entry in ``state: branch``:
 
 1. push the branch and open a draft PR (title and body from the branch's
-   commit message, plus a link to the report), subject to the per-run cap;
+   commit messages — a single commit verbatim, several stitched with the
+   report's summary as the title — plus a link to the report), subject to
+   the per-run cap;
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
@@ -116,10 +118,32 @@ def _open_pr_for_branch(sh: Shell, repo: str, branch: str) -> str | None:
     return prs[0]["url"] if prs else None
 
 
-def _commit_message(sh: Shell, repo_root: Path, branch: str) -> tuple[str, str]:
-    subject = sh.run("git", "log", "-1", "--format=%s", branch, cwd=repo_root).strip()
-    body = sh.run("git", "log", "-1", "--format=%b", branch, cwd=repo_root).strip()
-    return subject, body
+def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tuple[str, str]:
+    """PR title and body from the branch's commits (one commit per item).
+
+    A single commit becomes the PR verbatim; several are stitched into one body,
+    one section per commit oldest-first, titled by the report's summary for the
+    branch.
+    """
+    base = (
+        "origin/main"
+        if sh.ok("git", "rev-parse", "--verify", "--quiet", "origin/main", cwd=repo_root)
+        else "main"
+    )
+    hashes = sh.run("git", "rev-list", "--reverse", f"{base}..{branch}", cwd=repo_root).split()
+    if not hashes:
+        hashes = [branch]
+    commits = [
+        (
+            sh.run("git", "log", "-1", "--format=%s", h, cwd=repo_root).strip(),
+            sh.run("git", "log", "-1", "--format=%b", h, cwd=repo_root).strip(),
+        )
+        for h in hashes
+    ]
+    if len(commits) == 1:
+        return commits[0]
+    body = "\n\n".join(f"## {s}\n\n{b}".rstrip() for s, b in commits)
+    return summary.strip() or commits[-1][0], body
 
 
 def publish_prs(
@@ -161,7 +185,7 @@ def publish_prs(
                 continue
             else:
                 sh.run("git", "push", "-u", "origin", branch, cwd=repo_root)
-                subject, body = _commit_message(sh, repo_root, branch)
+                subject, body = _pr_title_body(sh, repo_root, branch, str(pr.get("summary") or ""))
                 report_path = report.path.relative_to(report.path.parents[3]).as_posix()
                 pr_body = f"{body}\n\n## Report\n\nhttps://github.com/{reports_repo}/blob/main/{report_path}".strip()
                 url = (
