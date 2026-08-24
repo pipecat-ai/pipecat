@@ -438,9 +438,7 @@ async def test_gandr_tts_missing_completion_frame_times_out():
     """An utterance whose closing frame never arrives fails instead of hanging."""
     captured: dict = {"messages": []}
 
-    async with serve(
-        _ws_server_handler(captured, send_completion=False), "127.0.0.1", 0
-    ) as server:
+    async with serve(_ws_server_handler(captured, send_completion=False), "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
 
         tts = GandrTTSService(
@@ -498,9 +496,7 @@ async def test_gandr_tts_long_text_is_split_untruncated():
 @pytest.mark.asyncio
 async def test_gandr_tts_interruption_drops_queued_and_abandons_inflight():
     """Barge-in empties the outbox and abandons the render on the wire."""
-    tts = GandrTTSService(
-        api_key="test-key", sample_rate=24000, reconnect_on_interruption=False
-    )
+    tts = GandrTTSService(api_key="test-key", sample_rate=24000, reconnect_on_interruption=False)
     tts._reconnect = AsyncMock()
     websocket = AsyncMock()
     tts._websocket = websocket

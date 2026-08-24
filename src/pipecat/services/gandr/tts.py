@@ -31,11 +31,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, field_validator
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -46,15 +50,10 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.gandr._text import MAX_REQUEST_CHARS, split_for_request
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-from pipecat.services.gandr._text import MAX_REQUEST_CHARS, split_for_request
-
-from websockets.asyncio.client import ClientConnection, connect as websocket_connect
-from websockets.protocol import State
-
 
 #: Default streaming endpoint.
 DEFAULT_WS_URL = "wss://tts.gandr.ai/ws"
@@ -85,7 +84,7 @@ class _Utterance:
     context_id: str
     is_final: bool
     done: asyncio.Event = field(default_factory=asyncio.Event)
-    error: Optional[str] = None
+    error: str | None = None
     needs_voice: bool = False
     busy: bool = False
     abandoned: bool = False
@@ -123,19 +122,19 @@ class GandrTTSService(WebsocketTTSService):
                 registers the voice for that connection.
         """
 
-        voice_id: Optional[str] = "gandr-mia"
-        language: Optional[str] = "en"
-        sample_rate: Optional[int] = None
-        speed: Optional[float] = None
-        volume: Optional[float] = None
-        temperature: Optional[float] = None
-        cfg_weight: Optional[float] = None
-        seed: Optional[int] = None
-        voice_wav_b64: Optional[str] = None
+        voice_id: str | None = "gandr-mia"
+        language: str | None = "en"
+        sample_rate: int | None = None
+        speed: float | None = None
+        volume: float | None = None
+        temperature: float | None = None
+        cfg_weight: float | None = None
+        seed: int | None = None
+        voice_wav_b64: str | None = None
 
         @field_validator("voice_id")
         @classmethod
-        def validate_voice_id(cls, v: Optional[str]) -> Optional[str]:
+        def validate_voice_id(cls, v: str | None) -> str | None:
             """Reject a blank voice id.
 
             An empty string is not the same as omitting the field: omitted
@@ -149,7 +148,7 @@ class GandrTTSService(WebsocketTTSService):
 
         @field_validator("language")
         @classmethod
-        def validate_language(cls, v: Optional[str]) -> Optional[str]:
+        def validate_language(cls, v: str | None) -> str | None:
             """Reject a blank language tag.
 
             Same reasoning as voice_id. Note the door takes BARE two-letter
@@ -164,7 +163,7 @@ class GandrTTSService(WebsocketTTSService):
 
         @field_validator("sample_rate")
         @classmethod
-        def validate_sample_rate(cls, v: Optional[int]) -> Optional[int]:
+        def validate_sample_rate(cls, v: int | None) -> int | None:
             """Restrict to the rates the service actually serves.
 
             An unsupported rate is worth catching here rather than at the
@@ -173,14 +172,12 @@ class GandrTTSService(WebsocketTTSService):
             reads as a voice-quality problem rather than a config one.
             """
             if v is not None and v not in SAMPLE_RATES:
-                raise ValueError(
-                    f"sample_rate must be one of {list(SAMPLE_RATES)}, got {v}"
-                )
+                raise ValueError(f"sample_rate must be one of {list(SAMPLE_RATES)}, got {v}")
             return v
 
         @field_validator("speed")
         @classmethod
-        def validate_speed(cls, v: Optional[float]) -> Optional[float]:
+        def validate_speed(cls, v: float | None) -> float | None:
             """Bound speed to 0.6-1.5.
 
             Outside that range the engine still renders, and the result is
@@ -194,7 +191,7 @@ class GandrTTSService(WebsocketTTSService):
 
         @field_validator("volume")
         @classmethod
-        def validate_volume(cls, v: Optional[float]) -> Optional[float]:
+        def validate_volume(cls, v: float | None) -> float | None:
             """Bound volume to 0.5-2.0, for the same reason as speed.
 
             The upper end clips rather than getting louder, and clipping in
@@ -209,8 +206,8 @@ class GandrTTSService(WebsocketTTSService):
         *,
         api_key: str,
         url: str = DEFAULT_WS_URL,
-        params: Optional[InputParams] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        params: InputParams | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         utterance_timeout_s: float = 30.0,
         busy_retry_s: float = 0.5,
         max_attempts: int = 3,
@@ -251,11 +248,7 @@ class GandrTTSService(WebsocketTTSService):
         resolved_sample_rate = (
             params.sample_rate
             if params.sample_rate is not None
-            else (
-                constructor_sample_rate
-                if constructor_sample_rate is not None
-                else 24000
-            )
+            else (constructor_sample_rate if constructor_sample_rate is not None else 24000)
         )
 
         default_settings = TTSSettings(
@@ -284,7 +277,7 @@ class GandrTTSService(WebsocketTTSService):
         self._max_attempts = max(1, max_attempts)
         self._reconnect_on_interruption = reconnect_on_interruption
 
-        self._gandr_settings: Dict[str, Any] = {
+        self._gandr_settings: dict[str, Any] = {
             "lang": params.language or "en",
             "output_sample_rate": resolved_sample_rate,
             "speed": params.speed,
@@ -295,12 +288,12 @@ class GandrTTSService(WebsocketTTSService):
         }
         self._voice_wav_b64 = params.voice_wav_b64
 
-        self._websocket: Optional[ClientConnection] = None
-        self._receive_task: Optional[asyncio.Task[None]] = None
-        self._send_task: Optional[asyncio.Task[None]] = None
-        self._reconnect_task: Optional[asyncio.Task[None]] = None
+        self._websocket: ClientConnection | None = None
+        self._receive_task: asyncio.Task[None] | None = None
+        self._send_task: asyncio.Task[None] | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
         self._outbox: asyncio.Queue[_Utterance] = asyncio.Queue()
-        self._inflight: Optional[_Utterance] = None
+        self._inflight: _Utterance | None = None
         self._voice_registered = False
         # run_tts, the send task and the interruption handler can all decide a
         # connection is needed at the same moment. This makes sure that only
@@ -357,9 +350,7 @@ class GandrTTSService(WebsocketTTSService):
         # successful connect is what would leave a queued utterance waiting
         # forever on a sender that was never created.
         if not self._receive_task:
-            self._receive_task = self.create_task(
-                self._receive_task_handler(self._report_error)
-            )
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
         if not self._send_task:
             self._send_task = self.create_task(self._send_task_handler())
 
@@ -409,9 +400,7 @@ class GandrTTSService(WebsocketTTSService):
             except Exception as e:
                 logger.error(f"{self} initialization error: {e}")
                 self._websocket = None
-                await self.push_error(
-                    error_msg=f"{self} connection error: {e}", exception=e
-                )
+                await self.push_error(error_msg=f"{self} connection error: {e}", exception=e)
 
     async def _disconnect_websocket(self) -> None:
         """Close the Gandr websocket."""
@@ -498,8 +487,7 @@ class GandrTTSService(WebsocketTTSService):
         utterance = self._inflight
         if utterance is None:
             logger.warning(
-                f"{self} received {len(audio)} audio bytes with no utterance "
-                "in flight; discarding"
+                f"{self} received {len(audio)} audio bytes with no utterance in flight; discarding"
             )
             return
 
@@ -579,7 +567,7 @@ class GandrTTSService(WebsocketTTSService):
             return str(self._gandr_settings["lang"])
         return str(getattr(language, "value", language))
 
-    def _build_message(self, text: str, *, include_voice: bool) -> Dict[str, Any]:
+    def _build_message(self, text: str, *, include_voice: bool) -> dict[str, Any]:
         """Build one utterance message for the Gandr websocket.
 
         Args:
@@ -590,7 +578,7 @@ class GandrTTSService(WebsocketTTSService):
         Returns:
             The JSON-serialisable message body.
         """
-        message: Dict[str, Any] = {
+        message: dict[str, Any] = {
             "text": text,
             "lang": self._language_code(),
             "voice_id": self._settings.voice,
@@ -674,13 +662,10 @@ class GandrTTSService(WebsocketTTSService):
                 return
 
             try:
-                await asyncio.wait_for(
-                    utterance.done.wait(), timeout=self._utterance_timeout_s
-                )
-            except asyncio.TimeoutError:
+                await asyncio.wait_for(utterance.done.wait(), timeout=self._utterance_timeout_s)
+            except TimeoutError:
                 utterance.error = (
-                    f"{self} received no completion frame within "
-                    f"{self._utterance_timeout_s}s"
+                    f"{self} received no completion frame within {self._utterance_timeout_s}s"
                 )
 
             self._inflight = None
@@ -796,7 +781,7 @@ class GandrTTSService(WebsocketTTSService):
 
     # ── synthesis ────────────────────────────────────────────────────────
 
-    async def flush_audio(self, context_id: Optional[str] = None) -> None:
+    async def flush_audio(self, context_id: str | None = None) -> None:
         """No-op.
 
         Gandr closes each utterance itself with a completion frame, so there is
@@ -853,4 +838,3 @@ class GandrTTSService(WebsocketTTSService):
             if self.audio_context_available(context_id):
                 await self.remove_audio_context(context_id)
             return
-

@@ -11,13 +11,11 @@ Kept separate so it can be unit-tested on its own.
 
 from __future__ import annotations
 
-from typing import List
-
 #: The API caps a single request's transcript at this many characters.
 MAX_REQUEST_CHARS = 2000
 
 
-def split_for_request(text: str, limit: int = MAX_REQUEST_CHARS) -> List[str]:
+def split_for_request(text: str, limit: int = MAX_REQUEST_CHARS) -> list[str]:
     """Split *text* into pieces the API will accept, on the cleanest boundary.
 
     Prefers a sentence end, falls back to a word boundary, and only cuts inside
@@ -44,7 +42,7 @@ def split_for_request(text: str, limit: int = MAX_REQUEST_CHARS) -> List[str]:
     if len(text) <= limit:
         return [text]
 
-    pieces: List[str] = []
+    pieces: list[str] = []
     remaining = text
     while len(remaining) > limit:
         window = remaining[:limit]
