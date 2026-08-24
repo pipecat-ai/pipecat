@@ -501,6 +501,101 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
         self.assertEqual(smap.user_facing_pos, len(text))
 
 
+class TestClassifyHopStripsLeadingWordPunctuation(unittest.TestCase):
+    """The matcher must tolerate leading punctuation on the *word* side too.
+
+    The candidates already skip the segment's leading non-alphanumeric run, so a
+    word that still carries that run (a quote, an asterisk, a dash) matched
+    neither the offset-0 candidate nor the deep one: the deep candidate's
+    punctuation is gone while the word's is not. The mirror retry -- the word
+    with its own leading run stripped -- closes that asymmetry. It runs last, so
+    it only ever rescues what would otherwise be NO_MATCH.
+    """
+
+    def test_quoted_token_matches_past_the_segments_punctuation_run(self):
+        hop = TextSegmentMap._classify_hop('*\n\n"Pookie, no.', '"Pookie,')
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+        self.assertEqual(hop.segment_advance, len('*\n\n"Pookie,'))
+
+    def test_leading_punctuation_variants_are_all_matched(self):
+        for mark in ('"', "'", "(", "*", "—", "-", "«", '("', '*"', "—'"):
+            with self.subTest(mark=mark):
+                hop = TextSegmentMap._classify_hop(f"*\n\n{mark}Hello there.", f"{mark}Hello")
+                self.assertEqual(hop.kind, _HopKind.PLACED)
+                self.assertEqual(hop.segment_advance, len(f"*\n\n{mark}Hello"))
+
+    def test_stripped_retry_still_folds_case_and_typographic_variants(self):
+        hop = TextSegmentMap._classify_hop("*\n\n“Don’t worry.", "\"don't")
+        self.assertEqual(hop.kind, _HopKind.PLACED)
+
+    def test_genuinely_foreign_token_is_still_rejected(self):
+        """A token whose stripped form is not a prefix of the remaining text must
+        stay NO_MATCH -- the retry widens tolerance to punctuation, not to content.
+        """
+        hop = TextSegmentMap._classify_hop('*\n\n"Pookie, no.', '"Zebra,')
+        self.assertEqual(hop.kind, _HopKind.NO_MATCH)
+
+    def test_punctuation_only_token_is_not_stripped_to_nothing(self):
+        hop = TextSegmentMap._classify_hop('*\n\n"Pookie, no.', "—")
+        self.assertEqual(hop.kind, _HopKind.NO_MATCH)
+
+    def test_strip_stops_at_markup(self):
+        """A token opening with a tag fragment must not have the '<' stripped away,
+        or the tag's name would be matched as if it were spoken content.
+        """
+        hop = TextSegmentMap._classify_hop("break time. Sure", '"<break/>')
+        self.assertNotEqual(hop.kind, _HopKind.PLACED)
+
+
+class TestSentenceSurvivesProviderAddedSentenceEnding(unittest.TestCase):
+    """A provider may normalise a line break into sentence-final punctuation.
+
+    Cartesia reports "Okay*." for "Okay*\\n\\n..." -- a period the source never
+    contained. The trailing-punctuation retry places that token but leaves the raw
+    cursor before the "*", so the next token has to match a remaining text that
+    starts with the punctuation run. Every spoken word after that point used to be
+    NO_MATCH, force-completing the slot and losing the rest of the reply.
+    """
+
+    def _walk(self, text, tokens):
+        smap = TextSegmentMap(text, text)
+        for word in tokens:
+            self.assertTrue(smap.word_belongs_current_segment(word), f"{word!r} rejected")
+            smap.advance_word(word)
+        return smap
+
+    def test_roleplay_reply_tracks_to_completion(self):
+        smap = self._walk(
+            '*speakswarmly*\n\n"Pookie, no.Noone should hurt you.',
+            ["*speakswarmly*.", '"Pookie,', "no.Noone", "should", "hurt", "you."],
+        )
+        self.assertTrue(smap.is_complete)
+        self.assertEqual(
+            smap.user_facing_pos, len('*speakswarmly*\n\n"Pookie, no.Noone should hurt you.')
+        )
+
+    def test_asterisk_and_newlines_before_a_quote(self):
+        smap = self._walk(
+            'Okay*\n\n"Hello there," she said.',
+            ["Okay*.", '"Hello', 'there,"', "she", "said."],
+        )
+        self.assertTrue(smap.is_complete)
+
+    def test_newlines_alone_still_track(self):
+        smap = self._walk(
+            'Okay\n\n"Hello there," she said.',
+            ["Okay.", '"Hello', 'there,"', "she", "said."],
+        )
+        self.assertTrue(smap.is_complete)
+
+    def test_spaces_alone_still_track(self):
+        smap = self._walk(
+            'Okay*  "Hello there," she said.',
+            ["Okay*", '"Hello', 'there,"', "she", "said."],
+        )
+        self.assertTrue(smap.is_complete)
+
+
 class TestClassifyHopFoldsTypographicVariants(unittest.TestCase):
     """Strategy 2 folds typographic variants, not just case and accents.
 
