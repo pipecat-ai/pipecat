@@ -31,7 +31,9 @@ concurrency:
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # GitHub-hosted runners hard-cap jobs at 360 minutes; staying under it and
+    # timing out the Claude step first keeps the always() push/artifact steps alive.
+    timeout-minutes: 355
     # Provider API keys live in this environment (deployment branch: main only).
     environment: provider-watch
     permissions:
@@ -123,6 +125,7 @@ jobs:
           echo "Running: /provider-watch $ARGS"
 
       - name: Run provider watch
+        timeout-minutes: 330
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
