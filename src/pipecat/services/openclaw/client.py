@@ -13,7 +13,7 @@ republishes that socket on the host, which is how a bot outside the sandbox
 talks to an agent inside one.
 
 This module deals in runs and events. Turning those into frames is
-:class:`~pipecat.services.openclaw.processor.OpenClawGatewayService`'s job.
+:class:`~pipecat.services.openclaw.gateway.OpenClawGatewayService`'s job.
 
 The client targets the Gateway as OpenClaw v2026.6.1 speaks it. Where the
 Gateway does something surprising, the surprise is written down at the method

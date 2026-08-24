@@ -73,8 +73,8 @@ Voice loop (transport + LLM + send/stop/status tools)
   from the agent loop, so it can stop the work, say what is running, and narrate
   each outcome. Three tools: `send_to_agent`, `stop_agent`, `agent_status`.
 - **[`openclaw_worker.py`](openclaw_worker.py)** — The agent loop: a
-  `PipelineWorker` whose pipeline is `OpenClawGatewayService -> RunCollector`.
-  A `run` job becomes the frames that drive a run, and `RunCollector` folds a
+  `PipelineWorker` whose pipeline is `OpenClawGatewayService -> OpenClawAggregator`.
+  A `run` job becomes the frames that drive a run, and `OpenClawAggregator` folds a
   run's frames back into one answer.
 
 ## Where each decision lives

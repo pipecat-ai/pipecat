@@ -8,7 +8,7 @@
 
 The pipeline is two processors long::
 
-    OpenClawGatewayService -> RunCollector
+    OpenClawGatewayService -> OpenClawAggregator
 
 The processor turns the Gateway's websocket traffic into frames, and the
 collector folds one run's frames into the single answer a voice loop can speak.
@@ -21,7 +21,6 @@ particulars live here, and the voice loop just forwards.
 import asyncio
 import os
 import time
-from collections.abc import Awaitable, Callable
 
 from loguru import logger
 
@@ -44,7 +43,7 @@ from pipecat.services.openclaw.frames import (
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
-from pipecat.services.openclaw.processor import OpenClawGatewayService
+from pipecat.services.openclaw.gateway import OpenClawGatewayService
 
 WORKER_NAME = "openclaw-agent"
 
@@ -69,31 +68,37 @@ SPOKEN_ANSWER_INSTRUCTION = (
 )
 
 
-class RunCollector(FrameProcessor):
+class OpenClawAggregator(FrameProcessor):
     """Folds one run's frames into the answer the voice loop speaks.
 
     An agent answers in pieces over minutes. A spoken turn wants it whole, so
     the deltas are gathered here and delivered once the run reaches a terminal
     frame.
+
+    Event handlers available:
+
+    - on_started: Called with the run id when a run begins.
+    - on_result: Called with how a run ended and what it produced.
+
+    Example::
+
+        @aggregator.event_handler("on_result")
+        async def on_result(aggregator, status, text):
+            ...
     """
 
-    def __init__(
-        self,
-        on_started: Callable[[str], Awaitable[None]],
-        on_result: Callable[[str, str], Awaitable[None]],
-        **kwargs,
-    ):
-        """Initialize the collector.
+    def __init__(self, **kwargs):
+        """Initialize the aggregator.
 
         Args:
-            on_started: Called with the run id when a run begins.
-            on_result: Called with how the run ended and what it produced.
             **kwargs: Additional arguments passed to the frame processor.
         """
         super().__init__(**kwargs)
-        self._on_started = on_started
-        self._on_result = on_result
         self._parts: list[str] = []
+        # Synchronous, so a run's outcome reaches the job waiting on it before
+        # the next frame moves.
+        self._register_event_handler("on_started", sync=True)
+        self._register_event_handler("on_result", sync=True)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Gather a run's text and report how it ended.
@@ -106,7 +111,7 @@ class RunCollector(FrameProcessor):
 
         if isinstance(frame, OpenClawStartedFrame):
             self._parts = []
-            await self._on_started(frame.run_id)
+            await self._call_event_handler("on_started", frame.run_id)
         elif isinstance(frame, OpenClawTextFrame):
             self._parts.append(frame.text)
         elif isinstance(frame, OpenClawEndFrame):
@@ -116,7 +121,7 @@ class RunCollector(FrameProcessor):
             answer = frame.text
             if frame.status == "completed":
                 answer = frame.text or "".join(self._parts).strip()
-            await self._on_result(frame.status, answer)
+            await self._call_event_handler("on_result", frame.status, answer)
 
         await self.push_frame(frame, direction)
 
@@ -154,12 +159,10 @@ class OpenClawAgentWorker(PipelineWorker):
                 take the whole runner down with it.
             **kwargs: Additional arguments passed to the pipeline worker.
         """
-        pipeline = Pipeline(
-            [
-                service,
-                RunCollector(self._on_run_started, self._on_run_result),
-            ]
-        )
+        aggregator = OpenClawAggregator()
+        aggregator.add_event_handler("on_started", self._on_run_started)
+        aggregator.add_event_handler("on_result", self._on_run_result)
+        pipeline = Pipeline([service, aggregator])
         super().__init__(pipeline, name=name, idle_timeout_secs=idle_timeout_secs, **kwargs)
         # The run in flight, and what the job handler is waiting on.
         self._result: asyncio.Future | None = None
@@ -239,11 +242,11 @@ class OpenClawAgentWorker(PipelineWorker):
         if self._result is result:
             self._result = None
 
-    async def _on_run_started(self, run_id: str):
+    async def _on_run_started(self, aggregator: OpenClawAggregator, run_id: str):
         """Note that the waiting job's own run is now under way."""
         self._started = True
 
-    async def _on_run_result(self, status: str, text: str):
+    async def _on_run_result(self, aggregator: OpenClawAggregator, status: str, text: str):
         """Hand a finished run back to the job that is waiting on it.
 
         A stopped run reports itself whenever the Gateway gets round to it,

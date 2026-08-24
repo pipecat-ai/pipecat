@@ -25,7 +25,7 @@ from pipecat.services.openclaw.frames import (
     OpenClawSteerFrame,
     OpenClawTextFrame,
 )
-from pipecat.services.openclaw.processor import OpenClawGatewayService
+from pipecat.services.openclaw.gateway import OpenClawGatewayService
 from pipecat.tests.utils import SleepFrame, run_test
 from tests.openclaw_fake_gateway import FakeGateway
 
