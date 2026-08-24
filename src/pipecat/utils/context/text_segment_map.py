@@ -26,6 +26,11 @@ from pipecat.utils.text.markup_utils import (
     strip_markup,
 )
 
+# Splits text into the words the diff lines up. A complete tag is one token, so
+# a tag that holds spaces stays whole; everything else splits on whitespace.
+# Both alternatives are captured, so joining the pieces rebuilds the text.
+_TOKEN_SPLIT_PATTERN = re.compile(r"(<[^<>\s][^<>]*>|\s+)")
+
 
 @dataclass(frozen=True)
 class TextSegment:
@@ -237,6 +242,13 @@ class TextSegmentMap:
         :class:`TextSegment`. Spaces are kept as words of their own so that the
         positions stay exact.
 
+        A whole tag is one token, so the diff can never cut one in half. Tags
+        hold spaces inside them, and a plain split on whitespace would hand
+        ``difflib`` ``"<speed"`` and ``ratio="0.9"/>`` as separate words, free
+        to land in different segments. A tag that loses its ``"<"`` that way
+        reads as ordinary text everywhere downstream, and no spoken word ever
+        matches it.
+
         One extra step: a piece that came out equal is cut around any tag inside
         it, so a single tag does not turn the whole sentence into an
         all-or-nothing segment.
@@ -245,7 +257,7 @@ class TextSegmentMap:
         """
 
         def tokenize(text: str) -> list[str]:
-            return re.split(r"(\s+)", text)
+            return re.split(_TOKEN_SPLIT_PATTERN, text)
 
         orig_tokens = tokenize(original_text)
         tts_tokens = tokenize(tts_text)
