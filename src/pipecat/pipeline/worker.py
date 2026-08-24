@@ -1135,6 +1135,10 @@ class PipelineWorker(BaseWorker):
         # Start worker observer.
         await self._observer.setup(self.task_manager)
 
+        # Services spend most of the start sequence waiting on the network, which
+        # leaves room to load the imports while setup is happening.
+        lazy_imports_task = self.create_task(asyncio.to_thread(warm_deferred_imports))
+
         # Setup processors
         setup = FrameProcessorSetup(
             audio_in_sample_rate=self._params.audio_in_sample_rate,
@@ -1156,6 +1160,9 @@ class PipelineWorker(BaseWorker):
             tool_resources=self._app_resources,
         )
         await self.create_task(self._pipeline.setup(setup))
+
+        # Make sure lazy imports are done at this point.
+        await lazy_imports_task
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
@@ -1203,12 +1210,6 @@ class PipelineWorker(BaseWorker):
         until the worker is cancelled or stopped (e.g. with an EndFrame).
         """
         self._maybe_start_idle_task()
-
-        # Services spend most of the start sequence waiting on the network, which
-        # leaves room to load the imports deferred out of pipeline construction.
-        self.create_task(
-            asyncio.to_thread(warm_deferred_imports), name=f"{self}::warm_deferred_imports"
-        )
 
         # Processors read the pipeline configuration from FrameProcessorSetup,
         # but the deprecated StartFrame fields carry it until they are removed,
