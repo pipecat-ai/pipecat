@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
+from pipecat.utils.file_storage import LocalFileStorage
 
 
 class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
@@ -436,7 +437,7 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
             file_path = Path(tmpdir) / file_id
             file_path.write_bytes(raw)
 
-            self.processor._folder = tmpdir
+            self.processor._file_storage = LocalFileStorage(tmpdir)
             data = self._make_send_file_data(
                 RTVI.FileId(id=f"pipecat:{file_id}"), fmt="application/pdf"
             )
@@ -452,7 +453,7 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_id_path_traversal_sends_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            self.processor._folder = tmpdir
+            self.processor._file_storage = LocalFileStorage(tmpdir)
             data = self._make_send_file_data(
                 RTVI.FileId(id="pipecat:../../../etc/passwd"), fmt="application/pdf"
             )
@@ -463,7 +464,7 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_id_absolute_path_sends_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            self.processor._folder = tmpdir
+            self.processor._file_storage = LocalFileStorage(tmpdir)
             data = self._make_send_file_data(
                 RTVI.FileId(id="pipecat:/etc/passwd"), fmt="application/pdf"
             )
@@ -474,7 +475,7 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_id_missing_pipecat_prefix_sends_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            self.processor._folder = tmpdir
+            self.processor._file_storage = LocalFileStorage(tmpdir)
             data = self._make_send_file_data(RTVI.FileId(id="some-other-id"), fmt="application/pdf")
             await self.processor._handle_send_file(data, "msg-1")
 
@@ -492,7 +493,7 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_id_missing_file_sends_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            self.processor._folder = tmpdir
+            self.processor._file_storage = LocalFileStorage(tmpdir)
             data = self._make_send_file_data(
                 RTVI.FileId(id=f"pipecat:{uuid.uuid4().hex}"), fmt="application/pdf"
             )
