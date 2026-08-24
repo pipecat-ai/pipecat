@@ -210,6 +210,32 @@ class TestInactiveWorkerGating(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(handled), 1)
 
+    async def test_handing_over_still_deactivates_the_worker_that_left(self):
+        """``deactivate_self=True`` clears the flag before sending the message.
+
+        The worker is inactive by the time its own deactivation arrives, so
+        gating that message would leave ``on_deactivated`` unrun.
+        """
+        deactivated = []
+
+        class Probe(BaseWorker):
+            async def on_deactivated(self):
+                deactivated.append(self.name)
+                await super().on_deactivated()
+
+        leaving = Probe("leaving")
+        taking_over = Probe("taking-over")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(leaving, taking_over)
+        await leaving.setup(self.tm)
+        await taking_over.setup(self.tm)
+        await self.bus.start()
+
+        await leaving.activate_worker("taking-over", deactivate_self=True)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(deactivated, ["leaving"])
+
     async def test_inactive_worker_still_takes_activation_and_shutdown(self):
         """Otherwise nothing could start it, and nothing could stop it."""
         worker = await self._worker(active=False)

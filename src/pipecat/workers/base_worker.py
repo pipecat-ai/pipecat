@@ -105,13 +105,12 @@ class WorkerActivationArgs:
         }
 
 
-#: Messages an inactive worker still receives. Activation is how a worker
-#: stops being inactive, and the shutdown messages are how a runner or a
-#: parent stops it: ``WorkerRunner.end`` sends one ``BusEndWorkerMessage``
-#: per root worker and ``_propagate_end_to_children`` awaits each child,
-#: so a worker that ignored them could never be stopped or waited on.
+#: Messages an inactive worker still receives: the ones that change whether it
+#: is active, and the ones that stop it. Gating these would leave it with no
+#: way to be woken or shut down.
 _ALWAYS_DELIVERED = (
     BusActivateWorkerMessage,
+    BusDeactivateWorkerMessage,
     BusEndWorkerMessage,
     BusCancelWorkerMessage,
 )
