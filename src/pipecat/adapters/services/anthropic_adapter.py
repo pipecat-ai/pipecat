@@ -420,7 +420,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             f"Unsupported 'file_url' MIME type: {f_data['mime_type']} for URL: {f_data['url']}"
                         )
                         continue
-                if item["type"] == "file":
+                if item["type"] == "file_base64":
                     f_data = item["file"]
                     if f_data["mime_type"] != "application/pdf":
                         logger.warning(f"Unsupported 'file' MIME type: {f_data['mime_type']}")

@@ -25,8 +25,6 @@ from typing import (
     Any,
     Literal,
     TypeAlias,
-    TypeGuard,
-    TypeVar,
     cast,
     overload,
 )
@@ -215,7 +213,7 @@ class LLMContext:
             content.append({"type": "text", "text": text})
 
         file_m = {"file_data": file, "filename": name if name else "", "mime_type": format}
-        content.append({"type": "file", "file": file_m})
+        content.append({"type": "file_base64", "file": file_m})
 
         return cast(LLMContextMessage, {"role": role, "content": content})
 
@@ -378,7 +376,7 @@ class LLMContext:
                     elif item_type == "audio":
                         if "audio" in item:
                             item["audio"] = "..."
-                    elif item_type == "file":
+                    elif item_type == "file_base64":
                         if "file" in item:
                             item["file"]["file_data"] = "..."
 
@@ -577,7 +575,7 @@ class LLMContext:
                     continue
                 content = message.get("content")
                 if isinstance(content, list) and any(
-                    isinstance(item, dict) and item.get("type") == "file" for item in content
+                    isinstance(item, dict) and item.get("type") == "file_base64" for item in content
                 ):
                     logger.warning(
                         "Removing message with file content from context due to invalid response."
