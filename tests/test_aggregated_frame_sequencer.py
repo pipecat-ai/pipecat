@@ -582,6 +582,127 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seq.force_complete("ctx1", last_word_pts=10), [])
 
 
+class TestForceCompletePreservesTranscript(unittest.IsolatedAsyncioTestCase):
+    """force_complete must leave the transcript covering everything it emits.
+
+    The remaining text goes out as a TTSTextFrame either way; without a matching
+    final AggregatedTextProgressFrame the transcript ends the slot wherever the
+    last word left it, and every stall becomes permanent transcript loss. The
+    progress frame is emitted only for a slot that spoke at least one word -- a
+    slot that never spoke keeps contributing nothing, so text the user never
+    heard stays out of the transcript.
+    """
+
+    def _progress(self, frames):
+        return [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+
+    async def _register(self, seq, text, tts_text=None, raw_text=None):
+        frame = _spoken_frame(text, raw_text=raw_text)
+        await seq.register_spoken(frame, "ctx1", tts_text or text, True)
+
+    async def test_never_spoken_slot_emits_no_progress_frame(self):
+        seq = _seq()
+        await self._register(seq, "hello world out there")
+        result = seq.force_complete("ctx1", last_word_pts=0)
+        self.assertEqual(self._progress(result), [])
+        # The raw channel still gets the remainder, as before.
+        self.assertEqual(
+            [f.text for f in result if isinstance(f, TTSTextFrame)], ["hello world out there"]
+        )
+
+    async def test_mid_slot_stall_progress_frame_carries_full_text(self):
+        seq = _seq()
+        await self._register(seq, "hello world out there")
+        seq.process_word("hello", pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        progress = self._progress(result)
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "hello world out there")
+        self.assertEqual(progress[0].remaining_text, "")
+        self.assertEqual(progress[0].pts, 50)
+
+    async def test_stall_at_last_word_progress_frame_carries_full_text(self):
+        seq = _seq()
+        await self._register(seq, "hello world out there")
+        for word in ("hello", "world", "out"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        progress = self._progress(result)
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "hello world out there")
+
+    async def test_never_spoken_markup_slot_emits_no_progress_frame(self):
+        seq = _seq()
+        await self._register(
+            seq,
+            "Your code is 4917 okay",
+            tts_text="Your code is <spell>4917</spell> okay",
+            raw_text="Your code is <spell>4917</spell> okay",
+        )
+        result = seq.force_complete("ctx1", last_word_pts=0)
+        self.assertEqual(self._progress(result), [])
+
+    async def test_mid_slot_markup_stall_progress_frame_carries_full_text(self):
+        seq = _seq()
+        await self._register(
+            seq,
+            "Your code is 4917 okay",
+            tts_text="Your code is <spell>4917</spell> okay",
+            raw_text="Your code is <spell>4917</spell> okay",
+        )
+        for word in ("Your", "code"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        progress = self._progress(result)
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "Your code is 4917 okay")
+        self.assertEqual(progress[0].remaining_text, "")
+
+    async def test_markup_stall_at_last_word_progress_frame_carries_full_text(self):
+        seq = _seq()
+        await self._register(
+            seq,
+            "Your code is 4917 okay",
+            tts_text="Your code is <spell>4917</spell> okay",
+            raw_text="Your code is <spell>4917</spell> okay",
+        )
+        for word in ("Your", "code", "is", "<spell>4917</spell>"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        progress = self._progress(result)
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "Your code is 4917 okay")
+
+    async def test_stall_inside_transformed_segment_still_covers_full_text(self):
+        """Words inside a rewritten span are suppressed, so the user-facing cursor
+        can sit at 0 while the raw cursor has moved. The slot did speak, so the
+        final progress frame must still cover its whole text.
+        """
+        seq = _seq()
+        await self._register(
+            seq,
+            "$42.50 thanks",
+            tts_text="forty two dollars and fifty cents thanks",
+        )
+        seq.process_word("forty", pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        progress = self._progress(result)
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "$42.50 thanks")
+
+    async def test_normally_completed_slot_gets_no_extra_progress_frame(self):
+        seq = _seq()
+        await self._register(seq, "hello world")
+        for word in ("hello", "world"):
+            seq.process_word(word, pts=10, context_id="ctx1")
+        self.assertEqual(seq.force_complete("ctx1", last_word_pts=50), [])
+
+
 # ---------------------------------------------------------------------------
 # clear
 # ---------------------------------------------------------------------------

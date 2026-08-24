@@ -622,6 +622,12 @@ class AggregatedFrameSequencer:
         all now-unblocked skipped frames. Slots for other contexts still in flight are
         left untouched so their own word events (or their own force_complete) finish them.
 
+        A slot that already spoke at least one word also gets one final
+        AggregatedTextProgressFrame covering its full user-facing text, so the
+        transcript ends the slot exactly where the emitted word frames do. A slot
+        that never spoke contributes nothing to the transcript, keeping text the
+        user never heard (e.g. a turn torn down before playback) out of it.
+
         Audio contexts are drained one at a time in registration order (a context's whole
         ``_handle_audio_context`` runs, ending with its own force_complete, before the next
         starts), so an earlier context is never still open here — every earlier context has
@@ -665,6 +671,12 @@ class AggregatedFrameSequencer:
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
                         )
+                    # A slot that spoke at least one word keeps its whole text in
+                    # the transcript, matching the word frame just emitted. One
+                    # that never spoke (e.g. cancelled before playback) stays out.
+                    if slot.tracker.get_accumulated_tts_text():
+                        slot.tracker.force_complete_remaining()
+                        frames.append(self._build_progress_frame(slot, last_word_pts))
                 slot.complete = True
         frames.extend(self.flush(last_word_pts=last_word_pts))
         # Context is fully done: forget it so any later word is dropped as stale.
