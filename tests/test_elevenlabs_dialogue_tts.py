@@ -181,61 +181,29 @@ async def test_dialogue_keepalive_context_messages_are_ignored():
 
 
 @pytest.mark.asyncio
-async def test_dialogue_flush_skipped_when_nothing_new_was_sent():
-    """Batches sent and batches acknowledged have to stay in step."""
+async def test_dialogue_flush_targets_registered_contexts_only():
+    """The server rejects any message naming a context it has closed."""
     service = _make_dialogue_service()
     ws = _FakeWebSocket()
     await _open_dialogue_context(service, ws)
 
     await service.flush_audio("ctx-1")
-    assert ws.sent == []
+    assert ws.sent == [{"context_id": "ctx-1", "flush": True}]
 
-    await service._send_text("Hello there.", "ctx-1")
-    await service.flush_audio("ctx-1")
+    service._contexts["ctx-1"].registered = False
     await service.flush_audio("ctx-1")
 
     assert ws.sent.count({"context_id": "ctx-1", "flush": True}) == 1
-    assert service._contexts["ctx-1"].outstanding_batches == 1
 
 
 @pytest.mark.asyncio
-async def test_dialogue_turn_end_waits_for_every_flushed_batch():
-    """A close discards batches that haven't started, truncating the turn."""
-    service = _make_dialogue_service()
-    ws = _FakeWebSocket()
-    await _open_dialogue_context(service, ws)
-
-    for sentence in ("First sentence.", "Second sentence."):
-        await service._send_text(sentence, "ctx-1")
-        await service.flush_audio("ctx-1")
-    assert service._contexts["ctx-1"].outstanding_batches == 2
-
-    service._turn_context_id = "ctx-1"
-    await service.on_turn_context_completed()
-
-    def closes():
-        return ws.sent.count({"context_id": "ctx-1", "close_context": True})
-
-    assert closes() == 0, "closed before any batch was acknowledged"
-    assert service._contexts["ctx-1"].close_when_drained is True
-
-    await service._handle_message({"context_id": "ctx-1", "is_final_audio_for_turn": True})
-    assert closes() == 0, "closed while a batch was still outstanding"
-
-    await service._handle_message({"context_id": "ctx-1", "is_final_audio_for_turn": True})
-    assert closes() == 1
-
-
-@pytest.mark.asyncio
-async def test_dialogue_turn_end_closes_once_batches_already_acknowledged():
-    """Generation can finish before the turn does; then the close is immediate."""
+async def test_dialogue_turn_end_closes_the_context():
+    """Ending a turn sends the close, which is what generates the turn's tail."""
     service = _make_dialogue_service()
     ws = _FakeWebSocket()
     await _open_dialogue_context(service, ws)
 
     await service._send_text("Sure.", "ctx-1")
-    await service.flush_audio("ctx-1")
-    await service._handle_message({"context_id": "ctx-1", "is_final_audio_for_turn": True})
 
     service._turn_context_id = "ctx-1"
     await service.on_turn_context_completed()
@@ -245,7 +213,7 @@ async def test_dialogue_turn_end_closes_once_batches_already_acknowledged():
 
 @pytest.mark.asyncio
 async def test_dialogue_turn_final_does_not_end_the_audio_context():
-    """Turn finals arrive per batch; only is_final ends a context."""
+    """Turn finals arrive per generation batch; only is_final ends a context."""
     service = _make_dialogue_service()
     ws = _FakeWebSocket()
     await _open_dialogue_context(service, ws)
