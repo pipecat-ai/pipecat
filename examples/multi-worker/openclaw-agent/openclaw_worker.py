@@ -63,7 +63,9 @@ SPOKEN_ANSWER_INSTRUCTION = (
     "message reached you; answer what was asked. Use plain spoken text: no "
     "markdown, bullets, code fences, links, or emoji. Give one concise answer for "
     "someone who is listening rather than reading, and say so plainly if you "
-    "cannot work it out."
+    "cannot work it out. Search your tools before concluding you cannot do "
+    "something: an agent that discloses its tools progressively only sees a few "
+    "of them until it looks."
 )
 
 
