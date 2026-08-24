@@ -354,7 +354,7 @@ class TestCreateFileMessage(unittest.IsolatedAsyncioTestCase):
         content = msg["content"]
         self.assertEqual(len(content), 1)
         item = content[0]
-        self.assertEqual(item["type"], "file")
+        self.assertEqual(item["type"], "file_base64")
         self.assertEqual(item["file"]["file_data"], f"data:application/pdf;base64,{b64}")
         self.assertEqual(item["file"]["mime_type"], "application/pdf")
 
@@ -384,7 +384,7 @@ class TestCreateFileMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(content), 2)
         self.assertEqual(content[0]["type"], "text")
         self.assertEqual(content[0]["text"], "Please summarize this document")
-        self.assertEqual(content[1]["type"], "file")
+        self.assertEqual(content[1]["type"], "file_base64")
 
     async def test_url_type_delegates_to_file_url_message(self):
         msg = await LLMContext.create_file_message(

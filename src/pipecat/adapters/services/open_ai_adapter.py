@@ -252,7 +252,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 if isinstance(content, list):
                     new_content = []
                     for item in content:
-                        if item["type"] == "file":
+                        if item["type"] == "file_base64":
                             f_data = item["file"]
                             mime_type = f_data["mime_type"]
                             if mime_type == "application/pdf":

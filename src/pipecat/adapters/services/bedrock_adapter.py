@@ -335,7 +335,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     else:
                         url = item["image_url"]["url"]
                         logger.warning(f"Unsupported 'image_url': {url}")
-                elif item["type"] == "file":
+                elif item["type"] == "file_base64":
                     f_data = item["file"]
                     mime_type = f_data["mime_type"]
                     bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)

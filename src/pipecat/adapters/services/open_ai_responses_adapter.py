@@ -285,7 +285,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                         "detail": image_url_obj.get("detail", "auto"),
                     }
                 )
-            elif part_type == "file":
+            elif part_type == "file_base64":
                 f_data = part["file"]
                 result.append(
                     {
