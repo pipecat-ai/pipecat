@@ -35,7 +35,7 @@ Examples:
 4. With `--publish` or `--non-interactive`, stop with a clear error if any of these fails: `gh auth status`, `_reports` exists and is on `main` (publish only), `uv run python scripts/provider-watch/inventory.py --md`.
 5. Decision intake: the team records decisions as comments on the digest issues; researchers fold them into each unit's `decisions.md` in `_reports`. Collect the comments of the three most recent issues into `<scratch>/digest-comments.md`:
    ```bash
-   gh issue list --repo pipecat-ai/provider-watch-reports --state all --search "Provider watch in:title" --limit 3 --json number,title,url \
+   gh issue list --repo pipecat-ai/provider-watch-reports --state all --search "Provider watch in:title sort:created-desc" --limit 3 --json number,title,url \
      | jq -r '.[].number' | while read -r n; do
        gh issue view "$n" --repo pipecat-ai/provider-watch-reports --json title,url,comments \
          --jq '"## \(.title) — \(.url)\n" + ([.comments[] | "- \(.author.login) (\(.createdAt | .[:10])) <\(.url)>:\n  \(.body | gsub("\n"; "\n  "))"] | join("\n"))'
