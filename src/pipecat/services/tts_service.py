@@ -308,10 +308,10 @@ class TTSService(AIService):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "The `pause_watchdog_timeout_s` parameter is deprecated since 1.8.0 and "
-                    "will be removed in 2.0.0. It no longer does anything: frame processing "
-                    "is paused only while there is audio still to be played, so the pause "
-                    "cannot outlive what it waits for.",
+                    "`pause_watchdog_timeout_s` is deprecated since 1.8.0 and will be "
+                    "removed in 2.0.0. No replacement. Frame processing is paused only "
+                    "while there is audio still to be played, so the pause cannot "
+                    "outlive what it waits for.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
