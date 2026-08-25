@@ -7,9 +7,9 @@
 """Tests for writing off a TTS service that stops producing audio.
 
 A provider can accept every request and return no audio at all — an unknown
-voice ID, say — without reporting an error. TTSService counts the contexts that
-complete in silence and, past a configurable limit, reports itself unable to do
-its job so the pipeline worker and any ServiceSwitcher can act on it.
+voice ID, say — without reporting an error. TTSService reports every context
+that completes in silence and, past a configurable limit, reports itself unable
+to do its job so the pipeline worker and any ServiceSwitcher can act on it.
 """
 
 import asyncio
@@ -130,6 +130,25 @@ def _errors(up: Sequence[Frame]) -> list[ErrorFrame]:
 
 
 @pytest.mark.asyncio
+async def test_the_first_silent_context_is_reported():
+    """A turn that produces no speech is reported without waiting for the limit.
+
+    Nothing else marks the end of a turn that never played audio, so this error
+    is all anything waiting on the bot to speak has to go on.
+    """
+    tts = MockTTSService(max_consecutive_zero_audio_contexts=3)
+
+    _, up = await asyncio.wait_for(
+        run_test(tts, frames_to_send=_speak("one")),
+        timeout=5.0,
+    )
+
+    errors = _errors(up)
+    assert len(errors) == 1
+    assert tts.is_usable
+
+
+@pytest.mark.asyncio
 async def test_silence_under_the_limit_leaves_the_service_usable():
     tts = MockTTSService(max_consecutive_zero_audio_contexts=3)
 
@@ -139,7 +158,13 @@ async def test_silence_under_the_limit_leaves_the_service_usable():
     )
 
     assert tts.is_usable
-    assert _errors(up) == []
+
+    # Each silent context is reported as it happens, so a first turn that never
+    # speaks is something application code can act on right away.
+    errors = _errors(up)
+    assert len(errors) == 2
+    assert all(error.processor is tts for error in errors)
+    assert all(error.processor.is_usable for error in errors)
 
 
 @pytest.mark.asyncio
@@ -153,12 +178,14 @@ async def test_consecutive_silent_contexts_write_off_the_service():
 
     assert not tts.is_usable
 
+    # The context that reaches the limit reports the permanent error in place of
+    # the recoverable one, so each silent context is reported once.
     errors = _errors(up)
-    assert len(errors) == 1
-    # The processor is already written off by the time the error is seen, which
-    # is what tells application code the error is not a transient one.
+    assert len(errors) == 2
     assert errors[0].processor is tts
-    assert not errors[0].processor.is_usable
+    # The processor is already written off by the time the last error is seen,
+    # which is what tells application code the error is not a transient one.
+    assert not errors[-1].processor.is_usable
 
 
 @pytest.mark.asyncio
@@ -174,11 +201,12 @@ async def test_audio_resets_the_count():
 
     assert tts.is_usable
     assert tts._consecutive_zero_audio_contexts == 1
-    assert _errors(up) == []
+    # One per silent context, neither of them reaching the limit.
+    assert len(_errors(up)) == 2
 
 
 @pytest.mark.asyncio
-async def test_zero_disables_the_check():
+async def test_zero_disables_reporting_silent_contexts():
     tts = MockTTSService(max_consecutive_zero_audio_contexts=0)
 
     _, up = await asyncio.wait_for(

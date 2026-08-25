@@ -164,7 +164,7 @@ class TTSService(AIService):
         pause_frame_processing: bool = False,
         pause_watchdog_timeout_s: float | None = None,
         # number of consecutive TTS contexts that may complete with no audio before the
-        # service is reported unable to do its job; 0 disables the check
+        # service is reported unable to do its job; 0 disables reporting silent contexts
         max_consecutive_zero_audio_contexts: int = 3,
         # if True, append a trailing space to text before sending to TTS
         # (helps prevent some TTS services from vocalizing trailing punctuation)
@@ -224,11 +224,12 @@ class TTSService(AIService):
             max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
                 complete without producing any audio before the service is reported unable
                 to do its job. Catches a provider that accepts requests and stays silent —
-                an unknown voice ID, say — which no error ever surfaces. On reaching the
-                limit the service reports a permanent error, stops being given work, and
-                the pipeline worker applies its
+                an unknown voice ID, say — which no error ever surfaces. Each silent
+                context reports an error the service can carry on from; on reaching the
+                limit the service reports a permanent error instead, stops being given
+                work, and the pipeline worker applies its
                 :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy`. Set to 0 to let
-                silent contexts go unchecked.
+                silent contexts go unreported and unchecked.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
@@ -1784,7 +1785,9 @@ class TTSService(AIService):
         """Track whether contexts are producing audio, and act when they stop.
 
         A provider can accept every request and return no audio at all — an
-        unknown voice ID, say — without ever reporting an error. Enough of those
+        unknown voice ID, say — without ever reporting an error. Every context
+        that completes in silence is reported as an error, so application code
+        hears about a turn that produced no speech as it happens. Enough of them
         in a row means the service isn't going to speak again, so it is reported
         unable to do its job: it stops being given work, a
         :class:`~pipecat.pipeline.service_switcher.ServiceSwitcher` can fail over
@@ -1832,6 +1835,11 @@ class TTSService(AIService):
                 ),
                 force_treat_as_permanent=True,
             )
+        else:
+            # A single silent context says nothing about whether the service
+            # will speak again, so it is reported without costing the service
+            # its usability.
+            await self.push_error(f"TTS context {context_id} completed with no audio")
 
     async def set_usable(self, is_usable: bool):
         """Set whether this service can be given work.
