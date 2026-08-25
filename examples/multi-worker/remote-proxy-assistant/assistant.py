@@ -70,11 +70,8 @@ class AcmeAssistant(LLMWorker):
             reason (str): Why the conversation is ending.
         """
         logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 @app.websocket("/ws")
