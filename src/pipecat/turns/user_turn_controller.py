@@ -135,13 +135,21 @@ class UserTurnController(BaseObject):
 
         await self._setup_strategies()
 
+    async def stop(self):
+        """Stop the turn stop timeout, leaving the strategies alone.
+
+        Called at session end. The strategies may be shared, so cleaning
+        them up waits for :meth:`cleanup`.
+        """
+        if self._user_turn_stop_timeout_task:
+            await self.cancel_task(self._user_turn_stop_timeout_task)
+            self._user_turn_stop_timeout_task = None
+
     async def cleanup(self):
         """Cleanup the controller."""
         await super().cleanup()
 
-        if self._user_turn_stop_timeout_task:
-            await self.cancel_task(self._user_turn_stop_timeout_task)
-            self._user_turn_stop_timeout_task = None
+        await self.stop()
 
         await self._cleanup_strategies()
 

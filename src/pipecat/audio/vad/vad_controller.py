@@ -143,6 +143,17 @@ class VADController(BaseObject):
         if self._audio_idle_timeout > 0 and not self._audio_idle_task:
             self._audio_idle_task = self.create_task(self._audio_idle_handler())
 
+    async def stop(self):
+        """Stop the idle timer, leaving the analyzer alone.
+
+        Called at session end so the timer can't report silence that only
+        means the session is over. The analyzer may be shared, so releasing
+        it waits for :meth:`cleanup`.
+        """
+        if self._audio_idle_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_idle_task)
+            self._audio_idle_task = None
+
     async def cleanup(self):
         """Clean up resources.
 
@@ -151,9 +162,7 @@ class VADController(BaseObject):
         before returning.
         """
         await super().cleanup()
-        if self._audio_idle_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_idle_task)
-            self._audio_idle_task = None
+        await self.stop()
         if self._vad_analyzer:
             await self._vad_analyzer.cleanup()
 

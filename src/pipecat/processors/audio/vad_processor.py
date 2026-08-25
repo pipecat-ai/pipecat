@@ -15,6 +15,8 @@ from loguru import logger
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -121,6 +123,9 @@ class VADProcessor(FrameProcessor):
         # 1. StartFrame reaches downstream before SpeechControlParamsFrame is broadcast
         # 2. Audio flows through immediately while VAD detection happens after
         await self.push_frame(frame, direction)
+
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            await self._vad_controller.stop()
 
         # Let the VAD controller handle the frame
         await self._vad_controller.process_frame(frame)

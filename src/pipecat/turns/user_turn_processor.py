@@ -176,10 +176,16 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_idle_controller.process_frame(frame)
 
     async def _stop(self, frame: EndFrame):
-        await self._cleanup()
+        await self._stop_controllers()
 
     async def _cancel(self, frame: CancelFrame):
-        await self._cleanup()
+        await self._stop_controllers()
+
+    async def _stop_controllers(self):
+        # Session end stops the controllers' timers; what they hold may be
+        # shared, so releasing it waits for cleanup().
+        await self._user_turn_controller.stop()
+        await self._user_idle_controller.stop()
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()

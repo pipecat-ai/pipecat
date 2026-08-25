@@ -82,10 +82,18 @@ class UserIdleController(BaseObject):
         """
         return await super().setup(setup.task_manager)
 
+    async def stop(self):
+        """Stop the idle timer.
+
+        Called at session end so it can't report idleness that only means
+        the session is over.
+        """
+        await self._cancel_idle_timer()
+
     async def cleanup(self):
         """Cleanup the controller."""
         await super().cleanup()
-        await self._cancel_idle_timer()
+        await self.stop()
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to track user activity state.
