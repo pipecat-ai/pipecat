@@ -534,8 +534,8 @@ class SonioxSTTService(WebsocketSTTService):
         """
         if self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._websocket.send(audio)
                 self._session_received_audio = self._session_received_audio or bool(audio)
+                await self._websocket.send(audio)
             except Exception as e:
                 logger.warning(f"{self}: send failed: {e}")
 

@@ -140,6 +140,28 @@ async def test_stop_without_audio_skips_end_of_audio():
     websocket.close.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_audio_is_tracked_before_websocket_send_completes():
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def blocked_send(_message):
+        send_started.set()
+        await release_send.wait()
+
+    service = SonioxSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket([], send_side_effect=blocked_send)
+    generator = service.run_stt(b"\x00\x00")
+    next_frame = asyncio.create_task(anext(generator))
+    await send_started.wait()
+
+    assert service._session_received_audio is True
+
+    release_send.set()
+    assert await next_frame is None
+    await generator.aclose()
+
+
 def test_language_from_tokens_uses_single_recognized_language():
     tokens = [
         {"text": "Hello", "language": "en"},
