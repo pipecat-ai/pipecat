@@ -226,7 +226,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Deepgram WebSocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram WebSocket")
                 # Send Close message to gracefully close the connection
                 await self._websocket.send(json.dumps({"type": "Close"}))
                 await self._websocket.close()

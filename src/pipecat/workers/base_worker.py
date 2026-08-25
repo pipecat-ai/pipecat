@@ -105,6 +105,17 @@ class WorkerActivationArgs:
         }
 
 
+#: Messages an inactive worker still receives: the ones that change whether it
+#: is active, and the ones that stop it. Gating these would leave it with no
+#: way to be woken or shut down.
+_ALWAYS_DELIVERED = (
+    BusActivateWorkerMessage,
+    BusDeactivateWorkerMessage,
+    BusEndWorkerMessage,
+    BusCancelWorkerMessage,
+)
+
+
 class BaseWorker(BaseObject, BusSubscriber):
     """Abstract base for workers in framework.
 
@@ -176,7 +187,11 @@ class BaseWorker(BaseObject, BusSubscriber):
             name: Unique name for this worker. If ``None``, an auto-generated
                 name is used (useful for instances that don't participate
                 in inter-worker communication).
-            active: Whether the worker starts active. Defaults to True.
+            active: Whether the worker starts out accepting bus messages
+                (see :attr:`active`). Starting one inactive is for
+                multi-worker setups where workers take turns: it stays out
+                of the way, doing nothing, until another worker or the
+                application activates it. Defaults to True.
             check_dangling_tasks: Whether to warn about tasks left running when
                 the worker finishes. Only applies when the worker owns its task
                 manager; a worker sharing the runner's task manager leaves the
@@ -259,7 +274,20 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     @property
     def active(self) -> bool:
-        """Whether this worker is currently active."""
+        """Whether this worker is accepting bus messages.
+
+        An active worker takes everything addressed to it. An inactive
+        one takes only activation, deactivation, end or cancel messages,
+        so no job request, frame or UI event reaches it and none of its
+        :meth:`on_bus_message` handling runs.
+
+        It matters mainly in multi-worker setups, where a worker is put
+        out of the way while the others carry on.
+
+        Registry watches sit outside this: ``@worker_ready`` handlers
+        fire from :class:`~pipecat.registry.WorkerRegistry` whatever this
+        returns, because they never travel over the bus.
+        """
         return self._active
 
     @property
@@ -464,6 +492,26 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         pass
 
+    def accepts_bus_message(self, message: BusMessage) -> bool:
+        """Take bus messages only while active.
+
+        An inactive worker is handed only activation, deactivation, end
+        or cancel messages. Work addressed to it, and everything it
+        would merely observe, is dropped by the bus rather than reaching
+        :meth:`on_bus_message`.
+
+        Registry notifications are unaffected, since ``@worker_ready``
+        watches fire from :class:`~pipecat.registry.WorkerRegistry`
+        rather than travelling over the bus.
+
+        Args:
+            message: The bus message about to be delivered.
+
+        Returns:
+            Whether to deliver the message.
+        """
+        return self._active or isinstance(message, _ALWAYS_DELIVERED)
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Called for every bus message after built-in lifecycle handling.
 
@@ -638,7 +686,9 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Activate a worker by name.
 
         The target worker's ``on_activated`` hook will be called
-        with the provided arguments.
+        with the provided arguments. The target need not be active
+        already: an activation reaches an inactive worker, which is what
+        lets it become active.
 
         Args:
             worker_name: The name of the worker to activate.

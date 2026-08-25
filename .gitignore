@@ -13,6 +13,7 @@ local.properties
 *.lock
 smart_turn_audio_log
 #*#
+.#*
 
 # Distribution / Packaging
 .Python

@@ -26,6 +26,7 @@ from pipecat.bus import (
     BusJobUpdateMessage,
     BusTTSSpeakMessage,
 )
+from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
@@ -84,12 +85,18 @@ def capture_bus(bus):
 
 
 def make_stub_pipeline_task(name, *, bridged=None, active=True):
-    """Create a PipelineWorker with an IdentityFilter pipeline."""
+    """Create a PipelineWorker with an IdentityFilter pipeline.
+
+    Answers its own flush probes even when bridged: these workers have no
+    transport peer to answer for them, so leaving it off would make every
+    drain wait out its timeout.
+    """
     return PipelineWorker(
         Pipeline([IdentityFilter()]),
         name=name,
         bridged=bridged,
         cancel_on_idle_timeout=False,
+        handle_flush_frame=True,
     )
 
 
@@ -156,6 +163,198 @@ class TestWorkerRunnerAccess(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(asyncio.gather(runner.run(), end_after_start()), timeout=10.0)
 
         self.assertIs(probe.peer, helper)
+
+
+class TestInactiveWorkerGating(unittest.IsolatedAsyncioTestCase):
+    """What an inactive worker is and is not handed off the bus."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+        self.registry = create_test_registry()
+        self.runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+
+    async def _worker(self, *, active: bool) -> BaseWorker:
+        worker = BaseWorker("gated", active=active)
+        await worker.attach(registry=self.registry, bus=self.bus, worker_runner=self.runner)
+        await worker.setup(self.tm)
+        return worker
+
+    async def test_inactive_worker_never_sees_a_job_request(self):
+        """End to end: the bus drops it, so no handler runs."""
+        worker = await self._worker(active=False)
+        handled = []
+
+        async def on_job_request(message):
+            handled.append(message)
+
+        worker.on_job_request = on_job_request  # type: ignore[method-assign]
+        await self.bus.start()
+
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(handled, [])
+
+    async def test_active_worker_sees_a_job_request(self):
+        worker = await self._worker(active=True)
+        handled = []
+
+        async def on_job_request(message):
+            handled.append(message)
+
+        worker.on_job_request = on_job_request  # type: ignore[method-assign]
+        await self.bus.start()
+
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(handled), 1)
+
+    async def test_handing_over_still_deactivates_the_worker_that_left(self):
+        """``deactivate_self=True`` clears the flag before sending the message.
+
+        The worker is inactive by the time its own deactivation arrives, so
+        gating that message would leave ``on_deactivated`` unrun.
+        """
+        deactivated = []
+
+        class Probe(BaseWorker):
+            async def on_deactivated(self):
+                deactivated.append(self.name)
+                await super().on_deactivated()
+
+        leaving = Probe("leaving")
+        taking_over = Probe("taking-over")
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(leaving, taking_over)
+        await leaving.setup(self.tm)
+        await taking_over.setup(self.tm)
+        await self.bus.start()
+
+        await leaving.activate_worker("taking-over", deactivate_self=True)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(deactivated, ["leaving"])
+
+    async def test_inactive_worker_still_takes_activation_and_shutdown(self):
+        """Otherwise nothing could start it, and nothing could stop it."""
+        worker = await self._worker(active=False)
+
+        for message in (
+            BusActivateWorkerMessage(source="other", target="gated"),
+            BusEndWorkerMessage(source="other", target="gated"),
+            BusCancelWorkerMessage(source="other", target="gated"),
+        ):
+            with self.subTest(message=type(message).__name__):
+                self.assertTrue(worker.accepts_bus_message(message))
+
+    async def test_activation_over_the_bus_opens_the_gate(self):
+        worker = await self._worker(active=False)
+        await worker.start()
+
+        await worker.on_bus_message(BusActivateWorkerMessage(source="other", target="gated"))
+
+        self.assertTrue(worker.active)
+        self.assertTrue(
+            worker.accepts_bus_message(
+                BusJobRequestMessage(source="other", target="gated", job_id="j1")
+            )
+        )
+
+    async def test_deactivation_closes_it_again(self):
+        worker = await self._worker(active=True)
+        await worker.start()
+
+        await worker.on_bus_message(BusDeactivateWorkerMessage(source="other", target="gated"))
+
+        self.assertFalse(worker.active)
+        self.assertFalse(
+            worker.accepts_bus_message(
+                BusJobRequestMessage(source="other", target="gated", job_id="j1")
+            )
+        )
+
+    async def test_a_plain_subscriber_is_never_gated(self):
+        """Observation is its own subscription, so it sees everything."""
+        seen = []
+
+        class Observer(BusSubscriber):
+            @property
+            def name(self) -> str:
+                return "observer"
+
+            async def on_bus_message(self, message):
+                seen.append(message)
+
+        observer = Observer()
+        await self.bus.subscribe(observer)
+        await self.bus.start()
+        await self.bus.send(BusJobRequestMessage(source="other", target="gated", job_id="j1"))
+        await asyncio.sleep(0.05)
+
+        self.assertTrue(any(isinstance(m, BusJobRequestMessage) for m in seen))
+
+
+class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
+    """end() and activate_worker() wait for in-flight frames."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    def _spy_on_flush(self, worker) -> list:
+        flushed = []
+        real = worker.flush_pipeline
+
+        # A short wait rather than the production default: a test that stops
+        # draining should fail in a second, not a minute.
+        async def spy(timeout: float = 1.0):
+            result = await real(timeout)
+            flushed.append(result)
+            return result
+
+        worker.flush_pipeline = spy  # type: ignore[method-assign]
+        return flushed
+
+    async def _run_until(self, worker, action):
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker)
+
+        async def drive():
+            await asyncio.sleep(0.05)
+            await action()
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), drive()), timeout=10.0)
+
+    async def test_end_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.end(reason="done"))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_activate_worker_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.activate_worker("peer"))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_end_skips_the_drain_when_nothing_is_running(self):
+        """Nothing would bounce the probe back, so waiting would only time out."""
+        worker = make_stub_pipeline_task("never-started")
+        await worker.attach(
+            registry=create_test_registry(),
+            bus=self.bus,
+            worker_runner=WorkerRunner(bus=self.bus, handle_sigint=False),
+        )
+        flushed = self._spy_on_flush(worker)
+
+        await worker.end(reason="done")
+
+        self.assertEqual(flushed, [])
 
 
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):

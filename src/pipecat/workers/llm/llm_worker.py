@@ -10,11 +10,14 @@ Provides the `LLMWorker` class that extends `PipelineWorker` with an LLM
 pipeline and automatic tool registration.
 """
 
+import contextvars
 import functools
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
@@ -22,7 +25,6 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    PipelineFlushFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -46,6 +48,18 @@ class LLMWorkerActivationArgs(WorkerActivationArgs):
 
     messages: list | None = None
     run_llm: bool | None = None
+
+
+#: The worker whose ``@tool`` handler is running, for the duration of that
+#: handler. A context variable rather than a counter so it answers "did this
+#: come from a tool", not "is a tool running somewhere": the bus dispatch tasks
+#: were created before any tool and carry a context where this is unset, so
+#: their frames are never mistaken for a handler's. It holds the worker rather
+#: than a flag because a handler can reach another worker, and only the worker
+#: running the tool will release what it holds.
+_IN_TOOL_CALL: contextvars.ContextVar["LLMWorker | None"] = contextvars.ContextVar(
+    "pipecat_in_tool_call", default=None
+)
 
 
 class LLMWorker(PipelineWorker):
@@ -109,7 +123,6 @@ class LLMWorker(PipelineWorker):
             pipeline,
             name=name,
             bridged=bridged,
-            exclude_frames=(PipelineFlushFrame,),
             enable_rtvi=bridged is None,
             idle_timeout_secs=None,
             params=PipelineParams(
@@ -154,18 +167,22 @@ class LLMWorker(PipelineWorker):
     async def queue_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
-        """Queue a frame, deferring delivery until all tools complete (if any).
+        """Queue a frame, holding it if a tool handler queued it.
 
-        When tool calls are in progress, the frame is held in an internal
-        queue and delivered automatically once the last tool finishes.
-        When no tools are active, the frame is queued immediately.
+        A frame queued from inside one of this worker's ``@tool`` handlers,
+        or from anything that handler awaits, is held and delivered once the
+        last tool finishes. Frames from anywhere else are queued
+        immediately: the worker's own traffic and frames arriving over the
+        bus, which run outside any handler's context, and frames a handler
+        on a different worker queues here, which this worker would never
+        release.
 
         Args:
             frame: Any ``Frame`` to deliver.
             direction: Direction the frame should travel. Defaults to
                 ``FrameDirection.DOWNSTREAM``.
         """
-        if self._defer_tool_frames and self._tool_call_inflight > 0 and not self._closing:
+        if self._defer_tool_frames and _IN_TOOL_CALL.get() is self and not self._closing:
             self._deferred_frames.append((frame, direction))
         else:
             await super().queue_frame(frame, direction)
@@ -190,8 +207,9 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Request a graceful end of the session.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback`` to
-        ensure any pending LLM output is fully delivered before ending.
+        When called from a ``@tool`` handler, pass ``params.result_callback``
+        so the call is settled before the pipeline drains, and any pending
+        LLM output is fully delivered before ending.
 
         Args:
             reason: Optional human-readable reason for ending.
@@ -265,9 +283,11 @@ class LLMWorker(PipelineWorker):
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
             self._tool_call_inflight += 1
+            token = _IN_TOOL_CALL.set(self)
             try:
                 return await method(params, *args, **kwargs)
             finally:
+                _IN_TOOL_CALL.reset(token)
                 self._tool_call_inflight = max(0, self._tool_call_inflight - 1)
                 if not self._closing and self._tool_call_inflight == 0:
                     await self._flush_deferred_frames()
@@ -275,9 +295,7 @@ class LLMWorker(PipelineWorker):
         return wrapper
 
     async def _flush_deferred_frames(self) -> None:
-        # Wait until the function result frame is really processed. flush_pipeline
-        # injects the probe straight into the pipeline, bypassing our queue_frame
-        # deferral override.
+        # Wait until the function result frame is really processed.
         await self.flush_pipeline()
 
         frames = list(self._deferred_frames)
@@ -293,8 +311,11 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Finish an in-progress function call before taking action.
 
-        Optionally injects LLM messages and flushes the pipeline so the
-        output is fully delivered before handing off or ending.
+        Optionally injects LLM messages and waits for the output they
+        produce, so the call is not settled in the middle of it. The
+        caller is ``end`` or ``activate_worker``, both of which drain the
+        pipeline afterwards, so the settled call needs no further wait
+        here.
 
         Args:
             result_callback: The callback from `FunctionCallParams`, or None.
@@ -302,15 +323,15 @@ class LLMWorker(PipelineWorker):
         """
         if messages:
             # Bypass our deferral override: this runs inside a tool call, so
-            # self.queue_frame would defer the frame and the flush below would
-            # return before the LLM output is delivered.
+            # self.queue_frame would park the frame instead of queueing it,
+            # and the flush below would return before the output is delivered.
             await super().queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
-            await self.flush_pipeline()
+            if not await self.flush_pipeline():
+                logger.warning(
+                    f"{self}: settling the function call before its output was delivered"
+                )
 
         if not result_callback:
             return
 
         await result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
-
-        # Wait until the function result frame is really processed.
-        await self.flush_pipeline()

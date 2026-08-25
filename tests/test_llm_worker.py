@@ -48,7 +48,7 @@ def _create_task():
     # flush_pipeline() does a real round-trip through the pipeline source/sink,
     # which this stubbed task has no running pipeline to service. Complete it
     # instantly so the deferral logic under test isn't blocked on the probe.
-    async def _instant_flush(timeout: float = 5.0) -> bool:
+    async def _instant_flush(timeout: float | None = None) -> bool:
         return True
 
     task.flush_pipeline = _instant_flush
@@ -119,18 +119,83 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(delivered), 1)
         self.assertIs(delivered[0][0], frame)
 
-    async def test_queue_frame_defers_when_tool_active(self):
-        """queue_frame defers delivery when a tool is in-flight."""
+    async def test_queue_frame_defers_a_frame_the_tool_queued(self):
+        """A frame queued from inside a tool handler is held."""
         task = self._track(_create_task())
-        task._tool_call_inflight = 1
-
         frame = _make_frame("deferred")
+        gate = asyncio.Event()
+
+        @tool
+        async def queueing_tool(self, params):
+            """Queues a frame, then blocks."""
+            await task.queue_frame(frame)
+            await gate.wait()
+
+        wrapped = task._track_tool_call(queueing_tool.__get__(task))
+        runner_task = asyncio.create_task(wrapped(MagicMock()))
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(_get_delivered_frames(task)), 0)
+        self.assertEqual(list(task._deferred_frames), [(frame, FrameDirection.DOWNSTREAM)])
+
+        gate.set()
+        await runner_task
+
+    async def test_a_tool_does_not_defer_on_another_worker(self):
+        """Only the worker running the tool holds what its handler queues.
+
+        A handler can reach another worker, and that worker would never
+        release a frame it held, since it has no tool of its own to finish.
+        """
+        task = self._track(_create_task())
+        other = self._track(_create_task())
+        frame = _make_frame("for the other worker")
+        gate = asyncio.Event()
+
+        @tool
+        async def reaching_tool(self, params):
+            """Queues onto another worker, then blocks."""
+            await other.queue_frame(frame)
+            await gate.wait()
+
+        wrapped = task._track_tool_call(reaching_tool.__get__(task))
+        runner_task = asyncio.create_task(wrapped(MagicMock()))
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(other._deferred_frames), 0)
+        self.assertEqual(len(_get_delivered_frames(other)), 1)
+
+        gate.set()
+        await runner_task
+
+    async def test_queue_frame_does_not_defer_traffic_from_elsewhere(self):
+        """A tool running does not hold back frames from other sources.
+
+        Bus traffic and the worker's own lifecycle frames arrive on other
+        tasks, outside the handler's context, and must not be caught by a
+        tool that happens to be running.
+        """
+        task = self._track(_create_task())
+        gate = asyncio.Event()
+
+        @tool
+        async def blocking_tool(self, params):
+            """Blocks until gate is set."""
+            await gate.wait()
+
+        wrapped = task._track_tool_call(blocking_tool.__get__(task))
+        runner_task = asyncio.create_task(wrapped(MagicMock()))
+        await asyncio.sleep(0)
+        self.assertEqual(task._tool_call_inflight, 1)
+
+        frame = _make_frame("from elsewhere")
         await task.queue_frame(frame)
 
-        delivered = _get_delivered_frames(task)
-        self.assertEqual(len(delivered), 0)
-        self.assertEqual(len(task._deferred_frames), 1)
-        self.assertEqual(task._deferred_frames[0], (frame, FrameDirection.DOWNSTREAM))
+        self.assertEqual(len(task._deferred_frames), 0)
+        self.assertEqual(len(_get_delivered_frames(task)), 1)
+
+        gate.set()
+        await runner_task
 
     async def test_deferred_frames_flush_when_tool_completes(self):
         """Frames deferred during a tool call are delivered when it finishes."""
@@ -140,7 +205,8 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
 
         @tool
         async def blocking_tool(self, params):
-            """Blocks until gate is set."""
+            """Queues a frame, then blocks until gate is set."""
+            await task.queue_frame(frame)
             await gate.wait()
 
         wrapped = task._track_tool_call(blocking_tool.__get__(task))
@@ -149,7 +215,6 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         runner_task = asyncio.create_task(wrapped(params))
         await asyncio.sleep(0)
 
-        await task.queue_frame(frame)
         self.assertEqual(len(_get_delivered_frames(task)), 0)
 
         gate.set()
@@ -167,7 +232,8 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
 
         @tool
         async def tool_a(self, params):
-            """First tool."""
+            """Queues the frame, then blocks."""
+            await task.queue_frame(frame)
             await gate_a.wait()
 
         @tool
@@ -179,14 +245,13 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         wrapped_b = task._track_tool_call(tool_b.__get__(task))
         params = MagicMock()
 
+        frame = _make_frame("queued")
         task_a = asyncio.create_task(wrapped_a(params))
         task_b = asyncio.create_task(wrapped_b(params))
         await asyncio.sleep(0)
 
         self.assertEqual(task._tool_call_inflight, 2)
-
-        frame = _make_frame("queued")
-        await task.queue_frame(frame)
+        self.assertEqual(len(_get_delivered_frames(task)), 0)
 
         # First tool finishes — frame still deferred (second tool running)
         gate_a.set()

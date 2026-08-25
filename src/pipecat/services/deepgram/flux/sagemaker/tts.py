@@ -178,7 +178,7 @@ class DeepgramFluxSageMakerTTSService(DeepgramFluxTTSBase):
         if not self._client:
             return
 
-        logger.debug("Disconnecting from Deepgram Flux TTS on SageMaker...")
+        logger.debug(f"{self}: Disconnecting from Deepgram Flux TTS on SageMaker...")
 
         await self.stop_all_metrics()
 

@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     OutputTransportMessageUrgentFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
 )
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
-_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
+_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame, PipelineFlushFrame)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
@@ -100,8 +101,10 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             await self.push_frame(frame, direction)
             return
 
-        # Urgent transport frames pass through directly. They need to
-        # reach the transport even when no child worker is active yet.
+        # Frames that belong to this pipeline rather than to a peer: urgent
+        # transport frames have to reach the transport even with no peer
+        # active, and a flush probe is asking about this pipeline, so it
+        # continues to the sink that answers it.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
@@ -148,14 +151,14 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         await self.push_frame(message.frame, message.direction)
 
 
-class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
-    """Pipeline-edge tee between a local pipeline and the bus.
+class _BusEdgeProcessor(FrameProcessor):
+    """Pipeline-edge tap that publishes local frames onto the bus.
 
     Placed by `PipelineWorker` at the source and sink of a bridged
     pipeline. Frames always continue through the local pipeline; in
-    addition, frames travelling in ``direction`` are forwarded to the
-    bus, and frames received from the bus in the opposite direction
-    are injected into the pipeline.
+    addition, frames travelling in ``direction`` are published to the
+    bus. The opposite path, a frame arriving from the bus, belongs to
+    the worker, which queues it into the pipeline itself.
     """
 
     def __init__(
@@ -163,7 +166,6 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         *,
         worker: "PipelineWorker",
         direction: FrameDirection,
-        bridges: tuple[str, ...] = (),
         exclude_frames: tuple[type[Frame], ...] | None = None,
         **kwargs,
     ):
@@ -173,13 +175,9 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             worker: The owning worker; the edge reads ``worker.bus`` lazily
                 so the bus only needs to be set (via
                 :meth:`PipelineWorker.attach`) by the time the processor is
-                set up. ``worker.name`` is the message source and
-                ``worker.active`` gates inbound frames.
-            direction: Direction this edge captures and forwards to the
-                bus. Inbound frames from the bus travelling in the
-                opposite direction are injected here.
-            bridges: Bridge names this edge accepts. Empty tuple accepts
-                frames from all bridges.
+                set up. ``worker.name`` is the message source.
+            direction: Direction this edge captures and publishes to the
+                bus.
             exclude_frames: Extra frame types that should never cross
                 the bus (lifecycle frames are always excluded).
             **kwargs: Additional arguments passed to ``FrameProcessor``.
@@ -187,18 +185,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         super().__init__(**kwargs)
         self._task = worker
         self._direction = direction
-        self._bridges = bridges
         self._exclude_frames = exclude_frames or ()
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Subscribe to the bus during processor setup."""
-        await super().setup(setup)
-        await self._task.bus.subscribe(self)
-
-    async def cleanup(self):
-        """Unsubscribe from the bus on cleanup."""
-        await super().cleanup()
-        await self._task.bus.unsubscribe(self)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Pass the frame through locally and forward matching ones to the bus."""
@@ -215,22 +202,3 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         await self._task.bus.send(
             BusFrameMessage(source=self._task.name, frame=frame, direction=direction)
         )
-
-    async def on_bus_message(self, message: BusMessage) -> None:
-        """Inject incoming bus frames into the pipeline."""
-        if not isinstance(message, BusFrameMessage):
-            return
-        if message.source == self._task.name:
-            return
-        if message.direction == self._direction:
-            return
-        if not self._task.active:
-            return
-        if message.target and message.target != self._task.name:
-            return
-        if self._bridges and message.bridge not in self._bridges:
-            return
-        # Route via the worker's push queue (rather than ``push_frame`` from
-        # this edge) so bus inbound serialises with frames the worker queues
-        # itself (e.g. those a flow framework enqueues from ``set_node``).
-        await self._task.queue_frame(message.frame, message.direction)
