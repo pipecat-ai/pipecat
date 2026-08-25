@@ -81,6 +81,7 @@ ELEVENLABS_MULTILINGUAL_MODELS = set(ELEVENLABS_MODEL_LANGUAGES)
 # Models that reject the previous_text/next_text context parameters
 ELEVENLABS_CONTEXT_UNSUPPORTED_MODELS = {
     "eleven_v3",
+    "eleven_v3_conversational",
 }
 
 

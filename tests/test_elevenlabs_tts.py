@@ -401,9 +401,10 @@ async def test_http_payload_includes_previous_text_when_supported():
     assert payload["previous_text"] == "Hello!"
 
 
+@pytest.mark.parametrize("model", ["eleven_v3", "eleven_v3_conversational"])
 @pytest.mark.asyncio
-async def test_http_payload_omits_previous_text_for_eleven_v3():
-    payload = await _http_payload_for_model("eleven_v3")
+async def test_http_payload_omits_previous_text_for_eleven_v3_models(model: str):
+    payload = await _http_payload_for_model(model)
     assert "previous_text" not in payload
 
 
