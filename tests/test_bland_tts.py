@@ -848,10 +848,11 @@ async def test_bland_tts_stops_feeding_a_refused_turn():
 
     speaks = _of_type(captured, "speak")
     assert [m["text"] for m in speaks] == ["first"]
-    # The refusal still reaches the pipeline, exactly once.
+    # The refusal still reaches the pipeline, exactly once. The turn's contexts
+    # separately report completing with no audio.
     errors = [f for f in down + up if isinstance(f, ErrorFrame)]
-    assert len(errors) == 1
-    assert "insufficient_credits" in errors[0].error
+    refusals = [f for f in errors if "insufficient_credits" in f.error]
+    assert len(refusals) == 1
 
 
 @pytest.mark.asyncio
@@ -1015,9 +1016,12 @@ async def test_bland_tts_reports_a_failed_turn_once():
             frames_to_send=[TTSSpeakFrame(text="Hold on <|30|> there."), SleepFrame(sleep=0.3)],
         )
 
+    # The context separately reports completing with no audio; the turn itself
+    # is reported once.
     errors = [f for f in down + up if isinstance(f, ErrorFrame)]
-    assert len(errors) == 1, [f.error for f in errors]
-    assert "invalid_request" in errors[0].error
+    turn_errors = [f for f in errors if "completed with no audio" not in f.error]
+    assert len(turn_errors) == 1, [f.error for f in turn_errors]
+    assert "invalid_request" in turn_errors[0].error
 
 
 @pytest.mark.asyncio
@@ -1037,8 +1041,8 @@ async def test_bland_tts_reports_a_failed_turn_with_no_error_frame():
         )
 
     errors = [f for f in down + up if isinstance(f, ErrorFrame)]
-    assert len(errors) == 1
-    assert "failed" in errors[0].error
+    failures = [f for f in errors if "failed" in f.error]
+    assert len(failures) == 1
 
 
 @pytest.mark.asyncio
