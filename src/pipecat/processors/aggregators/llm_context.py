@@ -552,37 +552,53 @@ class LLMContext:
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
 
-    def maybe_remove_invalid_message(self, exception: Exception):
-        """Remove messages from context if an exception indicates they were invalid.
+    def remove_invalid_file_message(self) -> bool:
+        """Remove the oldest file message added since the model's last successful reply.
 
-        This is a best-effort method to handle cases where an LLM service returns
-        an error indicating that a particular message in the context was invalid
-        (e.g., due to unsupported content). The method inspects the exception,
-        and if it can identify a specific message that caused the issue, it removes
-        that message from the context.
+        Best-effort cleanup for an LLM service to call once it's determined
+        (from a provider-specific error) that a request was rejected due to
+        unsupported or malformed file content — e.g. an unsupported MIME type
+        or corrupt bytes. Removing it prevents the context from getting
+        permanently stuck retrying the same failure.
 
-        Args:
-            exception: The exception raised during LLM processing, which may contain
-                information about invalid messages.
+        Providers don't say which message or content item triggered the
+        rejection, so there's no way to identify the exact culprit — this is
+        a heuristic, not a precise fix. An assistant message proves
+        everything before it was already accepted by a prior successful
+        completion (assistant messages are only ever appended after a
+        completion succeeds), so only file messages added since the last one
+        are candidates — a file from an earlier, already-successful turn is
+        never at risk. If several files are candidates (e.g. sent in quick
+        succession before either went through a completion), only the oldest
+        is removed: if it wasn't the actual culprit, the next retry fails
+        again and removes the next-oldest, converging on the bad file within
+        a few retries without ever knowing which one the provider meant.
+
+        Returns:
+            True if a file message was found and removed.
         """
-        # Check for OpenAI-specific error indicating an invalid file message, and remove it if found.
-        if (
-            getattr(exception, "type", None) == "invalid_request_error"
-            and getattr(exception, "param", None) == "file_id"
-        ):
-            for i in range(len(self._messages) - 1, -1, -1):
-                message = self._messages[i]
-                if isinstance(message, LLMSpecificMessage):
-                    continue
-                content = message.get("content")
-                if isinstance(content, list) and any(
-                    isinstance(item, dict) and item.get("type") == "file_base64" for item in content
-                ):
-                    logger.warning(
-                        "Removing message with file content from context due to invalid response."
-                    )
-                    self._messages.pop(i)
-                    break
+        since_index = 0
+        for i in range(len(self._messages) - 1, -1, -1):
+            message = self._messages[i]
+            if not isinstance(message, LLMSpecificMessage) and message.get("role") == "assistant":
+                since_index = i + 1
+                break
+
+        for i in range(since_index, len(self._messages)):
+            message = self._messages[i]
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and any(
+                isinstance(item, dict) and item.get("type") in ("file_base64", "file_url")
+                for item in content
+            ):
+                logger.warning(
+                    "Removing message with file content from context due to invalid response."
+                )
+                self._messages.pop(i)
+                return True
+        return False
 
     @overload
     @staticmethod

@@ -608,7 +608,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
-                frame.context.maybe_remove_invalid_message(e)
+                # OpenAI explicitly flags the invalid file_id parameter.
+                if (
+                    getattr(e, "type", None) == "invalid_request_error"
+                    and getattr(e, "param", None) == "file_id"
+                ):
+                    frame.context.remove_invalid_file_message()
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
