@@ -1,0 +1,1 @@
+- `AnthropicLLMService.ThinkingConfig` now covers Anthropic's current thinking API: `type="adaptive"`, the only mode Claude Opus 4.7 and later models accept, and `display`, which asks for summarized thinking text on models that omit it by default.
