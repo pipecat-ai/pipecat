@@ -401,6 +401,7 @@ class SonioxSTTService(WebsocketSTTService):
         self._user_turn_open = False
 
         self._receive_task = None
+        self._session_received_audio = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -495,14 +496,17 @@ class SonioxSTTService(WebsocketSTTService):
         # cancelling the Soniox receive task that drains the final response.
         await WebsocketSTTService._disconnect(self)
         try:
-            await self._send_stop_recording()
-            if self._receive_task:
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(self._receive_task), timeout=_FINAL_TRANSCRIPT_TIMEOUT
-                    )
-                except TimeoutError:
-                    logger.warning(f"{self}: timed out waiting for final Soniox transcript")
+            # Soniox rejects end-of-audio when the session received no PCM. In
+            # that case there cannot be a buffered final transcript to drain.
+            if self._session_received_audio:
+                await self._send_stop_recording()
+                if self._receive_task:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(self._receive_task), timeout=_FINAL_TRANSCRIPT_TIMEOUT
+                        )
+                    except TimeoutError:
+                        logger.warning(f"{self}: timed out waiting for final Soniox transcript")
         finally:
             await self._disconnect()
 
@@ -531,6 +535,7 @@ class SonioxSTTService(WebsocketSTTService):
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(audio)
+                self._session_received_audio = self._session_received_audio or bool(audio)
             except Exception as e:
                 logger.warning(f"{self}: send failed: {e}")
 
@@ -603,6 +608,7 @@ class SonioxSTTService(WebsocketSTTService):
                 return
 
             logger.debug("Connecting to Soniox STT")
+            self._session_received_audio = False
 
             self._websocket = await self._websocket_connect(self._url)
 

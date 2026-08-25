@@ -116,6 +116,9 @@ async def test_stop_drains_final_transcript_without_reconnecting(monkeypatch):
     service._receive_task = service.create_task(
         service._receive_task_handler(service._report_error), name="receive"
     )
+    async for _ in service.run_stt(b"\x00\x00"):
+        pass
+    websocket.send.reset_mock()
 
     await service.stop(EndFrame())
 
@@ -123,6 +126,18 @@ async def test_stop_drains_final_transcript_without_reconnecting(monkeypatch):
     final_frames = [frame for frame in pushed_frames if isinstance(frame, TranscriptionFrame)]
     assert [frame.text for frame in final_frames] == ["open shifts"]
     reconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_without_audio_skips_end_of_audio():
+    service = SonioxSTTService(api_key="test-key")
+    websocket = _StopAwareWebsocket([])
+    service._websocket = websocket
+
+    await service.stop(EndFrame())
+
+    websocket.send.assert_not_awaited()
+    websocket.close.assert_awaited_once()
 
 
 def test_language_from_tokens_uses_single_recognized_language():
