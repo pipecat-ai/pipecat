@@ -276,17 +276,13 @@ class BaseWorker(BaseObject, BusSubscriber):
     def active(self) -> bool:
         """Whether this worker is accepting bus messages.
 
-        That is the whole of what it means. An active worker takes
-        everything addressed to it. An inactive one takes only what can
-        change its mind, an activation, an end or a cancel, so no job
-        request, frame or UI event reaches it and none of its
+        An active worker takes everything addressed to it. An inactive
+        one takes only activation, deactivation, end or cancel messages,
+        so no job request, frame or UI event reaches it and none of its
         :meth:`on_bus_message` handling runs.
 
-        It therefore only says something where several workers share a
-        bus and take turns, such as a handoff between two LLM workers
-        where the one not speaking should stay out of the way. A bot
-        built from a single worker has nobody to take turns with, so its
-        worker is active for its whole life and this never comes up.
+        It matters mainly in multi-worker setups, where a worker is put
+        out of the way while the others carry on.
 
         Registry watches sit outside this: ``@worker_ready`` handlers
         fire from :class:`~pipecat.registry.WorkerRegistry` whatever this
@@ -499,10 +495,10 @@ class BaseWorker(BaseObject, BusSubscriber):
     def accepts_bus_message(self, message: BusMessage) -> bool:
         """Take bus messages only while active.
 
-        An inactive worker is handed nothing but the messages that can
-        change that: an activation, or a request to end or cancel. Work
-        addressed to it, and everything it would merely observe, is
-        dropped by the bus rather than reaching :meth:`on_bus_message`.
+        An inactive worker is handed only activation, deactivation, end
+        or cancel messages. Work addressed to it, and everything it
+        would merely observe, is dropped by the bus rather than reaching
+        :meth:`on_bus_message`.
 
         Registry notifications are unaffected, since ``@worker_ready``
         watches fire from :class:`~pipecat.registry.WorkerRegistry`
