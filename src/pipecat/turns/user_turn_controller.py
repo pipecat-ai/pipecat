@@ -128,12 +128,17 @@ class UserTurnController(BaseObject):
         # caller having to hand us the setup again.
         self._setup = setup
 
+        await self._setup_strategies()
+
+    async def start(self):
+        """Start watching for a turn that stops without the user stopping.
+
+        Paired with :meth:`stop`.
+        """
         if not self._user_turn_stop_timeout_task:
             self._user_turn_stop_timeout_task = self.create_task(
                 self._user_turn_stop_timeout_task_handler()
             )
-
-        await self._setup_strategies()
 
     async def stop(self):
         """Stop the turn stop timeout, leaving the strategies alone.

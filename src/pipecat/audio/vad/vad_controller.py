@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     SpeechControlParamsFrame,
-    StartFrame,
     VADParamsUpdateFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -122,21 +121,23 @@ class VADController(BaseObject):
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
 
-        Handles `StartFrame` to initialize the sample rate and `InputAudioRawFrame`
-        to analyze audio for voice activity.
+        Handles `InputAudioRawFrame` to analyze audio for voice activity, and
+        `VADParamsUpdateFrame` to reconfigure the analyzer.
 
         Args:
             frame: The frame to process.
         """
-        if isinstance(frame, StartFrame):
-            await self._start(frame)
-        elif isinstance(frame, InputAudioRawFrame):
+        if isinstance(frame, InputAudioRawFrame):
             await self._handle_audio(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
             self._vad_analyzer.set_params(frame.params)
             await self.broadcast_frame(SpeechControlParamsFrame, vad_params=frame.params)
 
-    async def _start(self, frame: StartFrame):
+    async def start(self):
+        """Announce the analyzer's params and start the idle timer.
+
+        Paired with :meth:`stop`.
+        """
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
 

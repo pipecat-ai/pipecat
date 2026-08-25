@@ -804,10 +804,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if await self._maybe_mute_frame(frame):
             return
 
-        if self._vad_controller:
-            await self._vad_controller.process_frame(frame)
-
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
@@ -859,6 +859,9 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
+
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
@@ -881,6 +884,9 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._call_event_handler("on_user_turn_message_added", message)
 
         return aggregation
+
+    async def _start(self, frame: StartFrame):
+        await self._start_controllers()
 
     async def _stop(self, frame: EndFrame):
         if self._realtime_service_mode:
@@ -1125,11 +1131,16 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._realtime_handoff_flush_task)
         self._realtime_handoff_flush_task = None
 
+    async def _start_controllers(self):
+        if self._vad_controller:
+            await self._vad_controller.start()
+        await self._user_turn_controller.start()
+
     async def _stop_controllers(self):
         # At session end the controllers' timers can only report what ending
         # looks like: no audio arriving, no turn finishing, the user idle. They
         # stop here, while what they hold (the VAD analyzer, the turn
-        # strategies) may be shared and is released in cleanup() instead.
+        # strategies) may be shared and is released in _cleanup() instead.
         await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
             await self._vad_controller.stop()

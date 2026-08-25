@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    StartFrame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -124,7 +125,9 @@ class VADProcessor(FrameProcessor):
         # 2. Audio flows through immediately while VAD detection happens after
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, (EndFrame, CancelFrame)):
+        if isinstance(frame, StartFrame):
+            await self._vad_controller.start()
+        elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._vad_controller.stop()
 
         # Let the VAD controller handle the frame

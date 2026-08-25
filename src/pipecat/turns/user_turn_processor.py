@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     Frame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -151,7 +152,10 @@ class UserTurnProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            await self._user_turn_controller.start()
+        elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
