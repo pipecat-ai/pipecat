@@ -891,13 +891,7 @@ class BaseOutputTransport(FrameProcessor):
             silence_frame = OutputAudioRawFrame(
                 audio=silence, sample_rate=self.sample_rate, num_channels=1
             )
-            try:
-                await asyncio.wait_for(
-                    self._transport.write_audio_frame(silence_frame),
-                    timeout=secs + 1,
-                )
-            except TimeoutError:
-                logger.warning(f"{self} timed out writing end-frame silence")
+            await self._internal_write_audio_frame(silence_frame)
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
@@ -918,7 +912,7 @@ class BaseOutputTransport(FrameProcessor):
                 # Try to send audio to the transport.
                 try:
                     if isinstance(frame, OutputAudioRawFrame):
-                        push_downstream = await self._transport.write_audio_frame(frame)
+                        push_downstream = await self._internal_write_audio_frame(frame)
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False
@@ -927,6 +921,36 @@ class BaseOutputTransport(FrameProcessor):
                 # downstream in case anyone else needs it.
                 if push_downstream:
                     await self._transport.push_frame(frame)
+
+        async def _internal_write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
+            """Write a frame to the transport, giving up if the write never returns.
+
+            A client that stops reading is the common way to get there: the
+            connection stays up and nothing fails, so the transport has neither
+            an error to report nor state to check. That leaves how long the
+            write takes as the only signal available.
+
+            Returns:
+                Whether the transport took the frame.
+            """
+            # Reporting the timeout below costs the transport its usability, so
+            # a peer is only written off once however much audio is still queued.
+            if not self._transport.is_usable:
+                return False
+
+            timeout = self._params.audio_out_write_timeout_secs
+            try:
+                return await asyncio.wait_for(
+                    self._transport.write_audio_frame(frame), timeout=timeout
+                )
+            except TimeoutError as e:
+                await self._transport.push_error(
+                    f"{self._transport} timed out after {timeout}s writing audio to the "
+                    "transport; the peer has stopped reading",
+                    exception=e,
+                    force_treat_as_permanent=True,
+                )
+                return False
 
         #
         # Video handling

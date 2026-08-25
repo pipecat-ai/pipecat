@@ -471,28 +471,37 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
                 num_channels=frame.num_channels,
             )
 
-        await self._write_frame(frame)
+        if not await self._write_frame(frame):
+            return False
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
 
         return True
 
-    async def _write_frame(self, frame: Frame):
-        """Serialize and send a frame to the WebSocket client."""
-        if not self._params.serializer:
-            return
+    async def _write_frame(self, frame: Frame) -> bool:
+        """Serialize and send a frame to the WebSocket client.
 
+        Returns:
+            Whether the frame was sent.
+        """
+        if not self._params.serializer:
+            return False
+
+        success = False
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
                 await self._websocket.send(payload)
+                success = True
         except websockets.ConnectionClosed:
             # The client went away mid-send (a normal race on disconnect, e.g.
             # while still streaming TTS audio). Not an error.
             logger.debug(f"{self}: client disconnected while sending")
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
+
+        return success
 
     async def _write_audio_sleep(self):
         """Simulate audio device timing by sleeping between audio chunks."""
