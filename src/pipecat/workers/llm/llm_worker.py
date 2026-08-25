@@ -12,6 +12,7 @@ pipeline and automatic tool registration.
 
 import contextvars
 import functools
+import warnings
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -207,20 +208,39 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Request a graceful end of the session.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback``
-        so the call is settled before the pipeline drains, and any pending
-        LLM output is fully delivered before ending.
+        When called from a ``@tool`` handler, deliver the function call result
+        first with ``await params.result_callback(result)``: the LLM output it
+        triggers is delivered before the session ends.
 
         Args:
             reason: Optional human-readable reason for ending.
             messages: Optional LLM messages to inject and speak before
                 ending. The LLM runs immediately so the output is
                 delivered before the session terminates.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before :meth:`end`
+                    instead. Will be removed in 2.0.0.
             result_callback: The ``result_callback`` from
                 `FunctionCallParams`.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before :meth:`end`
+                    instead. Will be removed in 2.0.0.
         """
         self._closing = True
-        await self._finish_function_call(result_callback, messages=messages)
+        if messages is not None or result_callback is not None:
+            warnings.warn(
+                "Passing messages or result_callback to LLMWorker.end() is deprecated, "
+                "call params.result_callback(result) before end() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            await self._finish_function_call(result_callback, messages=messages)
+        else:
+            # Make sure everything is flushed before activate. This makes sure
+            # `result_callback` is properly handled.
+            await self.flush_pipeline()
         await super().end(reason=reason)
 
     async def activate_worker(
@@ -232,11 +252,11 @@ class LLMWorker(PipelineWorker):
         messages: list | None = None,
         result_callback: FunctionCallResultCallback | None = None,
     ) -> None:
-        """Activate another worker, optionally finishing an in-progress tool call.
+        """Activate another worker, draining this worker's pipeline first.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback`` to
-        ensure any pending LLM output is fully delivered before the target is
-        activated.
+        When called from a ``@tool`` handler, deliver the function call result
+        first with ``await params.result_callback(result)``: the LLM output it
+        triggers is delivered before the target is activated.
 
         Args:
             worker_name: The name of the worker to activate.
@@ -247,9 +267,29 @@ class LLMWorker(PipelineWorker):
             messages: Optional LLM messages to inject and speak before
                 activating the target. The LLM runs immediately so the output
                 is delivered before the transfer completes.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before
+                    :meth:`activate_worker` instead. Will be removed in 2.0.0.
             result_callback: The ``result_callback`` from `FunctionCallParams`.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before
+                    :meth:`activate_worker` instead. Will be removed in 2.0.0.
         """
-        await self._finish_function_call(result_callback, messages=messages)
+        if messages is not None or result_callback is not None:
+            warnings.warn(
+                "Passing messages or result_callback to LLMWorker.activate_worker() is "
+                "deprecated, call params.result_callback(result) before activate_worker() "
+                "instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            await self._finish_function_call(result_callback, messages=messages)
+        else:
+            # Make sure everything is flushed before activate. This makes sure
+            # `result_callback` is properly handled.
+            await self.flush_pipeline()
         await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
 
     async def process_deferred_tool_frames(

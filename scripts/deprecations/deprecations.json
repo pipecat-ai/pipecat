@@ -4238,6 +4238,50 @@
       "location": "pipecat/workers/base_worker.py"
     },
     {
+      "subject": "LLMWorker.activate_worker.messages",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`activate_worker` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.activate_worker.result_callback",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`activate_worker` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.end.messages",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`end` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
+      "subject": "LLMWorker.end.result_callback",
+      "module": "pipecat.workers.llm.llm_worker",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "params.result_callback(result)",
+      "message": "Call ``params.result_callback(result)`` before :meth:`end` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/workers/llm/llm_worker.py"
+    },
+    {
       "subject": "tool.timeout",
       "module": "pipecat.workers.llm.tool_decorator",
       "kind": "parameter",
