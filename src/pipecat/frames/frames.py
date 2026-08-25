@@ -1261,18 +1261,30 @@ class ProposedUserStartedSpeakingFrame(SystemFrame):
     proposal, not a decision: an
     :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` resolves it
     into a :class:`UserStartedSpeakingFrame` and broadcasts the interruption.
+
+    This is a system frame because resolving it broadcasts an interruption,
+    which must preempt queued frames rather than wait behind them. Its
+    end-of-turn counterpart has the opposite requirement and is a control
+    frame; see :class:`ProposedUserStoppedSpeakingFrame`.
     """
 
     pass
 
 
 @dataclass
-class ProposedUserStoppedSpeakingFrame(SystemFrame):
+class ProposedUserStoppedSpeakingFrame(ControlFrame, UninterruptibleFrame):
     """Frame proposing that the user turn has ended.
 
     The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
     resolved into a :class:`UserStoppedSpeakingFrame` by an
     :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`.
+
+    This is a control frame so it stays ordered against the final
+    :class:`TranscriptionFrame`. A service with its own turn detection pushes
+    that transcript and then proposes the stop, and the turn strategy needs
+    that text in hand to close the turn on. It is marked
+    :class:`UninterruptibleFrame` so a queued proposal survives an
+    interruption.
     """
 
     pass
