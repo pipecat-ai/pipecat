@@ -110,8 +110,8 @@ jobs:
       - name: Configure git identity
         run: |
           for dir in . _reports; do
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
+            git -C "$dir" config user.name "pipecat-provider-watch-bot[bot]"
+            git -C "$dir" config user.email "321038859+pipecat-provider-watch-bot[bot]@users.noreply.github.com"
           done
 
       - name: Compose skill arguments
