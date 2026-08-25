@@ -939,9 +939,12 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_deferred_finalization_keeps_the_signals_emission_flags(self):
         """Finalization from the transcript timeout carries the right flags.
 
-        With wait_for_transcript the stop can land from the internal timeout
-        rather than the stop signal, long after the signal that determined
-        whether emission is suppressed.
+        A transcript that arrives after the stop signal closes the turn from
+        the internal timeout, long after the signal that determined whether
+        emission is suppressed. This ordering happens with services whose
+        stop signal and transcript come from independent events; a service
+        that pushes the transcript before proposing the stop takes the
+        immediate path instead.
         """
         strategy = ExternalUserTurnStopStrategy(timeout=0.05)
         await strategy.setup(frame_processor_setup(self.task_manager))

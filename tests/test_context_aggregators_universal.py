@@ -15,6 +15,7 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -69,7 +70,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -390,6 +391,54 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         await run_test(
             Pipeline([user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_turn_closes_on_the_stop_signal_when_the_transcript_precedes_it(self):
+        """A service that pushes the transcript before proposing the stop closes at once.
+
+        The aggregation timer is set far longer than the test runs, so the turn
+        can only close from the stop signal itself. That path needs the final
+        transcript to have arrived first, which holds only while
+        ``ProposedUserStoppedSpeakingFrame`` stays ordered against it.
+        """
+
+        class TurnDetectingSTT(FrameProcessor):
+            """Stands in for an STT whose provider reports turn boundaries."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, InterimTranscriptionFrame):
+                    await self.push_frame(
+                        TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+                    )
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=ExternalUserTurnStrategies(
+                    stop=[ExternalUserTurnStopStrategy(timeout=30.0)]
+                )
+            ),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            SleepFrame(sleep=0.3),
+        ]
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            LLMContextFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        await run_test(
+            Pipeline([TurnDetectingSTT(), user_aggregator]),
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
