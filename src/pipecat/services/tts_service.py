@@ -164,7 +164,7 @@ class TTSService(AIService):
         pause_frame_processing: bool = False,
         pause_watchdog_timeout_s: float | None = None,
         # number of consecutive TTS contexts that may complete with no audio before the
-        # service is reported unable to do its job; 0 disables reporting silent contexts
+        # service is reported unable to do its job; 0 disables the check
         max_consecutive_zero_audio_contexts: int = 3,
         # if True, append a trailing space to text before sending to TTS
         # (helps prevent some TTS services from vocalizing trailing punctuation)
@@ -224,12 +224,12 @@ class TTSService(AIService):
             max_consecutive_zero_audio_contexts: How many consecutive TTS contexts may
                 complete without producing any audio before the service is reported unable
                 to do its job. Catches a provider that accepts requests and stays silent —
-                an unknown voice ID, say — which no error ever surfaces. Each silent
-                context reports an error the service can carry on from; on reaching the
-                limit the service reports a permanent error instead, stops being given
-                work, and the pipeline worker applies its
-                :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy`. Set to 0 to let
-                silent contexts go unreported and unchecked.
+                an unknown voice ID, say — which no error ever surfaces. Every silent
+                context reports an error the service can carry on from, whatever the limit
+                is; on reaching the limit the service reports a permanent error instead,
+                stops being given work, and the pipeline worker applies its
+                :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy`. Set to 0 to
+                report silent contexts without ever writing the service off.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
                 Only applied in sentence aggregation mode; when streaming tokens, the incoming
@@ -1813,9 +1813,6 @@ class TTSService(AIService):
         if not self._bot_speaking:
             await self._maybe_resume_frame_processing()
 
-        if not self._max_consecutive_zero_audio_contexts:
-            return
-
         # An unusable service is deliberately not given work (see
         # _synthesize_text), so its silent contexts say nothing new.
         if not self.is_usable:
@@ -1827,7 +1824,10 @@ class TTSService(AIService):
             f"({self._consecutive_zero_audio_contexts} in a row)"
         )
 
-        if self._consecutive_zero_audio_contexts >= self._max_consecutive_zero_audio_contexts:
+        if (
+            self._max_consecutive_zero_audio_contexts
+            and self._consecutive_zero_audio_contexts >= self._max_consecutive_zero_audio_contexts
+        ):
             await self.push_error(
                 error_msg=(
                     f"{self._consecutive_zero_audio_contexts} consecutive TTS contexts "

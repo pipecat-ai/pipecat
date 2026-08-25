@@ -206,7 +206,7 @@ async def test_audio_resets_the_count():
 
 
 @pytest.mark.asyncio
-async def test_zero_disables_reporting_silent_contexts():
+async def test_zero_reports_silent_contexts_without_writing_the_service_off():
     tts = MockTTSService(max_consecutive_zero_audio_contexts=0)
 
     _, up = await asyncio.wait_for(
@@ -214,8 +214,10 @@ async def test_zero_disables_reporting_silent_contexts():
         timeout=5.0,
     )
 
+    # Silence is reported however long it goes on, but never costs the service
+    # its usability.
     assert tts.is_usable
-    assert _errors(up) == []
+    assert len(_errors(up)) == 4
 
 
 @pytest.mark.asyncio
@@ -296,4 +298,6 @@ async def test_a_silent_context_resumes_frame_processing():
     assert any(marker.label == "after_silence" for marker in markers), (
         "frame processing stayed paused after a context completed with no audio"
     )
-    assert _errors(up) == []
+    # The silence is reported, and the service carries on able to do its job.
+    assert len(_errors(up)) == 1
+    assert tts.is_usable
