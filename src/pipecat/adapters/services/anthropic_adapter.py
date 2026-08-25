@@ -437,19 +437,21 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             content = new_content
             msg["content"] = content
 
-            # In the case where there's a single image in the list (like what
-            # would result from a UserImageRawFrame), ensure that the image
-            # comes before text, as recommended by Anthropic docs
+            # In the case where there's a single image or document in the list (like
+            # what would result from a UserImageRawFrame or UserFileRawFrame), ensure
+            # it comes before text, as recommended by Anthropic docs
             # (https://docs.anthropic.com/en/docs/build-with-claude/vision#example-one-image)
-            image_indices = [i for i, item in enumerate(content) if item["type"] == "image"]
+            media_indices = [
+                i for i, item in enumerate(content) if item["type"] in ("image", "document")
+            ]
             text_indices = [i for i, item in enumerate(content) if item["type"] == "text"]
-            if len(image_indices) == 1 and text_indices:
-                img_idx = image_indices[0]
+            if len(media_indices) == 1 and text_indices:
+                media_idx = media_indices[0]
                 first_txt_idx = text_indices[0]
-                if img_idx > first_txt_idx:
-                    # Move image before the first text
-                    image_item = content.pop(img_idx)
-                    content.insert(first_txt_idx, image_item)
+                if media_idx > first_txt_idx:
+                    # Move the image/document before the first text
+                    media_item = content.pop(media_idx)
+                    content.insert(first_txt_idx, media_item)
 
         return cast(MessageParam, msg)
 
