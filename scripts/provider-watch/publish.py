@@ -19,7 +19,8 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 1. push the branch and open a draft PR (title and body from the branch's
    commit messages — a single commit verbatim, several stitched with the
    report's summary as the title — plus a link to the report), subject to
-   the per-run cap;
+   the per-run cap, then rename the branch's ``+slug`` changelog fragments
+   to the PR's number;
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
@@ -38,6 +39,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -118,6 +120,66 @@ def _open_pr_for_branch(sh: Shell, repo: str, branch: str) -> str | None:
     return prs[0]["url"] if prs else None
 
 
+def _main_base(sh: Shell, repo_root: Path) -> str:
+    return (
+        "origin/main"
+        if sh.ok("git", "rev-parse", "--verify", "--quiet", "origin/main", cwd=repo_root)
+        else "main"
+    )
+
+
+def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+    """Rename the branch's ``+slug`` changelog fragments to the PR's number.
+
+    Researchers write towncrier's orphan form because no PR exists when the
+    branch is committed; once the PR is open its number is known, so one
+    follow-up commit gives the fragments their conventional names (with
+    ``.2``/``.3`` counters when a branch adds several of one type).
+    """
+    number = pr_url.rstrip("/").split("/")[-1]
+    added = sh.run(
+        "git",
+        "diff",
+        "--name-only",
+        "--diff-filter=A",
+        f"{_main_base(sh, repo_root)}..{branch}",
+        "--",
+        "changelog/",
+        cwd=repo_root,
+    ).split()
+    orphans = sorted(p for p in added if Path(p).name.startswith("+"))
+    if not orphans or not number.isdigit():
+        return
+    workdir = tempfile.mkdtemp(prefix="pw-fragments-")
+    try:
+        sh.run("git", "worktree", "add", "--quiet", workdir, branch, cwd=repo_root)
+        counters: dict[str, int] = {}
+        for path in orphans:
+            parts = Path(path).name.split(".")
+            fragment_type = parts[-2] if len(parts) >= 3 else "other"
+            counters[fragment_type] = counters.get(fragment_type, 0) + 1
+            counter = counters[fragment_type]
+            suffix = "" if counter == 1 else f".{counter}"
+            sh.run(
+                "git",
+                "mv",
+                path,
+                f"changelog/{number}.{fragment_type}{suffix}.md",
+                cwd=Path(workdir),
+            )
+        sh.run(
+            "git",
+            "commit",
+            "-q",
+            "-m",
+            f"Name the changelog fragments after PR #{number}",
+            cwd=Path(workdir),
+        )
+        sh.run("git", "push", "origin", branch, cwd=Path(workdir))
+    finally:
+        sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
+
+
 def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tuple[str, str]:
     """PR title and body from the branch's commits (one commit per item).
 
@@ -125,11 +187,7 @@ def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tup
     one section per commit oldest-first, titled by the report's summary for the
     branch.
     """
-    base = (
-        "origin/main"
-        if sh.ok("git", "rev-parse", "--verify", "--quiet", "origin/main", cwd=repo_root)
-        else "main"
-    )
+    base = _main_base(sh, repo_root)
     hashes = sh.run("git", "rev-list", "--reverse", f"{base}..{branch}", cwd=repo_root).split()
     if not hashes:
         hashes = [branch]
@@ -211,6 +269,10 @@ def publish_prs(
                 )
                 opened_this_run += 1
                 outcome.opened.append(url)
+                try:
+                    _rename_changelog_fragments(sh, repo_root, branch, url)
+                except RuntimeError as exc:
+                    outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
 
             pr.update({"state": "open", "url": url, "opened": date})
             pr.pop("capped", None)

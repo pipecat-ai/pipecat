@@ -308,11 +308,12 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(self, open_prs=None, branches=None, commits=None):
+        def __init__(self, open_prs=None, branches=None, commits=None, fragments=None):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
+            self.fragments = fragments or {}  # branch -> [changelog paths added]
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
@@ -324,6 +325,9 @@ class TestPublish:
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
+            if args[:2] == ("git", "diff") and "--name-only" in args:
+                branch = args[4].split("..")[-1]
+                return "\n".join(self.fragments.get(branch, []))
             if args[:2] == ("git", "rev-list"):
                 branch = args[-1].split("..")[-1]
                 return "\n".join(f"{branch}@{i}" for i in range(len(self.commits.get(branch, ()))))
@@ -449,6 +453,49 @@ class TestPublish:
         assert "## Default CartesiaTTSService to sonic-4\n\nSonic body." in body
         assert "## Fix the retired sonic-2 in the eval fallback\n\nEval body." in body
         assert body.index("sonic-4") < body.index("retired sonic-2")
+
+    def test_renames_changelog_fragments_to_pr_number(self, tmp_path):
+        import publish
+
+        branch = "provider-watch/cartesia-tts-updates"
+        path = tmp_path / "reports/cartesia/tts/2026-08-20.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
+            f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
+            f"- `{branch}` — review: `git show {branch}` — s\n"
+        )
+        sh = self.FakeShell(
+            branches=[branch],
+            fragments={
+                branch: [
+                    "changelog/+cartesia-normalization.added.md",
+                    "changelog/+cartesia-locale.added.md",
+                    "changelog/+cartesia-sonic.fixed.md",
+                ]
+            },
+        )
+        reports = publish.load_reports(tmp_path, "2026-08-20")
+        outcome = publish.publish_prs(
+            reports,
+            sh=sh,
+            repo_root=tmp_path,
+            pipecat_repo="pipecat-ai/pipecat",
+            reports_repo="pipecat-ai/provider-watch-reports",
+            date="2026-08-20",
+            cap=8,
+        )
+        assert len(outcome.opened) == 1 and not outcome.skipped
+        moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
+        assert moves == [
+            ("git", "mv", "changelog/+cartesia-locale.added.md", "changelog/101.added.md"),
+            ("git", "mv", "changelog/+cartesia-normalization.added.md", "changelog/101.added.2.md"),
+            ("git", "mv", "changelog/+cartesia-sonic.fixed.md", "changelog/101.fixed.md"),
+        ]
+        assert any(c[:2] == ("git", "commit") and "#101" in c[-1] for c in sh.calls)
+        assert ("git", "push", "origin", branch) in [
+            c[:4] for c in sh.calls if c[:2] == ("git", "push")
+        ]
 
     def test_second_pass_is_a_no_op(self, reports_dir):
         tmp_path, publish = reports_dir
