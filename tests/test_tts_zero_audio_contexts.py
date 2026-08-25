@@ -246,14 +246,10 @@ async def test_becoming_usable_again_clears_the_count():
 async def test_a_silent_context_resumes_frame_processing():
     """A context known to have played nothing lifts the pause it took.
 
-    The watchdog would eventually force-resume, so it is given a timeout far
-    longer than the test: the frames only get through if completing in silence
-    resumes frame processing on its own.
+    The pause is taken while the context is still open and might yet produce
+    audio; nothing else will resume it once the context completes in silence.
     """
-    tts = MockPausingTTSService(
-        pause_watchdog_timeout_s=30.0,
-        max_consecutive_zero_audio_contexts=0,
-    )
+    tts = MockPausingTTSService(max_consecutive_zero_audio_contexts=0)
 
     frames_to_send: list[Frame] = [
         LLMFullResponseStartFrame(),
@@ -272,5 +268,4 @@ async def test_a_silent_context_resumes_frame_processing():
     assert any(marker.label == "after_silence" for marker in markers), (
         "frame processing stayed paused after a context completed with no audio"
     )
-    # The watchdog never fired, so the error it reports is absent too.
     assert _errors(up) == []

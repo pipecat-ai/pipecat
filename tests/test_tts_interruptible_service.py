@@ -11,9 +11,9 @@ was speaking (or about to start speaking) for the turn being interrupted. It
 tracks this with two flags:
 
 - ``_bot_speaking`` (on the base TTSService): true only once BotStartedSpeakingFrame
-  confirms the output transport actually received audio; also gates
-  TTSService's pause watchdog (see test_no_spurious_watchdog_on_long_streaming_turn
-  and test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).
+  confirms the output transport actually received audio (see
+  test_no_early_resume_on_long_streaming_turn and
+  test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).
 - ``_tts_started`` (InterruptibleTTSService only): true from the moment
   run_tts is invoked (TTSStartedFrame pushed) until consumed by an
   interruption, or cleared by BotStoppedSpeakingFrame (turn ended normally) or
@@ -177,9 +177,9 @@ async def test_tts_started_cleared_on_new_turn():
     """_tts_started must not leak into a new turn.
 
     Models a turn that invoked run_tts (TTSStartedFrame) but never got a
-    BotStartedSpeakingFrame or BotStoppedSpeakingFrame — e.g. force-resumed by
-    TTSService's own pause watchdog after a zero-audio completion, so nothing
-    ever clears _tts_started via the normal BotStoppedSpeakingFrame path.
+    BotStartedSpeakingFrame or BotStoppedSpeakingFrame — a turn that completed
+    with no audio, say — so nothing ever clears _tts_started via the normal
+    BotStoppedSpeakingFrame path.
     Without the LLMFullResponseStartFrame reset, an interruption during the
     *next* turn (before it has invoked run_tts itself) would incorrectly
     reconnect because of the stale flag.
@@ -219,17 +219,14 @@ async def test_silent_turn_resumes_frame_processing():
     A context completes (TTSStoppedFrame) with zero TTSAudioRawFrames, and no
     BotStartedSpeakingFrame/BotStoppedSpeakingFrame ever arrives — as in
     production, where the output transport never receives audio to react to.
-    Both recoveries from this are gated on _bot_speaking: the resume when a
-    context completes in silence, and the pause watchdog behind it. Which one
-    gets there first depends on how long the provider holds the context open,
-    so this asserts only that the pipeline keeps moving.
+    Whether the pause is taken at all depends on how long the provider holds
+    the context open, so this asserts only that the pipeline keeps moving.
     """
 
     class FakeInterruptiblePauseTTSService(FakeInterruptibleTTSService):
         def __init__(self, **kwargs):
             super().__init__(
                 pause_frame_processing=True,
-                pause_watchdog_timeout_s=0.2,
                 **kwargs,
             )
 
@@ -250,7 +247,7 @@ async def test_silent_turn_resumes_frame_processing():
         LLMFullResponseStartFrame(),
         TextFrame(text="Hello."),
         LLMFullResponseEndFrame(),
-        SleepFrame(sleep=0.4),  # longer than pause_watchdog_timeout_s=0.2
+        SleepFrame(sleep=0.4),  # let the silent context complete
         MarkerFrame(label="after_silence"),
     ]
 

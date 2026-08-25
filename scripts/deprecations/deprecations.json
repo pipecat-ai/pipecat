@@ -3622,6 +3622,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.pause_watchdog_timeout_s",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Frame processing is now paused only while there is audio still to be played, so the pause is lifted by the ``BotStoppedSpeakingFrame`` that follows playback or by the audio context completing in silence, and no timer is needed to break it. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "TTSService.set_model",
       "module": "pipecat.services.tts_service",
       "kind": "method",

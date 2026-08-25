@@ -311,9 +311,8 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
     ElevenLabsTTSService's actual override: it resets alignment state but never
     calls _maybe_resume_frame_processing(). Because no TTSAudioRawFrame is ever
     produced, the output transport's BotStartedSpeakingFrame/
-    BotStoppedSpeakingFrame never fire in production either, so nothing resumes
-    frame processing after pause_processing_frames() latches — until
-    TTSService's own pause watchdog force-resumes after pause_watchdog_timeout_s.
+    BotStoppedSpeakingFrame never fire in production either, so the context
+    completing in silence is the only thing that can lift the pause.
     """
 
     def __init__(self, **kwargs):
@@ -321,7 +320,6 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
             push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            pause_watchdog_timeout_s=0.2,
             sample_rate=_SAMPLE_RATE,
             **kwargs,
         )
@@ -348,8 +346,8 @@ class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
     whose audio context completes quickly (as ElevenLabs-style providers
     typically report isFinal shortly after the last text is sent), but whose
     actual playback — tracked independently by the output transport — keeps
-    going past pause_watchdog_timeout_s after the turn's LLMFullResponseEndFrame
-    pauses frame processing.
+    going well after the turn's LLMFullResponseEndFrame pauses frame
+    processing.
 
     Does NOT override on_audio_context_completed(), matching
     ElevenLabsTTSService's actual override (resets alignment state but never
@@ -364,7 +362,6 @@ class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
             push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            pause_watchdog_timeout_s=0.2,
             sample_rate=_SAMPLE_RATE,
             **kwargs,
         )
@@ -1593,8 +1590,8 @@ async def test_no_deadlock_on_zero_audio_context_completion():
 
     Timeline:
     1. LLM response -> _processing_text=True.
-    2. LLMFullResponseEndFrame -> pause_processing_frames() called, starting
-       the pause watchdog.
+    2. LLMFullResponseEndFrame -> pause_processing_frames() called, the context
+       still being open and able to produce audio.
     3. Provider reports the context finished with no audio (TTSStoppedFrame,
        zero TTSAudioRawFrame). on_audio_context_completed() is a no-op here,
        matching ElevenLabsTTSService's actual override.
@@ -1602,10 +1599,8 @@ async def test_no_deadlock_on_zero_audio_context_completion():
        production the output transport only sends them once TTS audio was
        actually received, and this test models that absence directly by never
        sending either.
-    5. The pause watchdog (pause_watchdog_timeout_s=0.2 here) fires with no
-       BotStartedSpeakingFrame seen, force-resumes frame processing, and
-       reports a non-fatal error. FooFrame must arrive downstream within the
-       timeout.
+    5. The context completing with no audio resumes frame processing, so
+       FooFrame must arrive downstream.
     """
     tts = MockWebSocketPauseTTSServiceZeroAudioCompletion()
 
@@ -1676,20 +1671,19 @@ async def test_filter_stripped_text_does_not_pause_frame_processing():
 
 
 @pytest.mark.asyncio
-async def test_no_spurious_watchdog_on_long_streaming_turn():
-    """A long streaming turn whose audio is still playing past
-    pause_watchdog_timeout_s after the pause must not trip the watchdog.
+async def test_no_early_resume_on_long_streaming_turn():
+    """A long streaming turn whose audio is still playing must stay paused.
 
     Timeline:
     1. LLM response -> _processing_text=True.
     2. BotStartedSpeakingFrame arrives *before* LLMFullResponseEndFrame —
        streaming TTS starts playback while the LLM is still generating, and
        the output transport only sends this frame once per turn.
-    3. LLMFullResponseEndFrame -> pause_processing_frames() called. Audio for
-       this turn was already confirmed, so no watchdog should be armed.
-    4. More than pause_watchdog_timeout_s (0.2s here) elapses with no
-       BotStoppedSpeakingFrame yet — this must NOT force-resume or push an
-       ErrorFrame; playback is still legitimately in progress.
+    3. LLMFullResponseEndFrame -> pause_processing_frames() called, this turn's
+       audio being on its way to the transport.
+    4. Time passes with no BotStoppedSpeakingFrame yet — nothing must resume
+       frame processing or push an ErrorFrame; playback is still legitimately
+       in progress.
     5. BotStoppedSpeakingFrame finally arrives (playback finished) and
        resumes frame processing normally; FooFrame must arrive afterward.
     """
@@ -1711,7 +1705,7 @@ async def test_no_spurious_watchdog_on_long_streaming_turn():
         BotStartedSpeakingFrame(),
         SleepFrame(sleep=0.05),
         LLMFullResponseEndFrame(),
-        SleepFrame(sleep=0.3),  # longer than pause_watchdog_timeout_s=0.2
+        SleepFrame(sleep=0.3),  # playback still in progress
         BotStoppedSpeakingFrame(),
         FooFrame(label="after_stop"),
     ]
@@ -1723,10 +1717,7 @@ async def test_no_spurious_watchdog_on_long_streaming_turn():
 
     down, up = frames_received
     error_frames = [f for f in up if isinstance(f, ErrorFrame)]
-    assert not error_frames, (
-        f"Spurious pause-watchdog ErrorFrame(s) during in-progress playback: {error_frames} — "
-        "the watchdog must not arm when audio was already confirmed before the pause"
-    )
+    assert not error_frames, f"Spurious ErrorFrame(s) during in-progress playback: {error_frames}"
 
     foo_frames = [f for f in down if isinstance(f, FooFrame)]
     assert any(f.label == "after_stop" for f in foo_frames), (
