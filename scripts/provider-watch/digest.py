@@ -160,12 +160,12 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
 
     lines += [
         "---",
-        "To record a decision about an item above, reply on this issue naming the unit and enough of "
+        "To record a decision about an item above, reply on this issue naming the service and enough of "
         "the item to identify it, one decision per line — e.g. `deepgram/stt, diarize_model: skip, "
         "the extra= workaround is fine` or `openai/realtime, tool_choice: tracked in #5400, stop reporting`. "
         "Fixes need no comment: the next run sees the code change. It reads these comments for "
         "everything it cannot see — won't do, later, tracked elsewhere — and records each "
-        "decision in the unit's `decisions.md`, beside its reports."
+        "decision in the service's `decisions.md`, beside its reports."
         + (f" Full triage workflow: the [README]({repo_url}#the-weekly-loop)." if repo_url else ""),
     ]
     return "\n".join(lines).rstrip() + "\n"
