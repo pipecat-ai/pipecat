@@ -649,8 +649,7 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
-    if RUNNER_FILE_STORAGE is not None:
-        _setup_file_uploads_route(app)
+    _setup_file_uploads_route(app)
 
 
 def _setup_unified_start_route(
@@ -1744,7 +1743,8 @@ def main(parser: argparse.ArgumentParser | None = None):
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--downloads-folder: Path to folder for files available for download
-       - -u/--uploads-folder: Path to folder for client uploads (short-lived)
+       - -u/--uploads-folder: Path to folder for client uploads (short-lived; default:
+         the PIPECAT_UPLOADS_FOLDER env var)
        - --uploads-folder-max-files: Max files in uploads folder (default: 10)
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
@@ -1814,7 +1814,11 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--uploads-folder",
         type=str,
         dest="uploads_folder",
-        help="Path to folder for client uploads (short-lived; max files enforced)",
+        default=os.getenv("PIPECAT_UPLOADS_FOLDER"),
+        help=(
+            "Path to folder for client uploads (short-lived; max files enforced). "
+            "Defaults to the PIPECAT_UPLOADS_FOLDER environment variable."
+        ),
     )
     parser.add_argument(
         "--uploads-folder-max-files",
