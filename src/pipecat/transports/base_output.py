@@ -923,12 +923,12 @@ class BaseOutputTransport(FrameProcessor):
                     await self._transport.push_frame(frame)
 
         async def _internal_write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-            """Write a frame to the transport, giving up if the peer stopped reading.
+            """Write a frame to the transport, giving up if the write never returns.
 
-            A peer that stops reading blocks the write on socket buffers that
-            never drain. Nothing about that is an error the transport could
-            report, so the only signal available is that the write never
-            returns, and by then the connection is no longer usable.
+            A client that stops reading is the common way to get there: the
+            connection stays up and nothing fails, so the transport has neither
+            an error to report nor state to check. That leaves how long the
+            write takes as the only signal available.
 
             Returns:
                 Whether the transport took the frame.
