@@ -140,6 +140,7 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
             items = [
                 f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}"
                 + (f" — {gap['note']}" if gap.get("note") else "")
+                + (f" — *needs a call: {gap['needs']}*" if gap.get("needs") else "")
                 for report, gap in group
             ]
             if priority == "low":

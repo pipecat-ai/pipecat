@@ -141,7 +141,8 @@ class TestDigest:
             "gaps:\n  - item: sonic-4 preview needs a voice migration\n    first_seen: 2026-07-30\n"
             "    action: consider\n    priority: low\n    note: re-check when GA\n"
             "  - item: emotion controls unreachable\n    first_seen: 2026-08-20\n"
-            "    action: consider\n    priority: high\nprs: []\nerror: null\n---\n",
+            "    action: consider\n    priority: high\n"
+            "    needs: which voices support emotion\nprs: []\nerror: null\n---\n",
         )
         write(
             "groq/llm",
@@ -186,6 +187,10 @@ class TestDigest:
             in text
         )
         consider = text.split("## Changes to consider")[1].split("## Did not complete")[0]
+        assert (
+            "emotion controls unreachable — *needs a call: which voices support emotion*"
+            in consider
+        )
         assert consider.index("**High**") < consider.index("emotion controls unreachable")
         assert consider.index("emotion controls unreachable") < consider.index(
             "<details><summary><b>Low</b> (1)"

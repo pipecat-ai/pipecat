@@ -48,7 +48,7 @@ You never push or open PRs yourself. You propose one by leaving a committed bran
 - The diff is small and self-explanatory; no new constructor parameters, no new service classes, no new extras, no behavioral changes beyond the value itself. A new `Settings` field qualifies only when it is simple: optional and unset by default (behavior is unchanged unless a user sets it), named and typed as the provider documents, and passed through to the request without touching other logic. A field that interacts with other settings, needs validation or conversion, or changes what happens by default stays `consider`.
 - The team has not decided against it (the unit's `decisions.md`).
 
-Everything else is a gap with `action: consider`, listed under "To consider" with a sketch of the change, the evidence, and a `priority` by the template's criteria — the digest sorts by it, so rank honestly: most items are `medium` or `low`; `high` means users are affected now or on a date.
+Everything else is a gap with `action: consider`, listed under "To consider" with a sketch of the change, the evidence, and a `priority` by the template's criteria — the digest sorts by it, so rank honestly: most items are `medium` or `low`; `high` means users are affected now or on a date. Give each a one-line `needs` naming the decision or unknown that keeps it out of a PR — `note` carries the what and the evidence, `needs` the question. If you cannot say what needs deciding, re-read the criteria: the item may qualify for the PR after all.
 
 ### Branch recipe
 
