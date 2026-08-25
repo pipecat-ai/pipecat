@@ -1140,7 +1140,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # At session end the controllers' timers can only report what ending
         # looks like: no audio arriving, no turn finishing, the user idle. They
         # stop here, while what they hold (the VAD analyzer, the turn
-        # strategies) may be shared and is released in _cleanup() instead.
+        # strategies) may be shared and is released in cleanup() instead.
         await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
             await self._vad_controller.stop()
