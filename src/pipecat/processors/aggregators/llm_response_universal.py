@@ -780,7 +780,17 @@ class LLMUserAggregator(LLMContextAggregator):
     async def cleanup(self):
         """Release this aggregator's resources at teardown."""
         await super().cleanup()
-        await self._cleanup()
+
+        await self._cancel_realtime_handoff_flush_task()
+
+        if self._vad_controller:
+            await self._vad_controller.cleanup()
+
+        await self._user_turn_controller.cleanup()
+        await self._user_idle_controller.cleanup()
+
+        for s in self._params.user_mute_strategies:
+            await s.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
@@ -794,10 +804,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if await self._maybe_mute_frame(frame):
             return
 
-        if self._vad_controller:
-            await self._vad_controller.process_frame(frame)
-
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
@@ -849,6 +859,9 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
+
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
@@ -872,6 +885,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         return aggregation
 
+    async def _start(self, frame: StartFrame):
+        await self._start_controllers()
+
     async def _stop(self, frame: EndFrame):
         if self._realtime_service_mode:
             # Realtime mode: cancel any pending deferred handoff flush
@@ -882,7 +898,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
-        await self._cleanup()
+        await self._stop_controllers()
 
     async def _cancel(self, frame: CancelFrame):
         # See _stop — same realtime-mode vs cascade dispatch.
@@ -891,7 +907,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
-        await self._cleanup()
+        await self._stop_controllers()
 
     def _apply_realtime_mode_strategy_mutations(
         self, user_turn_strategies: UserTurnStrategies, are_user_provided_custom_strategies: bool
@@ -1115,15 +1131,21 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._realtime_handoff_flush_task)
         self._realtime_handoff_flush_task = None
 
-    async def _cleanup(self):
+    async def _start_controllers(self):
+        if self._vad_controller:
+            await self._vad_controller.start()
+        await self._user_turn_controller.start()
+
+    async def _stop_controllers(self):
+        # At session end the controllers' timers can only report what ending
+        # looks like: no audio arriving, no turn finishing, the user idle. They
+        # stop here, while what they hold (the VAD analyzer, the turn
+        # strategies) may be shared and is released in cleanup() instead.
         await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
-            await self._vad_controller.cleanup()
-        await self._user_turn_controller.cleanup()
-        await self._user_idle_controller.cleanup()
-
-        for s in self._params.user_mute_strategies:
-            await s.cleanup()
+            await self._vad_controller.stop()
+        await self._user_turn_controller.stop()
+        await self._user_idle_controller.stop()
 
     async def _maybe_mute_frame(self, frame: Frame):
         # Lifecycle frames should never be muted and should not trigger mute
