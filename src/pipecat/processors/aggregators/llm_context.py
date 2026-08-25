@@ -132,6 +132,9 @@ class LLMContext:
             url: The URL of the image.
             text: Optional text to include with the image.
         """
+        # TODO: Deprecate support for a non-data `url` here now that `create_file_url_message`
+        #       exists — a URL-referenced image and a URL-referenced file should go through the
+        #       same path instead of two.
         content: list[dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
@@ -201,8 +204,6 @@ class LLMContext:
         """
         # Format is a public url. It is expected that the llm service will fetch the file from the url.
         # The url is passed as is to the llm service.
-        # TODO: Deprecate support in adapters for passing a non-data url as part of the image_url interface.
-        #       all urls should be passed as a file_url message instead.
         if type == "url":
             return LLMContext.create_file_url_message(
                 role=role, format=format, url=file, filename=name, text=text
