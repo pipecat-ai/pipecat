@@ -1272,7 +1272,7 @@ class ProposedUserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class ProposedUserStoppedSpeakingFrame(ControlFrame, UninterruptibleFrame):
+class ProposedUserStoppedSpeakingFrame(ControlFrame):
     """Frame proposing that the user turn has ended.
 
     The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
@@ -1282,9 +1282,7 @@ class ProposedUserStoppedSpeakingFrame(ControlFrame, UninterruptibleFrame):
     This is a control frame so it stays ordered against the final
     :class:`TranscriptionFrame`. A service with its own turn detection pushes
     that transcript and then proposes the stop, and the turn strategy needs
-    that text in hand to close the turn on. It is marked
-    :class:`UninterruptibleFrame` so a queued proposal survives an
-    interruption.
+    that text in hand to close the turn on.
     """
 
     pass
