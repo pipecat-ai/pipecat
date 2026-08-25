@@ -7,7 +7,7 @@
 """Tests for the streamed-response timeouts and retry in GoogleLLMService."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from google import genai
@@ -286,3 +286,141 @@ def test_timeouts_are_enabled_by_default():
     assert service._stream_idle_timeout_secs == 20.0
     assert service._retry_timeout_secs == 5.0
     assert service._retry_on_timeout is False
+
+
+@pytest.mark.asyncio
+async def test_google_llm_removes_file_message_on_client_error():
+    """A 4xx ClientError from Gemini triggers file-message cleanup.
+
+    This prevents the context from getting permanently stuck retrying a file
+    Gemini has already rejected (unsupported MIME type, corrupt bytes, etc.).
+    """
+    from google.genai.errors import ClientError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise ClientError(
+            400, {"error": {"code": 400, "message": "bad file", "status": "INVALID_ARGUMENT"}}
+        )
+
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "hello"})
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    messages = context.get_messages()
+    assert len(messages) == 1
+    assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_google_llm_removes_file_message_despite_newer_message():
+    """Test that the right file message is found even if it's no longer the newest.
+
+    A file arriving alongside a separately-aggregated user utterance (e.g. the
+    user was mid-turn when the file was sent) can end up with a plain-text
+    message added after it, before either has gone through a completion. The
+    file should still be identified as the removal candidate.
+    """
+    from google.genai.errors import ClientError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise ClientError(
+            400, {"error": {"code": 400, "message": "bad file", "status": "INVALID_ARGUMENT"}}
+        )
+
+    context = LLMContext()
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+    context.add_message({"role": "user", "content": "what does it say?"})
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    messages = context.get_messages()
+    assert len(messages) == 1
+    assert messages[0]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_google_llm_leaves_a_confirmed_file_message_alone():
+    """Test that a file already confirmed accepted by a prior completion is untouched.
+
+    Once an assistant reply has followed the file, it's no longer a removal
+    candidate — a later, unrelated turn erroring out shouldn't discard it.
+    """
+    from google.genai.errors import ClientError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise ClientError(
+            400, {"error": {"code": 400, "message": "bad file", "status": "INVALID_ARGUMENT"}}
+        )
+
+    context = LLMContext()
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+    # Simulates an earlier, separate completion that succeeded with this file.
+    context.add_message({"role": "assistant", "content": "Here's a summary."})
+    context.add_message({"role": "user", "content": "what does it say?"})
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    messages = context.get_messages()
+    assert len(messages) == 3
+    assert messages[2]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_google_llm_leaves_context_alone_on_server_error():
+    """A 5xx ServerError from Gemini does not trigger file-message cleanup.
+
+    A server-side failure isn't evidence that our request (or its file) was
+    bad, so the message should survive to be retried.
+    """
+    from google.genai.errors import ServerError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise ServerError(
+            500, {"error": {"code": 500, "message": "internal error", "status": "INTERNAL"}}
+        )
+
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "hello"})
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    assert len(context.get_messages()) == 2

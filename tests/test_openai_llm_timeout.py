@@ -226,6 +226,140 @@ async def test_openai_llm_emits_error_frame_on_exception():
 
 
 @pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_on_invalid_file_id_error():
+    """Test that an invalid_request_error/file_id error triggers file-message cleanup.
+
+    This prevents the context from getting permanently stuck retrying a file
+    OpenAI has already rejected.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        error = RuntimeError("invalid file")
+        error.type = "invalid_request_error"
+        error.param = "file_id"
+        service._process_context = AsyncMock(side_effect=error)
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_despite_newer_message():
+    """Test that the right file message is found even if it's no longer the newest.
+
+    A file arriving alongside a separately-aggregated user utterance (e.g. the
+    user was mid-turn when the file was sent) can end up with a plain-text
+    message added after it, before either has gone through a completion. The
+    file should still be identified as the removal candidate.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        error = RuntimeError("invalid file")
+        error.type = "invalid_request_error"
+        error.param = "file_id"
+        service._process_context = AsyncMock(side_effect=error)
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        context.add_message({"role": "user", "content": "what does it say?"})
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_leaves_a_confirmed_file_message_alone():
+    """Test that a file already confirmed accepted by a prior completion is untouched.
+
+    Once an assistant reply has followed the file, it's no longer a removal
+    candidate — a later, unrelated turn erroring out shouldn't discard it.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        error = RuntimeError("invalid file")
+        error.type = "invalid_request_error"
+        error.param = "file_id"
+        service._process_context = AsyncMock(side_effect=error)
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        # Simulates an earlier, separate completion that succeeded with this file.
+        context.add_message({"role": "assistant", "content": "Here's a summary."})
+        context.add_message({"role": "user", "content": "what does it say?"})
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 3
+        assert messages[2]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_leaves_context_alone_on_unrelated_error():
+    """Test that an unrelated error does not trigger file-message cleanup."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("rate limited"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        assert len(context.get_messages()) == 2
+
+
+@pytest.mark.asyncio
 async def test_openai_llm_async_iterator_closed_on_stream_end():
     """Test that the async iterator is explicitly closed after stream consumption.
 
