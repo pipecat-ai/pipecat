@@ -251,6 +251,40 @@ class TestProbe:
         result = self._run("--no-dotenv", "list-models", "--provider", "nosuchprovider")
         assert result.returncode == 3
 
+    def test_merge_probe_results_medians(self):
+        import probe
+
+        def result(ok=True, ttfat=None, ttfb=None, error=None):
+            return probe.ProbeResult(
+                service="AnthropicLLMService",
+                model="m",
+                ok=ok,
+                ttfb_ms=ttfb,
+                ttfat_ms=ttfat,
+                thinking_ms=0,
+                frames={},
+                error=error,
+            )
+
+        single = result(ttfat=100, ttfb=100)
+        assert probe.merge_probe_results([single]) is single
+
+        merged = probe.merge_probe_results(
+            [
+                result(ttfat=998, ttfb=998),
+                result(ttfat=2401, ttfb=2401),
+                result(ttfat=933, ttfb=933),
+            ]
+        )
+        assert merged.ok and merged.ttfat_ms == 998 and merged.ttfb_ms == 998
+        assert merged.note == "median of 3/3 runs, ttfat 933–2401 ms"
+
+        partial = probe.merge_probe_results(
+            [result(ttfat=100, ttfb=100), result(ok=False, error="boom")]
+        )
+        assert not partial.ok and partial.ttfat_ms == 100
+        assert partial.note.startswith("median of 1/2 runs")
+
     def test_setting_values_parse_json_and_scalars(self):
         import probe
 

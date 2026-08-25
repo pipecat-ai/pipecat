@@ -52,6 +52,7 @@ import inspect
 import json
 import os
 import re
+import statistics
 import sys
 import time
 import tomllib
@@ -59,7 +60,7 @@ import urllib.error
 import urllib.request
 import wave
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +105,31 @@ class Timings:
     ttfb: float | None = None
     ttfat: float | None = None
     thinking: float | None = None
+
+
+def merge_probe_results(results: list[ProbeResult]) -> ProbeResult:
+    """Fold repeated probes of one model into one result with median latencies.
+
+    A single latency sample has a heavy right tail, so comparisons that decide
+    anything (a default bump) should quote the median over interleaved repeats.
+    Failed repeats are excluded from the medians; the note carries the counts
+    and the spread of the primary metric.
+    """
+    if len(results) == 1:
+        return results[0]
+    succeeded = [r for r in results if r.ok]
+    merged = replace(succeeded[0] if succeeded else results[0])
+    for name in ("ttfb_ms", "ttfat_ms", "thinking_ms"):
+        values = [getattr(r, name) for r in succeeded if getattr(r, name) is not None]
+        setattr(merged, name, round(statistics.median(values)) if values else None)
+    primary = "ttfat_ms" if any(r.ttfat_ms is not None for r in succeeded) else "ttfb_ms"
+    values = sorted(getattr(r, primary) for r in succeeded if getattr(r, primary) is not None)
+    spread = f", {primary[:-3]} {values[0]}–{values[-1]} ms" if len(values) > 1 else ""
+    merged.ok = len(succeeded) == len(results)
+    merged.note = f"median of {len(succeeded)}/{len(results)} runs{spread}" + (
+        f"; {merged.note}" if merged.note else ""
+    )
+    return merged
 
 
 @dataclass
@@ -511,7 +537,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if len(models) > MAX_MODELS_PER_RUN:
         raise SystemExit(f"at most {MAX_MODELS_PER_RUN} models per invocation")
 
-    results = [asyncio.run(probe_one(unit, cls_info, model, args)) for model in models]
+    samples: dict[str | None, list[ProbeResult]] = {model: [] for model in models}
+    for _ in range(args.repeat):
+        for model in models:
+            samples[model].append(asyncio.run(probe_one(unit, cls_info, model, args)))
+    results = [merge_probe_results(samples[model]) for model in models]
     for result in results:
         if args.json:
             print(json.dumps(asdict(result)))
@@ -766,6 +796,15 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=20.0,
         help="seconds to wait for the pipeline to start",
+    )
+    run.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        choices=range(1, 11),
+        metavar="N",
+        help="probe each model N times, interleaved, and report median latencies "
+        "(use ~5 for default-bump comparisons)",
     )
     run.add_argument("--json", action="store_true", help="one JSON object per model on stdout")
     run.add_argument("--verbose", action="store_true", help="show service debug logs")
