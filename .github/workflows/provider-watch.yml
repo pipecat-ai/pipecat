@@ -130,6 +130,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
+          # The provider-watch environment holds the bot's dedicated key,
+          # shadowing the repo-level ANTHROPIC_API_KEY for this job.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
           prompt: |
