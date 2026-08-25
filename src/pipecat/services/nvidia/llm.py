@@ -160,7 +160,6 @@ class NvidiaLLMService(OpenAILLMService):
             return text
 
         self._think_tag_buffer += text
-
         if self._think_tag_state == _ThinkTagState.DETECTING:
             if len(self._think_tag_buffer) < len(_THINK_OPEN):
                 if _THINK_OPEN.startswith(self._think_tag_buffer):
@@ -171,6 +170,7 @@ class NvidiaLLMService(OpenAILLMService):
                 return passthrough
 
             if self._think_tag_buffer.startswith(_THINK_OPEN):
+                await self.stop_ttfb_metrics()
                 self._think_tag_state = _ThinkTagState.IN_THOUGHT
                 await self.push_frame(LLMThoughtStartFrame())
                 self._think_tag_buffer = self._think_tag_buffer[len(_THINK_OPEN) :]
@@ -287,6 +287,7 @@ class NvidiaLLMService(OpenAILLMService):
                     )
                     if rc:
                         if not self._has_reasoning_field:
+                            await self.stop_ttfb_metrics()
                             self._has_reasoning_field = True
                             await self.push_frame(LLMThoughtStartFrame())
                         await self.push_frame(LLMThoughtTextFrame(text=rc))
