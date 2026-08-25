@@ -7,6 +7,7 @@
 """Tests for the streamed-response timeouts and retry in GoogleLLMService."""
 
 import asyncio
+import binascii
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -303,6 +304,40 @@ async def test_google_llm_removes_file_message_on_client_error():
         raise ClientError(
             400, {"error": {"code": 400, "message": "bad file", "status": "INVALID_ARGUMENT"}}
         )
+
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "hello"})
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    messages = context.get_messages()
+    assert len(messages) == 1
+    assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_google_llm_removes_file_message_on_context_conversion_error():
+    """An LLMContextConversionError also triggers file-message cleanup.
+
+    Corrupt file data (e.g. malformed base64) fails during local message
+    conversion, before any request reaches Gemini at all — so this never
+    surfaces as a ClientError, but it's just as much evidence the file was
+    the problem.
+    """
+    from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise LLMContextConversionError(binascii.Error("Incorrect padding"))
 
     context = LLMContext()
     context.add_message({"role": "user", "content": "hello"})

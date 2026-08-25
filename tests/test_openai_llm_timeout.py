@@ -226,6 +226,44 @@ async def test_openai_llm_emits_error_frame_on_exception():
 
 
 @pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_on_context_conversion_error():
+    """Test that an LLMContextConversionError also triggers file-message cleanup.
+
+    An unsupported file MIME type (or corrupt base64) fails during local
+    message conversion, before any request reaches OpenAI at all — so it
+    never surfaces as an invalid_request_error, but it's just as much
+    evidence the file was the problem.
+    """
+    from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        service._process_context = AsyncMock(
+            side_effect=LLMContextConversionError(ValueError("Unsupported 'file' MIME type"))
+        )
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
 async def test_openai_llm_removes_file_message_on_invalid_file_id_error():
     """Test that an invalid_request_error/file_id error triggers file-message cleanup.
 
