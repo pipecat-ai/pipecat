@@ -9,7 +9,7 @@ import unittest
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
-from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
+from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -58,9 +58,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             nonlocal speech_started
             speech_started = True
 
-        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.setup(frame_processor_setup(self.task_manager))
-        await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
 
@@ -87,9 +85,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             nonlocal speech_stopped
             speech_stopped = True
 
-        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.setup(frame_processor_setup(self.task_manager))
-        await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
 
@@ -116,9 +112,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
             nonlocal activity_count
             activity_count += 1
 
-        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.setup(frame_processor_setup(self.task_manager))
-        await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
 
@@ -181,9 +175,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         async def on_speech_stopped(_controller):
             events_triggered.append("stopped")
 
-        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.setup(frame_processor_setup(self.task_manager))
-        await controller.process_frame(start_frame)
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
 
@@ -266,9 +258,8 @@ class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
             nonlocal speech_stopped
             speech_stopped = True
 
-        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
         await controller.setup(frame_processor_setup(self.task_manager))
-        await controller.process_frame(start_frame)
+        await controller.start()
 
         # Stay in QUIET state, wait past idle timeout
         await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
