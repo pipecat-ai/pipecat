@@ -46,7 +46,7 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 try:
     import aiobotocore.session
     from botocore.config import Config
-    from botocore.exceptions import ReadTimeoutError
+    from botocore.exceptions import ClientError, ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -630,6 +630,22 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             await self._call_event_handler("on_completion_timeout")
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. an unsupported file MIME type, corrupt
+            # base64 data) can't reach the API at all, but is just as much
+            # evidence of an invalid file as a rejection from Bedrock itself, so
+            # it gets the same best-effort cleanup.
+            context.remove_invalid_file_message()
+        except ClientError as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # botocore doesn't distinguish client-fault (4xx) from server-fault
+            # (5xx) by exception type, so check the status code directly. A
+            # rejection of our request (bad document name, unsupported format,
+            # etc.) is grounds to remove a pending file message on a
+            # best-effort basis; a server-side failure isn't evidence our
+            # request (or its file) was bad.
+            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if isinstance(status, int) and 400 <= status < 500:
+                context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

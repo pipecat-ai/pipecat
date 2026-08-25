@@ -8,7 +8,6 @@
 
 from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
-from loguru import logger
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -17,7 +16,7 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -264,15 +263,17 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                                     },
                                 }
                             else:
-                                logger.warning(
-                                    f"Unsupported 'file' MIME type for OpenAI: {mime_type}"
+                                raise LLMContextConversionError(
+                                    ValueError(
+                                        f"Unsupported 'file' MIME type for OpenAI: {mime_type}"
+                                    )
                                 )
-                                continue
                         elif item["type"] == "file_url":
-                            logger.warning(
-                                f"OpenAI does not support URL-based files: {item['file']['url']}"
+                            raise LLMContextConversionError(
+                                ValueError(
+                                    f"OpenAI does not support URL-based files: {item['file']['url']}"
+                                )
                             )
-                            continue
                         new_content.append(item)
                     msg["content"] = new_content
                 result.append(cast("ChatCompletionMessageParam", msg))

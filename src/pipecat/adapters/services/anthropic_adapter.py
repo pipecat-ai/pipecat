@@ -416,15 +416,18 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                         }
                         del item["file"]
                     else:
-                        logger.warning(
-                            f"Unsupported 'file_url' MIME type: {f_data['mime_type']} for URL: {f_data['url']}"
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(
+                            f"Unsupported 'file_url' MIME type: {f_data['mime_type']} "
+                            f"for URL: {f_data['url']}"
                         )
-                        continue
                 if item["type"] == "file_base64":
                     f_data = item["file"]
                     if f_data["mime_type"] != "application/pdf":
-                        logger.warning(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
-                        continue
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
 
                     item["type"] = "document"
                     item["source"] = {

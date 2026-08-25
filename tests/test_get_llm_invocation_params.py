@@ -81,7 +81,10 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
+from pipecat.adapters.services.bedrock_adapter import (
+    AWSBedrockLLMAdapter,
+    _sanitize_bedrock_document_name,
+)
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
@@ -105,6 +108,54 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = OpenAILLMAdapter()
+
+    def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file OpenAI never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:text/plain;base64,aGVsbG8=",
+                        "filename": "notes.txt",
+                        "mime_type": "text/plain",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIn("Unsupported 'file' MIME type", str(ctx.exception))
+
+    def test_unsupported_file_url_raises_conversion_error(self):
+        """Test that a file_url message raises instead of silently dropping the file.
+
+        OpenAI Chat doesn't support URL-based files at all.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {"url": "https://example.com/doc.pdf", "mime_type": "application/pdf"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIn("does not support URL-based files", str(ctx.exception))
 
     def test_standard_messages_passed_through_unchanged(self):
         """Test that LLMStandardMessage objects are passed through unchanged to OpenAI params."""
@@ -1054,6 +1105,33 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
+    def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file Anthropic never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:text/plain;base64,aGVsbG8=",
+                        "filename": "notes.txt",
+                        "mime_type": "text/plain",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertIn("Unsupported 'file' MIME type", str(ctx.exception))
+
     def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
         # Create standard messages
@@ -1585,6 +1663,106 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
+    def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file Bedrock never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:application/zip;base64,aGVsbG8=",
+                        "filename": "notes.zip",
+                        "mime_type": "application/zip",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        self.assertIn("Unsupported 'file' MIME type for Bedrock", str(ctx.exception))
+
+    def test_unsupported_s3_url_raises_conversion_error(self):
+        """Test that a non-S3 file_url raises instead of silently dropping the file.
+
+        Bedrock only accepts documents referenced via an s3:// URI.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {
+                        "url": "https://example.com/doc.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        self.assertIn("Bedrock only supports S3 URLs", str(ctx.exception))
+
+    def test_file_base64_document_name_is_sanitized_for_bedrock(self):
+        """Test that an ordinary filename is sanitized to satisfy Bedrock's document name rules.
+
+        Bedrock rejects document names containing anything other than
+        alphanumerics, whitespace, hyphens, parentheses, and square brackets
+        (e.g. no "."), which an ordinary filename like "notes.pdf" violates.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:application/pdf;base64,aGVsbG8=",
+                        "filename": "notes.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["name"], "notes pdf")
+
+    def test_file_url_document_name_is_sanitized_for_bedrock(self):
+        """Test that document name sanitization also applies to the S3-URL file path."""
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {
+                        "url": "s3://bucket/notes.pdf",
+                        "filename": "notes.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["name"], "notes pdf")
+
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
         # Create standard messages
@@ -2029,6 +2207,29 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         # Adapter should have moved the image before the text.
         self.assertIn("image", content[0])
         self.assertEqual(content[1]["text"], "What do you see?")
+
+
+class TestSanitizeBedrockDocumentName(unittest.TestCase):
+    """Tests for bedrock_adapter._sanitize_bedrock_document_name."""
+
+    def test_dot_and_underscore_replaced_with_whitespace(self):
+        self.assertEqual(_sanitize_bedrock_document_name("my_notes.pdf"), "my notes pdf")
+
+    def test_allowed_characters_preserved(self):
+        self.assertEqual(
+            _sanitize_bedrock_document_name("Report (v2) [final] - draft"),
+            "Report (v2) [final] - draft",
+        )
+
+    def test_consecutive_whitespace_collapsed(self):
+        self.assertEqual(_sanitize_bedrock_document_name("weird   spacing"), "weird spacing")
+
+    def test_leading_and_trailing_whitespace_stripped(self):
+        self.assertEqual(_sanitize_bedrock_document_name("  notes.txt  "), "notes txt")
+
+    def test_empty_or_fully_disallowed_name_falls_back_to_document(self):
+        self.assertEqual(_sanitize_bedrock_document_name(""), "document")
+        self.assertEqual(_sanitize_bedrock_document_name("..."), "document")
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):

@@ -9,6 +9,7 @@
 import base64
 import copy
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 
@@ -36,6 +37,19 @@ _MIME_TO_BEDROCK_FORMAT: dict[str, str] = {
     "text/plain": "txt",
     "text/markdown": "md",
 }
+
+# Bedrock's document name only allows alphanumerics, whitespace, hyphens,
+# parentheses, and square brackets, with no consecutive whitespace — notably
+# no ".", so an ordinary filename like "notes.pdf" is rejected as-is.
+_BEDROCK_DOCUMENT_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9\s\-()\[\]]")
+_BEDROCK_DOCUMENT_NAME_WHITESPACE = re.compile(r"\s+")
+
+
+def _sanitize_bedrock_document_name(name: str) -> str:
+    """Rewrite `name` to satisfy Bedrock's document name restrictions."""
+    sanitized = _BEDROCK_DOCUMENT_NAME_DISALLOWED.sub(" ", name)
+    sanitized = _BEDROCK_DOCUMENT_NAME_WHITESPACE.sub(" ", sanitized).strip()
+    return sanitized or "document"
 
 
 class AWSBedrockLLMInvocationParams(TypedDict):
@@ -340,14 +354,17 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     mime_type = f_data["mime_type"]
                     bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
                     if bedrock_format is None:
-                        logger.warning(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
-                        continue
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
                     file_data_url = f_data["file_data"]
                     raw_bytes = base64.b64decode(file_data_url.split(",")[1])
                     new_content.append(
                         {
                             "document": {
-                                "name": f_data["filename"] or "document",
+                                "name": _sanitize_bedrock_document_name(
+                                    f_data["filename"] or "document"
+                                ),
                                 "format": bedrock_format,
                                 "source": {"bytes": raw_bytes},
                             }
@@ -360,19 +377,26 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                         mime_type = f_data["mime_type"]
                         bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
                         if bedrock_format is None:
-                            logger.warning(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
-                            continue
+                            # Wrapped as LLMContextConversionError by the caller in
+                            # _from_universal_context_messages.
+                            raise ValueError(
+                                f"Unsupported 'file' MIME type for Bedrock: {mime_type}"
+                            )
                         new_content.append(
                             {
                                 "document": {
-                                    "name": f_data["filename"] or "document",
+                                    "name": _sanitize_bedrock_document_name(
+                                        f_data["filename"] or "document"
+                                    ),
                                     "format": bedrock_format,
                                     "source": {"s3Location": {"uri": url}},
                                 }
                             }
                         )
                     else:
-                        logger.warning(f"Bedrock only supports S3 URLs for file sources: {url}")
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Bedrock only supports S3 URLs for file sources: {url}")
 
             # In the case where there's a single image in the list (like what
             # would result from a UserImageRawFrame), ensure that the image

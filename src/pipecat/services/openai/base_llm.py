@@ -28,6 +28,7 @@ from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
@@ -606,6 +607,13 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except LLMContextConversionError as e:
+                await self.push_error(error_msg=str(e), exception=e)
+                # A conversion failure (e.g. an unsupported file MIME type, corrupt
+                # base64 data) can't reach the API at all, but is just as much
+                # evidence of an invalid file as a rejection from OpenAI itself, so
+                # it gets the same best-effort cleanup.
+                frame.context.remove_invalid_file_message()
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
                 # OpenAI explicitly flags the invalid file_id parameter.

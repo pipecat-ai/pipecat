@@ -46,7 +46,7 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
-    from anthropic import APITimeoutError, AsyncAnthropic
+    from anthropic import APIStatusError, APITimeoutError, AsyncAnthropic
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -604,6 +604,19 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self._call_event_handler("on_completion_timeout")
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. an unsupported file MIME type, corrupt
+            # base64 data) can't reach the API at all, but is just as much
+            # evidence of an invalid file as a rejection from Anthropic itself, so
+            # it gets the same best-effort cleanup.
+            context.remove_invalid_file_message()
+        except APIStatusError as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # A rejection of our request (unsupported document, malformed
+            # content, etc.) is grounds to remove a pending file message on a
+            # best-effort basis; a server-side failure (5xx) isn't evidence
+            # our request (or its file) was bad.
+            if 400 <= e.status_code < 500:
+                context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

@@ -838,6 +838,11 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.push_error(error_msg="LLM completion timeout", exception=e)
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. corrupt base64 data) can't reach the
+            # API at all, but is just as much evidence of an invalid file as a
+            # rejection from Gemini itself, so it gets the same best-effort
+            # cleanup.
+            context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # Gemini doesn't say which field was invalid, so any 4xx rejection from
