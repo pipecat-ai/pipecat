@@ -403,6 +403,7 @@ class SonioxSTTService(WebsocketSTTService):
         self._receive_task = None
         self._session_received_audio = False
         self._session_lock = asyncio.Lock()
+        self._session_shutdown_started = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -488,6 +489,7 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             frame: The end frame.
         """
+        self._session_shutdown_started = True
         # Bypass WebsocketSTTService.stop(), which closes the socket immediately.
         # Soniox requires an empty end-of-audio message and can send final tokens
         # before acknowledging it with a `finished` response.
@@ -523,6 +525,7 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             frame: The cancel frame.
         """
+        self._session_shutdown_started = True
         await super().cancel(frame)
         await self._disconnect()
 
@@ -537,10 +540,11 @@ class SonioxSTTService(WebsocketSTTService):
         """
         async with self._session_lock:
             websocket = self._websocket
-            if websocket and websocket.state is State.OPEN:
+            if not self._session_shutdown_started and websocket and websocket.state is State.OPEN:
                 try:
                     await websocket.send(audio)
-                    self._session_received_audio = self._session_received_audio or bool(audio)
+                    if websocket is self._websocket:
+                        self._session_received_audio = self._session_received_audio or bool(audio)
                 except Exception as e:
                     logger.warning(f"{self}: send failed: {e}")
 
@@ -609,6 +613,8 @@ class SonioxSTTService(WebsocketSTTService):
     async def _connect_websocket(self):
         """Establish the websocket connection to Soniox."""
         async with self._session_lock:
+            if self._session_shutdown_started:
+                return
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
                     return

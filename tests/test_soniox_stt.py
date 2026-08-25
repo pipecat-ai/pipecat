@@ -152,6 +152,51 @@ async def test_failed_audio_send_does_not_mark_session_audio():
 
 
 @pytest.mark.asyncio
+async def test_replaced_socket_does_not_mark_session_audio():
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def blocked_send(_message):
+        send_started.set()
+        await release_send.wait()
+
+    service = SonioxSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket([], send_side_effect=blocked_send)
+    generator = service.run_stt(b"\x00\x00")
+    next_frame = asyncio.create_task(anext(generator))
+    await send_started.wait()
+
+    service._websocket = None
+    release_send.set()
+    assert await next_frame is None
+    await generator.aclose()
+
+    assert service._session_received_audio is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_prevents_queued_reconnect(monkeypatch):
+    service = SonioxSTTService(api_key="test-key")
+    service._websocket = None
+    websocket_connect = AsyncMock()
+    disconnect = AsyncMock()
+    monkeypatch.setattr(service, "_websocket_connect", websocket_connect)
+    monkeypatch.setattr(service, "_disconnect", disconnect)
+    await service._session_lock.acquire()
+    connect = asyncio.create_task(service._connect_websocket())
+    await asyncio.sleep(0)
+    stop = asyncio.create_task(service.stop(EndFrame()))
+    await asyncio.sleep(0)
+
+    service._session_lock.release()
+    await connect
+    await stop
+
+    websocket_connect.assert_not_awaited()
+    disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_stop_waits_for_audio_send_before_finalizing():
     send_started = asyncio.Event()
     release_send = asyncio.Event()
