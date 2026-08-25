@@ -24,6 +24,7 @@ from pipecat.runner.run import (
     _parse_ice_servers,
     _print_startup_message,
     _setup_daily_routes,
+    _setup_file_uploads_route,
     _setup_telephony_routes,
     _setup_unified_start_route,
     _setup_webrtc_routes,
@@ -415,6 +416,47 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+class TestFileUploadsRoute(unittest.TestCase):
+    """POST /files must always be registered so an unconfigured uploads folder
+    fails with a clear 503 from the handler itself, rather than 404ing on the
+    exact path and falling through to Starlette's redirect_slashes, which
+    (because GET /files/{filename:path} also matches the slash-appended
+    path) turns into a confusing 307 followed by a 405.
+    """
+
+    def test_registers_the_route_even_without_storage_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_route(app)
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/files", paths)
+
+    def test_returns_503_directly_when_storage_not_configured(self):
+        app = FastAPI()
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", None):
+            _setup_file_uploads_route(app)
+            client = TestClient(app, follow_redirects=False)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hi")})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_saves_file_when_storage_is_configured(self):
+        app = FastAPI()
+        fake_storage = MagicMock()
+        fake_storage.save = AsyncMock(return_value="pipecat:abc123")
+
+        with patch("pipecat.runner.run.RUNNER_FILE_STORAGE", fake_storage):
+            _setup_file_uploads_route(app)
+            client = TestClient(app)
+
+            response = client.post("/files", files={"file": ("a.txt", b"hello")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source"], {"type": "id", "id": "pipecat:abc123"})
 
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
