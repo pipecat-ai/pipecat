@@ -472,6 +472,7 @@ class TestPublish:
                     "changelog/+cartesia-normalization.added.md",
                     "changelog/+cartesia-locale.added.md",
                     "changelog/+cartesia-sonic.fixed.md",
+                    "changelog/999.changed.md",
                 ]
             },
         )
@@ -491,6 +492,7 @@ class TestPublish:
             ("git", "mv", "changelog/+cartesia-locale.added.md", "changelog/101.added.md"),
             ("git", "mv", "changelog/+cartesia-normalization.added.md", "changelog/101.added.2.md"),
             ("git", "mv", "changelog/+cartesia-sonic.fixed.md", "changelog/101.fixed.md"),
+            ("git", "mv", "changelog/999.changed.md", "changelog/101.changed.md"),
         ]
         assert any(c[:2] == ("git", "commit") and "#101" in c[-1] for c in sh.calls)
         assert ("git", "push", "origin", branch) in [

@@ -128,15 +128,35 @@ def _main_base(sh: Shell, repo_root: Path) -> str:
     )
 
 
-def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
-    """Rename the branch's ``+slug`` changelog fragments to the PR's number.
+FRAGMENT_TYPES = {
+    "added",
+    "changed",
+    "deprecated",
+    "removed",
+    "fixed",
+    "security",
+    "performance",
+    "other",
+}
 
-    Researchers write towncrier's orphan form because no PR exists when the
-    branch is committed; once the PR is open its number is known, so one
-    follow-up commit gives the fragments their conventional names (with
-    ``.2``/``.3`` counters when a branch adds several of one type).
+
+def _fragment_type(name: str) -> str:
+    return next((part for part in name.split(".") if part in FRAGMENT_TYPES), "other")
+
+
+def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+    """Give the branch's changelog fragments the PR's number.
+
+    Researchers write towncrier's ``+slug`` orphan form because no PR exists
+    when a branch is committed, and must not guess a number. Once the PR is
+    open its number is known: one follow-up commit renames every fragment the
+    branch adds that does not already carry it — orphans and wrong guesses
+    alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
+    branch adds several of one type.
     """
     number = pr_url.rstrip("/").split("/")[-1]
+    if not number.isdigit():
+        return
     added = sh.run(
         "git",
         "diff",
@@ -147,16 +167,19 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
         "changelog/",
         cwd=repo_root,
     ).split()
-    orphans = sorted(p for p in added if Path(p).name.startswith("+"))
-    if not orphans or not number.isdigit():
+    rename = sorted(p for p in added if not Path(p).name.startswith(f"{number}."))
+    if not rename:
         return
+    counters: dict[str, int] = {}
+    for path in added:
+        if Path(path).name.startswith(f"{number}."):
+            fragment_type = _fragment_type(Path(path).name)
+            counters[fragment_type] = counters.get(fragment_type, 0) + 1
     workdir = tempfile.mkdtemp(prefix="pw-fragments-")
     try:
         sh.run("git", "worktree", "add", "--quiet", workdir, branch, cwd=repo_root)
-        counters: dict[str, int] = {}
-        for path in orphans:
-            parts = Path(path).name.split(".")
-            fragment_type = parts[-2] if len(parts) >= 3 else "other"
+        for path in rename:
+            fragment_type = _fragment_type(Path(path).name)
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
             counter = counters[fragment_type]
             suffix = "" if counter == 1 else f".{counter}"
