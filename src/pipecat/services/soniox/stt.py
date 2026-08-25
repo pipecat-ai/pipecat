@@ -402,6 +402,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._session_received_audio = False
+        self._session_lock = asyncio.Lock()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -495,20 +496,22 @@ class SonioxSTTService(WebsocketSTTService):
         # Mark this as an intentional disconnect and stop keepalives without
         # cancelling the Soniox receive task that drains the final response.
         await WebsocketSTTService._disconnect(self)
-        try:
-            # Soniox rejects end-of-audio when the session received no PCM. In
-            # that case there cannot be a buffered final transcript to drain.
-            if self._session_received_audio:
-                await self._send_stop_recording()
-                if self._receive_task:
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.shield(self._receive_task), timeout=_FINAL_TRANSCRIPT_TIMEOUT
-                        )
-                    except TimeoutError:
-                        logger.warning(f"{self}: timed out waiting for final Soniox transcript")
-        finally:
-            await self._disconnect()
+        async with self._session_lock:
+            try:
+                # Soniox rejects end-of-audio when the session received no PCM. In
+                # that case there cannot be a buffered final transcript to drain.
+                if self._session_received_audio:
+                    await self._send_stop_recording()
+                    if self._receive_task:
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(self._receive_task),
+                                timeout=_FINAL_TRANSCRIPT_TIMEOUT,
+                            )
+                        except TimeoutError:
+                            logger.warning(f"{self}: timed out waiting for final Soniox transcript")
+            finally:
+                await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Soniox STT websocket connection.
@@ -532,12 +535,14 @@ class SonioxSTTService(WebsocketSTTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
-        if self._websocket and self._websocket.state is State.OPEN:
-            try:
-                self._session_received_audio = self._session_received_audio or bool(audio)
-                await self._websocket.send(audio)
-            except Exception as e:
-                logger.warning(f"{self}: send failed: {e}")
+        async with self._session_lock:
+            websocket = self._websocket
+            if websocket and websocket.state is State.OPEN:
+                try:
+                    await websocket.send(audio)
+                    self._session_received_audio = self._session_received_audio or bool(audio)
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
 
         yield None
 
@@ -603,56 +608,59 @@ class SonioxSTTService(WebsocketSTTService):
 
     async def _connect_websocket(self):
         """Establish the websocket connection to Soniox."""
-        try:
-            if self._websocket and self._websocket.state is State.OPEN:
-                return
+        async with self._session_lock:
+            try:
+                if self._websocket and self._websocket.state is State.OPEN:
+                    return
 
-            logger.debug("Connecting to Soniox STT")
-            self._session_received_audio = False
+                logger.debug("Connecting to Soniox STT")
+                self._session_received_audio = False
 
-            self._websocket = await self._websocket_connect(self._url)
+                self._websocket = await self._websocket_connect(self._url)
 
-            if not self._websocket:
-                await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
-                raise Exception(f"Unable to connect to Soniox API at {self._url}")
+                if not self._websocket:
+                    await self.push_error(
+                        error_msg=f"Unable to connect to Soniox API at {self._url}"
+                    )
+                    raise Exception(f"Unable to connect to Soniox API at {self._url}")
 
-            # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
-            # Either one or the other is required.
-            enable_endpoint_detection = not self._vad_force_turn_endpoint
+                # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
+                # Either one or the other is required.
+                enable_endpoint_detection = not self._vad_force_turn_endpoint
 
-            s = self._settings
+                s = self._settings
 
-            context = s.context
-            if isinstance(context, SonioxContextObject):
-                context = context.model_dump()
+                context = s.context
+                if isinstance(context, SonioxContextObject):
+                    context = context.model_dump()
 
-            # Send the initial configuration message.
-            config = {
-                "api_key": self._api_key,
-                "model": s.model,
-                "audio_format": self._audio_format,
-                "num_channels": self._num_channels,
-                "enable_endpoint_detection": enable_endpoint_detection,
-                "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
-                "endpoint_sensitivity": s.endpoint_sensitivity,
-                "endpoint_latency_adjustment_level": s.endpoint_latency_adjustment_level,
-                "sample_rate": self.sample_rate,
-                "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
-                "language_hints_strict": s.language_hints_strict,
-                "context": context,
-                "enable_speaker_diarization": s.enable_speaker_diarization,
-                "enable_language_identification": s.enable_language_identification,
-                "client_reference_id": s.client_reference_id,
-            }
+                # Send the initial configuration message.
+                config = {
+                    "api_key": self._api_key,
+                    "model": s.model,
+                    "audio_format": self._audio_format,
+                    "num_channels": self._num_channels,
+                    "enable_endpoint_detection": enable_endpoint_detection,
+                    "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
+                    "endpoint_sensitivity": s.endpoint_sensitivity,
+                    "endpoint_latency_adjustment_level": s.endpoint_latency_adjustment_level,
+                    "sample_rate": self.sample_rate,
+                    "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
+                    "language_hints_strict": s.language_hints_strict,
+                    "context": context,
+                    "enable_speaker_diarization": s.enable_speaker_diarization,
+                    "enable_language_identification": s.enable_language_identification,
+                    "client_reference_id": s.client_reference_id,
+                }
 
-            # Send the configuration message.
-            await self._websocket.send(json.dumps(config))
+                # Send the configuration message.
+                await self._websocket.send(json.dumps(config))
 
-            await self._call_event_handler("on_connected")
-            logger.debug("Connected to Soniox STT")
-        except Exception as e:
-            self._websocket = None
-            await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
+                await self._call_event_handler("on_connected")
+                logger.debug("Connected to Soniox STT")
+            except Exception as e:
+                self._websocket = None
+                await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to Soniox."""
