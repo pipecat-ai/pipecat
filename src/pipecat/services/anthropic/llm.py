@@ -59,18 +59,17 @@ class AnthropicThinkingConfig(BaseModel):
 
     Parameters:
         type: Thinking mode. "adaptive" lets the model decide when and how deeply
-            to think, and is the only mode models from the Claude Opus 4.7
-            generation on accept. "enabled" is manual extended thinking, paired
-            with ``budget_tokens`` and supported up to Claude Sonnet 4.6.
-            "disabled" turns thinking off.
+            to think; prefer it. "enabled" is legacy manual thinking, sized by
+            ``budget_tokens``: Claude 4.7 and later reject it, and Claude 4.5 and
+            earlier accept only it. "disabled" turns thinking off.
         budget_tokens: Maximum number of tokens for thinking.
             With today's models, the minimum is 1024.
             Required when type is "enabled", not allowed otherwise.
         display: How thinking text comes back: "summarized" for readable
             thinking, which is what :class:`~pipecat.frames.frames.LLMThoughtTextFrame`
-            carries, or "omitted" for thinking blocks whose text is empty. Models
-            from the Claude Opus 4.7 generation on omit thinking unless asked for
-            a summary.
+            carries, or "omitted" for thinking blocks whose text is empty. Claude
+            4.7 and later default to "omitted", so set "summarized" there to keep
+            those frames carrying text. Not allowed when type is "disabled".
     """
 
     # Why `| str` here? To not break compatibility in case Anthropic adds
