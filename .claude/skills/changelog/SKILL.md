@@ -7,7 +7,7 @@ Create changelog files for the important commits in this PR. The PR number is pr
 
 ## Instructions
 
-1. Skip changelog for: documentation-only, internal refactoring, test-only, CI changes, and fixes to changes that have not shipped yet (the unreleased change's entry covers them).
+1. Skip changelog for: documentation-only, internal refactoring, test-only, CI changes, and fixes to changes that have not shipped yet (the unreleased change's entry covers them — update that entry instead if the fix alters what it should say).
 
 2. First, check what commits are on the current branch compared to main:
    ```
