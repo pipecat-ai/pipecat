@@ -1,0 +1,29 @@
+name: Provider watch
+
+# Registration stub: workflow_dispatch can only address a workflow whose file
+# exists on the default branch. This no-op copy registers provider-watch.yml so
+# the real workflow, in review on pk/provider-watch (#5389), can be dispatched
+# there with --ref. #5389 replaces this file with the full workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated providers or unit ids (e.g. openai,deepgram/stt); empty = all"
+        required: false
+        type: string
+      limit:
+        description: "Research only the first N selected units"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run: push nothing, open nothing; reports are uploaded as an artifact"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  stub:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Registration stub; dispatch with --ref pk/provider-watch to run the real workflow."
