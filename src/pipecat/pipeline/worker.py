@@ -1422,7 +1422,9 @@ class PipelineWorker(BaseWorker):
         if now - self._flush_progress_sent < FLUSH_PROGRESS_PERIOD_SECS:
             return
         self._flush_progress_sent = now
-        for flush_id, origin in self._foreign_probes.items():
+        # Over a snapshot: sending suspends on a network bus, and a probe
+        # arriving meanwhile would resize the dict under the loop.
+        for flush_id, origin in list(self._foreign_probes.items()):
             await self.bus.send(
                 BusFlushProgressMessage(source=self.name, target=origin, flush_id=flush_id)
             )
