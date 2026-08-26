@@ -1,6 +1,7 @@
 import builtins
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,13 @@ from pathlib import Path
 # accept Union-wrapped dict types (i.e., Optional[Dict[str, Any]]).
 import pydantic._internal._generate_schema as _pydantic_gs
 from sphinx import addnodes
+
+try:
+    from sphinx.ext.autodoc._sentinels import INSTANCE_ATTR
+except ImportError:
+    # Private to Sphinx, and the public ``INSTANCEATTR`` alias is a different
+    # object that never matches. Without it the redundant field stubs stay.
+    INSTANCE_ATTR = None
 
 _ORIG_DICT_TYPES = _pydantic_gs.DICT_TYPES
 # Expand the accepted types to include Union (Optional[Dict[str, Any]])
@@ -150,6 +158,50 @@ def resolve_builtins_against_python(app, doctree):
             node.attributes.pop("refspecific", None)
 
 
+# Sphinx hands an annotation-only class attribute to the member filter with its
+# skip flag already False, so ``undoc-members: False`` does not suppress it: a
+# dataclass or model field renders once in the class signature, once in the
+# Parameters block napoleon builds from the class docstring, and a third time as
+# a bare ``name: type`` stub carrying no prose. Drop that stub where the
+# docstring already describes the field, and keep it where it is the only place
+# the field appears at all.
+_FIELD_SECTION = re.compile(
+    r"^([ \t]*)(?:Parameters|Attributes|Args):[ \t]*\n(.*?)(?=\n\1\S|\Z)", re.M | re.S
+)
+_FIELD_NAME = re.compile(r"^\s+([A-Za-z_]\w*)\s*(?:\([^)]*\))?:", re.M)
+_documented_field_cache: dict[type, set] = {}
+
+
+def documented_fields(cls):
+    """Field names the class or one of its bases describes in its docstring."""
+    if cls in _documented_field_cache:
+        return _documented_field_cache[cls]
+    names = set()
+    for klass in getattr(cls, "__mro__", (cls,)):
+        # __dict__ rather than __doc__ so an inherited docstring is not counted
+        # twice; the MRO walk already covers the base that owns it.
+        for _, block in _FIELD_SECTION.findall(klass.__dict__.get("__doc__") or ""):
+            names.update(_FIELD_NAME.findall(block))
+    _documented_field_cache[cls] = names
+    return names
+
+
+def skip_documented_field(app, what, name, obj, skip, options):
+    """Skip a field stub whose description already lives in the docstring."""
+    if INSTANCE_ATTR is None:
+        return skip
+    if skip or obj is not INSTANCE_ATTR:
+        return skip
+    module = sys.modules.get(app.env.temp_data.get("autodoc:module") or "")
+    path = (app.env.temp_data.get("autodoc:class") or "").split(".")
+    cls = getattr(module, path[0], None) if module and path[0] else None
+    for part in path[1:]:
+        cls = getattr(cls, part, None)
+    if cls is not None and name in documented_fields(cls):
+        return True
+    return skip
+
+
 def import_core_modules():
     """Import core pipecat modules for autodoc to discover."""
     core_modules = [
@@ -203,6 +255,13 @@ def setup(app):
     from sphinx.ext.apidoc import main
 
     app.connect("doctree-read", resolve_builtins_against_python)
+    if INSTANCE_ATTR is None:
+        logger.warning(
+            "sphinx.ext.autodoc._sentinels.INSTANCE_ATTR is gone; every documented "
+            "dataclass and model field will render a second time as a bare stub. "
+            "Find what replaced it and update skip_documented_field."
+        )
+    app.connect("autodoc-skip-member", skip_documented_field)
 
     docs_dir = Path(__file__).parent
     project_root = docs_dir.parent.parent
