@@ -1,3 +1,4 @@
+import builtins
 import logging
 import os
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 # `Dict[str, Any] | None` whose get_origin() is Union, not dict. Patch the check to
 # accept Union-wrapped dict types (i.e., Optional[Dict[str, Any]]).
 import pydantic._internal._generate_schema as _pydantic_gs
+from sphinx import addnodes
 
 _ORIG_DICT_TYPES = _pydantic_gs.DICT_TYPES
 # Expand the accepted types to include Union (Optional[Dict[str, Any]])
@@ -44,6 +46,8 @@ suppress_warnings = [
     "autodoc.mocked_object",
     "toc.not_included",
 ]
+
+intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 
 # Napoleon settings
 napoleon_google_docstring = True
@@ -129,6 +133,23 @@ autodoc_typehints = "signature"  # Show type hints in the signature only, not in
 html_show_sphinx = False
 
 
+# An unqualified annotation resolves through the Python domain's fuzzy search,
+# which scans every registered object for one whose name ends in ".<target>".
+# A builtin like ``type`` or ``object`` matches the same-named field on a few
+# hundred pipecat models, so the annotation links to whichever of them was
+# registered first. Builtins are never pipecat attributes: without the flag that
+# enables the fuzzy search the lookup misses, and intersphinx answers from the
+# Python inventory instead.
+_BUILTIN_NAMES = frozenset(dir(builtins))
+
+
+def resolve_builtins_against_python(app, doctree):
+    """Send builtin annotations to the Python inventory, not to pipecat fields."""
+    for node in doctree.findall(addnodes.pending_xref):
+        if node.get("refdomain") == "py" and node.get("reftarget") in _BUILTIN_NAMES:
+            node.attributes.pop("refspecific", None)
+
+
 def import_core_modules():
     """Import core pipecat modules for autodoc to discover."""
     core_modules = [
@@ -180,6 +201,8 @@ def clean_title(title: str) -> str:
 def setup(app):
     """Generate API documentation during Sphinx build."""
     from sphinx.ext.apidoc import main
+
+    app.connect("doctree-read", resolve_builtins_against_python)
 
     docs_dir = Path(__file__).parent
     project_root = docs_dir.parent.parent
