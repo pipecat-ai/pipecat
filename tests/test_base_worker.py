@@ -29,7 +29,7 @@ from pipecat.bus import (
 )
 from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
-from pipecat.pipeline.job_context import JobStatus
+from pipecat.pipeline.job_context import JobGroupParams, JobParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -1301,7 +1301,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await self.registry.register(WorkerReadyData(worker_name="worker", runner="test-runner"))
 
-        job_id = await parent.request_job("worker", payload={"key": "val"})
+        job_id = await parent.request_job("worker", params=JobParams(payload={"key": "val"}))
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
         self.assertEqual(len(request_msgs), 1)
@@ -1316,7 +1316,9 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "w1", "w2")
 
-        job_id = await parent.request_job_group("w1", "w2", payload={"work": True})
+        job_id = await parent.request_job_group(
+            "w1", "w2", params=JobGroupParams(payload={"work": True})
+        )
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
         self.assertEqual(len(request_msgs), 2)
@@ -1640,7 +1642,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "worker")
 
-        job_id = await parent.request_job("worker", timeout=0.05)
+        job_id = await parent.request_job("worker", params=JobParams(timeout=0.05))
 
         # Wait for timeout to fire
         await asyncio.sleep(0.1)
@@ -1660,7 +1662,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "worker")
 
-        job_id = await parent.request_job("worker", timeout=0.5)
+        job_id = await parent.request_job("worker", params=JobParams(timeout=0.5))
 
         # Let the timeout worker start before responding
         await asyncio.sleep(0)
