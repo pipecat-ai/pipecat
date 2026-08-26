@@ -1235,6 +1235,12 @@ class MOQInputTransport(BaseInputTransport):
             audio: Raw mono 16-bit PCM audio bytes.
             sample_rate: Sample rate of ``audio``, in Hz.
         """
+        # The MoQ session comes up during setup(), so a fast peer's audio can
+        # arrive before StartFrame has created the audio queue
+        # (_create_audio_task). Drop it instead of crashing the session task
+        # with an AttributeError.
+        if self._audio_task is None:
+            return
         await self.push_audio_frame(
             InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
         )
