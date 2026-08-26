@@ -64,9 +64,9 @@ class IncompleteType(Enum):
 
 
 # Default prompts for incomplete timeouts
-DEFAULT_INCOMPLETE_SHORT_PROMPT = """The user paused briefly. Generate a brief, natural prompt to encourage them to continue.
+DEFAULT_INCOMPLETE_SHORT_PROMPT = f"""The user paused briefly. Generate a brief, natural prompt to encourage them to continue.
 
-IMPORTANT: You MUST respond with ✓ followed by your message. Do NOT output ○ or ◐ - the user has already been given time to continue.
+IMPORTANT: You MUST respond with {USER_TURN_COMPLETE_MARKER} followed by your message. Do NOT output {USER_TURN_INCOMPLETE_SHORT_MARKER} or {USER_TURN_INCOMPLETE_LONG_MARKER} - the user has already been given time to continue.
 
 Your response should:
 - Be contextually relevant to what was just discussed
@@ -74,13 +74,13 @@ Your response should:
 - Be very concise (1 sentence max)
 - Gently prompt them to continue
 
-Example format: ✓ Go ahead, I'm listening.
+Example format: {USER_TURN_COMPLETE_MARKER} Go ahead, I'm listening.
 
-Generate your ✓ response now."""
+Generate your {USER_TURN_COMPLETE_MARKER} response now."""
 
-DEFAULT_INCOMPLETE_LONG_PROMPT = """The user has been quiet for a while. Generate a friendly check-in message.
+DEFAULT_INCOMPLETE_LONG_PROMPT = f"""The user has been quiet for a while. Generate a friendly check-in message.
 
-IMPORTANT: You MUST respond with ✓ followed by your message. Do NOT output ○ or ◐ - the user has already been given plenty of time.
+IMPORTANT: You MUST respond with {USER_TURN_COMPLETE_MARKER} followed by your message. Do NOT output {USER_TURN_INCOMPLETE_SHORT_MARKER} or {USER_TURN_INCOMPLETE_LONG_MARKER} - the user has already been given plenty of time.
 
 Your response should:
 - Acknowledge they might be thinking or busy
@@ -88,89 +88,89 @@ Your response should:
 - Be warm and understanding
 - Be brief (1 sentence)
 
-Example format: ✓ No rush! Let me know when you're ready to continue.
+Example format: {USER_TURN_COMPLETE_MARKER} No rush! Let me know when you're ready to continue.
 
-Generate your ✓ response now."""
+Generate your {USER_TURN_COMPLETE_MARKER} response now."""
 
 # System prompt instructions for turn completion that can be appended to any base prompt
-USER_TURN_COMPLETION_INSTRUCTIONS = """
+USER_TURN_COMPLETION_INSTRUCTIONS = f"""
 CRITICAL INSTRUCTION - MANDATORY RESPONSE FORMAT:
 Every single response MUST begin with a turn completion indicator. This is not optional.
 
 TURN COMPLETION DECISION FRAMEWORK:
 Ask yourself: "Has the user provided enough information for me to give a meaningful, substantive response?"
 
-Mark as COMPLETE (✓) when:
+Mark as COMPLETE ({USER_TURN_COMPLETE_MARKER}) when:
 - The user has answered your question with actual content
 - The user has made a complete request or statement
 - The user has provided all necessary information for you to respond meaningfully
 - The conversation can naturally progress to your substantive response
 
-Mark as INCOMPLETE SHORT (○) when the user will likely continue soon:
+Mark as INCOMPLETE SHORT ({USER_TURN_INCOMPLETE_SHORT_MARKER}) when the user will likely continue soon:
 - The user was clearly cut off mid-sentence or mid-word
 - The user is in the middle of a thought that got interrupted
 - Brief technical interruption (they'll resume in a few seconds)
 
-Mark as INCOMPLETE LONG (◐) when the user needs more time:
+Mark as INCOMPLETE LONG ({USER_TURN_INCOMPLETE_LONG_MARKER}) when the user needs more time:
 - The user explicitly asks for time: "let me think", "give me a minute", "hold on"
 - The user is clearly pondering or deliberating: "hmm", "well...", "that's a good question"
 - The user acknowledged but hasn't answered yet: "That's interesting..."
 - The response feels like a preamble before the actual answer
 
 RESPOND in one of these three formats:
-1. If COMPLETE: `✓` followed by a space and your full substantive response
-2. If INCOMPLETE SHORT: ONLY the character `○` (user will continue in a few seconds)
-3. If INCOMPLETE LONG: ONLY the character `◐` (user needs more time to think)
+1. If COMPLETE: `{USER_TURN_COMPLETE_MARKER}` followed by a space and your full substantive response
+2. If INCOMPLETE SHORT: ONLY the character `{USER_TURN_INCOMPLETE_SHORT_MARKER}` (user will continue in a few seconds)
+3. If INCOMPLETE LONG: ONLY the character `{USER_TURN_INCOMPLETE_LONG_MARKER}` (user needs more time to think)
 
 KEY INSIGHT: Grammatically complete ≠ conversationally complete
-- "That's a really good question." is grammatically complete but conversationally incomplete (use ◐)
-- "I'd go to Japan because I love" is mid-sentence (use ○)
+- "That's a really good question." is grammatically complete but conversationally incomplete (use {USER_TURN_INCOMPLETE_LONG_MARKER})
+- "I'd go to Japan because I love" is mid-sentence (use {USER_TURN_INCOMPLETE_SHORT_MARKER})
 
 EXAMPLES:
 
 You ask: "Where would you travel?"
 User: "I'd go to Japan because I love"
-→ `○`
+→ `{USER_TURN_INCOMPLETE_SHORT_MARKER}`
 (Cut off mid-sentence - they'll continue in seconds)
 
 You ask: "Where would you travel?"
 User: "That's a good question. Let me think..."
-→ `◐`
+→ `{USER_TURN_INCOMPLETE_LONG_MARKER}`
 (User is deliberating - give them time)
 
 You ask: "Where would you travel?"
 User: "Hmm, hold on a second."
-→ `◐`
+→ `{USER_TURN_INCOMPLETE_LONG_MARKER}`
 (User explicitly asked for time)
 
 You ask: "Where would you travel?"
 User: "I'd go to Japan because I love the culture."
-→ `✓ Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
+→ `{USER_TURN_COMPLETE_MARKER} Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
 (Complete answer - give full response)
 
 User: "I need help with"
-→ `○`
+→ `{USER_TURN_INCOMPLETE_SHORT_MARKER}`
 (Cut off mid-request - they'll finish soon)
 
 User: "Well, let me think about that for a moment."
-→ `◐`
+→ `{USER_TURN_INCOMPLETE_LONG_MARKER}`
 (User needs time to think)
 
 User: "Can you help me book a flight to New York next week?"
-→ `✓ I'd be happy to help you with that! Let me gather some information...`
+→ `{USER_TURN_COMPLETE_MARKER} I'd be happy to help you with that! Let me gather some information...`
 (Complete request - provide full response)
 
 User: "Give me a minute to gather my thoughts."
-→ `◐`
+→ `{USER_TURN_INCOMPLETE_LONG_MARKER}`
 (User explicitly asked for time)
 
 FORMAT REQUIREMENTS:
-- ALWAYS use single-character indicators: `✓` (complete), `○` (short wait), or `◐` (long wait)
-- For COMPLETE: `✓` followed by a space and your full response
-- For INCOMPLETE: ONLY the single character (`○` or `◐`) with absolutely nothing else
+- ALWAYS use single-character indicators: `{USER_TURN_COMPLETE_MARKER}` (complete), `{USER_TURN_INCOMPLETE_SHORT_MARKER}` (short wait), or `{USER_TURN_INCOMPLETE_LONG_MARKER}` (long wait)
+- For COMPLETE: `{USER_TURN_COMPLETE_MARKER}` followed by a space and your full response
+- For INCOMPLETE: ONLY the single character (`{USER_TURN_INCOMPLETE_SHORT_MARKER}` or `{USER_TURN_INCOMPLETE_LONG_MARKER}`) with absolutely nothing else
 - Your turn indicator must be the very first character in your response
 
-Remember: Focus on conversational completeness and how long the user might need. Was it a mid-sentence cutoff (○) or do they need time to think (◐)?"""
+Remember: Focus on conversational completeness and how long the user might need. Was it a mid-sentence cutoff ({USER_TURN_INCOMPLETE_SHORT_MARKER}) or do they need time to think ({USER_TURN_INCOMPLETE_LONG_MARKER})?"""
 
 
 @dataclass
