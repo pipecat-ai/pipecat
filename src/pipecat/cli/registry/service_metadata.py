@@ -744,7 +744,7 @@ class ServiceRegistry:
             env_prefix="CARTESIA",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "71a7ad14-091c-4e8e-a314-022ece01c121"},
+            param_defaults={"voice": "86e30c1d-714b-4074-a1f2-1cb6b552fb49"},
         ),
         ServiceDefinition(
             value="deepgram_tts",

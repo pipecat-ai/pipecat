@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",
+            voice="f6ff7c0c-e396-40a9-a70b-f7607edb6937",
         ),
     )
 
