@@ -86,11 +86,11 @@ def pgmq_from_url(database_url: str, *, pool_size: int = 4) -> PGMQueue:
     )
 
 
-class AcmeLLMTask(LLMWorker):
+class AcmeLLMWorker(LLMWorker):
     """LLM worker for Acme Corp with transfer and end tools."""
 
     def __init__(self, name: str, *, system_instruction: str, watch: list[str]):
-        """Initialize the AcmeLLMTask.
+        """Initialize the AcmeLLMWorker.
 
         Args:
             name: Unique worker name (``"greeter"`` or ``"support"``).
@@ -163,7 +163,7 @@ async def main_async() -> None:
     bus = PgmqBus(pgmq=pgmq, channel=args.channel)
 
     config = WORKER_CONFIG[args.worker]
-    worker = AcmeLLMTask(
+    worker = AcmeLLMWorker(
         args.worker,
         system_instruction=config["system_instruction"],
         watch=config["watch"],

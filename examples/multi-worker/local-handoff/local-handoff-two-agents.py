@@ -69,7 +69,7 @@ transport_params = {
 }
 
 
-class AcmeLLMTask(LLMWorker):
+class AcmeLLMWorker(LLMWorker):
     """LLM-only child worker with transfer/end tools.
 
     Receives user context from the main worker via the bus, runs its LLM,
@@ -111,7 +111,7 @@ class AcmeLLMTask(LLMWorker):
         await self.end(reason=reason)
 
 
-def build_greeter() -> AcmeLLMTask:
+def build_greeter() -> AcmeLLMWorker:
     """Greeter: routes the user to support when they pick a product."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -128,10 +128,10 @@ def build_greeter() -> AcmeLLMTask:
             ),
         ),
     )
-    return AcmeLLMTask("greeter", llm=llm, bridged=())
+    return AcmeLLMWorker("greeter", llm=llm, bridged=())
 
 
-def build_support() -> AcmeLLMTask:
+def build_support() -> AcmeLLMWorker:
     """Support: answers product questions, can hand back to the greeter."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -150,7 +150,7 @@ def build_support() -> AcmeLLMTask:
             ),
         ),
     )
-    return AcmeLLMTask("support", llm=llm, bridged=())
+    return AcmeLLMWorker("support", llm=llm, bridged=())
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
