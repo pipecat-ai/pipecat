@@ -42,7 +42,7 @@ async def _requested_thinking(service: AnthropicLLMService) -> dict[str, Any] | 
 
 
 def test_sonnet_5_disables_thinking():
-    """Sonnet 5 thinks unless told not to, so it gets told not to."""
+    """Sonnet 5 has adaptive thinking on unless told not to, so it gets told not to."""
     assert _applied_thinking("claude-sonnet-5") == {"type": "disabled"}
 
 
@@ -58,7 +58,7 @@ def test_every_id_form_of_sonnet_5_is_recognized():
 
 
 def test_sonnet_4_6_gets_no_thinking_default():
-    """Earlier Sonnets think only when asked, so there is nothing to turn off."""
+    """Earlier Sonnets have thinking off unless asked, so there is nothing to turn off."""
     assert _applied_thinking("claude-sonnet-4-6") is None
 
 

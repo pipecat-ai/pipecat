@@ -54,8 +54,8 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The first Sonnet generation that thinks by default when a request omits
-# ``thinking``. Earlier Sonnets, and every Haiku, think only when asked to.
+# The first Sonnet generation with adaptive thinking on when a request omits
+# ``thinking``. Earlier Sonnets, and every Haiku, have thinking off unless asked.
 _SONNET_THINKS_BY_DEFAULT_FROM = 5
 
 
@@ -107,9 +107,9 @@ class AnthropicLLMSettings(LLMSettings):
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.
         thinking: Thinking configuration. If this is not provided, Pipecat
-            disables thinking on Sonnet 5 and later, which otherwise think
-            before every response, to reduce latency; Opus and Fable are left
-            at Anthropic's default.
+            disables thinking on Sonnet 5 and later, which otherwise decide
+            per request whether to think, to reduce latency; Opus and Fable
+            are left at Anthropic's default.
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -176,8 +176,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 Enabling extended thinking causes the model to spend more time "thinking" before responding.
                 It also causes this service to emit LLMThinking*Frames during response generation.
                 If this is not provided, Pipecat disables thinking on Sonnet 5 and later, which
-                otherwise think before every response, to reduce latency; Opus and Fable are
-                left at Anthropic's default.
+                otherwise decide per request whether to think, to reduce latency; Opus and
+                Fable are left at Anthropic's default.
             extra: Additional parameters to pass to the API.
         """
 
@@ -320,7 +320,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             return response
 
     def _maybe_disable_thinking(self, params: dict[str, Any]):
-        """Turn thinking off by default on Sonnet models that think unless told not to.
+        """Turn thinking off by default on Sonnet models where it is on unless told not to.
 
         Sonnet 5 and later run adaptive thinking whenever the request omits
         ``thinking``, which for real-time voice can add seconds before the first
