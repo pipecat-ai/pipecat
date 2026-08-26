@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     OutputTransportMessageUrgentFrame,
-    PipelineFlushFrame,
     StartFrame,
     StopFrame,
 )
@@ -36,7 +35,7 @@ if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
-_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame, PipelineFlushFrame)
+_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
