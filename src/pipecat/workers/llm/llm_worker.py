@@ -14,7 +14,7 @@ import contextvars
 import functools
 import warnings
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -113,6 +113,8 @@ class LLMWorker(PipelineWorker):
         self._defer_tool_frames = defer_tool_frames
         self._tool_call_inflight: int = 0
         self._deferred_frames: deque[tuple[Frame, FrameDirection]] = deque()
+        # A handover or ending a tool asked for, held until its call is done.
+        self._pending_handover: Callable[[], Awaitable[None]] | None = None
         self._closing: bool = False
 
         self._llm = llm
@@ -237,7 +239,7 @@ class LLMWorker(PipelineWorker):
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
-        await super().end(reason=reason)
+        await self._after_tool_calls(lambda: super(LLMWorker, self).end(reason=reason))
 
     async def activate_worker(
         self,
@@ -282,7 +284,11 @@ class LLMWorker(PipelineWorker):
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
-        await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
+        await self._after_tool_calls(
+            lambda: super(LLMWorker, self).activate_worker(
+                worker_name, args=args, deactivate_self=deactivate_self
+            )
+        )
 
     async def process_deferred_tool_frames(
         self, frames: list[tuple[Frame, FrameDirection]]
@@ -311,6 +317,22 @@ class LLMWorker(PipelineWorker):
                 timeout_secs=method._pipecat_timeout_secs,
             )
 
+    async def _after_tool_calls(self, handover: Callable[[], Awaitable[None]]) -> None:
+        """Run a handover once no tool call is in flight.
+
+        A tool asking to end or hand over is still running when it asks, and
+        deactivating a worker mid-call leaves the rest of that call to a worker
+        nobody is listening to. Held here and run once the last call finishes;
+        outside a call there is nothing to wait for, so it runs now.
+
+        Args:
+            handover: What to do once the calls are done.
+        """
+        if self._tool_call_inflight:
+            self._pending_handover = handover
+        else:
+            await handover()
+
     def _track_tool_call(self, method: Callable) -> Callable:
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
@@ -321,17 +343,25 @@ class LLMWorker(PipelineWorker):
             finally:
                 _IN_TOOL_CALL.reset(token)
                 self._tool_call_inflight = max(0, self._tool_call_inflight - 1)
-                if not self._closing and self._tool_call_inflight == 0:
-                    await self._flush_deferred_frames()
+                if self._tool_call_inflight == 0:
+                    if not self._closing:
+                        await self._flush_deferred_frames()
+                    handover, self._pending_handover = self._pending_handover, None
+                    if handover:
+                        await handover()
 
         return wrapper
 
     async def _flush_deferred_frames(self) -> None:
-        # Wait until the function result frame is really processed.
-        await self.flush_pipeline()
-
         frames = list(self._deferred_frames)
         self._deferred_frames.clear()
+
+        # Held frames go back in behind the function call result, so wait for
+        # that to be processed first. With nothing held there is nothing to
+        # order, and the round-trip would buy nothing.
+        if frames:
+            await self.flush_pipeline()
+
         for frame, direction in await self.process_deferred_tool_frames(frames):
             await self.queue_frame(frame, direction)
 
