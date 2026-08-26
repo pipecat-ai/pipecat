@@ -341,7 +341,7 @@ class PipelineWorker(BaseWorker):
                 cancel).
             cancel_runner_on_idle_timeout: When ``cancel_on_idle_timeout`` is
                 also ``True``, whether reaching the idle timeout should also
-                cancel the entire :class:`WorkerRunner`. The worker is
+                cancel the entire :class:`~pipecat.workers.runner.WorkerRunner`. The worker is
                 always cancelled first; when this is ``True`` the worker also
                 emits a ``BusCancelMessage`` so the runner broadcasts
                 cancellation to every other root worker. Defaults to ``True``

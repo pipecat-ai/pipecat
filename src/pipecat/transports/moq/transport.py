@@ -1011,7 +1011,7 @@ class MOQTransportClient:
         losslessly. Delivered via :attr:`MOQCallbacks.on_message_received`,
         which :class:`MOQTransport` wires to push an
         :class:`InputTransportMessageFrame` into the pipeline, handled by
-        :class:`RTVIProcessor` the same way as any other transport. This
+        :class:`~pipecat.processors.frameworks.rtvi.RTVIProcessor` the same way as any other transport. This
         is what lets ``client-ready`` (for protocol version negotiation),
         typed text input, function-call results, and any other
         client→server RTVI traffic reach the bot over MoQ.
@@ -1246,11 +1246,11 @@ class MOQInputTransport(BaseInputTransport):
         )
 
     async def push_received_message(self, message: dict):
-        """Push a received RTVI message to :class:`RTVIProcessor` upstream.
+        """Push a received RTVI message to :class:`~pipecat.processors.frameworks.rtvi.RTVIProcessor` upstream.
 
         Called by :class:`MOQTransport` for every record delivered on the
         peer's transcript stream. ``RTVIProcessor`` sits upstream of this
-        input transport (it's prepended by :class:`PipelineWorker` when
+        input transport (it's prepended by :class:`~pipecat.pipeline.worker.PipelineWorker` when
         ``enable_rtvi=True``), so pushing upstream is the direct route.
 
         Args:
