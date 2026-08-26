@@ -6,7 +6,7 @@
 
 """Tests for the MoQ (Media over QUIC) transport.
 
-Four areas covered:
+Five areas covered:
 
 1. **``_downmix_s16_to_mono``** — the workaround for ``@moq/publish``'s
    browser-side encoder publishing stereo even when the source mic
@@ -31,9 +31,18 @@ Four areas covered:
    future refactor moves either into ``_run()``, the bot will lose its
    first few hundred ms of audio (this was a real bug PR #4557's
    self-review fixed).
+
+5. **Audio track restart on interruption** — the bot writes TTS ahead of
+   real-time, so an interruption has to discard audio that has already
+   left. Retiring the track is what does it, and these tests pin the
+   properties that makes possible: a successor track, a timeline that
+   restarts with it, and no write from the retired utterance landing on
+   it.
 """
 
 import argparse
+import asyncio
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -758,3 +767,121 @@ class TestIsNormalClose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ----------------------------------------------------------------------
+# Audio track restart on interruption
+# ----------------------------------------------------------------------
+
+
+class TestMOQAudioTrackRestart(unittest.IsolatedAsyncioTestCase):
+    """An interruption must discard audio the bot has already published.
+
+    Pacing lets the bot run seconds ahead of real-time, so by the time a
+    user barges in the rest of the utterance is encoded and gone. The
+    track it went out on is retired and a successor published in its
+    place: the track name is what marks the audio as belonging to the
+    abandoned utterance, so a straggler can't be mistaken for the first
+    frame of the next one.
+    """
+
+    def setUp(self):
+        patcher = patch("pipecat.transports.moq.transport.moq")
+        self.moq = patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.broadcast = MagicMock(name="broadcast")
+        self.broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+        self.broadcast.publish_audio.side_effect = lambda *a, **k: MagicMock(name="audio_producer")
+        origin = MagicMock(name="publish_origin")
+        origin.create_broadcast.return_value = self.broadcast
+        self.moq.OriginProducer.return_value = origin
+
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        self.client = MOQTransport(params=params, host="localhost", port=4080)._client
+
+    def _published_track_names(self):
+        return [call.args[0] for call in self.broadcast.publish_audio.call_args_list]
+
+    def test_interruption_retires_the_track_and_publishes_a_successor(self):
+        """The old producer is finished — which drops its catalog rendition —
+        and a differently-named track takes its place, so the catalog still
+        advertises exactly one audio track for subscribers to follow."""
+        self.client.open_audio_track(16000)
+        retired = self.client._audio_out
+
+        self.client.restart_audio_track()
+
+        retired.finish.assert_called_once()
+        self.assertIsNotNone(self.client._audio_out)
+        self.assertIsNot(self.client._audio_out, retired)
+        self.assertEqual(self._published_track_names(), ["bot-audio", "bot-audio-1"])
+
+    def test_each_interruption_names_a_further_track(self):
+        """Names keep advancing, so no two utterances in a session share one."""
+        self.client.open_audio_track(16000)
+        self.client.restart_audio_track()
+        self.client.restart_audio_track()
+
+        self.assertEqual(self._published_track_names(), ["bot-audio", "bot-audio-1", "bot-audio-2"])
+
+    def test_successor_anchors_into_the_shared_timeline(self):
+        """Every track the bot publishes stamps against one broadcast clock, so
+        a successor re-anchors into that timeline rather than restarting it.
+
+        The anchor is where playback resumes — the elapsed position now — not
+        the write-ahead frontier the abandoned utterance had reached. The
+        encoder takes that first stamp as the track's epoch, so it decides
+        when the new utterance plays."""
+        self.client.open_audio_track(16000)
+        # Pacing runs ahead of real-time, so the abandoned utterance left the
+        # timestamp far in the future.
+        self.client._publish_pts_us = self.client._elapsed_us() + 25_000_000
+
+        self.client.restart_audio_track()
+
+        anchor = self.client._publish_pts_us
+        self.assertLess(anchor, 1_000_000, "successor anchored at the write-ahead frontier")
+        self.assertAlmostEqual(anchor, self.client._elapsed_us(), delta=100_000)
+
+    def test_first_track_anchors_into_the_same_timeline(self):
+        """The first track is not special-cased: it anchors off the same clock,
+        so a successor's stamps are comparable with its own."""
+        self.client.open_audio_track(16000)
+
+        self.assertAlmostEqual(
+            self.client._publish_pts_us, self.client._elapsed_us(), delta=100_000
+        )
+
+    def test_restart_before_the_track_opens_is_a_no_op(self):
+        """An interruption can land before StartFrame opens the track (the
+        sample rate isn't known until then). There is nothing to retire, and
+        no track should be conjured at an unknown rate."""
+        self.client.restart_audio_track()
+
+        self.assertIsNone(self.client._audio_out)
+        self.broadcast.publish_audio.assert_not_called()
+
+    async def test_a_chunk_paced_against_a_retired_track_is_dropped(self):
+        """Pacing can park a chunk in a sleep for seconds — long enough for the
+        interruption that abandons its utterance. It must not land on the
+        successor track, which would put the discarded audio back at the head
+        of the new timeline."""
+        self.client.open_audio_track(16000)
+        retired = self.client._audio_out
+
+        # Park the pacing clock past the buffer budget so the write waits.
+        budget = self.client._params.audio_out_max_buffer_ms / 1000.0
+        self.client._publish_audio_clock = time.monotonic() + budget + 0.2
+
+        write = asyncio.create_task(self.client.publish_audio(b"\x00" * 320))
+        await asyncio.sleep(0)  # let it reach the pacing sleep
+        self.client.restart_audio_track()
+        anchor = self.client._publish_pts_us
+        await write
+
+        retired.write.assert_not_called()
+        self.client._audio_out.write.assert_not_called()
+        # The successor's epoch is still the anchor the restart chose, not one
+        # the discarded chunk moved.
+        self.assertEqual(self.client._publish_pts_us, anchor)
