@@ -50,6 +50,8 @@ extensions = [
     "sphinx.ext.intersphinx",
 ]
 
+exclude_patterns = ["api/_packages.rst"]
+
 suppress_warnings = [
     "autodoc.mocked_object",
     "toc.not_included",
@@ -202,6 +204,36 @@ def skip_documented_field(app, what, name, obj, skip, options):
     return skip
 
 
+# Packages left out of the landing page's toctree even though apidoc generates
+# pages for them. Anything excluded from generation drops out on its own; this
+# is for pages that exist but should not be advertised as entry points.
+TOCTREE_EXCLUDED_PACKAGES = {"tests"}
+
+# Titles that are not just the capitalized package name.
+TOCTREE_TITLES = {"cli": "CLI"}
+
+
+def write_package_toctree(output_dir: Path) -> None:
+    """Write the landing page's toctree from the pages apidoc just generated.
+
+    Args:
+        output_dir: Directory apidoc wrote its .rst files to.
+    """
+    lines = [".. toctree::", "   :maxdepth: 2", "   :caption: API Reference", "   :hidden:", ""]
+    for path in sorted(output_dir.glob("pipecat.*.rst")):
+        # One dot past "pipecat" is a top-level package; deeper pages are
+        # reached from that package's own page.
+        if path.stem.count(".") != 1:
+            continue
+        name = path.stem.split(".")[1]
+        if name in TOCTREE_EXCLUDED_PACKAGES:
+            continue
+        lines.append(
+            f"   {TOCTREE_TITLES.get(name, name.replace('_', ' ').title())} <api/{path.stem}>"
+        )
+    (output_dir / "_packages.rst").write_text("\n".join(lines) + "\n")
+
+
 def import_core_modules():
     """Import core pipecat modules for autodoc to discover."""
     core_modules = [
@@ -304,6 +336,8 @@ def setup(app):
         )
 
         logger.info("API documentation generated successfully!")
+
+        write_package_toctree(Path(output_dir))
 
         # Process generated RST files to update titles
         for rst_file in Path(output_dir).glob("**/*.rst"):  # Changed to recursive glob
