@@ -28,10 +28,6 @@ class CerebrasLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
-    # Cerebras doesn't support the "developer" message role.
-    # This value is used by BaseOpenAILLMService when calling the adapter.
-    supports_developer_role = False
-
     Settings = CerebrasLLMSettings
     _settings: Settings
 

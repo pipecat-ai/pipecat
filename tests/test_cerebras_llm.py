@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.cerebras.llm import CerebrasLLMService
 
 
@@ -74,3 +75,20 @@ def test_extra_passes_provider_specific_params(service_factory):
     params = service.build_chat_completion_params({})
 
     assert params["reasoning_effort"] == "low"
+
+
+def test_developer_messages_are_sent_as_is(service_factory):
+    """Cerebras maps the "developer" role to its developer instruction layer."""
+    service = service_factory(model="gpt-oss-120b")
+    context = LLMContext(
+        messages=[
+            {"role": "developer", "content": "Be terse."},
+            {"role": "user", "content": "Hello"},
+        ]
+    )
+
+    params = service.get_llm_adapter().get_llm_invocation_params(
+        context, convert_developer_to_user=not service.supports_developer_role
+    )
+
+    assert params["messages"][0]["role"] == "developer"
