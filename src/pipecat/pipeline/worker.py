@@ -764,8 +764,8 @@ class PipelineWorker(BaseWorker):
         """Request a graceful end of the session, draining the pipeline first.
 
         Whatever this worker has already pushed reaches the end of the
-        pipeline before the session goes away, so a closing line is heard
-        rather than cut off.
+        pipeline before the session goes away, rather than being cut off
+        wherever it happened to be.
 
         Args:
             reason: Optional human-readable reason for ending.
@@ -780,11 +780,13 @@ class PipelineWorker(BaseWorker):
         args: WorkerActivationArgs | None = None,
         deactivate_self: bool = False,
     ) -> None:
-        """Activate a worker by name, draining this pipeline first.
+        """Activate a worker by name, draining this pipeline when handing over.
 
-        Handing over before the pipeline drains would let the target
-        start while this worker's output is still in flight, so the two
-        would talk over each other.
+        Standing down before the pipeline drains would let the target start
+        producing while this worker's output is still in flight, and both
+        streams reach the transport together. A worker that stays active is
+        handing nothing over, so it doesn't wait: the first activation of a
+        session would otherwise wait on the very worker it is about to wake.
 
         Args:
             worker_name: The name of the worker to activate.
@@ -793,7 +795,8 @@ class PipelineWorker(BaseWorker):
             deactivate_self: Whether to deactivate this worker before
                 activating the target.
         """
-        await self._drain_pipeline()
+        if deactivate_self:
+            await self._drain_pipeline()
         await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
 
     async def _drain_pipeline(self) -> None:
@@ -963,11 +966,6 @@ class PipelineWorker(BaseWorker):
         """
         await super().on_bus_message(message)
 
-        if isinstance(message, BusFlushProgressMessage):
-            if message.flush_id in self._flush_progress:
-                self._flush_progress[message.flush_id] += 1
-            return
-
         # ``BaseWorker.on_bus_message`` already drops targeted messages for
         # other workers, but it returns early before reaching here -- re-apply
         # the filter before queueing pipeline frames.
@@ -984,15 +982,14 @@ class PipelineWorker(BaseWorker):
             ):
                 self._foreign_probes[frame.id] = frame.origin
             await self._queue_bridged_frame(message)
-            return
-
-        if isinstance(message, BusTTSSpeakMessage):
+        elif isinstance(message, BusFlushProgressMessage):
+            if message.flush_id in self._flush_progress:
+                self._flush_progress[message.flush_id] += 1
+        elif isinstance(message, BusTTSSpeakMessage):
             await self.queue_frame(
                 TTSSpeakFrame(text=message.text, append_to_context=message.append_to_context)
             )
-            return
-
-        if self._rtvi and isinstance(message, BusUIDataMessage):
+        elif self._rtvi and isinstance(message, BusUIDataMessage):
             await self._handle_ui_bus_message(message)
 
     async def _queue_bridged_frame(self, message: BusFrameMessage) -> None:

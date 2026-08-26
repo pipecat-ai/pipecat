@@ -334,13 +334,26 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(flushed, [True])
 
-    async def test_activate_worker_drains_a_running_pipeline(self):
+    async def test_handing_over_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.activate_worker("peer", deactivate_self=True))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_activating_a_peer_without_standing_down_skips_the_drain(self):
+        """Handing nothing over, so there is nothing in flight to wait for.
+
+        The first activation of a session would otherwise wait on the very
+        worker it is about to wake.
+        """
         worker = make_stub_pipeline_task("draining")
         flushed = self._spy_on_flush(worker)
 
         await self._run_until(worker, lambda: worker.activate_worker("peer"))
 
-        self.assertEqual(flushed, [True])
+        self.assertEqual(flushed, [])
 
     async def test_end_skips_the_drain_when_nothing_is_running(self):
         """Nothing would bounce the probe back, so waiting would only time out."""
