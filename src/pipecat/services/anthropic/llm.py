@@ -62,10 +62,10 @@ _SONNET_THINKS_BY_DEFAULT_FROM = 5
 def _sonnet_generation(model: str) -> int | None:
     """The generation of a Sonnet model id, or ``None`` for any other model.
 
-    Covers every id form the service sees — ``claude-sonnet-5``,
-    ``claude-sonnet-4-6``, Bedrock's ``anthropic.claude-sonnet-5``, dated
-    snapshots. Pre-4 ids such as ``claude-3-5-sonnet-20241022`` put the
-    generation before the name and don't match; they don't think either.
+    Searched rather than anchored because the service also takes Bedrock and
+    Vertex clients, whose ids prefix the name (``anthropic.claude-sonnet-5``).
+    Pre-4 ids such as ``claude-3-5-sonnet-20241022`` put the generation before
+    the name and don't match; they don't think either.
     """
     match = re.search(r"sonnet-(\d{1,2})(?!\d)", model.lower())
     return int(match.group(1)) if match else None
