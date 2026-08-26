@@ -120,7 +120,7 @@ class AcmeLLMWorker(LLMWorker):
             agent (str): The agent to transfer to (e.g. 'greeter', 'support').
             reason (str): Why the user is being transferred.
         """
-        logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
         await params.result_callback(None)
         await self.activate_worker(
             agent,
@@ -135,7 +135,7 @@ class AcmeLLMWorker(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
         await params.result_callback(reason)
         await self.end(reason=reason)
 

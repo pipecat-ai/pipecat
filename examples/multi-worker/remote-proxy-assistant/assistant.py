@@ -69,7 +69,7 @@ class AcmeAssistant(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
         await params.result_callback(reason)
         await self.end(reason=reason)
 

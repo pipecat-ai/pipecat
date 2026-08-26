@@ -9,7 +9,7 @@
 Same shape as ``local-handoff-two-agents.py``, but each child worker
 runs its own TTS with a distinct voice. The main worker has no TTS —
 audio comes from the child workers via the bus and is played by the
-main worker's transport. Tasks announce the transfer ("let me connect
+main worker's transport. Workers announce the transfer ("let me connect
 you with...") before handing off.
 
 Architecture::
@@ -75,7 +75,7 @@ transport_params = {
 }
 
 
-class AcmeTTSTask(LLMWorker):
+class AcmeTTSWorker(LLMWorker):
     """Child worker with its own LLM + TTS, bridged to the main worker.
 
     Each child wraps the standard ``Pipeline([llm])`` with an extra
@@ -110,7 +110,7 @@ class AcmeTTSTask(LLMWorker):
             agent (str): The agent to transfer to (e.g. 'greeter', 'support').
             reason (str): Why the user is being transferred.
         """
-        logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
         await params.result_callback(f"Transferring to {agent} agent.")
         await self.activate_worker(
             agent,
@@ -127,12 +127,12 @@ class AcmeTTSTask(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
         await params.result_callback(reason)
         await self.end(reason=reason)
 
 
-def build_greeter() -> AcmeTTSTask:
+def build_greeter() -> AcmeTTSWorker:
     """Greeter: routes the user to support when they pick a product."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -149,14 +149,14 @@ def build_greeter() -> AcmeTTSTask:
             ),
         ),
     )
-    return AcmeTTSTask(
+    return AcmeTTSWorker(
         "greeter",
         llm=llm,
         voice_id="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline
     )
 
 
-def build_support() -> AcmeTTSTask:
+def build_support() -> AcmeTTSWorker:
     """Support: answers product questions, can hand back to the greeter."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -174,7 +174,7 @@ def build_support() -> AcmeTTSTask:
             ),
         ),
     )
-    return AcmeTTSTask(
+    return AcmeTTSWorker(
         "support",
         llm=llm,
         voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Blake
