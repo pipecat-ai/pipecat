@@ -20,7 +20,10 @@ Quick Links
 
    Adapters <api/pipecat.adapters>
    Audio <api/pipecat.audio>
+   Bus <api/pipecat.bus>
+   CLI <api/pipecat.cli>
    Clocks <api/pipecat.clocks>
+   Evals <api/pipecat.evals>
    Extensions <api/pipecat.extensions>
    Flows <api/pipecat.flows>
    Frames <api/pipecat.frames>
@@ -28,6 +31,7 @@ Quick Links
    Observers <api/pipecat.observers>
    Pipeline <api/pipecat.pipeline>
    Processors <api/pipecat.processors>
+   Registry <api/pipecat.registry>
    Runner <api/pipecat.runner>
    Serializers <api/pipecat.serializers>
    Services <api/pipecat.services>
@@ -35,3 +39,4 @@ Quick Links
    Transports <api/pipecat.transports>
    Turns <api/pipecat.turns>
    Utils <api/pipecat.utils>
+   Workers <api/pipecat.workers>

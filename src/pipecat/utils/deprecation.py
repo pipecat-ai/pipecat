@@ -57,7 +57,7 @@ target, or an explicit "No replacement." — enforced by
 ``tests/test_deprecation_markers.py``::
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorker` instead.        # rename / use-existing
+        Use :class:`~pipecat.pipeline.worker.PipelineWorker` instead.        # rename / use-existing
         Merged into :class:`LLMContext`.            # capability absorbed
         Moved to :mod:`pipecat.services.xai.llm`.   # module move
         No replacement.                             # nothing to migrate to

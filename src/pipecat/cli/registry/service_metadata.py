@@ -40,13 +40,11 @@ BotType = Literal["web", "telephony"]
 class ServiceDefinition:
     """Service metadata definition.
 
-    Required fields:
-        value: Service identifier (e.g., "openai_llm")
-        label: Human-readable name (e.g., "OpenAI")
-        package: Python package requirement (e.g., "pipecat-ai[openai]")
-
-    Optional fields:
-        class_name: List of class names to import for this service
+    Parameters:
+        value: Service identifier (e.g., "openai_llm").
+        label: Human-readable name (e.g., "OpenAI").
+        package: Python package requirement (e.g., "pipecat-ai[openai]").
+        class_name: List of class names to import for this service.
         env_prefix: Prefix for environment variables (e.g., "OPENAI" -> "OPENAI_API_KEY")
         include_params: Constructor params that have defaults but should still appear in the
             generated config (e.g., "api_key" has a default but we want users to set it via

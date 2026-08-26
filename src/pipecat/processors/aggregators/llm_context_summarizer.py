@@ -206,12 +206,10 @@ class LLMContextSummarizer(BaseObject):
         must be set (enforced at config construction time).
 
         Returns:
-            True if all conditions are met:
-            - ``auto_trigger`` is enabled
-            - No summarization currently in progress
-            - AND either:
-              - Token count exceeds ``max_context_tokens`` (when set)
-              - OR message count exceeds ``max_unsummarized_messages`` since last summary (when set)
+            True when ``auto_trigger`` is enabled, no summarization is in
+            progress, and either the token count exceeds ``max_context_tokens``
+            or the message count since the last summary exceeds
+            ``max_unsummarized_messages`` — whichever of the two is set.
         """
         logger.trace(f"{self}: Checking if context summarization is needed")
 

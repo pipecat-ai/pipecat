@@ -373,7 +373,7 @@
       "removed_in": "2.0.0",
       "relation": "move",
       "replacement": "pipecat.pipeline.worker",
-      "message": "Import from :mod:`pipecat.pipeline.worker` instead. Constructing :class:`PipelineTask` directly is also deprecated; use :class:`PipelineWorker`. Will be removed in 2.0.0.",
+      "message": "Import from :mod:`pipecat.pipeline.worker` instead. Constructing :class:`PipelineTask` directly is also deprecated; use :class:`~pipecat.pipeline.worker.PipelineWorker`. Will be removed in 2.0.0.",
       "location": "pipecat/pipeline/task.py"
     },
     {
