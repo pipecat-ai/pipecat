@@ -67,6 +67,7 @@ IMPORTS = {
         "from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService"
     ],
     "fal_stt": ["from pipecat.services.fal.stt import FalSTTService"],
+    "gemini_stt": ["from pipecat.services.google.gemini_live.stt import GeminiSTTService"],
     "gladia_stt": ["from pipecat.services.gladia.stt import GladiaSTTService"],
     "google_stt": ["from pipecat.services.google.stt import GoogleSTTService"],
     "gradium_stt": ["from pipecat.services.gradium.stt import GradiumSTTService"],

@@ -336,6 +336,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="gemini_stt",
+            label="Gemini Transcribe Live",
+            package="pipecat-ai[google]",
+            class_name=["GeminiSTTService"],
+            env_prefix="GOOGLE",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="gladia_stt",
             label="Gladia",
             package="pipecat-ai[gladia]",

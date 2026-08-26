@@ -78,7 +78,7 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-google-audio-in.py
     scenarios: [capital_question]
-  - bot: voice/voice-google-gemini-tts.py
+  - bot: voice/voice-google-gemini.py
     scenarios: [capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [capital_question]
