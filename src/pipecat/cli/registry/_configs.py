@@ -377,7 +377,7 @@ SERVICE_CONFIGS = {
         "CartesiaTTSService(\n"
         '        api_key=os.getenv("CARTESIA_API_KEY"),\n'
         "        settings=CartesiaTTSService.Settings(\n"
-        '            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),\n'
+        '            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),\n'
         "        ),\n"
         "    )\n"
     ),

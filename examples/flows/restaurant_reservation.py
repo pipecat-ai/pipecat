@@ -266,7 +266,7 @@ async def run_bot(
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
     # LLM service is created using the create_llm function from utils.py

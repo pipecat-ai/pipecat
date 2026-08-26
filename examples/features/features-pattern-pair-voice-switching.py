@@ -76,7 +76,7 @@ load_dotenv(override=True)
 # Define voice IDs
 VOICE_IDS = {
     "narrator": "c45bc5ec-dc68-4feb-8829-6e6b2748095d",  # Narrator voice
-    "female": "71a7ad14-091c-4e8e-a314-022ece01c121",  # Female character voice
+    "female": "f6ff7c0c-e396-40a9-a70b-f7607edb6937",  # Female character voice
     "male": "7cf0e2b1-8daf-4fe4-89ad-f6039398f359",  # Male character voice
 }
 
