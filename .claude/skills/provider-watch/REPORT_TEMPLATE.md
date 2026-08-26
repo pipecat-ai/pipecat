@@ -97,11 +97,12 @@ bullet per decision:
 
 - Add a `pronunciation` Settings field — wontfix, covered by `pronunciation_dict_id` ([comment](https://github.com/pipecat-ai/provider-watch-reports/issues/12#issuecomment-1), 2026-08-13)
 - Expose `flush_id` — later, revisit after 2026-11-01 ([comment](https://github.com/pipecat-ai/provider-watch-reports/issues/14#issuecomment-2), 2026-08-20)
+- Default to sonic-4 — later, re-propose when aiewf-eval scores it at or above sonic-3.5 ([comment](https://github.com/pipecat-ai/provider-watch-reports/issues/14#issuecomment-3), 2026-08-20)
 ```
 
 - Append an entry when a digest-issue comment or a closed-unmerged PR decides an item: the item
   as the report named it, the decision in the commenter's words, and the comment or PR as the
   linked source, with the date.
-- Delete an entry when it stops being in force — its revisit date has passed (the item is a gap
-  again) or a code change made it moot. Git history is the archive; the file holds only what
+- Delete an entry when it stops being in force — its revisit date has passed or its revisit
+  condition now holds (the item is a gap again), or a code change made it moot. Git history is the archive; the file holds only what
   currently applies.
