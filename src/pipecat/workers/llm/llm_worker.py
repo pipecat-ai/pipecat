@@ -250,19 +250,23 @@ class LLMWorker(PipelineWorker):
         messages: list | None = None,
         result_callback: FunctionCallResultCallback | None = None,
     ) -> None:
-        """Activate another worker, draining this worker's pipeline first.
+        """Activate another worker, draining this worker's pipeline to hand over.
 
         When called from a ``@tool`` handler, deliver the function call result
-        first with ``await params.result_callback(result)``: the LLM output it
-        triggers is delivered before the target is activated.
+        first with ``await params.result_callback(result)``: the output it
+        triggers is delivered before the target is activated. The handover
+        itself waits until the tool call asking for it has finished.
 
         Args:
             worker_name: The name of the worker to activate.
             args: Optional ``WorkerActivationArgs`` forwarded to the target
                 worker's ``on_activated`` handler.
             deactivate_self: Whether to deactivate this worker before activating
-                the target.
-            messages: Optional LLM messages to inject and speak before
+                the target. Deactivating this worker drains its pipeline
+                first; staying active does not. A worker that stays active and
+                wants to drain anyway can call :meth:`flush_pipeline` before
+                this.
+            messages: Optional LLM messages to inject and deliver before
                 activating the target. The LLM runs immediately so the output
                 is delivered before the transfer completes.
 

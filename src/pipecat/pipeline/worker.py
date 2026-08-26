@@ -782,9 +782,9 @@ class PipelineWorker(BaseWorker):
     ) -> None:
         """Activate a worker by name, draining this pipeline when handing over.
 
-        Standing down before the pipeline drains would let the target start
-        producing while this worker's output is still in flight, and both
-        streams reach the transport together. A worker that stays active is
+        Deactivating this worker before its pipeline drains would let the
+        target start producing while this worker's output is still in flight,
+        and both would arrive interleaved. A worker that stays active is
         handing nothing over, so it doesn't wait: the first activation of a
         session would otherwise wait on the very worker it is about to wake.
 
@@ -793,7 +793,10 @@ class PipelineWorker(BaseWorker):
             args: Optional ``WorkerActivationArgs`` forwarded to the
                 target worker's ``on_activated``.
             deactivate_self: Whether to deactivate this worker before
-                activating the target.
+                activating the target. Deactivating this worker drains its
+                pipeline first; staying active does not. A worker that stays
+                active and wants to drain anyway can call
+                :meth:`flush_pipeline` before this.
         """
         if deactivate_self:
             await self._drain_pipeline()
