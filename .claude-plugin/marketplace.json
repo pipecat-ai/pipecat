@@ -21,6 +21,7 @@
         "./.claude/skills/pr-description",
         "./.claude/skills/pr-submit",
         "./.claude/skills/prose-review",
+        "./.claude/skills/provider-watch",
         "./.claude/skills/update-docs"
       ]
     }

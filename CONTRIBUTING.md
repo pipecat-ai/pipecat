@@ -69,6 +69,8 @@ If you respond on a `needs-repro` issue, any comment resets the 30-day clock. Wh
 
 Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
 
+A fix or follow-up to a change that has not shipped yet needs no entry of its own: the unreleased change's entry covers it — update that entry instead if the follow-up alters what it should say.
+
 ### Creating a Changelog Fragment
 
 1. Create a new file in the `changelog/` directory with this naming pattern:
