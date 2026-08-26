@@ -386,7 +386,7 @@ class AggregatedFrameSequencer:
             transport_destination: Transport routing value to attach at flush time.
 
         Returns:
-            Frames to push downstream: any sentence promoted by the initial
+            The frames to push downstream — any sentence promoted by the initial
             :meth:`finalize` (streaming mode), followed by this skipped frame once it
             is unblocked. The skipped frame itself is absent while a preceding spoken
             slot is still incomplete — the promoted-sentence frame can still be

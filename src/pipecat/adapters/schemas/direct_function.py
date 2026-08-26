@@ -148,10 +148,8 @@ class BaseDirectFunctionWrapper:
             docstring_params: List of parameters extracted from the function's docstring.
 
         Returns:
-            A tuple containing:
-
-            - A dictionary mapping each function parameter to its JSON schema
-            - A list of required parameter names
+            A tuple of a dictionary mapping each function parameter to its JSON
+            schema, and a list of required parameter names.
         """
         sig = inspect.signature(func)
         hints = get_type_hints(func)

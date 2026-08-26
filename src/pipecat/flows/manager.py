@@ -256,8 +256,8 @@ class FlowManager:
         the pipeline, enabling advanced flow control and custom frame injection.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
 
         Examples:
             Queueing frames in handlers::
@@ -284,8 +284,8 @@ class FlowManager:
             Use :attr:`worker` instead. Will be removed in 2.0.0.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
         """
         return self._worker
 

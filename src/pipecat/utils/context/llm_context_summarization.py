@@ -334,11 +334,9 @@ class LLMContextSummarizationUtil:
             context: LLM context to estimate.
 
         Returns:
-            Estimated total token count including:
-            - Message content (text, images)
-            - Tool calls and their arguments
-            - Tool results
-            - Structural overhead (TOKEN_OVERHEAD_PER_MESSAGE per message)
+            The estimated total token count, covering message content (text and
+            images), tool calls and their arguments, tool results, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
         """
         total = 0
 
