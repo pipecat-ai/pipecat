@@ -54,7 +54,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def test_completion_dropped_while_user_speaking(self):
         """A completion arriving while the user speaks must not stop the turn.
 
-        External completions (e.g. an LLM ✓) resolve with latency, so the user
+        External completions (e.g. an LLM ●) resolve with latency, so the user
         may have resumed speaking. The controller drops the finalization while
         the user is speaking and finalizes once they fall silent.
         """

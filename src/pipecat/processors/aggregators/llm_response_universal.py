@@ -146,8 +146,8 @@ class LLMUserAggregatorParams:
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
-            turn-completion marker at the start of each response: ✓ (complete),
-            ○ (incomplete short), or ◐ (incomplete long). Incomplete
+            turn-completion marker at the start of each response: ● (complete),
+            ◐ (incomplete short), or ○ (incomplete long). Incomplete
             responses are suppressed and timeouts trigger re-prompting.
 
             .. deprecated:: 1.2.0
@@ -1462,6 +1462,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
+        # Markers seen on LLMMarkerFrames, so a service configured with markers
+        # other than the defaults still gets them stripped from transcripts.
+        self._seen_turn_markers: set[str] = set()
         self._context_updated_tasks: set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
@@ -2072,10 +2075,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_marker_frame(self, frame: LLMMarkerFrame):
+        self._seen_turn_markers.add(frame.marker)
+
         if frame.append_to_context_immediately:
             # Stand-alone marker: write it to the context now as its
             # own assistant message. Used when the marker is the entire
-            # assistant turn — e.g. the ○ / ◐ incomplete-turn signals,
+            # assistant turn — e.g. the ◐ / ○ incomplete-turn signals,
             # where the spoken response is suppressed and the marker
             # is the only artifact.
             self._context.add_message({"role": "assistant", "content": frame.marker})
@@ -2086,9 +2091,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         # Marker is part of an in-progress assistant response. Append
         # it to the running aggregation so `push_aggregation` writes
-        # marker + text as a single context message — e.g. the ✓
+        # marker + text as a single context message — e.g. the ●
         # complete-turn signal that prefixes the spoken response,
-        # producing "✓ <response>" in context. Markers are stripped
+        # producing "● <response>" in context. Markers are stripped
         # from the transcript via
         # `_maybe_strip_turn_completion_markers` so consumers see
         # clean text.
@@ -2199,8 +2204,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
     def _maybe_strip_turn_completion_markers(self, text: str) -> str:
         """Strip turn completion markers from assistant transcript.
 
-        These markers (✓, ○, ◐) are used internally for turn completion
-        detection and shouldn't appear in the final transcript.
+        Turn completion markers are used internally for turn completion
+        detection and shouldn't appear in the final transcript. Both the
+        default markers and any seen on this turn's marker frames are removed,
+        so a custom marker set is stripped too.
         """
         from pipecat.turns.user_turn_completion_mixin import (
             USER_TURN_COMPLETE_MARKER,
@@ -2209,11 +2216,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
         marker_found = False
-        for marker in (
+        for marker in {
             USER_TURN_COMPLETE_MARKER,
             USER_TURN_INCOMPLETE_SHORT_MARKER,
             USER_TURN_INCOMPLETE_LONG_MARKER,
-        ):
+        } | self._seen_turn_markers:
             if marker in text:
                 text = text.replace(marker, "")
                 marker_found = True

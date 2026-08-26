@@ -114,8 +114,8 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     """Stop strategies gated on the LLM's turn-completion verdict.
 
     The LLM is asked to begin every response with one of three markers:
-    ✓ (complete), ○ (incomplete short), or ◐ (incomplete long). Only ✓
-    finalizes the user turn; ○ / ◐ keep the turn open so the user can
+    ● (complete), ◐ (incomplete short), or ○ (incomplete long). Only ●
+    finalizes the user turn; ◐ / ○ keep the turn open so the user can
     continue speaking and the LLM can re-evaluate later.
 
     Configuring strategies this way preserves the existing detector

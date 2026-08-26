@@ -943,7 +943,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_inferences_in_one_turn_preserve_aggregation(self):
         """Two inference triggers before finalization should preserve the full user transcript.
 
-        When the LLM marks the first inference incomplete (○ / ◐) and the
+        When the LLM marks the first inference incomplete (◐ / ○) and the
         user keeps speaking, the deferred upstream strategy fires a
         second inference. Both the public ``on_user_turn_stopped`` event
         and the conversation context should reflect the full user
@@ -985,14 +985,14 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # First inference fired here. Imagine the LLM returned ○;
+            # First inference fired here. Imagine the LLM returned ◐;
             # the turn is not yet finalized, so the user keeps talking.
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="about pizza", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
-            # Second inference fired here. Now the LLM returns ✓ and the
+            # Second inference fired here. Now the LLM returns ● and the
             # turn finalizes via UserTurnInferenceCompletedFrame.
             UserTurnInferenceCompletedFrame(),
             SleepFrame(),
