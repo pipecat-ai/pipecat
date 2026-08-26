@@ -43,6 +43,11 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 # before finalizing the transcription.
 TRANSCRIPT_AGGREGATION_DELAY = 0.1
 
+# Gradium's language code asking it to detect the language rather than being
+# grounded to one. It is not a Language enum member because it names a mode
+# rather than a language, so it is passed through as a plain string.
+_GRADIUM_ANY_LANGUAGE = "any"
+
 
 def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
     """Build Gradium input_format from encoding type and sample rate.
@@ -72,11 +77,11 @@ def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
     return encoding
 
 
-def language_to_gradium_language(language: Language) -> str:
+def language_to_gradium_language(language: Language | str) -> str:
     """Convert a Language enum to Gradium's language code format.
 
     Args:
-        language: The Language enum value to convert.
+        language: The Language enum value to convert, or ``"any"``.
 
     Returns:
         The corresponding Gradium language code. If ``language`` is not in
@@ -84,6 +89,9 @@ def language_to_gradium_language(language: Language) -> str:
         ``en`` from ``en-US``) and logs a warning (via
         ``resolve_language(..., use_base_code=True)``).
     """
+    if language == _GRADIUM_ANY_LANGUAGE:
+        return _GRADIUM_ANY_LANGUAGE
+
     LANGUAGE_MAP = {
         Language.DE: "de",
         Language.EN: "en",
@@ -92,7 +100,9 @@ def language_to_gradium_language(language: Language) -> str:
         Language.PT: "pt",
     }
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+    # A raw string that is not a Language falls through to the base-code
+    # branch of resolve_language, which handles it as-is.
+    return resolve_language(cast("Language", language), LANGUAGE_MAP, use_base_code=True)
 
 
 @dataclass
@@ -115,6 +125,10 @@ class GradiumSTTService(WebsocketSTTService):
     Provides real-time speech transcription using Gradium's WebSocket API.
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
+
+    Transcribes English by default. Set ``settings.language`` to one of the
+    other supported languages (German, Spanish, French, Portuguese), or to
+    ``"any"`` to have Gradium detect the language.
     """
 
     Settings = GradiumSTTSettings
@@ -134,7 +148,8 @@ class GradiumSTTService(WebsocketSTTService):
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
                 This helps ground the model to a specific language and improve
-                transcription quality.
+                transcription quality. Defaults to ``Language.EN``; ``"any"``
+                asks Gradium to detect the language.
             delay_in_frames: Delay in audio frames (80ms each) before text is
                 generated. Higher delays allow more context but increase latency.
                 Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
@@ -198,7 +213,7 @@ class GradiumSTTService(WebsocketSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="default",
-            language=None,
+            language=Language.EN,
             delay_in_frames=12,
         )
 
@@ -208,7 +223,8 @@ class GradiumSTTService(WebsocketSTTService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = params.language
+                if params.language is not None:
+                    default_settings.language = params.language
                 if params.delay_in_frames is not None:
                     default_settings.delay_in_frames = params.delay_in_frames
 

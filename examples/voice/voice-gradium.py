@@ -24,7 +24,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -57,12 +56,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = GradiumSTTService(
-        api_key=os.environ["GRADIUM_API_KEY"],
-        settings=GradiumSTTService.Settings(
-            language=Language.EN,
-        ),
-    )
+    stt = GradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
 
     tts = GradiumTTSService(
         api_key=os.environ["GRADIUM_API_KEY"],
