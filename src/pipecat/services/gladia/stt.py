@@ -438,9 +438,18 @@ class GladiaSTTService(WebsocketSTTService):
         await self._connect()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply settings delta.
+        """Apply a settings delta by starting a new Gladia session with it.
 
-        Settings are stored but not applied to the active session.
+        Gladia takes its whole configuration at session-init time (``POST
+        /v2/live``) rather than over the websocket, so a settings change can only
+        take effect on a new session. Dropping the cached session makes
+        ``_connect()`` initialize a fresh one from the updated settings, and
+        ``_request_reconnect()`` holds that reconnect until the current user turn
+        ends, buffering audio across the transition.
+
+        ``language`` is the exception: Gladia selects languages through
+        ``language_config``, so it never reaches the session payload and is still
+        reported as unhandled.
 
         Args:
             delta: A settings delta.
@@ -453,14 +462,11 @@ class GladiaSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # self._session_url = None
-        # self._session_id = None
-        # await self._disconnect()
-        # await self._connect()
+        self._session_url = None
+        self._session_id = None
+        await self._request_reconnect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.keys() & {"language"})
 
         return changed
 
