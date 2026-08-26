@@ -124,7 +124,7 @@ transport_params = {
 
 
 @dataclass
-class ActiveTask:
+class ActiveJob:
     """What the agent is working on, as the voice loop understands it."""
 
     job_id: str
@@ -135,22 +135,22 @@ class ActiveTask:
 class VoiceLoopWorker(PipelineWorker):
     """The media path and the voice loop.
 
-    It keeps one handle on the agent's task, learned from the agent loop, so it
+    It keeps one handle on the agent's job, learned from the agent loop, so it
     can stop the work, say what is running, and narrate each outcome honestly.
     """
 
     def __init__(self, *args, **kwargs):
         """Initialize the worker."""
         super().__init__(*args, **kwargs)
-        self._active: ActiveTask | None = None
+        self._active: ActiveJob | None = None
 
     @property
-    def active_task(self) -> ActiveTask | None:
-        """The agent's current task, or None while it is idle."""
+    def active_job(self) -> ActiveJob | None:
+        """The agent's current job, or None while it is idle."""
         return self._active
 
-    async def stop_active_task(self, reason: str) -> str | None:
-        """Cancel the agent's task, returning its job id, or None if idle.
+    async def stop_active_job(self, reason: str) -> str | None:
+        """Cancel the agent's job, returning its id, or None if idle.
 
         Args:
             reason: Why the user wants it stopped.
@@ -165,7 +165,7 @@ class VoiceLoopWorker(PipelineWorker):
         return self._active.job_id
 
     async def on_job_update(self, message: BusJobUpdateMessage):
-        """Record the task the agent has accepted.
+        """Record the job the agent has accepted.
 
         Args:
             message: The update from the agent loop.
@@ -173,7 +173,7 @@ class VoiceLoopWorker(PipelineWorker):
         await super().on_job_update(message)
         update = message.update or {}
         if message.source == WORKER_NAME and update.get("kind") == "started":
-            self._active = ActiveTask(
+            self._active = ActiveJob(
                 job_id=message.job_id,
                 request=str(update.get("request", "")),
                 started_at=time.monotonic(),
@@ -279,7 +279,7 @@ async def stop_agent(params: FunctionCallParams, reason: str):
     Args:
         reason (str): Why the user wants it stopped, briefly.
     """
-    job_id = await params.pipeline_worker.stop_active_task(reason)
+    job_id = await params.pipeline_worker.stop_active_job(reason)
     if job_id is None:
         await params.result_callback(
             {"status": "nothing_running"},
@@ -300,7 +300,7 @@ async def agent_status(params: FunctionCallParams):
     Read-only and instant: it reads what the voice loop already knows and does
     not touch the agent.
     """
-    active = params.pipeline_worker.active_task
+    active = params.pipeline_worker.active_job
     await params.result_callback(
         {
             "status": "working" if active else "idle",
@@ -362,7 +362,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @worker.event_handler("on_idle_timeout")
     async def on_idle_timeout(worker):
-        if worker.active_task:
+        if worker.active_job:
             logger.info("Voice loop: quiet, but the agent is working; staying up")
             return
         logger.info("Voice loop: idle with nothing running; ending the session")

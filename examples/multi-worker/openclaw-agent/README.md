@@ -69,7 +69,7 @@ Voice loop (transport + LLM + send/stop/status tools)
 ```
 
 - **[`openclaw-agent.py`](openclaw-agent.py)** — The voice loop: STT, LLM, TTS,
-  and transport. `VoiceLoopWorker` keeps one handle on the agent's task, learned
+  and transport. `VoiceLoopWorker` keeps one handle on the agent's job, learned
   from the agent loop, so it can stop the work, say what is running, and narrate
   each outcome. Three tools: `send_to_agent`, `stop_agent`, `agent_status`.
 - **[`openclaw_worker.py`](openclaw_worker.py)** — The agent loop: a
