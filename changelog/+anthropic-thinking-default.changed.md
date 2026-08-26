@@ -1,0 +1,1 @@
+- `AnthropicLLMService` now disables thinking by default on Sonnet 5 and later, which otherwise think before every response, to keep latency low for real-time voice — mirroring how the Gemini service disables thinking by default on Flash models. Opus and Fable are left at Anthropic's default. Set `Settings.thinking` to configure thinking explicitly.
