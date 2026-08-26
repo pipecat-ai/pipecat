@@ -325,11 +325,11 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         Sonnet 5 and later run adaptive thinking whenever the request omits
         ``thinking``, which for real-time voice can add seconds before the first
         answer token, so when the caller hasn't configured thinking, request
-        ``{"type": "disabled"}``. Only the Sonnet line, Anthropic's speed tier,
-        trades reasoning for latency this way: Opus and Fable are left at the
-        provider default, since choosing one is a decision to reason. Mirrors
-        Gemini's ``_maybe_unset_thinking_budget``, which does the same for the
-        Flash line.
+        ``{"type": "disabled"}``. We only do this for the Sonnet line,
+        Anthropic's speed tier: Opus and Fable are left at the provider
+        default, since choosing one is a decision to reason. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``, which does the same for the Flash
+        line.
 
         Args:
             params: The request params dict (modified in place).

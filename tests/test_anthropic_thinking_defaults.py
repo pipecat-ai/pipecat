@@ -68,7 +68,7 @@ def test_pre_4_sonnet_ids_get_no_thinking_default():
 
 
 def test_opus_and_fable_get_no_thinking_default():
-    """Only the Sonnet line trades reasoning for latency by default."""
+    """We only trade reasoning for latency by default on the Sonnet line."""
     assert _applied_thinking("claude-opus-5") is None
     assert _applied_thinking("claude-fable-5") is None
 
