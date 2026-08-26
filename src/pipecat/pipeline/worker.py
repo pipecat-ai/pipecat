@@ -554,13 +554,13 @@ class PipelineWorker(BaseWorker):
         # followed by the user pipeline, and ending with a sink processor. The
         # source allows us to receive and react to upstream frames, and the sink
         # allows us to receive and react to downstream frames.
-        source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
+        self._source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
         self._sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
         # Only prepend the RTVIProcessor if we created it ourselves. When the
         # user already placed it inside their pipeline we must not insert it
         # again or it will appear twice in the frame chain.
         processors = [self._rtvi, pipeline] if prepend_rtvi else [pipeline]
-        self._pipeline = Pipeline(processors, source=source, sink=self._sink)
+        self._pipeline = Pipeline(processors, source=self._source, sink=self._sink)
 
         # The worker observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -915,6 +915,9 @@ class PipelineWorker(BaseWorker):
             True if the pipeline drained, False if it went quiet first.
         """
         event = asyncio.Event()
+
+        logger.debug(f"{self}: pushing flush probe downstream")
+
         await self._push_queue.put(PipelineFlushFrame(event=event))
         while True:
             before = self._frames_reaching_sink
@@ -1344,6 +1347,33 @@ class PipelineWorker(BaseWorker):
             self._push_queue.task_done()
         await self._cleanup(cleanup_pipeline)
 
+    async def _advance_flush_probe(self, frame: PipelineFlushFrame, at_sink: bool) -> None:
+        """Move a flush probe along its trip, settling it once it is done.
+
+        The probe travels down to the sink, back up to the source, then down
+        again, and only the second arrival at the sink settles it. The extra
+        leg is what makes the probe wait for work a processor starts by
+        pushing upstream: an ``LLMContextFrame`` pushed up after a function
+        call result, say, whose response only comes back down afterwards. A
+        probe that stopped at the source would return while that response was
+        still being generated, or still being synthesized.
+
+        Args:
+            frame: The probe, carrying the event its initiator awaits.
+            at_sink: Whether the probe has arrived at the sink or the source.
+        """
+        if not at_sink:
+            logger.debug(f"{self}: flush probe reached source — sending it down again")
+            frame.returning = True
+            await self._source.push_frame(frame, FrameDirection.DOWNSTREAM)
+        elif not frame.returning:
+            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+        else:
+            logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
+            if frame.event:
+                frame.event.set()
+
     async def _source_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming upstream from the pipeline.
 
@@ -1354,15 +1384,6 @@ class PipelineWorker(BaseWorker):
         """
         if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
-
-        if isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
-            # The flush probe completed its round-trip (down to the sink, back up
-            # to the source). Everything queued ahead of it has been processed;
-            # release whoever is awaiting it.
-            logger.debug(f"{self}: flush probe reached source — pipeline drained")
-            if frame.event:
-                frame.event.set()
-            return
 
         if isinstance(frame, EndWorkerFrame):
             # Tell the worker we should end nicely.
@@ -1394,6 +1415,8 @@ class PipelineWorker(BaseWorker):
                 await self._handle_unusable_processor(frame.processor)
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")
+        elif isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
+            await self._advance_flush_probe(frame, at_sink=False)
 
     async def _handle_unusable_processor(self, processor: FrameProcessor):
         """Apply the unusable-processor policy, once per processor.
@@ -1432,14 +1455,6 @@ class PipelineWorker(BaseWorker):
         if not isinstance(frame, HeartbeatFrame):
             self._frames_reaching_sink += 1
 
-        if isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
-            # The flush probe reached the sink. Bounce the same instance back
-            # upstream so it returns to the source (carrying its event) and the
-            # round-trip drains both directions.
-            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
-            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
-            return
-
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)
             await self._observer.on_pipeline_started()
@@ -1471,6 +1486,8 @@ class PipelineWorker(BaseWorker):
         elif isinstance(frame, InterruptionWorkerFrame):
             logger.debug(f"{self}: received interruption worker frame downstream {frame}")
             await self.queue_frame(InterruptionWorkerFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, PipelineFlushFrame) and self._handle_flush_frame:
+            await self._advance_flush_probe(frame, at_sink=True)
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""

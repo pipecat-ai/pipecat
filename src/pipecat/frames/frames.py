@@ -1964,9 +1964,15 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
         event: Set by the worker when the probe completes its round-trip. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
+        returning: Whether the probe is on its second pass downstream, after
+            having been back up to the source. Work a processor starts by
+            pushing upstream — an LLM run triggered by a function call result,
+            say — only reaches the sink after that turnaround, so the probe
+            makes the trip twice and settles on the second arrival.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
+    returning: bool = field(default=False, compare=False)
 
 
 @dataclass
