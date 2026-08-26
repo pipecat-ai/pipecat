@@ -1969,10 +1969,14 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
             pushing upstream — an LLM run triggered by a function call result,
             say — only reaches the sink after that turnaround, so the probe
             makes the trip twice and settles on the second arrival.
+        origin: Name of the worker that started the flush. A probe that crosses
+            into another pipeline is answered there, out of sight of whoever is
+            waiting, so the answering worker reports progress back to this name.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
     returning: bool = field(default=False, compare=False)
+    origin: str | None = field(default=None, compare=False)
 
 
 @dataclass

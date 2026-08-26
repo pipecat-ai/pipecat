@@ -12,6 +12,7 @@ including heartbeats, idle detection, and observer integration.
 """
 
 import asyncio
+import time
 import warnings
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pipecat.bus import (
     BusCancelWorkerMessage,
     BusEndWorkerMessage,
+    BusFlushProgressMessage,
     BusFrameMessage,
     BusMessage,
     BusTTSSpeakMessage,
@@ -91,6 +93,9 @@ from pipecat.workers.base_worker import BaseWorker, WorkerActivationArgs, Worker
 
 HEARTBEAT_SECS = 1.0
 HEARTBEAT_MONITOR_SECS = 10.0
+
+# How often a pipeline answering someone else's flush says it is still working.
+FLUSH_PROGRESS_PERIOD_SECS = 1.0
 
 IDLE_TIMEOUT_SECS = 300
 
@@ -421,6 +426,11 @@ class PipelineWorker(BaseWorker):
         # Frames that have reached the sink. A flush watches this to tell a
         # pipeline that is still working from one that is stuck.
         self._frames_reaching_sink: int = 0
+        # Probes from other workers that this pipeline is answering, by
+        # flush id, and the progress reported back for our own.
+        self._foreign_probes: dict[int, str] = {}
+        self._flush_progress: dict[int, int] = {}
+        self._flush_progress_sent: float = 0.0
         self._setup_timeout_secs = setup_timeout_secs
         self._start_timeout_secs = start_timeout_secs
         self._clock = clock or SystemClock()
@@ -905,29 +915,41 @@ class PipelineWorker(BaseWorker):
         override (e.g. tool-call deferral).
 
         Args:
-            timeout: Seconds of no frames reaching the sink before giving up.
-                A pipeline still working keeps the wait alive, however long it
-                takes; one that is stuck, or that nobody will answer, gives up
-                after this much quiet. On giving up a warning is logged and
-                ``False`` is returned rather than blocking forever.
+            timeout: Seconds of no progress before giving up. Progress is a
+                frame reaching this worker's sink, or a report from the
+                pipeline answering the probe when it crossed into another
+                worker. A pipeline still working keeps the wait alive, however
+                long it takes; one that is stuck, or that nobody will answer,
+                gives up after this much quiet. On giving up a warning is
+                logged and ``False`` is returned rather than blocking forever.
 
         Returns:
             True if the pipeline drained, False if it went quiet first.
         """
         event = asyncio.Event()
+        probe = PipelineFlushFrame(event=event, origin=self.name)
 
         logger.debug(f"{self}: pushing flush probe downstream")
 
-        await self._push_queue.put(PipelineFlushFrame(event=event))
-        while True:
-            before = self._frames_reaching_sink
-            try:
-                await asyncio.wait_for(event.wait(), timeout)
-                return True
-            except TimeoutError:
-                if self._frames_reaching_sink == before:
-                    logger.warning(f"{self}: pipeline flush gave up after {timeout}s of no frames")
-                    return False
+        self._flush_progress[probe.id] = 0
+        try:
+            await self._push_queue.put(probe)
+            while True:
+                frames, reports = self._frames_reaching_sink, self._flush_progress[probe.id]
+                try:
+                    await asyncio.wait_for(event.wait(), timeout)
+                    return True
+                except TimeoutError:
+                    reported = self._flush_progress[probe.id] != reports
+                    if self._frames_reaching_sink == frames and not reported:
+                        logger.warning(
+                            f"{self}: pipeline flush gave up after {timeout}s of no progress"
+                        )
+                        return False
+                    if reported:
+                        logger.debug(f"{self}: flush still in flight, whoever has it is working")
+        finally:
+            self._flush_progress.pop(probe.id, None)
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
@@ -941,6 +963,11 @@ class PipelineWorker(BaseWorker):
         """
         await super().on_bus_message(message)
 
+        if isinstance(message, BusFlushProgressMessage):
+            if message.flush_id in self._flush_progress:
+                self._flush_progress[message.flush_id] += 1
+            return
+
         # ``BaseWorker.on_bus_message`` already drops targeted messages for
         # other workers, but it returns early before reaching here -- re-apply
         # the filter before queueing pipeline frames.
@@ -948,6 +975,14 @@ class PipelineWorker(BaseWorker):
             return
 
         if isinstance(message, BusFrameMessage):
+            frame = message.frame
+            if (
+                self._handle_flush_frame
+                and isinstance(frame, PipelineFlushFrame)
+                and frame.origin
+                and frame.origin != self.name
+            ):
+                self._foreign_probes[frame.id] = frame.origin
             await self._queue_bridged_frame(message)
             return
 
@@ -1371,8 +1406,25 @@ class PipelineWorker(BaseWorker):
             await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
         else:
             logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
+            self._foreign_probes.pop(frame.id, None)
             if frame.event:
                 frame.event.set()
+
+    async def _report_flush_progress(self) -> None:
+        """Tell whoever is waiting on a probe we hold that we are still working.
+
+        Their own sink sees nothing while we drain, so without this they can
+        only conclude the pipeline has gone quiet. Sent no more than once a
+        second: it says the flush is alive, not how much is left.
+        """
+        now = time.monotonic()
+        if now - self._flush_progress_sent < FLUSH_PROGRESS_PERIOD_SECS:
+            return
+        self._flush_progress_sent = now
+        for flush_id, origin in self._foreign_probes.items():
+            await self.bus.send(
+                BusFlushProgressMessage(source=self.name, target=origin, flush_id=flush_id)
+            )
 
     async def _source_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming upstream from the pipeline.
@@ -1454,6 +1506,8 @@ class PipelineWorker(BaseWorker):
         # doing anything, so counting them would make it always look busy.
         if not isinstance(frame, HeartbeatFrame):
             self._frames_reaching_sink += 1
+            if self._foreign_probes:
+                await self._report_flush_progress()
 
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)
