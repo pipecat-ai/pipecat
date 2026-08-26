@@ -69,6 +69,17 @@
       "location": "pipecat/audio/vad/aic_quail_vad.py"
     },
     {
+      "subject": "BusBridgeProcessor.target_task",
+      "module": "pipecat.bus.bridge_processor",
+      "kind": "parameter",
+      "deprecated_in": "1.8.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "target_worker",
+      "message": "Use ``target_worker`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/bus/bridge_processor.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",
