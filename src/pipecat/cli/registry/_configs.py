@@ -54,6 +54,7 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
         '        api_key=os.getenv("GLADIA_API_KEY"),\n'

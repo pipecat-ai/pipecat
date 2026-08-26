@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Google Cloud Speech-to-Text V2 service implementation for Pipecat.
+"""Google speech-to-text service implementations for Pipecat.
 
-This module provides a Google Cloud Speech-to-Text V2 service with streaming
-support, enabling real-time speech recognition with features like automatic
-punctuation, voice activity detection, and multi-language support.
+``GoogleSTTService`` provides Google Cloud Speech-to-Text V2, with features
+like automatic punctuation, voice activity detection, and multi-language
+support.
 """
 
 import asyncio
