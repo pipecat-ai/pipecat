@@ -13,30 +13,4 @@ Quick Links
 * `GitHub Repository <https://github.com/pipecat-ai/pipecat>`_
 * `Join our Community <https://discord.gg/pipecat>`_
 
-.. toctree::
-   :maxdepth: 2
-   :caption: API Reference
-   :hidden:
-
-   Adapters <api/pipecat.adapters>
-   Audio <api/pipecat.audio>
-   Bus <api/pipecat.bus>
-   CLI <api/pipecat.cli>
-   Clocks <api/pipecat.clocks>
-   Evals <api/pipecat.evals>
-   Extensions <api/pipecat.extensions>
-   Flows <api/pipecat.flows>
-   Frames <api/pipecat.frames>
-   Metrics <api/pipecat.metrics>
-   Observers <api/pipecat.observers>
-   Pipeline <api/pipecat.pipeline>
-   Processors <api/pipecat.processors>
-   Registry <api/pipecat.registry>
-   Runner <api/pipecat.runner>
-   Serializers <api/pipecat.serializers>
-   Services <api/pipecat.services>
-   Transcriptions <api/pipecat.transcriptions>
-   Transports <api/pipecat.transports>
-   Turns <api/pipecat.turns>
-   Utils <api/pipecat.utils>
-   Workers <api/pipecat.workers>
+.. include:: api/_packages.rst
