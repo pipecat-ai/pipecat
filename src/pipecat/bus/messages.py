@@ -134,6 +134,22 @@ class BusTTSSpeakMessage(BusDataMessage):
     append_to_context: bool = True
 
 
+@dataclass
+class BusFlushProgressMessage(BusDataMessage):
+    """Reports that a flush probe from another worker is still making progress.
+
+    A probe that crosses into another pipeline is answered there, so the worker
+    waiting on it cannot see whether anything is happening. The pipeline holding
+    the probe says so, and the wait stays alive for as long as it keeps saying
+    it.
+
+    Parameters:
+        flush_id: The id of the probe being reported on.
+    """
+
+    flush_id: int
+
+
 # ---------------------------------------------------------------------------
 # Worker lifecycle
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ from pipecat.bus import (
     AsyncQueueBus,
     BusActivateWorkerMessage,
     BusAddWorkerMessage,
+    BusBridgeProcessor,
     BusCancelMessage,
     BusCancelWorkerMessage,
     BusDeactivateWorkerMessage,
@@ -28,7 +29,7 @@ from pipecat.bus import (
 )
 from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
-from pipecat.pipeline.job_context import JobStatus
+from pipecat.pipeline.job_context import JobGroupParams, JobParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -334,13 +335,26 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(flushed, [True])
 
-    async def test_activate_worker_drains_a_running_pipeline(self):
+    async def test_handing_over_drains_a_running_pipeline(self):
+        worker = make_stub_pipeline_task("draining")
+        flushed = self._spy_on_flush(worker)
+
+        await self._run_until(worker, lambda: worker.activate_worker("peer", deactivate_self=True))
+
+        self.assertEqual(flushed, [True])
+
+    async def test_activating_a_peer_without_standing_down_skips_the_drain(self):
+        """Handing nothing over, so there is nothing in flight to wait for.
+
+        The first activation of a session would otherwise wait on the very
+        worker it is about to wake.
+        """
         worker = make_stub_pipeline_task("draining")
         flushed = self._spy_on_flush(worker)
 
         await self._run_until(worker, lambda: worker.activate_worker("peer"))
 
-        self.assertEqual(flushed, [True])
+        self.assertEqual(flushed, [])
 
     async def test_end_skips_the_drain_when_nothing_is_running(self):
         """Nothing would bounce the probe back, so waiting would only time out."""
@@ -355,6 +369,57 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
         await worker.end(reason="done")
 
         self.assertEqual(flushed, [])
+
+
+class TestForeignFlushProbes(unittest.IsolatedAsyncioTestCase):
+    """A probe is only tracked by the pipeline that takes it in."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    async def test_a_worker_with_nowhere_to_put_a_probe_leaves_it_alone(self):
+        """Every worker on the bus sees the probe, most have no use for it.
+
+        Tracking one it will never see again would leave the worker reporting
+        progress on a flush it is taking no part in.
+        """
+        origin = make_stub_pipeline_task("origin", bridged=())
+        bystander = make_stub_pipeline_task("bystander")
+        holder = PipelineWorker(
+            Pipeline([BusBridgeProcessor(bus=self.bus, worker_name="holder"), IdentityFilter()]),
+            name="holder",
+            cancel_on_idle_timeout=False,
+        )
+
+        workers = (origin, bystander, holder)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(*workers)
+
+        # The probe crosses the bus, so every pipeline has to be up before it
+        # goes out.
+        running = [asyncio.Event() for _ in workers]
+
+        for worker, event in zip(workers, running):
+            worker.event_handler("on_pipeline_started")(
+                lambda _worker, _frame, event=event: event.set()
+            )
+
+        flushed = None
+        # Read while the workers are up: cleanup drops whatever is left.
+        bystander_probes = None
+
+        async def drive():
+            nonlocal flushed, bystander_probes
+            await asyncio.gather(*(event.wait() for event in running))
+            flushed = await origin.flush_pipeline(timeout=1.0)
+            bystander_probes = dict(bystander._foreign_probes)
+            for worker in workers:
+                await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), drive()), timeout=10.0)
+
+        self.assertTrue(flushed)
+        self.assertEqual(bystander_probes, {})
 
 
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
@@ -1236,7 +1301,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await self.registry.register(WorkerReadyData(worker_name="worker", runner="test-runner"))
 
-        job_id = await parent.request_job("worker", payload={"key": "val"})
+        job_id = await parent.request_job("worker", params=JobParams(payload={"key": "val"}))
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
         self.assertEqual(len(request_msgs), 1)
@@ -1251,7 +1316,9 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "w1", "w2")
 
-        job_id = await parent.request_job_group("w1", "w2", payload={"work": True})
+        job_id = await parent.request_job_group(
+            "w1", "w2", params=JobGroupParams(payload={"work": True})
+        )
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
         self.assertEqual(len(request_msgs), 2)
@@ -1575,7 +1642,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "worker")
 
-        job_id = await parent.request_job("worker", timeout=0.05)
+        job_id = await parent.request_job("worker", params=JobParams(timeout=0.05))
 
         # Wait for timeout to fire
         await asyncio.sleep(0.1)
@@ -1595,7 +1662,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = await self._attach(BaseWorker("parent"))
         await register_tasks(self.registry, "worker")
 
-        job_id = await parent.request_job("worker", timeout=0.5)
+        job_id = await parent.request_job("worker", params=JobParams(timeout=0.5))
 
         # Let the timeout worker start before responding
         await asyncio.sleep(0)

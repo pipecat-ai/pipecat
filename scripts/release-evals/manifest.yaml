@@ -405,3 +405,15 @@ suite:
     scenarios:
       - keenable_web_search
       - keenable_fetch_page
+
+  #
+  # Multi-worker: LLM workers on a bus handing the conversation between each
+  # other. The distributed variants of these run the same handoff over pgmq or
+  # redis, and need that broker plus a second process, so they stay manual.
+  #
+  - bot: multi-worker/local-handoff/local-handoff-two-agents.py
+    scenarios: [acme_handoff]
+  # Audio only: each child worker's LLM text goes to that worker's own TTS, so
+  # only the audio reaches the main worker.
+  - bot: multi-worker/local-handoff/local-handoff-two-agents-tts.py
+    scenarios: [acme_handoff_voices]

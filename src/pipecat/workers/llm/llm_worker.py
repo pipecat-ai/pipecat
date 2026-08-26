@@ -12,8 +12,9 @@ pipeline and automatic tool registration.
 
 import contextvars
 import functools
+import warnings
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -112,6 +113,8 @@ class LLMWorker(PipelineWorker):
         self._defer_tool_frames = defer_tool_frames
         self._tool_call_inflight: int = 0
         self._deferred_frames: deque[tuple[Frame, FrameDirection]] = deque()
+        # A handover or ending a tool asked for, held until its call is done.
+        self._pending_handover: Callable[[], Awaitable[None]] | None = None
         self._closing: bool = False
 
         self._llm = llm
@@ -207,21 +210,36 @@ class LLMWorker(PipelineWorker):
     ) -> None:
         """Request a graceful end of the session.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback``
-        so the call is settled before the pipeline drains, and any pending
-        LLM output is fully delivered before ending.
+        When called from a ``@tool`` handler, deliver the function call result
+        first with ``await params.result_callback(result)``: the LLM output it
+        triggers is delivered before the session ends.
 
         Args:
             reason: Optional human-readable reason for ending.
             messages: Optional LLM messages to inject and speak before
                 ending. The LLM runs immediately so the output is
                 delivered before the session terminates.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before :meth:`end`
+                    instead. Will be removed in 2.0.0.
             result_callback: The ``result_callback`` from
                 `FunctionCallParams`.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before :meth:`end`
+                    instead. Will be removed in 2.0.0.
         """
         self._closing = True
-        await self._finish_function_call(result_callback, messages=messages)
-        await super().end(reason=reason)
+        if messages is not None or result_callback is not None:
+            warnings.warn(
+                "Passing messages or result_callback to LLMWorker.end() is deprecated, "
+                "call params.result_callback(result) before end() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            await self._finish_function_call(result_callback, messages=messages)
+        await self._after_tool_calls(lambda: super(LLMWorker, self).end(reason=reason))
 
     async def activate_worker(
         self,
@@ -232,25 +250,49 @@ class LLMWorker(PipelineWorker):
         messages: list | None = None,
         result_callback: FunctionCallResultCallback | None = None,
     ) -> None:
-        """Activate another worker, optionally finishing an in-progress tool call.
+        """Activate another worker, draining this worker's pipeline to hand over.
 
-        When called from a ``@tool`` handler, pass ``params.result_callback`` to
-        ensure any pending LLM output is fully delivered before the target is
-        activated.
+        When called from a ``@tool`` handler, deliver the function call result
+        first with ``await params.result_callback(result)``: the output it
+        triggers is delivered before the target is activated. The handover
+        itself waits until the tool call asking for it has finished.
 
         Args:
             worker_name: The name of the worker to activate.
             args: Optional ``WorkerActivationArgs`` forwarded to the target
                 worker's ``on_activated`` handler.
             deactivate_self: Whether to deactivate this worker before activating
-                the target.
-            messages: Optional LLM messages to inject and speak before
+                the target. Deactivating this worker drains its pipeline
+                first; staying active does not. A worker that stays active and
+                wants to drain anyway can call :meth:`flush_pipeline` before
+                this.
+            messages: Optional LLM messages to inject and deliver before
                 activating the target. The LLM runs immediately so the output
                 is delivered before the transfer completes.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before
+                    :meth:`activate_worker` instead. Will be removed in 2.0.0.
             result_callback: The ``result_callback`` from `FunctionCallParams`.
+
+                .. deprecated:: 1.8.0
+                    Call ``params.result_callback(result)`` before
+                    :meth:`activate_worker` instead. Will be removed in 2.0.0.
         """
-        await self._finish_function_call(result_callback, messages=messages)
-        await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
+        if messages is not None or result_callback is not None:
+            warnings.warn(
+                "Passing messages or result_callback to LLMWorker.activate_worker() is "
+                "deprecated, call params.result_callback(result) before activate_worker() "
+                "instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            await self._finish_function_call(result_callback, messages=messages)
+        await self._after_tool_calls(
+            lambda: super(LLMWorker, self).activate_worker(
+                worker_name, args=args, deactivate_self=deactivate_self
+            )
+        )
 
     async def process_deferred_tool_frames(
         self, frames: list[tuple[Frame, FrameDirection]]
@@ -279,6 +321,22 @@ class LLMWorker(PipelineWorker):
                 timeout_secs=method._pipecat_timeout_secs,
             )
 
+    async def _after_tool_calls(self, handover: Callable[[], Awaitable[None]]) -> None:
+        """Run a handover once no tool call is in flight.
+
+        A tool asking to end or hand over is still running when it asks, and
+        deactivating a worker mid-call leaves the rest of that call to a worker
+        nobody is listening to. Held here and run once the last call finishes;
+        outside a call there is nothing to wait for, so it runs now.
+
+        Args:
+            handover: What to do once the calls are done.
+        """
+        if self._tool_call_inflight:
+            self._pending_handover = handover
+        else:
+            await handover()
+
     def _track_tool_call(self, method: Callable) -> Callable:
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
@@ -289,17 +347,25 @@ class LLMWorker(PipelineWorker):
             finally:
                 _IN_TOOL_CALL.reset(token)
                 self._tool_call_inflight = max(0, self._tool_call_inflight - 1)
-                if not self._closing and self._tool_call_inflight == 0:
-                    await self._flush_deferred_frames()
+                if self._tool_call_inflight == 0:
+                    if not self._closing:
+                        await self._flush_deferred_frames()
+                    handover, self._pending_handover = self._pending_handover, None
+                    if handover:
+                        await handover()
 
         return wrapper
 
     async def _flush_deferred_frames(self) -> None:
-        # Wait until the function result frame is really processed.
-        await self.flush_pipeline()
-
         frames = list(self._deferred_frames)
         self._deferred_frames.clear()
+
+        # Held frames go back in behind the function call result, so wait for
+        # that to be processed first. With nothing held there is nothing to
+        # order, and the round-trip would buy nothing.
+        if frames:
+            await self.flush_pipeline()
+
         for frame, direction in await self.process_deferred_tool_frames(frames):
             await self.queue_frame(frame, direction)
 

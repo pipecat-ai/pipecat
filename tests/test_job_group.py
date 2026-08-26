@@ -19,6 +19,8 @@ from pipecat.pipeline.job_context import (
     JobGroup,
     JobGroupError,
     JobGroupEvent,
+    JobGroupParams,
+    JobParams,
     JobStatus,
 )
 from pipecat.registry import WorkerRegistry
@@ -157,7 +159,9 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, w1)
         await setup_task(self.bus, self.registry, w2)
 
-        async with parent.job_group("w1", "w2", payload={"work": True}) as tg:
+        async with parent.job_group(
+            "w1", "w2", params=JobGroupParams(payload={"work": True})
+        ) as tg:
             pass
 
         self.assertEqual(tg.responses, {"w1": {"a": 1}, "w2": {"b": 2}})
@@ -172,7 +176,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         w1 = JobWorkerTask("w1", response={"ok": True})
         await setup_task(self.bus, self.registry, w1)
 
-        async with parent.job_group("w1", payload={"data": 1}):
+        async with parent.job_group("w1", params=JobGroupParams(payload={"data": 1})):
             pass
 
         request_msgs = [m for m in sent if isinstance(m, BusJobRequestMessage)]
@@ -206,7 +210,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("worker", timeout=0.05):
+            async with parent.job_group("worker", params=JobGroupParams(timeout=0.05)):
                 pass
 
         self.assertIn("timeout", str(ctx.exception))
@@ -218,7 +222,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         # "ghost" is never registered, so the ready-wait times out
         with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("ghost", timeout=0.05):
+            async with parent.job_group("ghost", params=JobGroupParams(timeout=0.05)):
                 pass
 
         self.assertIn("not ready", str(ctx.exception))
@@ -348,7 +352,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         await setup_task(self.bus, self.registry, worker)
 
         events = []
-        async with parent.job_group("worker", payload={"work": True}) as tg:
+        async with parent.job_group("worker", params=JobGroupParams(payload={"work": True})) as tg:
             async for event in tg:
                 events.append(event)
 
@@ -549,7 +553,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         worker = JobWorkerTask("worker", response={"result": 42})
         await setup_task(self.bus, self.registry, worker)
 
-        async with parent.job("worker", payload={"x": 1}) as t:
+        async with parent.job("worker", params=JobParams(payload={"x": 1})) as t:
             pass
 
         self.assertEqual(t.response, {"result": 42})
@@ -725,8 +729,8 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         # track job IDs and cancel only the ones started here
         try:
             job_ids = []
-            job_ids.append(await parent.request_job("w1", payload={"job": 1}))
-            job_ids.append(await parent.request_job("w2", payload={"job": 2}))
+            job_ids.append(await parent.request_job("w1", params=JobParams(payload={"job": 1})))
+            job_ids.append(await parent.request_job("w2", params=JobParams(payload={"job": 2})))
             self.assertEqual(len(parent.job_groups), 2)
             raise asyncio.CancelledError()
         except asyncio.CancelledError:
@@ -751,7 +755,7 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         worker = SlowWorkerTask("worker")
         await setup_task(self.bus, self.registry, worker)
 
-        job_id = await parent.request_job("worker", payload={"job": 1})
+        job_id = await parent.request_job("worker", params=JobParams(payload={"job": 1}))
 
         # Wait for the worker to start executing
         await asyncio.wait_for(worker.started.wait(), timeout=2.0)

@@ -196,7 +196,7 @@ def build_sensor_controller() -> PipelineWorker:
     state: dict[str, str | None] = {"job_id": None}
 
     @worker.event_handler("on_job_request")
-    async def on_request(_task, message: BusJobRequestMessage):
+    async def on_request(_worker, message: BusJobRequestMessage):
         question = message.payload["question"]
         logger.info(f"Controller: received question '{question}'")
         state["job_id"] = message.job_id

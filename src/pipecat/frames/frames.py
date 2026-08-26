@@ -1949,22 +1949,33 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
-    when it returns to the source the worker sets ``event``. Once that fires,
-    every frame queued ahead of the probe has completed the round-trip and been
-    processed. Useful to wait for the pipeline to drain (e.g. after an
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
+    source turns it around, and the worker sets ``event`` when it reaches the
+    sink a second time. Once that fires, every frame queued ahead of the probe
+    has been processed, along with anything a processor started by pushing
+    upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
     This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its round-trip.
+    InterruptionFrame and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
+        returning: Whether the probe is on its second pass downstream, after
+            having been back up to the source. Work a processor starts by
+            pushing upstream — an LLM run triggered by a function call result,
+            say — only reaches the sink after that turnaround, so the probe
+            makes the trip twice and settles on the second arrival.
+        origin: Name of the worker that started the flush. A probe that crosses
+            into another pipeline is answered there, out of sight of whoever is
+            waiting, so the answering worker reports progress back to this name.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
+    returning: bool = field(default=False, compare=False)
+    origin: str | None = field(default=None, compare=False)
 
 
 @dataclass

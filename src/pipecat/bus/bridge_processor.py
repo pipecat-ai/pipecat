@@ -16,6 +16,7 @@ Provides:
   to the bus).
 """
 
+import warnings
 from typing import TYPE_CHECKING
 
 from pipecat.bus.bus import WorkerBus
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
-_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame, PipelineFlushFrame)
+_PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
@@ -52,9 +53,10 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         *,
         bus: WorkerBus,
         worker_name: str,
-        target_task: str | None = None,
+        target_worker: str | None = None,
         bridge: str | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
+        target_task: str | None = None,
         **kwargs,
     ):
         """Initialize the BusBridgeProcessor.
@@ -62,18 +64,33 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         Args:
             bus: The `WorkerBus` to exchange frames with.
             worker_name: Name of the owning worker, used as message source.
-            target_task: When set, only exchange frames with this worker.
+            target_worker: When set, only exchange frames with this worker.
             bridge: Optional bridge name for routing. When set, outgoing
                 frames are tagged with this name and only incoming frames
                 with the same bridge name are accepted.
             exclude_frames: Extra frame types that should never cross the bus
                 (on top of lifecycle frames which are always excluded).
+            target_task: When set, only exchange frames with this worker.
+
+                .. deprecated:: 1.8.0
+                    Use ``target_worker`` instead. Will be removed in 2.0.0.
             **kwargs: Additional arguments passed to `FrameProcessor`.
         """
         super().__init__(**kwargs)
+        if target_task is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`BusBridgeProcessor(target_task=...)` is deprecated since 1.8.0, "
+                    "use `target_worker` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if target_worker is None:
+                target_worker = target_task
         self._bus = bus
         self._worker_name = worker_name
-        self._target_task = target_task
+        self._target_worker = target_worker
         self._bridge = bridge
         self._exclude_frames = exclude_frames or ()
 
@@ -101,10 +118,8 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             await self.push_frame(frame, direction)
             return
 
-        # Frames that belong to this pipeline rather than to a peer: urgent
-        # transport frames have to reach the transport even with no peer
-        # active, and a flush probe is asking about this pipeline, so it
-        # continues to the sink that answers it.
+        # Urgent transport frames belong to this pipeline rather than to a
+        # peer: they have to reach the transport even with no peer active.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
@@ -140,13 +155,18 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         if self._bridge and message.bridge != self._bridge:
             return
 
-        # If target_task set, only accept from that worker
-        if self._target_task and message.source != self._target_task:
+        # If target_worker set, only accept from that worker
+        if self._target_worker and message.source != self._target_worker:
             return
 
         # If message targeted at someone else, skip
         if message.target and message.target != self._worker_name:
             return
+
+        # The frame has cleared every filter, so this pipeline is the one
+        # taking it in.
+        if isinstance(message.frame, PipelineFlushFrame):
+            self.pipeline_worker.track_flush_probe(message.frame)
 
         await self.push_frame(message.frame, message.direction)
 

@@ -379,12 +379,33 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.label, "My research")
         self.assertFalse(context.cancellable)
 
+    async def test_the_deprecated_wrappers_pass_on_their_arguments(self):
+        """The wrappers' only job is to gather their arguments into params."""
+        worker = await _make_solo_worker()
+        worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
+        _stub_job_group(worker)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            async with worker.ui_job_group("w1", label="My research", cancellable=False):
+                pass
+            job_id = await worker.start_ui_job_group("w1", label="Background work")
+
+        self.assertEqual(job_id, "t1")
+        started = [
+            c.args[0]
+            for c in worker.send_bus_message.await_args_list
+            if isinstance(c.args[0], BusUIJobGroupStartedMessage)
+        ]
+        self.assertEqual([m.label for m in started], ["My research", "Background work"])
+        self.assertFalse(started[0].cancellable)
+
     async def test_context_publishes_started_and_completed(self):
         worker = await _make_solo_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        async with worker.ui_job_group("w1", label="My research") as tg:
+        async with worker.job_group("w1", params=JobGroupParams(label="My research")) as tg:
             self.assertEqual(tg.job_id, "t1")
             self.assertIn("t1", worker._job_groups)
 
@@ -416,7 +437,7 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        async with worker.ui_job_group("w1", cancellable=False):
+        async with worker.job_group("w1", params=JobGroupParams(cancellable=False)):
             pass
 
         started = worker.send_bus_message.await_args_list[0].args[0]
@@ -427,17 +448,19 @@ class TestUIJobGroupContext(unittest.IsolatedAsyncioTestCase):
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        async with worker.ui_job_group("w1") as tg:
+        async with worker.job_group("w1") as tg:
             pass
 
         self.assertNotIn(tg.job_id, worker._job_groups)
 
-    async def test_start_ui_job_group_returns_id_and_publishes(self):
+    async def test_request_job_group_returns_id_and_publishes(self):
         worker = await _make_solo_worker()
         worker.send_bus_message = AsyncMock()  # type: ignore[method-assign]
         _stub_job_group(worker)
 
-        job_id = await worker.start_ui_job_group("w1", label="Background work")
+        job_id = await worker.request_job_group(
+            "w1", params=JobGroupParams(label="Background work")
+        )
         self.assertEqual(job_id, "t1")
 
         started = worker.send_bus_message.await_args_list[0].args[0]
