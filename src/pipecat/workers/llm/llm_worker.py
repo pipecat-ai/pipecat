@@ -237,10 +237,6 @@ class LLMWorker(PipelineWorker):
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
-        else:
-            # Make sure everything is flushed before activate. This makes sure
-            # `result_callback` is properly handled.
-            await self.flush_pipeline()
         await super().end(reason=reason)
 
     async def activate_worker(
@@ -286,10 +282,6 @@ class LLMWorker(PipelineWorker):
                 stacklevel=2,
             )
             await self._finish_function_call(result_callback, messages=messages)
-        else:
-            # Make sure everything is flushed before activate. This makes sure
-            # `result_callback` is properly handled.
-            await self.flush_pipeline()
         await super().activate_worker(worker_name, args=args, deactivate_self=deactivate_self)
 
     async def process_deferred_tool_frames(
