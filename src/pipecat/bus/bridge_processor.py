@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     OutputTransportMessageUrgentFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
 )
@@ -161,6 +162,11 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         # If message targeted at someone else, skip
         if message.target and message.target != self._worker_name:
             return
+
+        # The frame has cleared every filter, so this pipeline is the one
+        # taking it in.
+        if isinstance(message.frame, PipelineFlushFrame):
+            self.pipeline_worker.track_flush_probe(message.frame)
 
         await self.push_frame(message.frame, message.direction)
 

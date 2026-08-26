@@ -958,6 +958,19 @@ class PipelineWorker(BaseWorker):
         finally:
             self._flush_progress.pop(probe.id, None)
 
+    def track_flush_probe(self, frame: PipelineFlushFrame) -> None:
+        """Report progress on a probe from another worker while we hold it.
+
+        Called by whoever brings the probe into this pipeline, since only they
+        know it is really coming in: every worker on the bus sees it, but most
+        of them have nowhere to put it.
+
+        Args:
+            frame: The flush probe entering this pipeline.
+        """
+        if self._handle_flush_frame and frame.origin and frame.origin != self.name:
+            self._foreign_probes[frame.id] = frame.origin
+
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
 
@@ -977,14 +990,6 @@ class PipelineWorker(BaseWorker):
             return
 
         if isinstance(message, BusFrameMessage):
-            frame = message.frame
-            if (
-                self._handle_flush_frame
-                and isinstance(frame, PipelineFlushFrame)
-                and frame.origin
-                and frame.origin != self.name
-            ):
-                self._foreign_probes[frame.id] = frame.origin
             await self._queue_bridged_frame(message)
         elif isinstance(message, BusFlushProgressMessage):
             if message.flush_id in self._flush_progress:
@@ -1313,6 +1318,9 @@ class PipelineWorker(BaseWorker):
         # Cleanup pipeline processors.
         if cleanup_pipeline:
             await self._pipeline.cleanup()
+
+        # Nothing left to answer a probe we are still holding.
+        self._foreign_probes.clear()
 
     async def _handle_worker_end(self, message: BusEndWorkerMessage) -> None:
         """End the pipeline after propagating end to children.

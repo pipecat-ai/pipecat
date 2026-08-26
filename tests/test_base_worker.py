@@ -11,6 +11,7 @@ from pipecat.bus import (
     AsyncQueueBus,
     BusActivateWorkerMessage,
     BusAddWorkerMessage,
+    BusBridgeProcessor,
     BusCancelMessage,
     BusCancelWorkerMessage,
     BusDeactivateWorkerMessage,
@@ -368,6 +369,57 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
         await worker.end(reason="done")
 
         self.assertEqual(flushed, [])
+
+
+class TestForeignFlushProbes(unittest.IsolatedAsyncioTestCase):
+    """A probe is only tracked by the pipeline that takes it in."""
+
+    async def asyncSetUp(self):
+        self.bus, self.tm = await create_test_bus()
+
+    async def test_a_worker_with_nowhere_to_put_a_probe_leaves_it_alone(self):
+        """Every worker on the bus sees the probe, most have no use for it.
+
+        Tracking one it will never see again would leave the worker reporting
+        progress on a flush it is taking no part in.
+        """
+        origin = make_stub_pipeline_task("origin", bridged=())
+        bystander = make_stub_pipeline_task("bystander")
+        holder = PipelineWorker(
+            Pipeline([BusBridgeProcessor(bus=self.bus, worker_name="holder"), IdentityFilter()]),
+            name="holder",
+            cancel_on_idle_timeout=False,
+        )
+
+        workers = (origin, bystander, holder)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(*workers)
+
+        # The probe crosses the bus, so every pipeline has to be up before it
+        # goes out.
+        running = [asyncio.Event() for _ in workers]
+
+        for worker, event in zip(workers, running):
+            worker.event_handler("on_pipeline_started")(
+                lambda _worker, _frame, event=event: event.set()
+            )
+
+        flushed = None
+        # Read while the workers are up: cleanup drops whatever is left.
+        bystander_probes = None
+
+        async def drive():
+            nonlocal flushed, bystander_probes
+            await asyncio.gather(*(event.wait() for event in running))
+            flushed = await origin.flush_pipeline(timeout=1.0)
+            bystander_probes = dict(bystander._foreign_probes)
+            for worker in workers:
+                await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(asyncio.gather(runner.run(), drive()), timeout=10.0)
+
+        self.assertTrue(flushed)
+        self.assertEqual(bystander_probes, {})
 
 
 class TestPipelineWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
