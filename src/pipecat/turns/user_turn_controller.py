@@ -372,7 +372,7 @@ class UserTurnController(BaseObject):
             return
 
         # Never finalize while the user is audibly speaking. A stop strategy can
-        # finalize on a latent signal (e.g. an LLM ✓ that resolves after the
+        # finalize on a latent signal (e.g. an LLM ● that resolves after the
         # user resumed), which is stale by the time it arrives. Keep the turn
         # open so the next inference re-evaluates; the watchdog still finalizes
         # if the user then falls silent. Detector strategies only finalize once

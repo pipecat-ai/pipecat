@@ -361,7 +361,7 @@ class LLMMarkerFrame(DataFrame):
 
     The primary use today is the ``filter_incomplete_user_turns``
     protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    turn-completion markers ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -375,8 +375,8 @@ class LLMMarkerFrame(DataFrame):
             soon as it's received. If False, the marker is appended to
             the running assistant aggregation and flushed to the
             context together with the following text as a single
-            message (e.g. for the ✓ case the context message ends up
-            as "✓ <response>").
+            message (e.g. for the ● case the context message ends up
+            as "● <response>").
     """
 
     marker: str
