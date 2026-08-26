@@ -40,7 +40,7 @@ FunctionCallResultCallback = Callable[..., Any]
 class LLMWorkerActivationArgs(WorkerActivationArgs):
     """Activation arguments for LLM workers.
 
-    Attributes:
+    Parameters:
         messages: LLM context messages to inject on activation.
         run_llm: Whether to run the LLM after appending messages.
             Defaults to True when ``messages`` is set.

@@ -35,7 +35,7 @@ def _assistant_message(text: str) -> dict[str, Any]:
 class FakeGateway:
     """A scriptable stand-in for the OpenClaw Gateway.
 
-    Attributes:
+    Parameters:
         requests: Every request frame received, in order.
         run_id: What ``chat.send`` reports as the run id. None echoes the
             client's idempotency key, which is what OpenClaw does.

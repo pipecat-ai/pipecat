@@ -111,7 +111,7 @@ class JobStatus(StrEnum):
     Inherits from ``str`` so values compare naturally with plain strings
     and serialize without extra handling.
 
-    Attributes:
+    Parameters:
         COMPLETED: The worker finished successfully.
         CANCELLED: The worker was cancelled by the requester.
         FAILED: The worker failed due to a logical or business error.
