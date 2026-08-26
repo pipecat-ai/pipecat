@@ -914,11 +914,12 @@ class PipelineWorker(BaseWorker):
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
         Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
-        the sink bounces it back upstream and the source sets its event once it
-        completes the round-trip, signalling that every frame queued ahead of it
-        has been processed. The probe goes on the worker's push queue, behind
-        whatever is already waiting there, and bypasses any ``queue_frame``
-        override (e.g. tool-call deferral).
+        the sink bounces it back upstream, the source turns it around, and its
+        event is set when it reaches the sink a second time. By then every
+        frame queued ahead of it has been processed, along with anything a
+        processor started by pushing upstream. The probe goes on the worker's
+        push queue, behind whatever is already waiting there, and bypasses any
+        ``queue_frame`` override (e.g. tool-call deferral).
 
         Args:
             timeout: Seconds of no progress before giving up. Progress is a

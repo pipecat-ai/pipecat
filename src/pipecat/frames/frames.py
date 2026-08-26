@@ -1951,14 +1951,15 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
-    when it returns to the source the worker sets ``event``. Once that fires,
-    every frame queued ahead of the probe has completed the round-trip and been
-    processed. Useful to wait for the pipeline to drain (e.g. after an
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
+    source turns it around, and the worker sets ``event`` when it reaches the
+    sink a second time. Once that fires, every frame queued ahead of the probe
+    has been processed, along with anything a processor started by pushing
+    upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
     This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its round-trip.
+    InterruptionFrame and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The

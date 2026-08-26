@@ -117,10 +117,8 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             await self.push_frame(frame, direction)
             return
 
-        # Frames that belong to this pipeline rather than to a peer: urgent
-        # transport frames have to reach the transport even with no peer
-        # active, and a flush probe is asking about this pipeline, so it
-        # continues to the sink that answers it.
+        # Urgent transport frames belong to this pipeline rather than to a
+        # peer: they have to reach the transport even with no peer active.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
