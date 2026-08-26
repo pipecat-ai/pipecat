@@ -114,6 +114,12 @@ autodoc_mock_imports = [
     "uvicorn",
     # Deepgram dependencies
     "deepgram",
+    # Vonage Video Connector - wheels exist only for Linux + Python 3.13, so the
+    # real package is never installed in a docs environment
+    "vonage_video_connector",
+    # FunASR - importing it executes the package's own module-level scanning,
+    # which fails on newer Python versions
+    "funasr",
 ]
 
 # HTML output settings
