@@ -54,6 +54,23 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+# The first Sonnet generation with adaptive thinking on when a request omits
+# ``thinking``. Earlier Sonnets, and every Haiku, have thinking off unless asked.
+_SONNET_THINKS_BY_DEFAULT_FROM = 5
+
+
+def _sonnet_generation(model: str) -> int | None:
+    """The generation of a Sonnet model id, or ``None`` for any other model.
+
+    Searched rather than anchored because the service also takes Bedrock and
+    Vertex clients, whose ids prefix the name (``anthropic.claude-sonnet-5``).
+    Pre-4 ids such as ``claude-3-5-sonnet-20241022`` put the generation before
+    the name and don't match; they don't think either.
+    """
+    match = re.search(r"sonnet-(\d{1,2})(?!\d)", model.lower())
+    return int(match.group(1)) if match else None
+
+
 class AnthropicThinkingConfig(BaseModel):
     """Configuration for thinking.
 
@@ -89,7 +106,10 @@ class AnthropicLLMSettings(LLMSettings):
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.
-        thinking: Thinking configuration.
+        thinking: Thinking configuration. If this is not provided, Pipecat
+            disables thinking on Sonnet 5 and later, which otherwise decide
+            per request whether to think, to reduce latency; Opus and Fable
+            are left at Anthropic's default.
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -155,7 +175,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             thinking: Extended thinking configuration.
                 Enabling extended thinking causes the model to spend more time "thinking" before responding.
                 It also causes this service to emit LLMThinking*Frames during response generation.
-                Extended thinking is disabled by default.
+                If this is not provided, Pipecat disables thinking on Sonnet 5 and later, which
+                otherwise decide per request whether to think, to reduce latency; Opus and
+                Fable are left at Anthropic's default.
             extra: Additional parameters to pass to the API.
         """
 
@@ -297,6 +319,28 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             response = await api_call(**params)
             return response
 
+    def _maybe_disable_thinking(self, params: dict[str, Any]):
+        """Turn thinking off by default on Sonnet models where it is on unless told not to.
+
+        Sonnet 5 and later run adaptive thinking whenever the request omits
+        ``thinking``, which for real-time voice can add seconds before the first
+        answer token, so when the caller hasn't configured thinking, request
+        ``{"type": "disabled"}``. We only do this for the Sonnet line,
+        Anthropic's speed tier: Opus and Fable are left at the provider
+        default, since choosing one is a decision to reason. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``, which does the same for the Flash
+        line.
+
+        Args:
+            params: The request params dict (modified in place).
+        """
+        if "thinking" in params:
+            return
+        model = assert_given(self._settings.model)
+        generation = _sonnet_generation(model or "")
+        if generation is not None and generation >= _SONNET_THINKS_BY_DEFAULT_FROM:
+            params["thinking"] = {"type": "disabled"}
+
     async def run_inference(
         self,
         context: LLMContext,
@@ -350,6 +394,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             params["thinking"] = thinking.model_dump(exclude_unset=True)
 
         params.update(self._settings.extra)
+
+        # Applied last, so an explicit thinking config from the settings or from
+        # extra wins over the low-latency default.
+        self._maybe_disable_thinking(params)
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
@@ -436,6 +484,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             params.update(params_from_context)
 
             params.update(self._settings.extra)
+
+            # Applied last, so an explicit thinking config from the settings or from
+            # extra wins over the low-latency default.
+            self._maybe_disable_thinking(params)
 
             # "Interleaved thinking" needed to allow thinking between sequences
             # of function calls, when extended thinking is enabled.
