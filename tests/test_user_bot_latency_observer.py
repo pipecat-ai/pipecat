@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 
 from pipecat.frames.frames import (
@@ -6,7 +7,12 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
+    LLMFullResponseStartFrame,
+    LLMMarkerFrame,
+    LLMTextFrame,
     MetricsFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -15,15 +21,19 @@ from pipecat.metrics.metrics import (
     TextAggregationMetricsData,
     TTFBMetricsData,
 )
+from pipecat.observers.base_observer import FramePushed
 from pipecat.observers.user_bot_latency_observer import (
     FunctionCallMetrics,
     LatencyBreakdown,
+    LatencySegment,
     TextAggregationBreakdownMetrics,
     TTFBBreakdownMetrics,
     UserBotLatencyObserver,
 )
 from pipecat.processors.filters.identity_filter import IdentityFilter
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
@@ -629,3 +639,124 @@ class TestLatencyBreakdownChronologicalEvents(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLatencySegments(unittest.IsolatedAsyncioTestCase):
+    """Segments cover the user-to-bot interval without gaps."""
+
+    async def asyncSetUp(self):
+        self.observer = UserBotLatencyObserver()
+        # Event handlers run as tasks, so the observer needs a task manager.
+        await self.observer.setup(TaskManager())
+        self.breakdowns = []
+
+        @self.observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            self.breakdowns.append(breakdown)
+
+    async def _push(self, frame, source="source"):
+        """Feed one frame to the observer, as a pipeline push would."""
+        await self.observer.on_push_frame(
+            FramePushed(
+                source=IdentityFilter(name=source),
+                destination=IdentityFilter(name="destination"),
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+        )
+
+    async def test_segments_tile_the_measured_latency(self):
+        """The durations sum to the interval they describe, with no gaps."""
+        await self._push(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(0.05)
+        await self._push(TranscriptionFrame(user_id="u", text="hello there", timestamp=""))
+        await self._push(LLMFullResponseStartFrame())
+        await asyncio.sleep(0.05)
+        await self._push(LLMMarkerFrame("●", append_to_context_immediately=False))
+        await self._push(LLMTextFrame("Hi!"))
+        await asyncio.sleep(0.05)
+        await self._push(TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1))
+        await self._push(BotStartedSpeakingFrame())
+        await asyncio.sleep(0.01)  # let the event handler task run
+
+        self.assertEqual(len(self.breakdowns), 1)
+        segments = self.breakdowns[0].segments
+        self.assertTrue(segments)
+
+        for previous, following in zip(segments, segments[1:]):
+            self.assertAlmostEqual(
+                previous.start_time + previous.duration_secs, following.start_time, places=6
+            )
+
+        labels = [s.label for s in segments]
+        self.assertEqual(
+            labels,
+            [
+                "speech to transcript",
+                "transcript to LLM request",
+                "turn completion marker",
+                "first spoken token",
+                "speech synthesis",
+                "output transport",
+            ],
+        )
+        self.assertAlmostEqual(sum(s.duration_secs for s in segments), 0.15, delta=0.05)
+
+    async def test_incomplete_turn_is_named_as_a_wait(self):
+        """A stand-alone marker holds the turn, and the hold is its own span."""
+        await self._push(VADUserStoppedSpeakingFrame())
+        await self._push(TranscriptionFrame(user_id="u", text="I was going to", timestamp=""))
+        await self._push(LLMFullResponseStartFrame())
+        await self._push(LLMMarkerFrame("◐"))
+        await asyncio.sleep(0.1)
+        await self._push(LLMFullResponseStartFrame())
+        await self._push(LLMMarkerFrame("●", append_to_context_immediately=False))
+        await self._push(LLMTextFrame("Go on."))
+        await self._push(TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1))
+        await self._push(BotStartedSpeakingFrame())
+
+        await asyncio.sleep(0.01)  # let the event handler task run
+        segments = self.breakdowns[0].segments
+        self.assertIn("incomplete turn detected", [s.label for s in segments])
+
+        wait = next(s for s in segments if s.label == "waiting for user to continue")
+        self.assertEqual(wait.owner, "turn completion")
+        self.assertGreater(wait.duration_secs, 0.09)
+
+    async def test_llm_inference_span_comes_from_its_ttfb(self):
+        """The LLM's own wait is recovered from the metric, not from frames."""
+        await self._push(VADUserStoppedSpeakingFrame())
+        await self._push(TranscriptionFrame(user_id="u", text="hi", timestamp=""))
+        await self._push(LLMFullResponseStartFrame(), source="MyLLMService#0")
+        await asyncio.sleep(0.05)
+        await self._push(
+            MetricsFrame(data=[TTFBMetricsData(processor="MyLLMService#0", value=0.02)])
+        )
+        await self._push(LLMMarkerFrame("●", append_to_context_immediately=False))
+        await self._push(LLMTextFrame("Hi!"))
+        await self._push(BotStartedSpeakingFrame())
+
+        await asyncio.sleep(0.01)  # let the event handler task run
+        segments = self.breakdowns[0].segments
+        inference = next(s for s in segments if s.label == "LLM inference")
+        self.assertEqual(inference.owner, "MyLLMService#0")
+        self.assertAlmostEqual(inference.duration_secs, 0.02, delta=0.005)
+
+    def test_segment_lines_include_a_total(self):
+        """The formatter ends with the sum of what it listed."""
+        breakdown = LatencyBreakdown(
+            segments=[
+                LatencySegment(
+                    label="speech to transcript", owner="STT", start_time=0.0, duration_secs=0.25
+                ),
+                LatencySegment(
+                    label="LLM inference", owner="LLM", start_time=0.25, duration_secs=0.35
+                ),
+            ]
+        )
+        lines = breakdown.segment_lines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("0.250s", lines[0])
+        self.assertIn("TOTAL", lines[-1])
+        self.assertIn("0.600s", lines[-1])

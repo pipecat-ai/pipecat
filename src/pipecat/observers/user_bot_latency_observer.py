@@ -23,7 +23,12 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
+    LLMFullResponseStartFrame,
+    LLMMarkerFrame,
+    LLMTextFrame,
     MetricsFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -80,6 +85,28 @@ class FunctionCallMetrics(BaseModel):
     duration_secs: float
 
 
+class LatencySegment(BaseModel):
+    """One span of the user-to-bot interval, attributed to what spent it.
+
+    Segments are contiguous: each begins where the previous one ended, so the
+    durations sum to the measured latency. Where a TTFB metric reports what a
+    service spent once asked, a segment reports where wall-clock time went,
+    including the hops and waits between services.
+
+    Parameters:
+        label: What happened during the span.
+        owner: What spent the time — a processor name, or a part of the
+            pipeline such as turn completion.
+        start_time: Unix timestamp when the span started.
+        duration_secs: Span duration in seconds.
+    """
+
+    label: str
+    owner: str
+    start_time: float
+    duration_secs: float
+
+
 class LatencyBreakdown(BaseModel):
     """Per-service latency breakdown for a single user-to-bot cycle.
 
@@ -102,9 +129,13 @@ class LatencyBreakdown(BaseModel):
             (e.g. no turn analyzer configured).
         function_calls: Latency for each function call executed during
             this cycle. Empty if no function calls occurred.
+        segments: Contiguous spans covering the whole user-to-bot interval,
+            in order. Their durations sum to the measured latency, so they
+            show where time went between services as well as inside them.
     """
 
     ttfb: list[TTFBBreakdownMetrics] = Field(default_factory=list)
+    segments: list[LatencySegment] = Field(default_factory=list)
     text_aggregation: TextAggregationBreakdownMetrics | None = None
     user_turn_start_time: float | None = None
     user_turn_secs: float | None = None
@@ -138,6 +169,21 @@ class LatencyBreakdown(BaseModel):
 
         events.sort(key=lambda e: e[0])
         return [label for _, label in events]
+
+    def segment_lines(self) -> list[str]:
+        """Return the segments as human-readable lines, in order.
+
+        Returns:
+            One formatted line per segment, then a total. Empty if no
+            segments were collected.
+        """
+        if not self.segments:
+            return []
+
+        lines = [f"{s.duration_secs:6.3f}s  {s.label:32} [{s.owner}]" for s in self.segments]
+        total = sum(s.duration_secs for s in self.segments)
+        lines.append(f"{total:6.3f}s  {'TOTAL':32}")
+        return lines
 
 
 class UserBotLatencyObserver(BaseObserver):
@@ -193,6 +239,10 @@ class UserBotLatencyObserver(BaseObserver):
         self._frame_history: deque = deque(maxlen=max_frames)
 
         # Per-cycle metric accumulators
+        self._anchors: list[tuple[float, str, str]] = []
+        self._llm_request_time: float | None = None
+        self._llm_processor: str | None = None
+        self._turn_held: bool = False
         self._ttfb: list[TTFBBreakdownMetrics] = []
         self._text_aggregation: TextAggregationBreakdownMetrics | None = None
         self._function_call_starts: dict[str, tuple[str, float]] = {}
@@ -254,6 +304,33 @@ class UserBotLatencyObserver(BaseObserver):
             # and any turn analyzer wait.
             if self._user_stopped_time is not None:
                 self._user_turn = time.time() - self._user_stopped_time
+        elif isinstance(data.frame, TranscriptionFrame):
+            self._add_anchor("speech to transcript", data.source.name)
+        elif isinstance(data.frame, LLMFullResponseStartFrame):
+            # After an incomplete marker the pipeline is holding for the user
+            # rather than working, which is worth telling apart from a hop.
+            label = (
+                "waiting for user to continue" if self._turn_held else "transcript to LLM request"
+            )
+            owner = "turn completion" if self._turn_held else "pipeline"
+            self._add_anchor(label, owner)
+            # Remember who asked, so the matching TTFB can be told apart from
+            # the other services reporting in the same window.
+            self._llm_request_time = time.time()
+            self._llm_processor = data.source.name
+            self._turn_held = False
+        elif isinstance(data.frame, LLMMarkerFrame):
+            # A stand-alone marker is an incomplete turn; one that prefixes a
+            # response is the completion the pipeline was waiting for.
+            if data.frame.append_to_context_immediately:
+                self._add_anchor("incomplete turn detected", "turn completion")
+                self._turn_held = True
+            else:
+                self._add_anchor("turn completion marker", "turn completion")
+        elif isinstance(data.frame, LLMTextFrame):
+            self._add_anchor("first spoken token", data.source.name, once=True)
+        elif isinstance(data.frame, TTSAudioRawFrame):
+            self._add_anchor("speech synthesis", data.source.name, once=True)
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
@@ -276,7 +353,50 @@ class UserBotLatencyObserver(BaseObserver):
         elif isinstance(data.frame, MetricsFrame):
             self._handle_metrics_frame(data.frame)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
+            self._add_anchor("output transport", data.source.name, once=True)
             await self._handle_bot_started_speaking()
+
+    def _add_anchor(self, label: str, owner: str, *, once: bool = False):
+        """Record the end of a span, if a cycle is being measured.
+
+        Args:
+            label: What the span ending here represents.
+            owner: What spent the time.
+            once: Keep only the first anchor with this label, for frames that
+                repeat within a cycle such as text and audio.
+        """
+        if self._user_stopped_time is None:
+            return
+        if once and any(existing == label for _, existing, _ in self._anchors):
+            return
+        self._anchors.append((time.time(), label, owner))
+
+    def _build_segments(self) -> list[LatencySegment]:
+        """Turn the recorded anchors into contiguous spans.
+
+        Returns:
+            Spans in chronological order, together covering the cycle.
+        """
+        if self._user_turn_start_time is None or not self._anchors:
+            return []
+
+        anchors = sorted(self._anchors, key=lambda a: a[0])
+
+        segments = []
+        previous = self._user_turn_start_time
+        for timestamp, label, owner in anchors:
+            if timestamp < previous:
+                continue
+            segments.append(
+                LatencySegment(
+                    label=label,
+                    owner=owner,
+                    start_time=previous,
+                    duration_secs=timestamp - previous,
+                )
+            )
+            previous = timestamp
+        return segments
 
     async def _handle_bot_started_speaking(self):
         """Handle BotStartedSpeakingFrame to emit latency and breakdown."""
@@ -298,6 +418,7 @@ class UserBotLatencyObserver(BaseObserver):
         if emit_breakdown:
             breakdown = LatencyBreakdown(
                 ttfb=list(self._ttfb),
+                segments=self._build_segments(),
                 text_aggregation=self._text_aggregation,
                 user_turn_start_time=self._user_turn_start_time,
                 user_turn_secs=self._user_turn,
@@ -330,6 +451,17 @@ class UserBotLatencyObserver(BaseObserver):
                         duration_secs=metrics_data.value,
                     )
                 )
+                if metrics_data.processor == self._llm_processor and self._llm_request_time:
+                    # The LLM's first chunk lands before any frame the pipeline
+                    # sees, since that chunk may carry only a marker, or no
+                    # content at all.
+                    self._anchors.append(
+                        (
+                            self._llm_request_time + metrics_data.value,
+                            "LLM inference",
+                            metrics_data.processor,
+                        )
+                    )
             elif isinstance(metrics_data, TextAggregationMetricsData):
                 # Only keep the first measurement — it's the one that
                 # impacts the initial speaking latency.
@@ -342,6 +474,10 @@ class UserBotLatencyObserver(BaseObserver):
 
     def _reset_accumulators(self):
         """Clear per-cycle metric accumulators."""
+        self._anchors = []
+        self._llm_request_time = None
+        self._llm_processor = None
+        self._turn_held = False
         self._ttfb = []
         self._text_aggregation = None
         self._user_turn_start_time = None
