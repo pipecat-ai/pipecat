@@ -4,6 +4,23 @@ Maps pipecat source files to their documentation pages. Source paths are relativ
 
 Doc paths in this file are candidates. Confirm each exists in `DOCS_PATH` before editing it; if it doesn't exist, fall through to the Search section.
 
+## Scope
+
+Every `.py` file under `src/pipecat/` is in scope. The package ships public API
+well beyond the per-provider service files — frames, workers, the bus, the eval
+harness, the CLI, the runner, and the service base classes are all documented
+somewhere on the site.
+
+Exclude only:
+
+- `src/pipecat/tests/**` (test helpers)
+- `__pycache__/`, `*.pyc`, `py.typed`
+- `__init__.py` files that only re-export names defined elsewhere
+
+Changes outside `src/pipecat/` — examples, CI config, the docs directory — don't
+trigger doc updates on their own.
+
+
 ## Non-standard locations
 
 These source paths don't follow the standard `services/{provider}/{type}.py` → `api-reference/server/services/{type}/{provider}.mdx` pattern. Use the doc page below as the candidate path.
@@ -159,3 +176,122 @@ For files that match no pattern above, or whose candidate doesn't exist in `DOCS
 1. Extract the main class name(s) from the source file.
 2. Grep `DOCS_PATH` for that class name: `grep -rl "ClassName" DOCS_PATH/api-reference/ DOCS_PATH/pipecat/`.
 3. If a page is found, use it. If nothing is found, the file is **unmapped** — report it in SKILL.md Step 8.
+
+## Section vocabulary
+
+Service pages are built from these sections. Check each against the source when
+the corresponding construct changed:
+
+| Section | Built from | Form |
+| --- | --- | --- |
+| Configuration | the `__init__` signature | `<ParamField>` entries |
+| InputParams | the `InputParams(BaseModel)` class fields | markdown table: `\| Parameter \| Type \| Default \| Description \|` |
+| Event Handlers | `_register_event_handler` calls and handler definitions | event table plus example |
+| Usage | current class names and import paths | code block |
+| Notes | behavioral caveats | prose |
+
+**InputParams** is the one most often out of step: match the field names, types,
+and defaults to the `InputParams(BaseModel)` class rather than to the
+constructor, which usually takes the whole object.
+
+## Guide directories
+
+Prose that cites pipecat API lives in:
+
+- `pipecat/learn/` — conceptual tutorials (pipeline, LLM, STT, TTS, etc.)
+- `pipecat/fundamentals/` — practical how-tos (metrics, recording, transcripts, etc.)
+- `pipecat/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
+- `pipecat/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
+- `pipecat/flows/` — Pipecat Flows guides (nodes-and-messages, functions, context-strategies, state-management, actions); check these when `src/pipecat/flows/**` changed
+
+## New pages
+
+### Location and template
+
+Create the new `.mdx` file under
+`DOCS_PATH/api-reference/server/services/{category}/{provider}.mdx` using this
+structure:
+
+````
+---
+title: "Service Name"
+description: "Brief description"
+---
+
+## Overview
+
+[Description from class docstring or source analysis]
+
+<CardGroup cols={2}>
+  [Cards for API reference and examples if available]
+</CardGroup>
+
+## Installation
+
+```bash
+uv add "pipecat-ai[package-name]"
+```
+
+## Prerequisites
+
+[Environment variables and account setup]
+
+## Configuration
+
+[ParamField entries for constructor params]
+
+## InputParams
+
+[Table of InputParams fields, if the service has them]
+
+## Usage
+
+### Basic Setup
+
+```python
+[Minimal working example]
+```
+
+## Notes
+
+[Important caveats]
+
+## Event Handlers
+
+[Event table and example code]
+````
+
+### Registration — both are required
+
+A page that exists but isn't registered is invisible. Do both.
+
+**1. `docs.json` navigation.** Add the path without the `.mdx` extension, in the
+matching group under Services:
+
+| Category | Group |
+| --- | --- |
+| STT | `Speech-to-Text` |
+| TTS | `Text-to-Speech` |
+| LLM | `LLM` |
+| S2S | `Speech-to-Speech` |
+| Transport | `Transport` |
+| Serializer | `Serializers` |
+| Image generation | `Image Generation` |
+| Video | `Video` |
+| Memory | `Memory` |
+| Vision | `Vision` |
+| Analytics | `Analytics & Monitoring` |
+
+Insert **alphabetically** within the group's `pages` array.
+
+**2. `supported-services.mdx`.** Add a row to the matching category table in
+`DOCS_PATH/api-reference/server/services/supported-services.mdx`:
+
+```
+| [DisplayName](/api-reference/server/services/{category}/{provider}) | `uv add "pipecat-ai[package]"` |
+```
+
+- **DisplayName** — the human-readable name ("ElevenLabs", "AWS Polly", "Google Gemini")
+- **package** — from the service's `pyproject.toml` extras or its import pattern; a service in `src/pipecat/services/foo/` is typically `foo`. Use `No dependencies required` when it needs none.
+
+Insert **alphabetically**, matching the column alignment of existing rows.
