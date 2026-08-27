@@ -285,7 +285,9 @@ async def _run_scenarios_all(
 
 @eval_app.command("run")
 def run(
-    scenarios: list[Path] = typer.Argument(..., help="One or more scenario YAML files."),
+    scenarios: list[Path] = typer.Argument(
+        ..., help="One or more scenario YAML files, or directories of them."
+    ),
     bot_url: str = typer.Option(
         "ws://localhost:7860",
         "--bot-url",
