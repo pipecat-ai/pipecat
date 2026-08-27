@@ -145,7 +145,7 @@ class DeepgramSageMakerSTTService(STTService):
             keyterm=None,
             keywords=None,
             numerals=False,
-            profanity_filter=True,
+            profanity_filter=None,
             punctuate=True,
             redact=None,
             replace=None,

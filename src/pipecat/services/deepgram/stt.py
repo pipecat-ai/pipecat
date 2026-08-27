@@ -209,7 +209,7 @@ class DeepgramSTTSettings(STTSettings):
     keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -356,7 +356,7 @@ class DeepgramSTTService(STTService):
             keyterm=None,
             keywords=None,
             numerals=False,
-            profanity_filter=True,
+            profanity_filter=None,
             punctuate=True,
             redact=None,
             replace=None,
