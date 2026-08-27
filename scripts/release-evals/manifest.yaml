@@ -34,6 +34,10 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-azure-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-bland.py
+    scenarios: [capital_question]
+  - bot: voice/voice-bland-http.py
+    scenarios: [capital_question]
   - bot: voice/voice-camb.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia.py
@@ -58,6 +62,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-elevenlabs-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-elevenlabs-dialogue.py
+    scenarios: [capital_question]
   - bot: voice/voice-fal.py
     scenarios: [capital_question]
   - bot: voice/voice-fish.py
@@ -72,7 +78,7 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-google-audio-in.py
     scenarios: [capital_question]
-  - bot: voice/voice-google-gemini-tts.py
+  - bot: voice/voice-google-gemini.py
     scenarios: [capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [capital_question]
@@ -156,9 +162,8 @@ suite:
   #
   - bot: realtime/realtime-aws-nova-sonic.py
     scenarios: [weather_function_call_audio]
-  # Needs a deployed Azure realtime model for $AZURE_REALTIME_BASE_URL to resolve.
-  # - bot: realtime/realtime-azure.py
-  #   scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-azure.py
+    scenarios: [weather_function_call_audio]
   - bot: realtime/realtime-gemini-live.py
     scenarios: [weather_function_call_audio]
   - bot: realtime/realtime-grok.py
@@ -400,3 +405,15 @@ suite:
     scenarios:
       - keenable_web_search
       - keenable_fetch_page
+
+  #
+  # Multi-worker: LLM workers on a bus handing the conversation between each
+  # other. The distributed variants of these run the same handoff over pgmq or
+  # redis, and need that broker plus a second process, so they stay manual.
+  #
+  - bot: multi-worker/local-handoff/local-handoff-two-agents.py
+    scenarios: [acme_handoff]
+  # Audio only: each child worker's LLM text goes to that worker's own TTS, so
+  # only the audio reaches the main worker.
+  - bot: multi-worker/local-handoff/local-handoff-two-agents-tts.py
+    scenarios: [acme_handoff_voices]

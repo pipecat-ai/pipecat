@@ -6,10 +6,11 @@
 
 """Tests for how `pipecat eval` renders a run's outcome."""
 
+import tempfile
 import unittest
 from pathlib import Path
 
-from pipecat.cli.commands.eval import _turn_tally
+from pipecat.cli.commands.eval import _expand_scenario_paths, _turn_tally
 from pipecat.evals.harness import EvalResult, EvalTurnResult
 from pipecat.evals.suite import EvalRun
 
@@ -47,3 +48,26 @@ class TestTurnTally(unittest.TestCase):
     def test_run_without_turns(self):
         self.assertEqual(_turn_tally(_run(None)), "")
         self.assertEqual(_turn_tally(_run([])), "")
+
+
+class TestScenarioPathExpansion(unittest.TestCase):
+    def test_directory_arguments_expand_in_sorted_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "zeta.yaml").write_text("name: zeta\n")
+            (directory / "alpha.yaml").write_text("name: alpha\n")
+            (directory / "ignored.yml").write_text("name: ignored\n")
+            (directory / "notes.txt").write_text("not a scenario\n")
+
+            paths = _expand_scenario_paths([directory])
+
+        self.assertEqual(paths, [directory / "alpha.yaml", directory / "zeta.yaml"])
+
+    def test_file_arguments_are_preserved(self):
+        scenario = Path("scenario.yaml")
+        self.assertEqual(_expand_scenario_paths([scenario]), [scenario])
+
+    def test_empty_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(Exception, "No \.yaml scenario files found"):
+                _expand_scenario_paths([Path(tmp)])

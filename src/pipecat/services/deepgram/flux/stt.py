@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxEventType,
@@ -377,8 +377,12 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             self._reset_configure_state()
             await self.stop_all_metrics()
 
-            should_drain = websocket is not None and websocket.state is State.OPEN
-            if websocket:
+            should_drain = (
+                websocket is not None
+                and self._websocket is websocket
+                and websocket.state is State.OPEN
+            )
+            if should_drain:
                 await self._send_close_stream()
 
             if should_drain and receive_task and not receive_task.done():
@@ -398,7 +402,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 if receive_task and not receive_task.done():
                     await self.cancel_task(receive_task, timeout=2.0)
                 if websocket:
-                    logger.debug("Disconnecting from Deepgram Flux Websocket")
+                    logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
                     try:
                         await websocket.close()
                     except Exception as e:
@@ -406,12 +410,16 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                             error_msg=f"Error closing websocket: {e}", exception=e
                         )
             finally:
-                self._watchdog_task = None
-                self._last_stt_time = None
-                self._receive_task = None
-                self._websocket = None
+                if self._watchdog_task is watchdog_task:
+                    self._watchdog_task = None
+                    self._last_stt_time = None
+                if self._receive_task is receive_task:
+                    self._receive_task = None
+                if self._websocket is websocket:
+                    self._websocket = None
                 self._disconnecting = was_disconnecting
-                await self._call_event_handler("on_disconnected")
+                if websocket is not None:
+                    await self._call_event_handler("on_disconnected")
 
     # ------------------------------------------------------------------
     # Audio sending and receiving
@@ -488,6 +496,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             else:
                 logger.warning(f"Received non-string message: {type(message)}")
 
-    async def _report_error(self, error, treat_as_permanent: bool = False):
+    async def _report_error(self, error, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

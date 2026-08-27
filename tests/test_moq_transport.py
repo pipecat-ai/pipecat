@@ -204,14 +204,30 @@ class TestIsPeerGone(unittest.TestCase):
     def test_remote_error_code_is_peer_gone(self):
         """The peer hanging up surfaces as ``remote error: code=N`` on the
         audio/transcript subscription being consumed."""
-        self.assertTrue(_is_peer_gone(moq.MoqError.Audio("moq: remote error: code=4")))
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: remote error: code=4")))
 
     def test_normal_close_is_peer_gone(self):
         """Session-level normal close counts as the peer leaving too."""
-        self.assertTrue(_is_peer_gone(moq.MoqError.Protocol("webtransport error: closed")))
+        self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
+
+    def test_dropped_producer_is_peer_gone(self):
+        """A peer that vanishes mid-call drops its producer without finishing.
+
+        moq-rs 0.4 raises that locally with the reason as the message tail
+        rather than as a reset code, and ``Dropped`` is the one normal-close
+        reason with no typed binding. Both shapes observed against a real
+        stack: bare from an in-process track, prefixed through the audio path.
+        """
+        self.assertTrue(_is_peer_gone(moq.Error.JsonTrack("dropped")))
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: dropped")))
+
+    def test_shutdown_variants_are_peer_gone(self):
+        """``Cancelled``/``Closed`` are typed, so they need no message match."""
+        self.assertTrue(_is_peer_gone(moq.Error.Cancelled("cancelled")))
+        self.assertTrue(_is_peer_gone(moq.Error.Closed("closed")))
 
     def test_other_moq_errors_propagate(self):
-        self.assertFalse(_is_peer_gone(moq.MoqError.Mux("json: cancelled")))
+        self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
 
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
@@ -474,18 +490,20 @@ class TestMOQTransportInit(unittest.TestCase):
     """
 
     def _make_transport(self):
-        """Construct a MOQTransport with the moq library's BroadcastProducer
-        mocked so we don't need a real QUIC stack just to check that the
-        producer methods got called."""
+        """Construct a MOQTransport with the moq library's origin mocked so we
+        don't need a real QUIC stack just to check that the producer methods
+        got called."""
         params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
 
-        # Patch ``moq.BroadcastProducer`` so we can observe what __init__
-        # calls on it without standing up an actual broadcast.
+        # A broadcast is created ON an origin, so patch the origin and observe
+        # what __init__ asks it for without standing up an actual broadcast.
         with patch("pipecat.transports.moq.transport.moq") as moq_mock:
             broadcast = MagicMock(name="broadcast")
             track = MagicMock(name="transcript_stream")
             broadcast.publish_json_stream.return_value = track
-            moq_mock.BroadcastProducer.return_value = broadcast
+            origin = MagicMock(name="publish_origin")
+            origin.create_broadcast.return_value = broadcast
+            moq_mock.OriginProducer.return_value = origin
 
             transport = MOQTransport(params=params, host="localhost", port=4080)
             return transport, broadcast, track, moq_mock
@@ -496,6 +514,11 @@ class TestMOQTransportInit(unittest.TestCase):
         transport, broadcast, _track, _moq = self._make_transport()
         self.assertIsNotNone(transport._client._publish_broadcast)
         self.assertIs(transport._client._publish_broadcast, broadcast)
+        # Created at its final path: the origin carries the broadcast into the
+        # session, so there is no later attach step to forget.
+        transport._client._publish_origin.create_broadcast.assert_called_once_with(
+            transport._client._broadcast_path
+        )
 
     def test_transcript_track_created_synchronously(self):
         """Same constraint for the transcript JSON stream: ``send_message``
@@ -567,6 +590,50 @@ class TestMOQTransportInit(unittest.TestCase):
         """A chosen, non-ephemeral source port is valid when dialing a
         relay — it isn't ignored."""
         self.assertEqual(self._bind_for(serve=False, bind="[::]:9000"), "[::]:9000")
+
+    def _client_kwargs(self, **params):
+        """The kwargs ``_make_transport`` hands ``moq.Client`` in client mode."""
+        p = MOQParams(audio_in_enabled=True, audio_out_enabled=True, serve=False, **params)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            moq_mock.BroadcastProducer.return_value = MagicMock()
+            transport = MOQTransport(params=p, host="localhost", port=4080)
+            client = transport._client
+            client._make_transport(MagicMock(), MagicMock())
+            return moq_mock.Client.call_args.kwargs
+
+    def test_client_cert_is_presented_when_both_halves_are_set(self):
+        """A relay that authenticates its peers with mTLS needs the client
+        cert; without it the dial is anonymous and the relay tiers it as an
+        ordinary connection."""
+        kwargs = self._client_kwargs(client_tls_cert="/c.pem", client_tls_key="/k.pem")
+        self.assertEqual(kwargs["tls_cert"], "/c.pem")
+        self.assertEqual(kwargs["tls_key"], "/k.pem")
+
+    def test_no_client_cert_by_default(self):
+        kwargs = self._client_kwargs()
+        self.assertNotIn("tls_cert", kwargs)
+        self.assertNotIn("tls_key", kwargs)
+
+    def test_half_a_client_cert_is_ignored(self):
+        """A cert without its key can't be loaded, so passing one alone would
+        fail the dial rather than degrade to anonymous."""
+        self.assertNotIn("tls_cert", self._client_kwargs(client_tls_cert="/c.pem"))
+        self.assertNotIn("tls_key", self._client_kwargs(client_tls_key="/k.pem"))
+
+    def test_custom_roots_and_pins_are_passed_through(self):
+        """Both are alternatives to switching ``verify_ssl`` off: a private CA
+        and a self-signed relay can each be verified rather than trusted
+        blindly."""
+        kwargs = self._client_kwargs(
+            client_tls_roots=["/ca.pem"], client_tls_fingerprints=["ab:cd"]
+        )
+        self.assertEqual(kwargs["tls_roots"], ["/ca.pem"])
+        self.assertEqual(kwargs["tls_fingerprints"], ["ab:cd"])
+
+    def test_no_roots_or_pins_by_default(self):
+        kwargs = self._client_kwargs()
+        self.assertNotIn("tls_roots", kwargs)
+        self.assertNotIn("tls_fingerprints", kwargs)
 
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
@@ -661,7 +728,7 @@ class TestIsNormalClose(unittest.TestCase):
     def _audio_error(self, message):
         import moq
 
-        return moq.MoqError.Audio(message)
+        return moq.Error.Audio(message)
 
     def test_session_close_is_normal(self):
         self.assertTrue(_is_normal_close(self._audio_error("webtransport error: closed")))

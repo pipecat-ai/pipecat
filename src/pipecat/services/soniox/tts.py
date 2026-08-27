@@ -30,10 +30,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -247,13 +247,13 @@ class SonioxTTSService(WebsocketTTSService):
         """
         return language_to_soniox_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self._audio_format.startswith("pcm_") and self.sample_rate not in VALID_SAMPLE_RATES:
             logger.warning(
                 f"{self}: sample_rate={self.sample_rate} is not in Soniox supported rates "

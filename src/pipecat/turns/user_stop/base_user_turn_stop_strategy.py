@@ -10,7 +10,7 @@ import warnings
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.utils.base_object import BaseObject
 
@@ -117,6 +117,14 @@ class BaseUserTurnStopStrategy(BaseObject):
         deciding.
         """
         return False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup.task_manager)
 
     async def cleanup(self):
         """Cleanup the strategy."""

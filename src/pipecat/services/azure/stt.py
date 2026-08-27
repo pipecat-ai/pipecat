@@ -23,9 +23,9 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
@@ -264,14 +264,19 @@ class AzureSTTService(STTService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def start(self, frame: StartFrame):
-        """Start the speech recognition service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating the start of processing.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
@@ -289,11 +294,6 @@ class AzureSTTService(STTService):
             frame: Frame indicating cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release resources at pipeline teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self):

@@ -7,7 +7,7 @@
 """Base strategy for deciding whether user frames should be muted."""
 
 from pipecat.frames.frames import Frame
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
 
@@ -30,22 +30,14 @@ class BaseUserMuteStrategy(BaseObject):
     def __init__(self, **kwargs):
         """Initialize the base user mute strategy."""
         super().__init__(**kwargs)
-        self._task_manager: BaseTaskManager | None = None
 
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} user mute strategy was not properly setup")
-        return self._task_manager
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        self._task_manager = task_manager
+        await super().setup(setup.task_manager)
 
     async def cleanup(self):
         """Cleanup the strategy."""

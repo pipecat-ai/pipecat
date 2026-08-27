@@ -28,13 +28,12 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    StartFrame,
     STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -568,11 +567,6 @@ class SpeechmaticsSTTService(STTService):
     # LIFE-CYCLE / SESSION MANAGEMENT
     # ============================================================================
 
-    async def start(self, frame: StartFrame):
-        """Called when the new session starts."""
-        await super().start(frame)
-        await self._connect()
-
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta, reconnecting only when necessary.
 
@@ -635,6 +629,20 @@ class SpeechmaticsSTTService(STTService):
 
         return changed
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
+
+    async def cleanup(self):
+        """Release Speechmatics resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
         await super().stop(frame)
@@ -643,11 +651,6 @@ class SpeechmaticsSTTService(STTService):
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release Speechmatics resources at pipeline teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self) -> None:

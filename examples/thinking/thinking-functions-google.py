@@ -13,7 +13,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
@@ -82,19 +82,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
-        # To use a more powerful (slower) reasoning model, uncomment the pro
-        # model and the thinking_level line below.
-        # model="gemini-3.1-pro-preview",
         settings=GoogleLLMService.Settings(
             thinking=GoogleLLMService.ThinkingConfig(
-                thinking_budget=-1,  # Dynamic thinking (default model, Gemini 2.5)
-                # thinking_level="low",  # Gemini 3.x (comment out thinking_budget above)
+                # Want more reasoning? Bump up thinking_level.
+                thinking_level="low",
                 include_thoughts=True,
             ),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
@@ -126,6 +123,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

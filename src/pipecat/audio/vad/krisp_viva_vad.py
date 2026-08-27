@@ -34,6 +34,8 @@ except ModuleNotFoundError as e:
 class KrispVivaVadAnalyzer(VADAnalyzer):
     """Voice Activity Detection analyzer using the Krisp VIVA SDK."""
 
+    _sdk_acquired = False
+
     def __init__(
         self,
         *,
@@ -61,40 +63,33 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
 
         logger.debug("Loading Krisp VIVA VAD model...")
 
-        try:
-            # Set model path, checking environment if not specified
-            if model_path:
-                self._model_path = model_path
-            else:
-                self._model_path = os.getenv("KRISP_VIVA_VAD_MODEL_PATH")
-                if not self._model_path:
-                    logger.error(
-                        "Model path is not provided and KRISP_VIVA_VAD_MODEL_PATH is not set."
-                    )
-                    raise ValueError("Model path for KrispVivaVADAnalyzer must be provided.")
+        # Set model path, checking environment if not specified
+        if model_path:
+            self._model_path = model_path
+        else:
+            self._model_path = os.getenv("KRISP_VIVA_VAD_MODEL_PATH")
+            if not self._model_path:
+                logger.error("Model path is not provided and KRISP_VIVA_VAD_MODEL_PATH is not set.")
+                raise ValueError("Model path for KrispVivaVADAnalyzer must be provided.")
 
-            if not self._model_path.endswith(".kef"):
-                raise Exception("Model is expected with .kef extension")
+        if not self._model_path.endswith(".kef"):
+            raise Exception("Model is expected with .kef extension")
 
-            if not os.path.isfile(self._model_path):
-                raise FileNotFoundError(f"Model file not found: {self._model_path}")
+        if not os.path.isfile(self._model_path):
+            raise FileNotFoundError(f"Model file not found: {self._model_path}")
 
-            self._session = None
-            self._frame_duration_ms = frame_duration
-            self._samples_per_frame = None
-            # Calculate samples per frame if sample_rate is provided
-            if sample_rate is not None:
-                self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
+        self._session = None
+        self._frame_duration_ms = frame_duration
+        self._samples_per_frame = None
+        # Calculate samples per frame if sample_rate is provided
+        if sample_rate is not None:
+            self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
 
-            # Acquire SDK reference (will initialize on first call)
-            KrispVivaSDKManager.acquire()
+        # Acquire SDK reference (will initialize on first call)
+        KrispVivaSDKManager.acquire()
+        self._sdk_acquired = True
 
-            logger.debug("Loaded Krisp VIVA VAD")
-
-        except Exception:
-            # If initialization fails, release the SDK reference
-            KrispVivaSDKManager.release()
-            raise
+        logger.debug("Loaded Krisp VIVA VAD")
 
     def _create_session(self, sample_rate: int, frame_duration: int):
         """Create a Krisp VAD session with a specific sample rate.
@@ -186,7 +181,10 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
         Returns:
             Voice confidence score between 0.0 and 1.0.
         """
-        if self._session is None:
+        # Read the session once: this runs on the analyzer's own thread, so
+        # cleanup() can clear the attribute at any point during the call.
+        session = self._session
+        if session is None:
             logger.warning("VAD session not initialized. Cannot process audio.")
             return 0.0
 
@@ -198,7 +196,7 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
             # Process through VAD session
-            voice_probability = self._session.process(audio_float32)
+            voice_probability = session.process(audio_float32)
 
             return voice_probability
 
@@ -207,10 +205,13 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
             return 0.0
 
     async def cleanup(self):
-        """Cleanup analyzer resources."""
-        try:
-            self._session = None
+        """Cleanup analyzer resources.
+
+        The SDK release is guarded so repeated calls do not over-decrement the
+        shared reference count.
+        """
+        await super().cleanup()
+        self._session = None
+        if self._sdk_acquired:
+            self._sdk_acquired = False
             KrispVivaSDKManager.release()
-        except Exception:
-            # Ignore errors during cleanup
-            pass

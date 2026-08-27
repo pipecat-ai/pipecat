@@ -16,6 +16,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
+from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
@@ -119,6 +120,55 @@ def test_cartesia_korean_timestamp_groups_reassemble_with_spaces():
         )
         == "저는 여러분의 AI 어시스턴트입니다."
     )
+
+
+def test_cartesia_spell_tag_keeps_its_word_attached_to_following_punctuation():
+    assert _process_word_timestamps(
+        words=["<spell>1234</spell>."],
+        starts=[0.0],
+        language="en",
+    ) == [("1234.", 0.0)]
+
+
+def test_cartesia_tag_between_two_words_keeps_them_separated():
+    assert _process_word_timestamps(
+        words=["to<spell>1234</spell>"],
+        starts=[0.0],
+        language="en",
+    ) == [("to 1234", 0.0)]
+
+
+def test_cartesia_tag_only_token_is_dropped():
+    assert (
+        _process_word_timestamps(
+            words=['<break time="80ms"/>'],
+            starts=[0.0],
+            language="en",
+        )
+        == []
+    )
+
+
+def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():
+    """Every normalized token has to be recognised by the word tracker.
+
+    A token the tracker cannot place force-completes the slot, which emits all the
+    text left unspoken — synthesis tags included — as one TTSTextFrame, ending the
+    turn's word-level tracking.
+    """
+    text = "Hello, I love to <spell>1234</spell>."
+    tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+
+    for word, _ in _process_word_timestamps(
+        words=["Hello,", "I", "love", "to", "<spell>1234</spell>."],
+        starts=[0.0, 0.1, 0.2, 0.3, 0.4],
+        language="en",
+    ):
+        assert tracker.word_belongs_here(word), f"{word!r} was not recognised"
+        tracker.add_word_and_check_complete(word)
+
+    assert tracker.is_complete
+    assert tracker.get_accumulated_user_facing_text() == text
 
 
 class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCase):

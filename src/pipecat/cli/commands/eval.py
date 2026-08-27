@@ -137,6 +137,23 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     return str(Path(record_dir) / f"{scenario_name}.wav")
 
 
+def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
+    """Expand directory arguments into sorted YAML scenario paths."""
+    expanded: list[Path] = []
+    for path in paths:
+        if not path.is_dir():
+            expanded.append(path)
+            continue
+
+        scenario_paths = sorted(
+            scenario_path for scenario_path in path.glob("*.yaml") if scenario_path.is_file()
+        )
+        if not scenario_paths:
+            raise typer.BadParameter(f"No .yaml scenario files found in {path}")
+        expanded.extend(scenario_paths)
+    return expanded
+
+
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
 
@@ -344,7 +361,7 @@ def run(
     # way, silence the console sink so it can't corrupt the live display.
     logger.remove()
 
-    runs = _build_scenario_runs(scenarios, bot_url)
+    runs = _build_scenario_runs(_expand_scenario_paths(scenarios), bot_url)
     _print_scenario_configs(runs)
 
     started = time.monotonic()

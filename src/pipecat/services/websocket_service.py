@@ -29,12 +29,12 @@ class ReportErrorCallback(Protocol):
     frame with a connection-error event of its own.
     """
 
-    async def __call__(self, error: ErrorFrame, treat_as_permanent: bool = False) -> None:
+    async def __call__(self, error: ErrorFrame, force_treat_as_permanent: bool = False) -> None:
         """Report the error.
 
         Args:
             error: The error frame to report.
-            treat_as_permanent: Whether to treat the error as one that will
+            force_treat_as_permanent: Whether to treat the error as one that will
                 keep recurring, leaving the service unable to do any more
                 work. Leaving it False doesn't keep the service usable, since
                 the error's own category may cost it its usability.
@@ -92,7 +92,7 @@ class WebsocketService(ABC):
     provider rejects the configuration, which no amount of retrying will fix,
     or the attempts are exhausted. Errors are reported through a
     ``report_error`` callback, which takes the same optional
-    ``treat_as_permanent`` flag as
+    ``force_treat_as_permanent`` flag as
     :meth:`~pipecat.processors.frame_processor.FrameProcessor.push_error_frame`,
     so that giving up and saying so are the same act.
     """
@@ -235,7 +235,7 @@ class WebsocketService(ABC):
             logger.error(msg)
             if report_error:
                 await report_error(
-                    ErrorFrame(msg, exception=last_exception), treat_as_permanent=True
+                    ErrorFrame(msg, exception=last_exception), force_treat_as_permanent=True
                 )
             return False
         finally:
@@ -306,7 +306,7 @@ class WebsocketService(ABC):
                     f"times immediately after connecting"
                 )
                 logger.error(msg)
-                await report_error(ErrorFrame(msg), treat_as_permanent=True)
+                await report_error(ErrorFrame(msg), force_treat_as_permanent=True)
                 return False
 
         # Log the message

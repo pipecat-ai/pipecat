@@ -34,7 +34,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated_read
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
@@ -361,7 +361,7 @@ class LLMMarkerFrame(DataFrame):
 
     The primary use today is the ``filter_incomplete_user_turns``
     protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    turn-completion markers ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -375,8 +375,8 @@ class LLMMarkerFrame(DataFrame):
             soon as it's received. If False, the marker is appended to
             the running assistant aggregation and flushed to the
             context together with the following text as a single
-            message (e.g. for the ✓ case the context message ends up
-            as "✓ <response>").
+            message (e.g. for the ● case the context message ends up
+            as "● <response>").
     """
 
     marker: str
@@ -908,6 +908,18 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 #
 
 
+# Fields of :class:`StartFrame` whose reads are deprecated.
+_START_FRAME_DEPRECATED_FIELDS = (
+    "audio_in_sample_rate",
+    "audio_out_sample_rate",
+    "enable_metrics",
+    "enable_tracing",
+    "enable_usage_metrics",
+    "report_only_initial_ttfb",
+    "tracing_context",
+)
+
+
 @dataclass
 class StartFrame(SystemFrame):
     """Initial frame to start pipeline processing.
@@ -917,12 +929,46 @@ class StartFrame(SystemFrame):
 
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
+
+            .. deprecated:: 1.8.0
+                Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         audio_out_sample_rate: Output audio sample rate in Hz.
+
+            .. deprecated:: 1.8.0
+                Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_metrics: Whether to enable performance metrics collection.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_tracing: Whether to enable OpenTelemetry tracing.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_usage_metrics: Whether to enable usage metrics collection.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+
+            .. deprecated:: 1.8.0
+                Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
+
+            .. deprecated:: 1.8.0
+                Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
     """
 
     audio_in_sample_rate: int = 16000
@@ -932,6 +978,21 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None
+
+    def __getattribute__(self, name: str) -> Any:
+        # Reads warn, writes don't: assignment goes through ``__setattr__``. The None
+        # guard is for ``tracing_context``, the only field whose default is None and
+        # so can't be told apart from unset.
+        if name in _START_FRAME_DEPRECATED_FIELDS:
+            value = object.__getattribute__(self, name)
+            if value is not None:
+                warn_deprecated_read(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
+                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
+                    "Will be removed in 2.0.0."
+                )
+            return value
+        return object.__getattribute__(self, name)
 
 
 @dataclass
@@ -956,12 +1017,21 @@ class ErrorFrame(SystemFrame):
     """Frame notifying of errors in the pipeline.
 
     This is used to notify upstream that an error has occurred downstream in
-    the pipeline. A fatal error indicates the error is unrecoverable and that the
-    bot should exit.
+    the pipeline.
 
     Parameters:
         error: Description of the error that occurred.
         fatal: Whether the error is fatal and requires bot shutdown.
+
+            .. deprecated:: 1.8.0
+                Use :meth:`FrameProcessor.push_error` with
+                ``force_treat_as_permanent=True`` instead, when the error leaves
+                its originating processor unable to do its job: it marks that
+                processor unusable and the pipeline worker applies its
+                :class:`ProcessorUnusablePolicy`. For an error that isn't about
+                a processor's state, push an :class:`EndWorkerFrame` after the
+                error to end the pipeline. Will be removed in 2.0.0.
+
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
         category: What kind of failure this was, drawn from `ErrorCategory`:
@@ -978,6 +1048,26 @@ class ErrorFrame(SystemFrame):
     exception: Exception | None = None
     category: ErrorCategory | None = None
 
+    def __post_init__(self):
+        super().__post_init__()
+        # Only a set flag carries behavior worth warning about, and
+        # `FatalErrorFrame` already warns about itself.
+        if self.fatal and not isinstance(self, FatalErrorFrame):
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                    "2.0.0. If the error leaves its originating processor unable to do its "
+                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
+                    "that marks the processor unusable, and the PipelineWorker acts on it "
+                    "according to its `processor_unusable_policy` "
+                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                    "`EndWorkerFrame` to end the pipeline.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+
     def __str__(self):
         category = (
             f", category: {self.category.value}"
@@ -987,12 +1077,23 @@ class ErrorFrame(SystemFrame):
         return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"
 
 
+@deprecated(
+    "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+    "Use `ErrorFrame` instead. See the `ErrorFrame.fatal` docstring for how to "
+    "report an error that used to be fatal."
+)
 @dataclass
 class FatalErrorFrame(ErrorFrame):
     """Frame notifying of unrecoverable errors requiring bot shutdown.
 
-    This is used to notify upstream that an unrecoverable error has occurred and
-    that the bot should exit immediately.
+    .. deprecated:: 1.8.0
+        Use :class:`ErrorFrame` instead. Report the error with
+        :meth:`FrameProcessor.push_error` and ``force_treat_as_permanent=True``
+        when it leaves its originating processor unable to do its job — the
+        pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of
+        which ``CANCEL`` shuts the bot down. For an error that isn't about a
+        processor's state, push an :class:`EndWorkerFrame` after the error
+        instead. Will be removed in 2.0.0.
 
     Parameters:
         fatal: Always True for fatal errors.
@@ -1024,6 +1125,11 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
     This frame is used to resume frame processing for the given processor
     if it was previously paused as fast as possible. After resuming frame
     processing all queued frames will be processed in the order received.
+
+    Note:
+        This frame is now equivalent to FrameProcessorResumeFrame, which was
+        changed to a SystemFrame to fix a bug where resume frames would get
+        stuck in the blocked processing queue.
 
     Parameters:
         processor: The frame processor to resume.
@@ -1155,18 +1261,28 @@ class ProposedUserStartedSpeakingFrame(SystemFrame):
     proposal, not a decision: an
     :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` resolves it
     into a :class:`UserStartedSpeakingFrame` and broadcasts the interruption.
+
+    This is a system frame because resolving it broadcasts an interruption,
+    which must preempt queued frames rather than wait behind them. Its
+    end-of-turn counterpart has the opposite requirement and is a control
+    frame; see :class:`ProposedUserStoppedSpeakingFrame`.
     """
 
     pass
 
 
 @dataclass
-class ProposedUserStoppedSpeakingFrame(SystemFrame):
+class ProposedUserStoppedSpeakingFrame(ControlFrame):
     """Frame proposing that the user turn has ended.
 
     The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
     resolved into a :class:`UserStoppedSpeakingFrame` by an
     :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`.
+
+    This is a control frame so it stays ordered against the final
+    :class:`TranscriptionFrame`. A service with its own turn detection pushes
+    that transcript and then proposes the stop, and the turn strategy needs
+    that text in hand to close the turn on.
     """
 
     pass
@@ -1833,22 +1949,33 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
-    when it returns to the source the worker sets ``event``. Once that fires,
-    every frame queued ahead of the probe has completed the round-trip and been
-    processed. Useful to wait for the pipeline to drain (e.g. after an
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
+    source turns it around, and the worker sets ``event`` when it reaches the
+    sink a second time. Once that fires, every frame queued ahead of the probe
+    has been processed, along with anything a processor started by pushing
+    upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
     This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its round-trip.
+    InterruptionFrame and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
+        returning: Whether the probe is on its second pass downstream, after
+            having been back up to the source. Work a processor starts by
+            pushing upstream — an LLM run triggered by a function call result,
+            say — only reaches the sink after that turnaround, so the probe
+            makes the trip twice and settles on the second arrival.
+        origin: Name of the worker that started the flush. A probe that crosses
+            into another pipeline is answered there, out of sight of whoever is
+            waiting, so the answering worker reports progress back to this name.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
+    returning: bool = field(default=False, compare=False)
+    origin: str | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -1928,12 +2055,19 @@ class FrameProcessorPauseFrame(ControlFrame):
 
 
 @dataclass
-class FrameProcessorResumeFrame(ControlFrame):
+class FrameProcessorResumeFrame(SystemFrame):
     """Frame to resume frame processing for a specific processor.
 
     This frame is used to resume frame processing for the given processor if
     it was previously paused. After resuming frame processing all queued frames
     will be processed in the order received.
+
+    This is a SystemFrame to ensure it bypasses the blocked processing queue
+    when the processor is paused. Otherwise, the resume frame would get queued
+    and never processed.
+
+    Note:
+        This frame is now equivalent to FrameProcessorResumeUrgentFrame.
 
     Parameters:
         processor: The frame processor to resume.

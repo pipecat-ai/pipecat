@@ -25,7 +25,6 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
-    StartFrame,
     STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
@@ -36,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import STTUsage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
@@ -348,14 +347,21 @@ class STTService(AIService):
         raise NotImplementedError
         yield  # pragma: no cover
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
+        await super().setup(setup)
+        self._sample_rate = self._init_sample_rate or setup.audio_in_sample_rate
+
+    async def cleanup(self):
+        """Clean up STT service resources."""
+        await super().cleanup()
+        await self._cancel_ttfb_timeout()
+        await self._cancel_keepalive_task()
+        self._reconnect_audio_buffer.clear()
 
     async def stop(self, frame: EndFrame):
         """Stop the STT service on a graceful end.
@@ -374,13 +380,6 @@ class STTService(AIService):
         """
         await super().cancel(frame)
         await self._flush_stt_usage_metrics()
-
-    async def cleanup(self):
-        """Clean up STT service resources."""
-        await super().cleanup()
-        await self._cancel_ttfb_timeout()
-        await self._cancel_keepalive_task()
-        self._reconnect_audio_buffer.clear()
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply an STT settings delta.
@@ -593,6 +592,7 @@ class STTService(AIService):
         while user is still speaking.
         """
         await self._cancel_ttfb_timeout()
+        await self.cancel_ttfb_metrics()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
@@ -657,12 +657,21 @@ class STTService(AIService):
         This timeout allows the final transcription to arrive before we calculate
         and report TTFB. Uses _last_transcript_time as the end time so we measure
         to when the transcript actually arrived, not when the timeout fired.
-        If no transcription arrived, no TTFB is reported.
+
+        A transcript that predates the end of speech belongs to an earlier
+        segment the service finalized on its own endpointing; the metrics
+        collector refuses it rather than report the negative interval it would
+        produce.
         """
         try:
             await asyncio.sleep(self._stt_ttfb_timeout)
             if self._last_transcript_time > 0:
                 await self.stop_ttfb_metrics(end_time=self._last_transcript_time)
+            else:
+                # No transcript at all, so there is no end time to measure to.
+                # Close the measurement rather than leave it open for the next
+                # transcript to be measured against.
+                await self.cancel_ttfb_metrics()
         except asyncio.CancelledError:
             # Task was cancelled (new utterance or interruption), which is expected behavior
             pass
@@ -818,13 +827,13 @@ class SegmentedSTTService(STTService):
         self._audio_buffer_size_1s = 0
         self._user_speaking = False
 
-    async def start(self, frame: StartFrame):
-        """Start the segmented STT service and initialize audio buffer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_buffer_size_1s = self.sample_rate * 2
 
     @property
@@ -1026,6 +1035,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         # counts toward usage.
         self._record_stt_audio_usage(silence)
 
-    async def _report_error(self, error: ErrorFrame, treat_as_permanent: bool = False):
+    async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error, treat_as_permanent=treat_as_permanent)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

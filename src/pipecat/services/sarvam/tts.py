@@ -53,10 +53,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
@@ -563,14 +563,6 @@ class SarvamHttpTTSService(TTSService):
         """
         return language_to_sarvam_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Sarvam TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Sarvam AI's API.
@@ -1003,14 +995,13 @@ class SarvamTTSService(InterruptibleTTSService):
         """
         return language_to_sarvam_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Sarvam TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
+        await super().setup(setup)
         # WebSocket API expects sample rate as string
         self._speech_sample_rate = str(self.sample_rate)
         await self._connect()

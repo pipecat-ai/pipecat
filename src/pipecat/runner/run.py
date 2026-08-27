@@ -84,6 +84,9 @@ To run locally:
 - Daily only: ``python bot.py -t daily``
 - Daily (direct, testing only): ``python bot.py -d``
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
+- WebRTC with custom STUN/TURN: ``python bot.py -t webrtc --ice-servers
+  stun:stun.l.google.com:19302 '{"urls": "turn:turn.example.com:3478", "username":
+  "user", "credential": "pass"}'`` (or set ``PIPECAT_ICE_SERVERS``)
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
 - LiveKit only: ``python bot.py -t livekit``
 - MOQ (bot is the server, local dev): ``python bot.py -t moq`` (serve mode and
@@ -657,6 +660,8 @@ def _setup_unified_start_route(
 
     class IceServer(TypedDict, total=False):
         urls: str | list[str]
+        username: str
+        credential: str
 
     class IceConfig(TypedDict):
         iceServers: list[IceServer]
@@ -693,6 +698,11 @@ def _setup_unified_start_route(
                 "dailyMeetingTokenProperties": {...},
                 "body": {...}
             }
+
+        For WebRTC, ``iceConfig`` in the response carries the servers the runner
+        was started with (``--ice-servers`` or ``PIPECAT_ICE_SERVERS``). When the
+        runner has none, ``enableDefaultIceServers`` returns a public STUN server
+        instead.
         """
         try:
             request_data = await request.json()
@@ -735,7 +745,14 @@ def _setup_unified_start_route(
             result = StartBotResult(
                 sessionId=session_id,
             )
-            if request_data.get("enableDefaultIceServers"):
+            # Servers configured on the runner are handed to the client too, so
+            # both peers negotiate against the same STUN and TURN servers. They
+            # take precedence over the Google STUN fallback.
+            if args.ice_servers:
+                result["iceConfig"] = IceConfig(
+                    iceServers=[IceServer(**server) for server in args.ice_servers]
+                )
+            elif request_data.get("enableDefaultIceServers"):
                 result["iceConfig"] = IceConfig(
                     iceServers=[IceServer(urls=["stun:stun.l.google.com:19302"])]
                 )
@@ -945,7 +962,7 @@ def _setup_webrtc_routes(
         return
 
     try:
-        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
             IceCandidate,
             SmallWebRTCPatchRequest,
@@ -971,9 +988,12 @@ def _setup_webrtc_routes(
 
         return FileResponse(path=file_path, media_type=media_type, filename=file_path.name)
 
-    # Initialize the SmallWebRTC request handler
+    # Initialize the SmallWebRTC request handler. The configured ICE servers are
+    # what the bot's own peer connection uses to gather server-reflexive and
+    # relay candidates; without them it only ever offers host candidates.
+    ice_servers = [IceServer(**server) for server in args.ice_servers]
     small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
-        esp32_mode=args.esp32, host=args.host
+        ice_servers=ice_servers or None, esp32_mode=args.esp32, host=args.host
     )
 
     @app.post("/api/offer")
@@ -1557,6 +1577,82 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
+def _parse_ice_servers(value: str | list[str] | None) -> list[dict[str, Any]]:
+    """Parse ICE server configuration into a list of plain dictionaries.
+
+    Accepts either the raw ``PIPECAT_ICE_SERVERS`` environment value (a string)
+    or the tokens collected by ``--ice-servers`` (a list of strings). Each entry
+    is either a bare STUN or TURN URL, or a JSON object with ``urls`` and, for
+    TURN, ``username`` and ``credential``. A string value is read as a whole JSON
+    array when it starts with ``[`` and as a single JSON object when it starts
+    with ``{``; anything else is split on commas into bare URLs.
+
+    Dictionaries are returned rather than ``IceServer`` objects so this stays
+    usable when the WebRTC extra is not installed, and so the same values can be
+    handed to WebRTC clients as JSON.
+
+    Args:
+        value: The raw environment value, the parsed CLI tokens, or None.
+
+    Returns:
+        ICE servers as dictionaries with ``urls`` and optional credentials.
+
+    Raises:
+        ValueError: If an entry is malformed, is missing ``urls``, or carries a
+            key other than ``urls``, ``username``, or ``credential``.
+    """
+    if not value:
+        return []
+
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                entries: list[Any] = json.loads(text)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"could not parse {text!r} as a JSON array: {e}") from e
+            if not isinstance(entries, list):
+                raise ValueError(f"expected a JSON array of ICE servers, got {text!r}")
+        elif text.startswith("{"):
+            entries = [text]
+        else:
+            entries = [item.strip() for item in text.split(",") if item.strip()]
+    else:
+        entries = list(value)
+
+    allowed_keys = {"urls", "username", "credential"}
+    ice_servers: list[dict[str, Any]] = []
+
+    for entry in entries:
+        if isinstance(entry, str):
+            text = entry.strip()
+            if not text:
+                continue
+            if not text.startswith("{"):
+                ice_servers.append({"urls": text})
+                continue
+            try:
+                entry = json.loads(text)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"could not parse {text!r} as a JSON object: {e}") from e
+
+        if not isinstance(entry, dict):
+            raise ValueError(f"expected a URL or a JSON object, got {entry!r}")
+
+        unknown = set(entry) - allowed_keys
+        if unknown:
+            raise ValueError(
+                f"unsupported key(s) {sorted(unknown)} in {entry!r}; "
+                f"supported keys are {sorted(allowed_keys)}"
+            )
+        if not entry.get("urls"):
+            raise ValueError(f"missing 'urls' in {entry!r}")
+
+        ice_servers.append({key: entry[key] for key in entry if entry[key] is not None})
+
+    return ice_servers
+
+
 def runner_downloads_folder() -> str | None:
     """Returns the folder where files are stored for later download."""
     return RUNNER_DOWNLOADS_FOLDER
@@ -1597,6 +1693,8 @@ def main(parser: argparse.ArgumentParser | None = None):
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
+       - --ice-servers: STUN and TURN servers for the WebRTC transport, as bare URLs or as
+         JSON objects when credentials are needed (default: the PIPECAT_ICE_SERVERS env var)
        - --whatsapp: Ensure required WhatsApp environment variables are present
        - -v/--verbose: Increase logging verbosity
 
@@ -1682,6 +1780,21 @@ def main(parser: argparse.ArgumentParser | None = None):
             "and obtain a signed HMAC session token before connecting to /ws or "
             "/ws-client. Defaults to the PIPECAT_WEBSOCKET_AUTH environment variable "
             "or 'none'."
+        ),
+    )
+    parser.add_argument(
+        "--ice-servers",
+        dest="ice_servers",
+        nargs="*",
+        default=os.getenv("PIPECAT_ICE_SERVERS"),
+        metavar="SERVER",
+        help=(
+            "STUN and TURN servers the WebRTC transport should use, given as bare URLs "
+            "(e.g. stun:stun.l.google.com:19302) or, when a TURN server needs credentials, "
+            'as JSON objects (e.g. \'{"urls": "turn:turn.example.com:3478", '
+            '"username": "user", "credential": "pass"}\'). Defaults to the PIPECAT_ICE_SERVERS '
+            "environment variable, which takes the same entries comma-separated or as a "
+            "JSON array. Without this the bot gathers host candidates only."
         ),
     )
     _env_origins = [
@@ -1810,6 +1923,13 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Validate and clean proxy hostname
     if args.proxy:
         args.proxy = _validate_and_clean_proxy(args.proxy)
+
+    # Normalize ICE servers from either the CLI tokens or PIPECAT_ICE_SERVERS
+    try:
+        args.ice_servers = _parse_ice_servers(args.ice_servers)
+    except ValueError as e:
+        logger.error(f"Invalid ICE server configuration: {e}")
+        return
 
     # --direct implies Daily transport
     if args.direct:

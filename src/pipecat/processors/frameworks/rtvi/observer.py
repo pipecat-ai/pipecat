@@ -59,6 +59,7 @@ from pipecat.metrics.metrics import (
     ProcessingMetricsData,
     STTUsageMetricsData,
     TTFAMetricsData,
+    TTFATMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -847,6 +848,10 @@ class RTVIObserver(BaseObserver):
                 if "ttfa" not in metrics:
                     metrics["ttfa"] = []
                 metrics["ttfa"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, TTFATMetricsData):
+                if "ttfat" not in metrics:
+                    metrics["ttfat"] = []
+                metrics["ttfat"].append(d.model_dump(exclude_none=True))
             elif isinstance(d, ProcessingMetricsData):
                 if "processing" not in metrics:
                     metrics["processing"] = []

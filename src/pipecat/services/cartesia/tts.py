@@ -23,10 +23,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -457,7 +457,22 @@ class CartesiaTTSService(WebsocketTTSService):
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
-        text = self._CARTESIA_TAG_RE.sub(" ", text)
+        """Remove Cartesia SSML tags from a word-timestamp token.
+
+        A tag standing between two alphanumeric characters is replaced by a space,
+        since it is the only thing separating two words (``"to<spell>1234"``).
+        Anywhere else it is removed outright: a space there would not join anything,
+        and it would split a word from its own punctuation
+        (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
+        token no longer matches the text that was sent for synthesis).
+        """
+
+        def replace(match: re.Match) -> str:
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            return " " if before.isalnum() and after.isalnum() else ""
+
+        text = self._CARTESIA_TAG_RE.sub(replace, text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
@@ -550,13 +565,13 @@ class CartesiaTTSService(WebsocketTTSService):
 
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
         await self._connect()
 
@@ -601,7 +616,7 @@ class CartesiaTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia")
+                logger.debug(f"{self}: Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -922,13 +937,14 @@ class CartesiaHttpTTSService(TTSService):
         """
         return language_to_cartesia_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
+
         self._output_sample_rate = self.sample_rate
         if self._owns_session:
             self._session = aiohttp.ClientSession()

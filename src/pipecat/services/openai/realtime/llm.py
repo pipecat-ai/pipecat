@@ -44,7 +44,6 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     SpeechControlParamsFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -56,7 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import LLMSettings
@@ -290,7 +289,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gpt-realtime-2",
+            model="gpt-realtime-2.1",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -489,14 +488,19 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # standard AIService frame handling
     #
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Release realtime LLM resources at teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close WebSocket connection.
@@ -514,11 +518,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             frame: The cancel frame triggering service cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release realtime LLM resources at teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     #
@@ -773,7 +772,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # match (rather than exact equality) so date-versioned variants of the same
     # base model also match without code changes. Extend this tuple as OpenAI
     # ships more reasoning-capable Realtime models.
-    _REASONING_CAPABLE_MODEL_SUBSTRINGS = ("gpt-realtime-2",)
+    _REASONING_CAPABLE_MODEL_SUBSTRINGS = ("gpt-realtime-2", "gpt-realtime-2.1")
 
     def _strip_unsupported_reasoning(
         self, settings: events.SessionProperties

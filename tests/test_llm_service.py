@@ -41,6 +41,7 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _expected_missing_tool_message(name: str) -> str:
@@ -65,8 +66,10 @@ class MockLLMService(LLMService):
             user_turn_completion_config=kwargs.pop("user_turn_completion_config", None),
         )
         super().__init__(settings=settings, **kwargs)
-        # Stub the pipeline task so FunctionCallParams can be constructed.
-        self._pipeline_worker = SimpleNamespace(app_resources=None)
+        # Stub the pipeline worker so FunctionCallParams can be constructed.
+        self._setup = frame_processor_setup(
+            pipeline_worker=SimpleNamespace(app_resources=None, worker_runner=None)
+        )
 
 
 class TestUnparameterizedSubclass(unittest.TestCase):
@@ -830,7 +833,6 @@ class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("kaboom", errors[0]["error_msg"])
         self.assertIsInstance(errors[0]["exception"], RuntimeError)
-        self.assertFalse(errors[0]["fatal"])
 
     async def test_the_exception_is_kept_out_of_the_llm_context(self):
         """Exception text reaches the user through the LLM; the ErrorFrame carries it instead."""

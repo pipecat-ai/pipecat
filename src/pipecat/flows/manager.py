@@ -256,8 +256,8 @@ class FlowManager:
         the pipeline, enabling advanced flow control and custom frame injection.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
 
         Examples:
             Queueing frames in handlers::
@@ -284,8 +284,8 @@ class FlowManager:
             Use :attr:`worker` instead. Will be removed in 2.0.0.
 
         Returns:
-            PipelineWorker: The pipeline worker instance used for frame processing
-                and queueing operations.
+            The pipeline worker instance used for frame processing and queueing
+            operations.
         """
         return self._worker
 
@@ -297,7 +297,7 @@ class FlowManager:
                 the flow will start at this node immediately.
 
         Raises:
-            FlowInitializationError: If initialization fails.
+            ~pipecat.flows.FlowInitializationError: If initialization fails.
 
         Examples:
             Initialize with an initial node::
@@ -341,7 +341,7 @@ class FlowManager:
             user messages, and assistant responses.
 
         Raises:
-            FlowError: If context aggregator is not available.
+            ~pipecat.flows.FlowError: If context aggregator is not available.
         """
         if not self._context_aggregator:
             raise FlowError("No context aggregator available")
@@ -374,7 +374,7 @@ class FlowManager:
             action: Action configuration dictionary containing type and optional handler.
 
         Raises:
-            ActionError: If action type is not registered and no valid handler provided.
+            ~pipecat.flows.ActionError: If action type is not registered and no valid handler provided.
         """
         action_type = action.get("type")
         handler = action.get("handler")
@@ -594,8 +594,8 @@ class FlowManager:
             node_config: Configuration for the new node.
 
         Raises:
-            FlowTransitionError: If manager not initialized.
-            FlowError: If node setup fails.
+            ~pipecat.flows.FlowTransitionError: If manager not initialized.
+            ~pipecat.flows.FlowError: If node setup fails.
         """
         await self._set_node(get_or_generate_node_name(node_config), node_config)
 
@@ -616,8 +616,8 @@ class FlowManager:
             node_config: Complete configuration for the node.
 
         Raises:
-            FlowTransitionError: If manager not initialized.
-            FlowError: If node setup fails.
+            ~pipecat.flows.FlowTransitionError: If manager not initialized.
+            ~pipecat.flows.FlowError: If node setup fails.
         """
         if not self._initialized:
             raise FlowTransitionError(f"{self.__class__.__name__} must be initialized first")
@@ -757,7 +757,7 @@ class FlowManager:
             strategy: Optional context update configuration.
 
         Raises:
-            FlowError: If context update fails.
+            ~pipecat.flows.FlowError: If context update fails.
         """
         try:
             frames = []
@@ -877,8 +877,8 @@ class FlowManager:
             config: Complete node configuration to validate.
 
         Raises:
-            FlowError: If required fields are missing.
-            InvalidFunctionError: If function format is invalid.
+            ~pipecat.flows.FlowError: If required fields are missing.
+            ~pipecat.flows.InvalidFunctionError: If function format is invalid.
         """
         # Check required fields
         if "task_messages" not in config:

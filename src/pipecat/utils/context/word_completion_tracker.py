@@ -4,60 +4,61 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Word completion tracker for TTS context ordering."""
-
-import re
-import unicodedata
+"""Per-frame bookkeeping for the words a TTS provider reports speaking."""
 
 from loguru import logger
 
-from pipecat.utils.context.text_segment_map import TextSegmentMap, strip_complete_markup
+from pipecat.utils.context.text_segment_map import TextSegmentMap
+from pipecat.utils.text.markup_utils import strip_complete_markup
 
 
 class WordCompletionTracker:
-    """Tracks whether all words from a source AggregatedTextFrame have been spoken.
+    """Follows one AggregatedTextFrame from dispatch until it is fully spoken.
 
-    Delegates completion tracking and cursor advancement entirely to a
-    :class:`~pipecat.utils.context.text_segment_map.TextSegmentMap` built from
-    ``tts_text`` (which may include TTS-specific SSML tags, e.g. ``<spell>...</spell>``
-    returned by some TTS providers in word-timestamp events). The map matches each
-    incoming word against the remaining TTS text and reports when the frame is
-    fully spoken, robust to punctuation, spacing, and markup -- this tracker's own
-    bookkeeping is limited to overriding cursors when a slot is force-completed
-    (see below).
+    A TTS provider reports the words it speaks one event at a time. This class
+    consumes those events for a single frame and answers, for each one:
 
-    When ``llm_text`` is provided (e.g. the original pattern-matched text including
-    delimiters like ``<card>4111 1111 1111 1111</card>``), the tracker additionally
-    maps each spoken word back to its corresponding span in that LLM text. This
-    lets callers attach the original text to ``TTSTextFrame`` entries so the
-    conversation context receives properly-tagged content rather than the cleaned
-    words received from the TTS provider.
+    - What text should the emitted ``TTSTextFrame`` carry? -- :meth:`get_word_for_frame`
+    - Which of the LLM's own text does that stand for? -- :meth:`get_llm_consumed`
+    - How much of the frame has been spoken? -- :meth:`get_accumulated_user_facing_text`
+      and :meth:`get_remaining_user_facing_text`
+    - Is the frame finished? -- the return of :meth:`add_word_and_check_complete`
+    - Did the word run past this frame? -- :meth:`get_overflow_word`
 
-    For unchanged segments (no text transforms applied) both cursors advance
-    proportionally word-by-word; for transformed segments (e.g. ``"$42.50"`` →
-    ``"forty two dollars and fifty cents"``) both cursors are held until the entire
-    TTS segment is consumed, then jump to the end of the original span in one step.
+    Three texts describe the same frame, and each answer above is phrased in one
+    of them:
 
-    Background: TTS providers apply their own SSML tags to the text before
-    synthesis and return word-timestamp events containing the raw spoken words
-    (e.g. ``"4111"``, ``"1111"``). Without LLM-text tracking, the conversation
-    context would only see those cleaned words and lose the original structure
-    (e.g. ``<card>4111 1111 1111 1111</card>``). By mapping consumed spans back
-    to positions in ``llm_text``, each TTSTextFrame can carry the exact span of
-    original text it represents.
+    ===================== ============================= =======================
+    Text                  Example                       Answers about
+    ===================== ============================= =======================
+    ``tts_text``          ``<spell>4111 1111</spell>``  what was spoken
+    ``user_facing_text``  ``4111 1111``                 what a UI displays
+    ``llm_text``          ``<card>4111 1111</card>``    what the context stores
+    ===================== ============================= =======================
 
-    Overflow handling: TTS providers sometimes return a single word token that
-    spans the boundary between two AggregatedTextFrames (e.g. ``"1111</spell>And"``
-    when one frame ends with ``1111</card>`` and the next begins with ``And``). The
-    tracker detects this and exposes the raw overflow suffix via ``get_overflow_word()``,
-    so callers can feed the remainder into the next frame's tracker and emit a
-    correctly-attributed TTSTextFrame for each part.
+    Keeping a position in all three is the job of
+    :class:`~pipecat.utils.context.text_segment_map.TextSegmentMap`, which this
+    class owns one of and defers to for every question of *where*. What the
+    tracker adds is the handful of decisions a position alone cannot express:
+
+    - **Providers drop events.** When a word does not match what is left to
+      speak, waiting for it would stall this frame and everything queued behind
+      it. The frame is force-completed instead: the unspoken remainder is emitted
+      so the context still gets it, and the stray word is handed back for the
+      next frame to try.
+    - **Some text is never spoken.** A closing ``</card>``, or a tag sitting
+      between the last word and its punctuation, never arrives as its own event.
+      Whatever is left once everything speakable is done belongs to this frame,
+      so the word that finishes it claims the rest.
+    - **A word can belong to two frames.** A provider may merge across the
+      boundary (``"1111And"``). The part that fits stays here; the rest is
+      exposed as overflow for the caller to feed to the next frame.
 
     Example::
 
         tracker = WordCompletionTracker("Hello, world!")
         tracker.add_word_and_check_complete("Hello")   # False
-        tracker.add_word_and_check_complete("world")   # True  — all TTS text consumed
+        tracker.add_word_and_check_complete("world")   # True -- nothing left to speak
     """
 
     def __init__(
@@ -66,230 +67,172 @@ class WordCompletionTracker:
         llm_text: str | None = None,
         user_facing_text: str | None = None,
     ):
-        """Initialize the tracker with the text of the frame being spoken.
+        """Initialize the tracker with the frame's three texts.
+
+        Only ``tts_text`` is required; the other two default to it, which is
+        exactly right for a frame nothing rewrote.
 
         Args:
-            tts_text: Full text of the AggregatedTextFrame sent to TTS (may include
-                TTS-specific SSML tags). Used as the cursor reference for the TTS
-                word stream.
-            llm_text: Original LLM-produced text including pattern delimiters (e.g.
-                ``<card>4111 1111 1111 1111</card>``). When provided, each
-                ``add_word_and_check_complete`` call also returns the corresponding
-                LLM span via ``get_llm_consumed()``.
-            user_facing_text: The original text of the AggregatedTextFrame as shown
-                to the user (e.g. via RTVI). Unlike ``tts_text``, this text has no
-                TTS-specific tags or transformations. The tracker maintains a cursor
-                into it so callers can retrieve the spoken and unspoken portions in
-                terms of user-visible text via ``get_accumulated_user_facing_text()``
-                and ``get_remaining_user_facing_text()``. Defaults to ``tts_text``
-                with markup stripped when not provided -- user-facing text should
-                never carry synthesis tags.
+            tts_text: What was sent to the TTS, and so what the incoming words
+                are matched against. May carry synthesis tags (``<spell>...``).
+            llm_text: What the LLM wrote, with any delimiters an aggregator split
+                off (``<card>4111 1111</card>``). Supply it to have each word
+                attributed back to it via :meth:`get_llm_consumed`, which is what
+                keeps those delimiters in the conversation context.
+            user_facing_text: What a client displays -- no tags, no rewrites.
+                Defaults to ``tts_text`` with markup stripped.
         """
-        # _tts_text is the raw text sent to TTS (may carry SSML tags). The segment
-        # map's raw_pos indexes into it; the get_*_tts_text accessors slice it.
+        # --- The three texts ---
         self._tts_text = tts_text
-
-        # _user_facing_text is the original text returned to the user (e.g. via RTVI).
-        # Falls back to tts_text (markup stripped) when not provided so this cursor
-        # is always valid, and so the segment map still splits out a non-tagged
-        # prefix/suffix around any markup instead of treating the whole identical
-        # string as one big segment.
-        # _user_facing_pos is a cursor into it, kept in sync with the segment map
-        # except when a slot is force-completed (which the segment map never
-        # observes, since it manually jumps this cursor to the end).
+        # Stripping markup from the fallback keeps synthesis tags out of what a UI
+        # shows, and gives the map a plain run to split around any tag rather than
+        # one atomic string.
         self._user_facing_text: str = (
             user_facing_text if user_facing_text is not None else strip_complete_markup(tts_text)
         )
-        self._user_facing_pos = 0
-
-        # _llm_text is the original LLM-produced text (with pattern delimiters like
-        # <card>...</card>). _llm_pos is a cursor into it, kept in sync with the
-        # segment map the same way as _user_facing_pos.
         self._llm_text = llm_text
+
+        # --- Cursors into two of them ---
+        # The map owns the authoritative positions; these mirror it, and only
+        # diverge where the tracker deliberately moves further (see
+        # _record_llm_span and _force_complete). The position in tts_text is not
+        # mirrored -- the map's raw_pos is read directly.
+        self._user_facing_pos = 0
         self._llm_pos = 0
 
-        # Per-call outputs: recomputed on every add_word_and_check_complete and
-        # read back through the get_* accessors. _frame_word is the part of the
-        # last word belonging to this frame; _overflow_word is the part that
-        # spilled into the next frame; _llm_consumed is the llm_text span it maps to.
-        self._overflow_word: str | None = None
-        self._llm_consumed: str | None = None
-        self._frame_word: str | None = None
+        # --- Answers about the most recent word ---
+        # Rewritten by every add_word_and_check_complete call and read back
+        # through the get_* accessors.
+        self._frame_word: str | None = None  # this frame's share of the word
+        self._overflow_word: str | None = None  # the next frame's share
+        self._llm_consumed: str | None = None  # LLM text the word stands for
 
-        # Set when a slot is force-completed (a word didn't match the remaining
-        # TTS text, e.g. the provider dropped a word-timestamp event). The segment
-        # map itself is never advanced in that case, so its own is_complete stays
-        # stale -- this flag is the authoritative completion signal from then on.
+        # Set by _force_complete. The map is never advanced there, so its own
+        # is_complete would keep saying False; this flag is the answer instead.
         self._force_completed = False
 
         self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
 
-    # Typographic variants that LLMs commonly emit but TTS services normalize away.
-    _TYPOGRAPHY_FOLD = str.maketrans(
-        {
-            "‘": "'",  # ' LEFT SINGLE QUOTATION MARK
-            "’": "'",  # ' RIGHT SINGLE QUOTATION MARK
-            "ʼ": "'",  # ʼ MODIFIER LETTER APOSTROPHE
-            "“": '"',  # " LEFT DOUBLE QUOTATION MARK
-            "”": '"',  # " RIGHT DOUBLE QUOTATION MARK
-            "–": "-",  # – EN DASH
-            "—": "-",  # — EM DASH
-        }
-    )
-
-    @staticmethod
-    def _fold_typography(text: str) -> str:
-        """Replace typographic punctuation variants with their ASCII equivalents."""
-        return text.translate(WordCompletionTracker._TYPOGRAPHY_FOLD)
-
-    @staticmethod
-    def _fold_for_comparison(text: str) -> str:
-        """Fold text for lenient span-containment comparisons.
-
-        Applies typographic folding, casefolds, and collapses connector
-        characters (spaces and hyphens). This makes the comparison tolerant of
-        case-only replacements (``"SQL"`` vs ``"sql"``) and replacements that
-        only change how words are joined (``"BODYPUMP"`` vs ``"body-pump"``),
-        while still preserving other content (digits, emoji, punctuation) so
-        the safeguard can detect a genuinely missing/mismatched word.
-        """
-        folded = WordCompletionTracker._fold_typography(text).casefold()
-        return re.sub(r"[-\s]+", "", folded)
-
-    @staticmethod
-    def _remove_trailing_punctuation(text: str) -> str:
-        """Remove punctuation only at the very end of the given text."""
-        i = len(text)
-        while i > 0 and unicodedata.category(text[i - 1]).startswith("P"):
-            i -= 1
-        return text[:i]
-
-    @staticmethod
-    def _remove_leading_punctuation(text: str) -> str:
-        """Remove punctuation and whitespace only at the very start of the given text."""
-        i = 0
-        while i < len(text) and (
-            text[i].isspace() or unicodedata.category(text[i]).startswith("P")
-        ):
-            i += 1
-        return text[i:]
-
     def add_word_and_check_complete(self, word: str) -> bool:
-        """Record a spoken word from a word-timestamp event.
+        """Record one word the TTS provider reported speaking.
 
-        Before advancing, checks whether the word belongs to this frame via
-        ``word_belongs_here``. If it does not (e.g. the TTS provider silently
-        dropped a word-timestamp), the slot is force-completed: the remaining
-        unspoken text from ``tts_text`` is stored in ``_frame_word`` so a
-        TTSTextFrame can still be emitted for the dropped portion, all remaining
-        ``llm_text`` is consumed, and the entire incoming word is set as overflow
-        so the caller's overflow path routes it to the next slot unchanged.
+        Three things can happen, in this order:
 
-        Otherwise the word is handed to the segment map, which matches it against
-        the remaining TTS text and advances its own cursors. If ``llm_text`` was
-        provided at construction time, also stores the corresponding LLM span in
-        ``_llm_consumed``. When this word completes the frame, the entire remaining
-        LLM text (including any closing tags) is consumed so nothing is lost.
-
-        If the word overshoots the expected length (overflow -- it spans the
-        boundary into the next AggregatedTextFrame), the raw suffix of the word is
-        stored in ``_overflow_word``, so the caller can attribute it to the next frame.
+        1. The frame is already finished -- the word is ignored.
+        2. The word does not match what is left to speak, so the provider must
+           have dropped an event: the frame is force-completed (see
+           :meth:`_force_complete`) and this word is handed back as overflow.
+        3. Otherwise the word advances the frame. Afterwards the ``get_*``
+           accessors describe it: this frame's share of the word, the LLM text it
+           stands for, and how much of the frame is now spoken.
 
         Args:
-            word: A single word token returned by the TTS service. TTS services that
-                emit spaces and punctuation as separate tokens (e.g. Inworld) must
-                pre-merge those tokens into the preceding word before calling this
-                method (see ``TTSService._merge_punct_tokens``). May also be a
-                fragment of a still-open SSML tag; the segment map matches such
-                fragments against the remaining TTS text without needing to parse
-                them as markup.
+            word: One token from the provider's word-timestamp stream. It may be
+                a plain word, a word carrying its own spacing or punctuation, or
+                a fragment of a still-open SSML tag -- matching is textual, so
+                none of those need special handling from the caller. Services
+                that report spaces and punctuation as separate tokens (e.g.
+                Inworld) must merge them into the preceding word first, via
+                ``merge_punct_tokens``.
 
         Returns:
-            True when all expected content has been covered.
+            True once nothing is left for this frame to speak.
         """
+        self._frame_word = None
         self._overflow_word = None
         self._llm_consumed = None
-        self._frame_word = None
 
-        # Reject only once every raw char of tts_text has actually been consumed.
-        # `is_complete` (alnum-based) can turn True earlier -- e.g. a frame ending
-        # in a symbol/emoji that contributes no alphanumeric content is "complete"
-        # before that trailing word arrives -- but such a word must still be
-        # accepted normally rather than rejected here.
+        # Every raw character consumed, not is_complete: a frame ending in an
+        # emoji contributes no alphanumeric content, so it reads as complete
+        # before that emoji's own event arrives, and that event is still wanted.
         if self._force_completed or self._segment_map.raw_pos >= len(self._tts_text):
             logger.warning(f"{self}, trying to add a word in an already complete frame")
             return True
 
-        # If the word doesn't match the next expected text, the TTS provider
-        # likely dropped a word-timestamp event. Force-complete this slot: emit the
-        # remaining TTS text as _frame_word so a TTSTextFrame is still produced
-        # for the unspoken portion, consume all remaining llm_text, and route the
-        # entire incoming word as overflow for the next slot.
         if not self.word_belongs_here(word):
-            self._frame_word = self._tts_text[self._segment_map.raw_pos :]
-            self._user_facing_pos = len(self._user_facing_text)
-            if self._llm_text is not None:
-                # Sweep all remaining llm_text so nothing is lost, then guard
-                # against a tts_text/llm_text desync (see the helper).
-                self._llm_consumed = self._llm_text[self._llm_pos :]
-                self._llm_pos = len(self._llm_text)
-                self._discard_llm_span_if_frame_word_missing()
-            self._force_completed = True
-            self._overflow_word = word
-            return True
+            return self._force_complete(word)
 
-        # Word belongs to this frame: let the segment map match it against the
-        # remaining TTS text and advance its own cursors.
-        prev_llm_pos = self._llm_pos
+        llm_pos_before = self._llm_pos
         self._segment_map.advance_word(word)
 
+        # Neither end of the token is necessarily this frame's: the head can
+        # repeat punctuation the previous word already carried, and the tail can
+        # run into the next frame. The map measures both; keep what is between.
+        # Without an llm_text there is no recorded span that could already have
+        # carried the mark, so it is new text on this frame.
+        head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
         overflow = self._segment_map.last_overflow
-        self._frame_word = word[: len(word) - len(overflow)] if overflow else word
+        tail = len(word) - len(overflow) if overflow else len(word)
+        self._frame_word = word[head:tail]
         self._overflow_word = overflow
 
         self._user_facing_pos = self._segment_map.user_facing_pos
         self._llm_pos = self._segment_map.llm_pos
 
         if self._llm_text is not None:
-            self._attribute_llm_consumed(word, prev_llm_pos)
+            self._record_llm_span(word, llm_pos_before)
 
-        return self.is_complete
+        complete = self.is_complete
+        if complete:
+            # Everything speakable has been spoken, so anything still left is
+            # text no word will ever arrive for -- a closing tag, or one sitting
+            # between the last word and its punctuation. It belongs to this
+            # frame, so take it rather than leave it out of the turn.
+            self._user_facing_pos = len(self._user_facing_text)
+        return complete
 
-    def _attribute_llm_consumed(self, word: str, prev_llm_pos: int) -> None:
-        """Set ``_llm_consumed`` to the llm_text span the just-advanced word maps to.
+    def _force_complete(self, word: str) -> bool:
+        """End this frame early because *word* does not belong to it.
 
-        Only called when ``llm_text`` was provided. Four cases:
+        The provider dropped one or more events, so the rest of this frame will
+        never be reported. Rather than stall, emit the unspoken remainder as this
+        frame's word -- the conversation context still receives the full text --
+        and hand *word* back as overflow for the next frame to try.
 
-        - **Frame completed**: sweep everything from *prev_llm_pos* to the end so
-          the completing word's span plus any trailing closing tags (e.g.
-          ``</card>``) are included.
-        - **Mid transformed segment**: attribution is suppressed (``None``) --
-          only the word that completes the segment carries its original text.
-        - **Non-alnum word** (emoji/punctuation) that moved no cursor and
-          completed no segment: consume its raw characters from ``llm_text``
-          directly, skipping leading spaces owned by the previous token.
-        - **Otherwise**: the span from *prev_llm_pos* to the new llm cursor
-          (covers a normal word, or a zero-budget segment that completed via this
-          word since ``llm_pos`` was already synced from its jump).
+        The segment map is deliberately left where it is, since nothing here was
+        actually spoken; :attr:`_force_completed` answers for it from now on.
 
-        Except mid-transformed-segment, the span is validated against the frame
-        word and discarded on a desync (see
-        :meth:`_discard_llm_span_if_frame_word_missing`). The validation is
-        skipped when the completing word finished a transformed segment, since
-        the spoken word (e.g. ``"dollars"``) won't appear verbatim in the
-        original (e.g. ``"$5"``).
+        Returns:
+            Always True -- the frame is finished.
+        """
+        self._frame_word = self._tts_text[self._segment_map.raw_pos :]
+        self._user_facing_pos = len(self._user_facing_text)
+        if self._llm_text is not None:
+            # The whole remainder is this frame's by definition, tags included.
+            self._llm_consumed = self._llm_text[self._llm_pos :]
+            self._llm_pos = len(self._llm_text)
+        self._force_completed = True
+        self._overflow_word = word
+        return True
+
+    def _record_llm_span(self, word: str, llm_pos_before: int) -> None:
+        """Record which part of ``llm_text`` the word just added stands for.
+
+        Usually that is simply the span the map's cursor moved over. Two cases
+        reach further, and both leave ``_llm_pos`` ahead of the map's:
+
+        - **The word finished the frame**: take everything to the end of
+          ``llm_text``. The map stops at the last spoken character, so a closing
+          tag -- which never arrives as its own event -- is still outstanding and
+          belongs to this word.
+        - **The cursor did not move**, because the map placed the word without
+          spending any budget (an emoji or symbol): take the word's own length
+          from ``llm_text``, skipping spaces the previous word owns.
+
+        A word inside a transformed segment records nothing, and is checked
+        before that second case: the cursor is held there on purpose, so "did not
+        move" would be misread as "spent nothing" and would walk the cursor
+        through text the transform covers. Only the word completing the segment
+        carries its original span.
         """
         assert self._llm_text is not None
-        completed = self._segment_map.last_completed_segment
 
         if self.is_complete:
-            self._llm_consumed = self._llm_text[prev_llm_pos:]
+            self._llm_consumed = self._llm_text[llm_pos_before:]
             self._llm_pos = len(self._llm_text)
-            if completed is None or not completed.is_transformed:
-                self._discard_llm_span_if_frame_word_missing()
         elif self._segment_map.in_transformed_segment:
             self._llm_consumed = None
-        elif self._llm_pos == prev_llm_pos and completed is None:
+        elif self._llm_pos == llm_pos_before and self._segment_map.last_completed_segment is None:
             start = self._llm_pos
             while start < len(self._llm_text) and self._llm_text[start].isspace():
                 start += 1
@@ -297,147 +240,117 @@ class WordCompletionTracker:
             self._llm_consumed = self._llm_text[start:end]
             self._llm_pos = end
         else:
-            self._llm_consumed = self._llm_text[prev_llm_pos : self._llm_pos]
-            if completed is None or not completed.is_transformed:
-                self._discard_llm_span_if_frame_word_missing()
-
-    def _discard_llm_span_if_frame_word_missing(self) -> None:
-        """Drop ``_llm_consumed`` if it doesn't contain the current frame word.
-
-        A safeguard against ``tts_text`` and ``llm_text`` drifting out of sync:
-        the span attributed to a word should contain that word. Compared case-
-        and connector-insensitively (casefolded, hyphens/spaces collapsed) so a
-        case-only (``"SQL"`` vs ``"sql"``) or hyphen-vs-space replacement isn't
-        mistaken for a desync. An all-punctuation frame word (nothing to match)
-        is left alone.
-        """
-        frame_word = self._remove_trailing_punctuation(self._frame_word or "")
-        if not frame_word:
-            return
-        folded_span = self._fold_for_comparison(self._llm_consumed or "")
-        if self._fold_for_comparison(frame_word) in folded_span:
-            return
-
-        # The word may lead with punctuation the previous word already consumed:
-        # advance_by_alnums sweeps punctuation trailing a word into that word's
-        # span, so a provider that instead reports it with the *following* word
-        # (", I" rather than "Yeah,") presents it twice. Drop the duplicate from
-        # the frame word rather than the whole attribution -- keeping it would
-        # emit the punctuation a second time into the conversation context.
-        trimmed = self._remove_leading_punctuation(frame_word)
-        if trimmed and self._fold_for_comparison(trimmed) in folded_span:
-            self._frame_word = self._remove_leading_punctuation(self._frame_word or "")
-            return
-
-        logger.warning(
-            f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
-            f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
-        )
-        self._llm_consumed = None
+            self._llm_consumed = self._llm_text[llm_pos_before : self._llm_pos]
 
     def word_belongs_here(self, word: str) -> bool:
-        """Return True if this word plausibly belongs to the remaining TTS text.
+        """Return True if *word* plausibly continues what this frame has left to say.
 
-        Delegates entirely to the segment map, which owns the remaining-text
-        matching needed to decide.
-
-        Used to detect when the TTS provider silently dropped a word-timestamp
-        event: if the incoming word does not match this slot's remaining content,
-        the caller should force-complete this slot and route the word to the next.
+        A False answer means the provider dropped an event. Callers ask this
+        before adding a word so they can offer it to the next frame instead;
+        adding it anyway force-completes this one.
         """
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:
-        """True when the last word is mid-flight inside a transformed segment.
+        """True when the last word was one step inside a rewritten span.
 
-        When True, the sequencer sets ``append_to_context=False`` on the emitted
-        ``TTSTextFrame`` so intermediate TTS words (e.g. "forty", "two") are not
-        written to the conversation context. Only the completing word of the segment
-        carries ``raw_text`` with the original text (e.g. ``"$42.50"``).
+        ``"$42.50"`` is spoken as five words, none of which the transcript should
+        contain. Callers keep every such word out of the conversation context and
+        let the word that finishes the span carry ``"$42.50"`` for all of them.
         """
         return self._segment_map.in_transformed_segment
 
     def get_word_for_frame(self) -> str | None:
-        """Return the portion of the last word that belongs to this frame.
+        """Return this frame's share of the last word -- the text to emit for it.
 
-        - Normal word (no overflow): the full word.
-        - Straddling word: the prefix up to the frame boundary (e.g. ``"1111"``
-          from ``"1111 And"``).
-        - Force-completed (word didn't belong): the remaining unspoken text from
-          ``tts_text`` so a TTSTextFrame can still be emitted for the dropped
-          portion. The incoming word is routed as overflow to the next slot.
+        Usually the whole word. A word straddling the boundary gives up its tail
+        (``"1111"`` out of ``"1111And"``), and a word that repeats the previous
+        word's punctuation gives up that mark. After a force-complete this is the
+        frame's unspoken remainder instead, so nothing is missing from the turn.
         """
         return self._frame_word.strip() if self._frame_word else self._frame_word
 
     def get_overflow_word(self) -> str | None:
-        """Return the raw suffix of the last word that overflows into the next frame.
+        """Return the part of the last word that belongs to the *next* frame.
 
-        Preserves the original casing and any non-alphanumeric characters so the
-        overflow TTSTextFrame has natural word text. Returns None when there is no
-        overflow (the word fit entirely within this frame).
+        Feed it to that frame's tracker as if the provider had sent it there.
+        Casing and punctuation are untouched so it still reads as a real word.
+        None when the word fit entirely within this frame.
         """
         return self._overflow_word.strip() if self._overflow_word else self._overflow_word
 
     def get_llm_consumed(self) -> str | None:
-        """Return the LLM text span consumed for the last added word.
+        """Return the LLM's own text that the last word stands for.
 
-        Returns None if no llm_text was provided at construction time.
+        This is what the conversation context records, so it keeps the tags and
+        spellings the LLM wrote (``"<card>4111"``) rather than what the provider
+        reported speaking (``"4111"``).
+
+        None when there is nothing to attribute: no ``llm_text`` was given, the
+        word is mid-rewrite, or ``llm_text`` is already exhausted (a trailing
+        emoji it never carried).
         """
-        return self._llm_consumed.strip() if self._llm_consumed else self._llm_consumed
+        if not self._llm_consumed:
+            return None
+        return self._llm_consumed.strip() or None
 
     def get_accumulated_user_facing_text(self) -> str:
-        """Return all consumed text from user_facing_text up to the current cursor position."""
+        """Return the part of the frame spoken so far, as the user sees it.
+
+        With :meth:`get_remaining_user_facing_text` this splits the frame's text
+        in two, which is what lets a client highlight speech as it happens.
+        """
         return self._user_facing_text[: self._user_facing_pos]
 
     def get_remaining_user_facing_text(self, strip: bool = True) -> str:
-        """Return the unspoken portion of user_facing_text.
+        """Return the part of the frame not yet spoken, as the user sees it.
 
         Args:
-            strip: When True (default), leading/trailing whitespace is removed.
-                Set to False to preserve leading whitespace so that
-                ``get_accumulated_user_facing_text() + get_remaining_user_facing_text(strip=False)``
-                reconstructs the original text exactly.
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, so accumulated + remaining reproduces the frame's
+                text exactly -- callers that index into that text rely on it.
         """
         remaining = self._user_facing_text[self._user_facing_pos :]
         return remaining.strip() if strip else remaining
 
     def get_accumulated_tts_text(self) -> str:
-        """Return all consumed text from tts_text up to the current cursor position.
+        """Return everything spoken so far, as it was sent to the TTS.
 
-        Unlike ``get_word_for_frame()`` (which reflects only the last word), this returns
-        everything that has been consumed since construction or the last ``reset()``.
+        The whole frame up to the cursor, where :meth:`get_word_for_frame`
+        describes only the most recent word.
         """
         return self._tts_text[: self._segment_map.raw_pos]
 
     def get_accumulated_llm_text(self) -> str | None:
-        """Return all consumed text from llm_text up to the current cursor position.
+        """Return everything spoken so far, as the LLM wrote it.
 
-        Unlike ``get_llm_consumed()`` (which reflects only the last word), this returns
-        everything that has been consumed since construction or the last ``reset()``.
-        Returns None if no llm_text was provided at construction time.
+        The whole frame up to the cursor, where :meth:`get_llm_consumed`
+        describes only the most recent word. None without an ``llm_text``.
         """
         if self._llm_text is None:
             return None
         return self._llm_text[: self._llm_pos]
 
     def get_remaining_tts_text(self, strip: bool = True) -> str:
-        """Return the unspoken portion of tts_text.
+        """Return what this frame still has left to speak.
+
+        Callers ending a frame early emit this, so text the provider never
+        reported still reaches the conversation context.
 
         Args:
-            strip: When True (default), leading/trailing whitespace is removed.
-                Set to False to preserve leading whitespace so that
-                ``get_accumulated_tts_text() + get_remaining_tts_text(strip=False)``
-                reconstructs the original text exactly.
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, so accumulated + remaining reproduces ``tts_text``
+                exactly.
         """
         remaining = self._tts_text[self._segment_map.raw_pos :]
         return remaining.strip() if strip else remaining
 
     def get_remaining_llm_text(self) -> str | None:
-        """Return the unspoken portion of llm_text, stripped of leading/trailing whitespace.
+        """Return what this frame still has left to speak, as the LLM wrote it.
 
-        Returns None if no llm_text was provided at construction time. Like
-        ``get_remaining_tts_text()``, intended for force-completing a slot so that the
-        conversation context receives the full original text.
+        The companion to :meth:`get_remaining_tts_text` when ending a frame
+        early: that supplies the text to emit, this the text to record. None
+        without an ``llm_text``, or when nothing is left.
         """
         if self._llm_text is None:
             return None
@@ -446,11 +359,16 @@ class WordCompletionTracker:
 
     @property
     def is_complete(self) -> bool:
-        """True when this frame's TTS text has been fully accounted for."""
+        """True when this frame has nothing left to speak.
+
+        Alphanumeric content is what counts, so a frame whose remainder is only
+        punctuation or a closing tag is already finished -- no word will ever
+        arrive for those.
+        """
         return self._force_completed or self._segment_map.is_complete
 
     def reset(self):
-        """Reset all cursors and per-call outputs without changing the expected texts."""
+        """Rewind to the start of the frame, keeping the three texts."""
         self._user_facing_pos = 0
         self._llm_pos = 0
         self._overflow_word = None

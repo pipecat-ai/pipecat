@@ -88,7 +88,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -146,8 +146,8 @@ class LLMUserAggregatorParams:
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         filter_incomplete_user_turns: When enabled, the LLM outputs a
-            turn-completion marker at the start of each response: ✓ (complete),
-            ○ (incomplete short), or ◐ (incomplete long). Incomplete
+            turn-completion marker at the start of each response: ● (complete),
+            ◐ (incomplete short), or ○ (incomplete long). Incomplete
             responses are suppressed and timeouts trigger re-prompting.
 
             .. deprecated:: 1.2.0
@@ -760,10 +760,37 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the aggregator.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        if self._vad_controller:
+            await self._vad_controller.setup(setup)
+
+        await self._user_turn_controller.setup(setup)
+
+        await self._user_idle_controller.setup(setup)
+
+        for s in self._params.user_mute_strategies:
+            await s.setup(setup)
+
     async def cleanup(self):
         """Release this aggregator's resources at teardown."""
         await super().cleanup()
-        await self._cleanup()
+
+        await self._cancel_realtime_handoff_flush_task()
+
+        if self._vad_controller:
+            await self._vad_controller.cleanup()
+
+        await self._user_turn_controller.cleanup()
+        await self._user_idle_controller.cleanup()
+
+        for s in self._params.user_mute_strategies:
+            await s.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
@@ -777,12 +804,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if await self._maybe_mute_frame(frame):
             return
 
-        if self._vad_controller:
-            await self._vad_controller.process_frame(frame)
-
         if isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
             await self._start(frame)
         elif isinstance(frame, EndFrame):
@@ -837,6 +859,9 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
+
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
@@ -861,15 +886,7 @@ class LLMUserAggregator(LLMContextAggregator):
         return aggregation
 
     async def _start(self, frame: StartFrame):
-        if self._vad_controller:
-            await self._vad_controller.setup(self.task_manager)
-
-        await self._user_turn_controller.setup(self.task_manager)
-
-        await self._user_idle_controller.setup(self.task_manager)
-
-        for s in self._params.user_mute_strategies:
-            await s.setup(self.task_manager)
+        await self._start_controllers()
 
     async def _stop(self, frame: EndFrame):
         if self._realtime_service_mode:
@@ -881,7 +898,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
-        await self._cleanup()
+        await self._stop_controllers()
 
     async def _cancel(self, frame: CancelFrame):
         # See _stop — same realtime-mode vs cascade dispatch.
@@ -890,7 +907,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
-        await self._cleanup()
+        await self._stop_controllers()
 
     def _apply_realtime_mode_strategy_mutations(
         self, user_turn_strategies: UserTurnStrategies, are_user_provided_custom_strategies: bool
@@ -1114,15 +1131,21 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._realtime_handoff_flush_task)
         self._realtime_handoff_flush_task = None
 
-    async def _cleanup(self):
+    async def _start_controllers(self):
+        if self._vad_controller:
+            await self._vad_controller.start()
+        await self._user_turn_controller.start()
+
+    async def _stop_controllers(self):
+        # At session end the controllers' timers can only report what ending
+        # looks like: no audio arriving, no turn finishing, the user idle. They
+        # stop here, while what they hold (the VAD analyzer, the turn
+        # strategies) may be shared and is released in cleanup() instead.
         await self._cancel_realtime_handoff_flush_task()
         if self._vad_controller:
-            await self._vad_controller.cleanup()
-        await self._user_turn_controller.cleanup()
-        await self._user_idle_controller.cleanup()
-
-        for s in self._params.user_mute_strategies:
-            await s.cleanup()
+            await self._vad_controller.stop()
+        await self._user_turn_controller.stop()
+        await self._user_idle_controller.stop()
 
     async def _maybe_mute_frame(self, frame: Frame):
         # Lifecycle frames should never be muted and should not trigger mute
@@ -1461,6 +1484,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
+        # Markers seen on LLMMarkerFrames, so a service configured with markers
+        # other than the defaults still gets them stripped from transcripts.
+        self._seen_turn_markers: set[str] = set()
         self._context_updated_tasks: set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
@@ -1506,6 +1532,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
             True if function calls are in progress, False otherwise.
         """
         return bool(self._function_calls_in_progress)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the aggregator.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        if self._summarizer:
+            await self._summarizer.setup(setup)
 
     async def cleanup(self):
         """Release this aggregator's resources at teardown."""
@@ -1643,8 +1679,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _start(self, frame: StartFrame):
         if self._realtime_service_mode:
             self._require_paired_user_aggregator()
-        if self._summarizer:
-            await self._summarizer.setup(self.task_manager)
 
     def _require_paired_user_aggregator(self):
         """Raise if realtime mode is active without a paired user aggregator.
@@ -2063,10 +2097,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_marker_frame(self, frame: LLMMarkerFrame):
+        self._seen_turn_markers.add(frame.marker)
+
         if frame.append_to_context_immediately:
             # Stand-alone marker: write it to the context now as its
             # own assistant message. Used when the marker is the entire
-            # assistant turn — e.g. the ○ / ◐ incomplete-turn signals,
+            # assistant turn — e.g. the ◐ / ○ incomplete-turn signals,
             # where the spoken response is suppressed and the marker
             # is the only artifact.
             self._context.add_message({"role": "assistant", "content": frame.marker})
@@ -2077,9 +2113,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         # Marker is part of an in-progress assistant response. Append
         # it to the running aggregation so `push_aggregation` writes
-        # marker + text as a single context message — e.g. the ✓
+        # marker + text as a single context message — e.g. the ●
         # complete-turn signal that prefixes the spoken response,
-        # producing "✓ <response>" in context. Markers are stripped
+        # producing "● <response>" in context. Markers are stripped
         # from the transcript via
         # `_maybe_strip_turn_completion_markers` so consumers see
         # clean text.
@@ -2190,8 +2226,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
     def _maybe_strip_turn_completion_markers(self, text: str) -> str:
         """Strip turn completion markers from assistant transcript.
 
-        These markers (✓, ○, ◐) are used internally for turn completion
-        detection and shouldn't appear in the final transcript.
+        Turn completion markers are used internally for turn completion
+        detection and shouldn't appear in the final transcript. Both the
+        default markers and any seen on this turn's marker frames are removed,
+        so a custom marker set is stripped too.
         """
         from pipecat.turns.user_turn_completion_mixin import (
             USER_TURN_COMPLETE_MARKER,
@@ -2200,11 +2238,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
         marker_found = False
-        for marker in (
+        for marker in {
             USER_TURN_COMPLETE_MARKER,
             USER_TURN_INCOMPLETE_SHORT_MARKER,
             USER_TURN_INCOMPLETE_LONG_MARKER,
-        ):
+        } | self._seen_turn_markers:
             if marker in text:
                 text = text.replace(marker, "")
                 marker_found = True

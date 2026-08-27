@@ -52,31 +52,43 @@ Run:
 git diff main..HEAD --name-only
 ```
 
-Filter to files that could affect documentation:
+Every `.py` file under `src/pipecat/` is in scope. The package ships public API
+well beyond the per-provider service files — frames, workers, the bus, the eval
+harness, the CLI, the runner, and the service base classes are all documented
+somewhere on the site.
 
-- `src/pipecat/services/**/*.py` (service implementations)
-- `src/pipecat/transports/**/*.py` (transport implementations)
-- `src/pipecat/serializers/**/*.py` (serializer implementations)
-- `src/pipecat/processors/**/*.py` (processor implementations)
-- `src/pipecat/audio/**/*.py` (audio utilities)
-- `src/pipecat/turns/**/*.py` (turn management)
-- `src/pipecat/observers/**/*.py` (observers)
-- `src/pipecat/pipeline/**/*.py` (pipeline core)
-- `src/pipecat/flows/**/*.py` (Pipecat Flows)
+Exclude only:
 
-Ignore `__init__.py`, `__pycache__`, test files, and files that only contain type re-exports.
+- `src/pipecat/tests/**` (test helpers)
+- `__pycache__/`, `*.pyc`, `py.typed`
+- `__init__.py` files that only re-export names defined elsewhere
+
+Changes outside `src/pipecat/` — examples, CI config, the docs directory — don't
+trigger doc updates on their own.
+
+Then apply the mapping file's Skip list (Step 4), which names the small set of
+genuinely internal files. Don't invent further reasons to drop a file here: being
+a base class, a shared module, or "core architecture" is not one. Public
+constructor parameters and observable behavior get documented wherever they live,
+and a file whose page isn't obvious should reach Step 8 as a reported gap rather
+than disappear.
 
 ### Step 4: Map source files to doc pages
 
 For each changed source file, resolve the doc page to edit. Read the mapping file at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md` and apply this resolution order. **Confirm every candidate path exists in `DOCS_PATH` before using it.**
 
 1. **Skip list** — if the file matches the skip list, stop. It triggers no doc update.
-2. **Pattern match** — apply the pattern table to get a candidate path, then confirm the `.mdx` file exists (glob/`ls` it under `DOCS_PATH`). If it exists, use it.
+2. **Base classes** — if the file is in the base-classes table, use every page it lists. A change here affects the services that inherit it, so check each page rather than stopping at the first.
 3. **Non-standard locations** — if the file is in the non-standard table, use that entry as the candidate path and confirm it exists.
-4. **Search** — if no candidate from steps 2–3 exists on disk, grep `DOCS_PATH` for the file's main class name (see the mapping file's Search section).
-5. **Unmapped** — if nothing resolves, treat the file as unmapped and report it in Step 8.
+4. **Pattern match** — apply the pattern table to get a candidate path, then confirm the `.mdx` file exists (glob/`ls` it under `DOCS_PATH`). If it exists, use it.
+5. **Search** — if no candidate from steps 2–4 exists on disk, grep `DOCS_PATH` for the file's main class name (see the mapping file's Search section).
+6. **Unmapped** — if nothing resolves, treat the file as unmapped and report it in Step 8.
 
 Never edit a path you haven't confirmed exists. If a candidate path doesn't resolve, fall through to the search step.
+
+Reaching step 6 is a finding, not a dead end: an unmapped file means public API
+with no home on the docs site, which is exactly what Step 8 exists to surface.
+Never resolve a file by dropping it.
 
 ### Step 5: Analyze each source-doc pair
 
@@ -287,7 +299,43 @@ To determine the correct values:
 
 Insert the new row **alphabetically** within the table. Match the column alignment of the existing rows.
 
-### Step 9: Output summary
+#### 8d: Frontmatter conventions
+
+A new page's `title` and `description` become its `llms.txt` entry and its
+citation label in AI tools, and the docs repo's metadata lint enforces them:
+
+- **title**: 50 chars max, no `- Pipecat` suffix (Mintlify appends it). Add a
+  `sidebarTitle` when the title runs past 30 chars.
+- **description**: 110-140 chars, naming the classes the page documents and the
+  modality acronym (STT/TTS/LLM/VAD) where relevant. Must be unique site-wide,
+  as must the effective unfurl title (`og:title` if set, else `title`) — add an
+  `og:title` when another page already uses the same short title.
+
+### Step 9: Format and regenerate llms.txt
+
+The docs repo checks in `llms.txt` (a navigation-ordered index built from each
+page's frontmatter) and `llms-full.txt` (every page's full body). Its metadata
+lint fails when either is stale, so regenerate them after any page edit,
+`docs.json` navigation change, or new page.
+
+Prettier reflows MDX and `llms-full.txt` embeds the page bodies verbatim, so
+formatting has to settle before generation:
+
+```bash
+cd DOCS_PATH
+npx prettier --ignore-unknown --write <edited files>
+node scripts/gen-llms-txt.mjs
+```
+
+Commit the doc edits together with the regenerated `llms.txt` and
+`llms-full.txt`. Generating before formatting leaves them stale — as does
+relying on the repo's pre-commit hook, which formats pages after generation has
+already run.
+
+`node scripts/docs-meta-lint.mjs` reports the same staleness and frontmatter
+findings CI will.
+
+### Step 10: Output summary
 
 After all edits are complete, print a summary:
 
@@ -338,4 +386,5 @@ Before finishing, verify:
 - [ ] Guides referencing changed APIs were checked and updated
 - [ ] New service pages were added to `docs.json` in the correct group, alphabetically
 - [ ] New service pages were added to `supported-services.mdx` in the correct table, alphabetically
+- [ ] Edited pages were formatted, then `llms.txt` and `llms-full.txt` regenerated and committed
 - [ ] Unmapped files were reported to the user

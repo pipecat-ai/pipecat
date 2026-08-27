@@ -30,57 +30,66 @@ VAD signal, useful as a timing anchor when a turn-detection strategy gates or de
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
 The bot's reply can be asserted three ways:
-    response       the transcription of the bot's *actual synthesized audio* (a
-                   local STT — Moonshine or Whisper — run by the harness) in
-                   audio modality, or the LLM text in text modality. The real
-                   end-to-end check — prefer this.
-    llm_response   the LLM's text output (``bot-llm-text``). Available in both
-                   modalities.
-    tts_response   the text the TTS reports speaking (``bot-tts-text``, with
-                   word timing). Audio modality only.
+
+``response``
+    the transcription of the bot's *actual synthesized audio* (a local STT —
+    Moonshine or Whisper — run by the harness) in audio modality, or the LLM
+    text in text modality. The real end-to-end check — prefer this.
+
+``llm_response``
+    the LLM's text output (``bot-llm-text``). Available in both modalities.
+
+``tts_response``
+    the text the TTS reports speaking (``bot-tts-text``, with word timing).
+    Audio modality only.
 
 Supported expectation fields (per event):
-    event: <name>              required — event type name
-    within_ms: <int>           latency budget from the most recent anchor
-                               (optional; defaults to 60s when omitted)
-    text_contains: <str>       substring check on the event's text content
-    calls:                     for ``function_call`` — the set of calls the turn
-                               should make, matched by name in any order; the
-                               expectation passes only when all are found::
 
-                                   - event: function_call
-                                     calls:
-                                       - name: get_current_weather
-                                         args: { location: San Francisco }
-                                       - name: get_restaurant_recommendation
+``event: <name>``
+    required — event type name
 
-                               ``function_call_stopped`` takes the same ``calls:``
-                               shape, and its ``args`` say how the call ended —
-                               which is how a scenario tells work that was stopped
-                               from work that finished on its own::
+``within_ms: <int>``
+    latency budget from the most recent anchor (optional; defaults to 60s when
+    omitted)
 
-                                   - event: function_call_stopped
-                                     calls:
-                                       - name: write_report
-                                         args: { cancelled: true }
+``text_contains: <str>``
+    substring check on the event's text content
 
-    eval: <str>                natural-language criterion the event's text content
-                               must satisfy, evaluated by a judge LLM (see
-                               :mod:`pipecat.evals.judge`).
+``calls:``
+    for ``function_call`` — the set of calls the turn should make, matched by
+    name in any order; the expectation passes only when all are found::
 
-    absent: true               invert the expectation: assert that NO event of
-                               this type arrives before the ``within_ms`` budget
-                               expires (default 60s — set ``within_ms`` explicitly
-                               to keep the quiet-window wait short). Matches on
-                               event type only, so it cannot be combined with
-                               ``text_contains``, ``eval:``, or ``calls:``. Used
-                               for duplicate-output regressions::
+        - event: function_call
+          calls:
+            - name: get_current_weather
+              args: { location: San Francisco }
+            - name: get_restaurant_recommendation
 
-                                   - event: response
-                                     eval: "answers the question"
-                                   - event: response
-                                     absent: true
-                                     within_ms: 30000
+    ``function_call_stopped`` takes the same ``calls:`` shape, and its ``args``
+    say how the call ended — which is how a scenario tells work that was stopped
+    from work that finished on its own::
+
+        - event: function_call_stopped
+          calls:
+            - name: write_report
+              args: { cancelled: true }
+
+``eval: <str>``
+    natural-language criterion the event's text content must satisfy, evaluated
+    by a judge LLM (see :mod:`pipecat.evals.judge`).
+
+``absent: true``
+    invert the expectation: assert that NO event of this type arrives before the
+    ``within_ms`` budget expires (default 60s — set ``within_ms`` explicitly to
+    keep the quiet-window wait short). Matches on event type only, so it cannot
+    be combined with ``text_contains``, ``eval:``, or ``calls:``. Used for
+    duplicate-output regressions::
+
+        - event: response
+          eval: "answers the question"
+        - event: response
+          absent: true
+          within_ms: 30000
 
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
@@ -109,50 +118,56 @@ across ``dtmf`` turns to exercise the aggregator's idle-timeout flush.
 ``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
 Top-level optional fields:
-    context: LLM messages the bot's context should start from. When given, the
-            harness sends them before driving turns (replacing the bot's
-            context); omit to leave the bot's own context untouched.
-    stop_on_failure:
-            whether the first failed turn ends the scenario (default true).
-            A failure leaves the conversation in an unknown state, so the
-            remaining turns usually just burn a timeout each. Set it false for a
-            scenario that scores every turn independently — a benchmark that
-            reports a per-turn pass rate needs all of its turns driven, not just
-            the ones before the first miss::
 
-                stop_on_failure: false
+``context:``
+    LLM messages the bot's context should start from. When given, the harness
+    sends them before driving turns (replacing the bot's context); omit to leave
+    the bot's own context untouched.
 
-            Give those turns an explicit ``within_ms``: with the 60s default, a
-            silent bot costs one full budget per remaining turn.
-    user:   how user turns are delivered::
+``stop_on_failure:``
+    whether the first failed turn ends the scenario (default true). A failure
+    leaves the conversation in an unknown state, so the remaining turns usually
+    just burn a timeout each. Set it false for a scenario that scores every turn
+    independently — a benchmark that reports a per-turn pass rate needs all of
+    its turns driven, not just the ones before the first miss::
 
-                user:
-                  modality: audio          # audio | text (default text)
-                  speech:                  # required when modality is audio
-                    service: kokoro        # local TTS that synthesizes the user turns
-                    voice: af_heart        # voices are language-specific
-                    language: en           # optional; must match the voice
-                    sample_rate: 16000     # optional
+        stop_on_failure: false
 
-            ``audio`` streams synthesized user audio to the bot (exercising its
-            STT for real); ``text`` (the default) sends RTVI ``send-text``.
-    judge:  what the judge evaluates, and with which LLM::
+    Give those turns an explicit ``within_ms``: with the 60s default, a silent
+    bot costs one full budget per remaining turn.
 
-                judge:
-                  modality: audio          # audio | text (default text)
-                  eval:                    # the judge LLM (default ollama)
-                    service: openai
-                    model: gpt-4o-mini
-                  transcription:           # required when modality is audio
-                    service: moonshine     # STT for the bot's audio (or whisper)
-                    model: small-streaming # optional
-                    language: en           # optional; the language the bot speaks
-                    padding_secs: 0        # optional; silence padded around the
-                                           # segment (default: 2)
+``user:``
+    how user turns are delivered::
 
-            ``audio`` makes the bot speak and judges the transcription of its
-            actual audio (``tts_response``); ``text`` (the default) skips TTS and
-            judges the LLM text (``llm_response``), which is faster and silent.
+        user:
+          modality: audio          # audio | text (default text)
+          speech:                  # required when modality is audio
+            service: kokoro        # local TTS that synthesizes the user turns
+            voice: af_heart        # voices are language-specific
+            language: en           # optional; must match the voice
+            sample_rate: 16000     # optional
+
+    ``audio`` streams synthesized user audio to the bot (exercising its STT for
+    real); ``text`` (the default) sends RTVI ``send-text``.
+
+``judge:``
+    what the judge evaluates, and with which LLM::
+
+        judge:
+          modality: audio          # audio | text (default text)
+          eval:                    # the judge LLM (default ollama)
+            service: openai
+            model: gpt-4o-mini
+          transcription:           # required when modality is audio
+            service: moonshine     # STT for the bot's audio (or whisper)
+            model: small-streaming # optional
+            language: en           # optional; the language the bot speaks
+            padding_secs: 0        # optional; silence padded around the
+                                   # segment (default: 2)
+
+    ``audio`` makes the bot speak and judges the transcription of its actual
+    audio (``tts_response``); ``text`` (the default) skips TTS and judges the
+    LLM text (``llm_response``), which is faster and silent.
 
 Any value can be pulled from a separate file with ``!include``, resolved
 relative to the scenario file's directory. This is handy for sharing the

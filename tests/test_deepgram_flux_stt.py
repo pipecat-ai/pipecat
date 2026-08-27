@@ -14,11 +14,11 @@ import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import TranscriptionFrame
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )
-from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 
 
 class _FakeFluxWebsocket:
@@ -33,6 +33,7 @@ class _FakeFluxWebsocket:
         self.close_stream_sent = asyncio.Event()
         self.receive_alive_when_close_stream_sent = None
         self.close_called = False
+        self.close_call_count = 0
 
     def __aiter__(self):
         return self
@@ -64,6 +65,7 @@ class _FakeFluxWebsocket:
 
     async def close(self):
         self.close_called = True
+        self.close_call_count += 1
         self.state = State.CLOSED
 
 
@@ -208,6 +210,8 @@ async def test_disconnect_with_completed_receiver_is_safe_and_idempotent():
     assert cancelled_tasks == []
     assert service._receive_task is None
     assert websocket.close_called
+    assert websocket.close_call_count == 1
+    service._call_event_handler.assert_awaited_once_with("on_disconnected")
 
 
 @pytest.mark.asyncio
@@ -231,6 +235,8 @@ async def test_cancelling_disconnect_still_cleans_up_receiver_and_websocket():
     """Cancellation of teardown propagates only after its resources are released."""
     websocket = _FakeFluxWebsocket()
     service, cancelled_tasks = _make_websocket_flux_service(websocket)
+    watchdog_task = asyncio.create_task(asyncio.Event().wait())
+    service._watchdog_task = watchdog_task
     receive_task = await _start_receive_task(service, websocket)
     disconnect_task = asyncio.create_task(service._disconnect_websocket())
     await asyncio.wait_for(websocket.close_stream_sent.wait(), timeout=1.0)
@@ -241,9 +247,12 @@ async def test_cancelling_disconnect_still_cleans_up_receiver_and_websocket():
 
     assert websocket.receiver_cancelled.is_set()
     assert receive_task.done()
-    assert cancelled_tasks == [receive_task]
+    assert watchdog_task.done()
+    assert cancelled_tasks == [watchdog_task, receive_task]
+    assert service._watchdog_task is None
     assert service._receive_task is None
     assert service._websocket is None
+    assert service._disconnecting is True
     assert websocket.close_called
 
 

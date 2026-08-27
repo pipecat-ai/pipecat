@@ -26,9 +26,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import XAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -192,9 +192,13 @@ class XAISTTService(WebsocketSTTService):
         await self._connect()
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the speech-to-text service."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
