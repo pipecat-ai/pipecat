@@ -363,6 +363,8 @@ class TestReasoningContextScoping:
         await service._update_settings(service.Settings(model="gpt-5.4"))
         model_a_input = service.get_llm_adapter().get_llm_invocation_params(context)["input"]
 
+        assert original_id.startswith("openai_responses:gpt-5.4:")
+        assert updated_id.startswith("openai_responses:gpt-5.5:")
         assert updated_id != original_id
         assert service.get_llm_adapter().id_for_llm_specific_messages == original_id
         assert [item.get("id") for item in model_b_input if item.get("type") == "reasoning"] == [

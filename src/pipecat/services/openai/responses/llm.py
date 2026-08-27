@@ -313,7 +313,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         """Scope encrypted reasoning to this service context and model."""
         model = assert_given(self._settings.model)
         self.get_llm_adapter().id_for_llm_specific_messages = (
-            f"openai_responses:{self._reasoning_context_id}:{model}"
+            f"openai_responses:{model}:{self._reasoning_context_id}"
         )
 
     async def _update_settings(self, delta: OpenAIResponsesLLMSettings) -> dict[str, Any]:
