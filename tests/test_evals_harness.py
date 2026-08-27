@@ -1321,8 +1321,9 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # The full traceback is preserved in the debug trace (saved to <bot>.eval.log).
         self.assertTrue(any("judge boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
-        # The raise came before any turn started, so none of them are scored.
-        self.assertEqual([t.status for t in result.turns], ["not_run"])
+        # The raise came from inside the turn, so it is scored as that turn's failure.
+        self.assertEqual([t.status for t in result.turns], ["failed"])
+        self.assertEqual(result.turns[0].failures, [result.failures[0]])
 
     async def test_audio_turn_sends_the_file_not_synthesized_text(self):
         import numpy as np
