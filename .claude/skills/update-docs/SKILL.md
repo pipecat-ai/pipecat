@@ -119,6 +119,37 @@ For each doc page that needs updates, edit **only the sections that need changes
 - **Preserve CardGroup, links, and examples** unless they reference removed functionality
 - **Don't touch frontmatter** unless the class was renamed
 
+#### Deprecations
+
+A diff that adds a `@deprecated` decorator or a `.. deprecated::` directive is a
+doc change even when nothing else about the API moved. The docs are where a
+reader finds out before their build breaks, and a deprecation that reaches the
+docs late has already been copied into someone's code.
+
+Mark it wherever the docs name it:
+
+- A `<ParamField>` takes a `deprecated` attribute, plus an italic note giving the
+  version and the replacement: `_Deprecated in v1.8.0. Use `x` instead. Will be
+  removed in 2.0.0._`
+- A class, method, or module the page documents gets a `<Warning>` naming the
+  version, the replacement, and the release that removes it
+- A table row gets the same note inline
+
+Use the source's own wording — every marker in the framework follows one
+template (`Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use
+`Replacement` instead.), so the version and replacement can be copied rather
+than paraphrased. When there is no replacement, say so; never leave it implied.
+
+**Where the deprecated name is the subject of a code sample, rewrite the sample
+to the current API rather than annotating it.** A reader copying a snippet should
+get code that works, not a footnote explaining why it doesn't. Annotate in place
+only where the page is describing an API rather than showing someone how to use
+it — a field table, a list of frame types.
+
+Check `scripts/deprecations/deprecations.json` for the entry: it carries the
+subject, kind, the version it was deprecated in, the replacement, and the exact
+message.
+
 #### Section-specific guidance
 
 **Configuration** (constructor params):
@@ -379,6 +410,7 @@ After all edits are complete, print a summary:
 Before finishing, verify:
 
 - [ ] All changed source files were checked against the mapping table
+- [ ] Any `@deprecated` or `.. deprecated::` added by the diff is marked on every page naming it, with the version and replacement
 - [ ] Each doc page edit matches the actual source code change (not guessed)
 - [ ] No content was removed unless the corresponding source was removed
 - [ ] New parameters have accurate types and defaults from source
