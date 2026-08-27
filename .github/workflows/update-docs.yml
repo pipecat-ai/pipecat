@@ -109,15 +109,15 @@ jobs:
 
             ## Setup
 
-            1. Read the skill instructions at `.claude/skills/update-docs/SKILL.md`
-            2. Read the source-to-doc mapping at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md`
+            1. Read the shared skill instructions at `.claude/skills/update-docs/SKILL.md`
+            2. Read this repo's profile at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md`
             3. The docs repository is checked out at `./_docs/`
 
             ## Get the diff
 
             Run `gh pr diff ${{ steps.pr.outputs.number }}` to see what changed in the PR.
             Also run `gh pr diff ${{ steps.pr.outputs.number }} --name-only` to get the list of changed files.
-            Filter to source files matching the directories listed in SKILL.md Step 3.
+            Filter to source files matching the profile's Scope section (SKILL.md Step 3).
 
             If no relevant source files were changed, exit with "No documentation changes needed."
 
