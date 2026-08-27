@@ -34,7 +34,9 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -140,6 +142,20 @@ class RTVIClientSerializer(FrameSerializer):
                     function_name=payload.get("function_name") or "",
                     tool_call_id=payload.get("tool_call_id", ""),
                     arguments=payload.get("arguments") or {},
+                )
+            case "llm-function-call-stopped":
+                # A call ends either by being cancelled or by returning; the two
+                # map to the frames the bot itself would have pushed.
+                if payload.get("cancelled"):
+                    return FunctionCallCancelFrame(
+                        function_name=payload.get("function_name") or "",
+                        tool_call_id=payload.get("tool_call_id", ""),
+                    )
+                return FunctionCallResultFrame(
+                    function_name=payload.get("function_name") or "",
+                    tool_call_id=payload.get("tool_call_id", ""),
+                    arguments={},
+                    result=payload.get("result"),
                 )
             case "user-transcription":
                 text = payload.get("text", "")

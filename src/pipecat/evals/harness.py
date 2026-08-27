@@ -117,7 +117,9 @@ from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -1152,6 +1154,20 @@ class EvalSession(BaseObject):
                     "type": "function_call",
                     "name": frame.function_name or None,
                     "args": dict(frame.arguments or {}),
+                }
+            ]
+        if isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+            # How the call ended is the assertable part, so `cancelled` sits in
+            # `args` alongside the id: a scenario matches both through the same
+            # `calls:`/`args:` check a function_call uses.
+            return [
+                {
+                    "type": "function_call_stopped",
+                    "name": frame.function_name or None,
+                    "args": {
+                        "tool_call_id": frame.tool_call_id,
+                        "cancelled": isinstance(frame, FunctionCallCancelFrame),
+                    },
                 }
             ]
         return []
