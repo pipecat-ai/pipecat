@@ -118,6 +118,11 @@ For each doc page that needs updates, edit **only the sections that need changes
 - **Keep descriptions concise** — match the tone and length of surrounding content
 - **Preserve CardGroup, links, and examples** unless they reference removed functionality
 - **Don't touch frontmatter** unless the class was renamed
+- **Match the size of the edit to the size of the change** — a changed default
+  is a changed default: edit the value and, if it needs one, the clause beside
+  it. A two-line source change should not produce a paragraph. When a diff
+  suggests more prose than the change warrants, that prose is usually
+  explaining the change rather than the API
 
 #### Section-specific guidance
 
@@ -142,9 +147,18 @@ For each doc page that needs updates, edit **only the sections that need changes
 
 **Notes**:
 
-- Add notes for new behavioral gotchas or breaking changes
 - Remove notes about limitations that were fixed
 - Keep existing notes that are still accurate
+- Add a note only when the behavior would surprise **a reader who has never
+  seen the previous behavior**. Judge it with the diff covered up: if the note
+  only makes sense as an explanation of what changed, it belongs in the
+  changelog, not here.
+
+A behavior change is not by itself a reason to add a note. The question is
+whether the *new* behavior needs explaining on its own terms. A default that
+moved from `True` to `None` needs the default updated; it needs a note only if
+`None` is confusing to someone meeting it for the first time — and then the
+note explains `None`, not the move.
 
 **Event Handlers**:
 
@@ -364,6 +378,14 @@ After all edits are complete, print a summary:
 ## Guidelines
 
 - **Write for a future reader, not the diff** — docs describe the API as it currently stands. Never narrate the change itself: no "newly added," "this replaces," "recently changed," or references to prior behavior. A reader landing on the page should see no sign that a PR just edited it. Match the weight of the prose to the feature — a routine new parameter gets a one-line description, not a paragraph.
+- **Don't carry the changelog's reasoning into the docs** — the PR body and the
+  changelog entry argue for a change to someone who knew the old behavior. The
+  docs describe the current state to someone who doesn't. Those need different
+  prose, so the changelog is a source of *facts* here — the new default, the new
+  name, what a parameter now does — and never a source of sentences. Copying its
+  justification across is the most common way a small change turns into a
+  paragraph, and it survives the rule above because a justification carries no
+  "newly" or "previously" to strip out.
 - **Avoid LLM tells** — write plainly. Skip filler and AI-signalling phrases ("delve," "seamless," "leverage," "it is worth noting," "this underscores"), formulaic "not just X, but Y" contrasts, and overuse of em dashes or boldface. Never leave placeholder text (`[X]`, `{placeholder}`) or assistant meta ("I hope this helps") in a page — this skill runs unattended in CI, so nothing downstream will catch it.
 - **Keep code and prose in sync** — when a page names a parameter, class, or identifier, spell it in prose exactly as the source and the `<ParamField>`/table entry do. After editing a code example or renaming a param, re-read the surrounding prose for stale references.
 - **Backtick inline technical terms** — wrap parameter names, class names, filenames, env vars, and config keys in backticks when they appear in prose (Overview, Notes, descriptions). Structured elements like `<ParamField>` already format these inside tables.
@@ -380,6 +402,7 @@ Before finishing, verify:
 
 - [ ] All changed source files were checked against the mapping table
 - [ ] Each doc page edit matches the actual source code change (not guessed)
+- [ ] The edit is no larger than the change: no note or paragraph that only makes sense as an explanation of what changed
 - [ ] No content was removed unless the corresponding source was removed
 - [ ] New parameters have accurate types and defaults from source
 - [ ] Formatting matches the existing page style
