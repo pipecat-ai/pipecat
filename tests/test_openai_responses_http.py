@@ -43,7 +43,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.tests.utils import run_test
 
@@ -279,6 +279,98 @@ class TestHttpReasoningCapture:
             "summary": [{"type": "summary_text", "text": "Thinking..."}],
             "encrypted_content": "ENCRYPTED",
         }
+
+
+class TestReasoningContextScoping:
+    @staticmethod
+    def _service(
+        *, model: str = "gpt-5.4", reasoning_context_id: str | None = None
+    ) -> OpenAIResponsesHttpLLMService:
+        with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+            return OpenAIResponsesHttpLLMService(
+                api_key="test-key",
+                reasoning_context_id=reasoning_context_id,
+                settings=OpenAIResponsesHttpLLMService.Settings(model=model),
+            )
+
+    @staticmethod
+    def _reasoning_message(
+        service: OpenAIResponsesHttpLLMService, item_id: str
+    ) -> LLMSpecificMessage:
+        adapter = service.get_llm_adapter()
+        return adapter.create_llm_specific_message(
+            {
+                "type": "reasoning",
+                "id": item_id,
+                "summary": [],
+                "encrypted_content": f"{item_id}-ciphertext",
+            }
+        )
+
+    @classmethod
+    def _context_with_reasoning(cls, service: OpenAIResponsesHttpLLMService) -> LLMContext:
+        return LLMContext(
+            messages=[
+                {"role": "user", "content": "hello"},
+                cls._reasoning_message(service, "rs_provider_a"),
+            ]
+        )
+
+    def test_default_scope_does_not_cross_service_instances(self):
+        provider_a = self._service()
+        provider_b = self._service()
+        context = self._context_with_reasoning(provider_a)
+        context.add_message(self._reasoning_message(provider_b, "rs_provider_b"))
+
+        provider_b_input = provider_b.get_llm_adapter().get_llm_invocation_params(context)["input"]
+        provider_a_input = provider_a.get_llm_adapter().get_llm_invocation_params(context)["input"]
+
+        assert [item.get("id") for item in provider_b_input if item.get("type") == "reasoning"] == [
+            "rs_provider_b"
+        ]
+        assert [item.get("id") for item in provider_a_input if item.get("type") == "reasoning"] == [
+            "rs_provider_a"
+        ]
+
+    def test_explicit_scope_shares_reasoning_between_compatible_services(self):
+        provider_a = self._service(reasoning_context_id="compatible-backend")
+        provider_b = self._service(reasoning_context_id="compatible-backend")
+        context = self._context_with_reasoning(provider_a)
+
+        provider_b_input = provider_b.get_llm_adapter().get_llm_invocation_params(context)["input"]
+
+        assert provider_b_input[-1]["encrypted_content"] == "rs_provider_a-ciphertext"
+
+    def test_explicit_scope_remains_model_specific(self):
+        provider_a = self._service(model="gpt-5.4", reasoning_context_id="compatible-backend")
+        provider_b = self._service(model="gpt-5.5", reasoning_context_id="compatible-backend")
+        context = self._context_with_reasoning(provider_a)
+
+        provider_b_input = provider_b.get_llm_adapter().get_llm_invocation_params(context)["input"]
+
+        assert provider_b_input == [{"role": "user", "content": "hello"}]
+
+    @pytest.mark.asyncio
+    async def test_model_switch_restores_that_models_reasoning_scope(self):
+        service = self._service(model="gpt-5.4")
+        original_id = service.get_llm_adapter().id_for_llm_specific_messages
+        context = self._context_with_reasoning(service)
+
+        await service._update_settings(service.Settings(model="gpt-5.5"))
+        updated_id = service.get_llm_adapter().id_for_llm_specific_messages
+        context.add_message(self._reasoning_message(service, "rs_model_b"))
+        model_b_input = service.get_llm_adapter().get_llm_invocation_params(context)["input"]
+        await service._update_settings(service.Settings(model="gpt-5.4"))
+        model_a_input = service.get_llm_adapter().get_llm_invocation_params(context)["input"]
+
+        assert updated_id != original_id
+        assert service.get_llm_adapter().id_for_llm_specific_messages == original_id
+        assert [item.get("id") for item in model_b_input if item.get("type") == "reasoning"] == [
+            "rs_model_b"
+        ]
+        assert [item.get("id") for item in model_a_input if item.get("type") == "reasoning"] == [
+            "rs_provider_a"
+        ]
 
 
 # ---------------------------------------------------------------------------

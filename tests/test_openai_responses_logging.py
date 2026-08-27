@@ -65,7 +65,7 @@ def test_standard_messages_pass_through():
 def test_context_not_mutated_by_elision():
     adapter, context = _adapter_and_context()
     adapter.get_messages_for_logging(context)
-    stored = context.get_messages("openai_responses")[1]
+    stored = context.get_messages(adapter.id_for_llm_specific_messages)[1]
     assert stored.message["encrypted_content"] == REASONING_MESSAGE["encrypted_content"]
 
 

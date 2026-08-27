@@ -281,6 +281,17 @@ class TestPreviousResponseOptimization:
         assert service._previous_input_hash is None
         assert service._previous_input_length is None
 
+    @pytest.mark.asyncio
+    async def test_model_update_clears_previous_response_state(self):
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-5.4"))
+        service._store_previous_response_state("resp_123", [{"role": "user", "content": "hi"}], [])
+
+        await service._update_settings(service.Settings(model="gpt-5.5"))
+
+        assert service._previous_response_id is None
+        assert service._previous_input_hash is None
+        assert service._previous_input_length is None
+
 
 # ---------------------------------------------------------------------------
 # _receive_response_events — text streaming

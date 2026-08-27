@@ -7,6 +7,7 @@
 """OpenAI Responses API adapter for Pipecat."""
 
 import copy
+import uuid
 from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
@@ -42,10 +43,38 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     - Extracting and sanitizing messages from the LLM context for logging
     """
 
+    def __init__(self, *, llm_specific_message_id: str | None = None):
+        """Initialize the adapter.
+
+        Args:
+            llm_specific_message_id: Identifier used to select Responses-specific
+                messages from a shared context. Defaults to a unique identifier so
+                encrypted reasoning is only returned to this adapter instance.
+
+        Raises:
+            ValueError: If ``llm_specific_message_id`` is empty.
+        """
+        super().__init__()
+        self.id_for_llm_specific_messages = (
+            llm_specific_message_id
+            if llm_specific_message_id is not None
+            else f"openai_responses:{uuid.uuid4().hex}"
+        )
+
     @property
     def id_for_llm_specific_messages(self) -> str:
-        """Get the identifier used in LLMSpecificMessage instances."""
-        return "openai_responses"
+        """Get the identifier used in LLMSpecificMessage instances.
+
+        Returns:
+            Identifier for selecting this adapter's Responses-specific messages.
+        """
+        return self._llm_specific_message_id
+
+    @id_for_llm_specific_messages.setter
+    def id_for_llm_specific_messages(self, value: str) -> None:
+        if not value:
+            raise ValueError("llm_specific_message_id must not be empty")
+        self._llm_specific_message_id = value
 
     def get_llm_invocation_params(
         self,
