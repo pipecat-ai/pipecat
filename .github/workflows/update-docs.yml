@@ -4,16 +4,12 @@ on:
   pull_request_target:
     types: [closed]
     branches: [main]
+    # Everything shipped in the package is in scope, named as exclusions so a new
+    # directory is covered the day it appears rather than when someone remembers
+    # to list it.
     paths:
-      - "src/pipecat/services/**"
-      - "src/pipecat/transports/**"
-      - "src/pipecat/serializers/**"
-      - "src/pipecat/processors/**"
-      - "src/pipecat/audio/**"
-      - "src/pipecat/turns/**"
-      - "src/pipecat/observers/**"
-      - "src/pipecat/pipeline/**"
-      - "src/pipecat/flows/**"
+      - "src/pipecat/**"
+      - "!src/pipecat/tests/**"
   workflow_dispatch:
     inputs:
       pr_number:
@@ -30,7 +26,10 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
+      # write so a run that fails can say so on the PR that triggered it;
+      # issues: write covers the label, which goes through the issues API
+      pull-requests: write
+      issues: write
       id-token: write
     steps:
       - name: Generate app token
@@ -176,10 +175,29 @@ jobs:
             If `gh pr create` fails because a PR from that branch already exists,
             push the updated commits and use `gh pr edit` to update the body instead.
 
+            ### Recording the outcome
+            Every run must leave a one-line verdict at
+            `$RUNNER_TEMP/docs-update-outcome.txt`, written before you finish:
+
+            - `PR: <url>` — a docs PR was created or updated
+            - `NOOP: <reason>` — no docs change was needed, naming the specific
+              reason (e.g. "only internal wiring in pipeline/task_manager.py changed;
+              no public API affected")
+
+            A bare "no changes needed" is not a reason. This file is how a reader
+            later tells a deliberate no-op from a run that quietly fell short, so
+            write it even when the answer seems obvious.
+
             ### No-op
             If after analyzing the diff you determine no documentation changes are needed
             (e.g., only skip-listed files changed, or changes don't affect public API docs),
-            exit cleanly without creating a branch or PR. Output "No documentation changes needed."
+            write the `NOOP:` line described above and exit cleanly without creating a
+            branch or PR.
+
+            A file being a base class or a shared module is NOT by itself a reason to
+            skip it. Public constructor parameters, event handlers, and behavior belong
+            in the docs wherever they live — see the mapping file's Skip list for the
+            short set of genuinely internal files.
 
             ### Formatting and llms.txt
             Skip SKILL.md Step 9. A later workflow step runs Prettier over the pages
@@ -193,7 +211,7 @@ jobs:
             - Use `GH_TOKEN=$DOCS_TOKEN` for all `gh` commands targeting pipecat-ai/docs
           claude_args: |
             --model claude-sonnet-4-5-20250929
-            --max-turns 30
+            --max-turns 90
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
 
       # Pinned from the docs repo's own .nvmrc rather than left to whatever the
@@ -264,3 +282,66 @@ jobs:
           fi
           gh pr edit "$PR_URL" --add-assignee "$ASSIGNEE"
           echo "Assigned $PR_URL to $ASSIGNEE"
+
+      # The run summary states the outcome either way, so a run that documented
+      # nothing is distinguishable from one that produced a docs PR.
+      - name: Record outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          DOCS_PR=$(gh pr list --repo pipecat-ai/docs \
+            --head "docs/pr-$PR_NUMBER" --state all \
+            --json url --jq '.[0].url' 2>/dev/null || true)
+
+          {
+            echo "## Docs automation for pipecat PR #$PR_NUMBER"
+            echo
+            if [ -n "$DOCS_PR" ]; then
+              echo "Docs PR: $DOCS_PR"
+            elif [ -f "$RUNNER_TEMP/docs-update-outcome.txt" ]; then
+              echo "No docs PR. Reported outcome:"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/docs-update-outcome.txt"
+              echo '```'
+            else
+              echo "No docs PR and no recorded outcome — the run did not reach the"
+              echo "point of stating one. Treat this PR as undocumented."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Nothing outside the Actions tab surfaces a failed run, so it is reported
+      # on the PR that triggered it.
+      - name: Report failure on the source PR
+        if: failure() && steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create docs-automation-failed \
+            --repo pipecat-ai/pipecat \
+            --color B60205 \
+            --description "The update-docs workflow failed for this PR" \
+            2>/dev/null || true
+
+          gh pr edit "$PR_NUMBER" --repo pipecat-ai/pipecat \
+            --add-label docs-automation-failed 2>/dev/null || true
+
+          gh pr comment "$PR_NUMBER" --repo pipecat-ai/pipecat --body "$(cat <<BODY
+          **Docs automation failed for this PR — its documentation is missing.**
+
+          The \`update-docs\` workflow did not produce a docs PR: [run log]($RUN_URL)
+
+          Re-run it once the cause is addressed:
+
+          \`\`\`
+          gh workflow run update-docs.yml -f pr_number=$PR_NUMBER --repo pipecat-ai/pipecat
+          \`\`\`
+
+          If this PR genuinely needs no documentation, remove the
+          \`docs-automation-failed\` label.
+          BODY
+          )"
