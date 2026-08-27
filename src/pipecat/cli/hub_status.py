@@ -20,6 +20,13 @@ directly is sub-millisecond and needs nothing outside the standard library.
 
 Every function here answers "unknown" rather than raising. A freshness hint must
 never break the command a user actually asked for.
+
+The contract carries a ``metadata_contract_version``, and its docs tell consumers
+to go silent on a value they don't recognise. This module doesn't: every question
+it asks has the same harmless remedy — run ``refresh`` — and going quiet on every
+hub bump would cost more than an occasionally stale hint. Each value is validated
+on its own instead, so a key that is missing, renamed, or unparseable yields
+silence whatever the contract number says.
 """
 
 import os
@@ -27,11 +34,6 @@ import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-
-# Highest metadata contract version this reader understands. A higher value in
-# the index means a newer hub changed the table's shape or a key's meaning, so
-# we stay silent rather than guess.
-_SUPPORTED_CONTRACT_VERSION = 1
 
 # Matches the hub's own default and env var, so tuning the threshold moves both
 # surfaces together rather than leaving them to disagree.
@@ -51,6 +53,10 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)")
 # `pipecat_ai-<version>.dist-info` in a project's virtualenv.
 _DIST_INFO_RE = re.compile(r"^pipecat_ai-(.+?)\.dist-info$")
 
+# How far into the future a recorded refresh may sit before the timestamp is
+# treated as unusable rather than as a clock that runs slightly fast.
+_CLOCK_SKEW_TOLERANCE_DAYS = 1.0
+
 
 def _enabled() -> bool:
     """False when the user has switched the check off."""
@@ -68,7 +74,7 @@ def _data_dir() -> Path:
 
 
 def read_hub_metadata() -> dict[str, str] | None:
-    """Read the hub's index metadata, or None when it can't be read.
+    """Every key in the hub's metadata table, or None when it can't be read.
 
     Opens read-only with no lock wait. The database is WAL, so this neither
     blocks nor is blocked by a concurrent refresh or a running MCP server, and
@@ -87,13 +93,18 @@ def read_hub_metadata() -> dict[str, str] | None:
         # Unreadable, locked, mid-first-build, on a filesystem without WAL, or
         # written by a hub whose schema predates the table. All mean "unknown".
         return None
-    metadata = {str(key): str(value) for key, value in rows}
-    try:
-        if int(metadata.get("metadata_contract_version", 0)) > _SUPPORTED_CONTRACT_VERSION:
-            return None
-    except ValueError:
-        return None
-    return metadata
+    return {str(key): str(value) for key, value in rows}
+
+
+def index_is_built() -> bool:
+    """Whether a completed index refresh exists on this machine.
+
+    The signal ``pipecat init`` needs before offering to build one: an index
+    cannot exist unless someone ran ``refresh``, so having one means this has
+    already been dealt with, here or in another project.
+    """
+    metadata = read_hub_metadata()
+    return bool(metadata and metadata.get("last_refresh_at"))
 
 
 def _stale_after_days() -> float:
@@ -123,7 +134,13 @@ def _index_age_days(metadata: dict[str, str]) -> float | None:
         return None
     if refreshed.tzinfo is None:
         refreshed = refreshed.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - refreshed).total_seconds() / 86400
+    age = (datetime.now(UTC) - refreshed).total_seconds() / 86400
+    if age < -_CLOCK_SKEW_TOLERANCE_DAYS:
+        # Far enough ahead to be a broken clock rather than skew. Believing it
+        # would call a stale index fresh for as long as the timestamp holds.
+        return None
+    # Mild skew: the refresh effectively just happened.
+    return max(age, 0.0)
 
 
 def _major_minor(version: str) -> tuple[int, int] | None:
@@ -188,7 +205,8 @@ def freshness_warning(cwd: Path | None = None) -> str | None:
     threshold = _stale_after_days()
     age = _index_age_days(metadata)
     if age is None:
-        # An index whose refresh never completed. Reporting an age would be a
+        # No usable refresh timestamp: either no refresh ever completed, or the
+        # one recorded isn't a time worth trusting. Reporting an age would be a
         # lie, and calling it stale would be the wrong instruction.
         return (
             "Pipecat Context Hub index looks unbuilt — run `pipecat context-hub refresh` "

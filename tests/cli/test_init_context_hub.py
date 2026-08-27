@@ -13,8 +13,10 @@ must never reach this, and the index question must not return once an index exis
 """
 
 import io
+import sqlite3
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from pipecat.cli.main import app
@@ -68,18 +70,47 @@ class TestCodingAgentPath:
 
 
 class TestIndexPrompt:
-    """The index build is the only expensive step, so it is the only question."""
+    """The index build is the only expensive step, so it is the only question.
 
-    def _index(self, monkeypatch, metadata):
-        monkeypatch.setattr(
-            "pipecat.cli.hub_status.read_hub_metadata", lambda: metadata, raising=False
+    These build a real index database rather than mocking the reader, so they exercise
+    the metadata contract an installed hub actually publishes.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _hub_data_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIPECAT_HUB_DATA_DIR", str(tmp_path / "hub"))
+
+    def _index(self, tmp_path, **metadata):
+        data_dir = tmp_path / "hub"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(data_dir / "metadata.db")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS index_metadata "
+            "(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
         )
+        conn.executemany(
+            "INSERT OR REPLACE INTO index_metadata VALUES (?, ?, ?)",
+            [(k, str(v), "now") for k, v in metadata.items()],
+        )
+        conn.commit()
+        conn.close()
 
-    def test_no_question_once_an_index_exists(self, monkeypatch, capsys):
+    def test_no_question_once_an_index_exists(self, tmp_path, monkeypatch, capsys):
         """An index cannot exist unless someone ran refresh, so this is the 'been here' flag."""
         from pipecat.cli.commands.init import _offer_context_hub_index
 
-        self._index(monkeypatch, {"last_refresh_at": "2026-08-03T00:00:00+00:00"})
+        self._index(tmp_path, metadata_contract_version=2, last_refresh_at="2026-08-03T00:00:00Z")
+        monkeypatch.setattr("pipecat.cli.commands.init._is_interactive", lambda: True)
+        _offer_context_hub_index()
+        assert capsys.readouterr().out == ""
+
+    def test_an_index_from_a_newer_hub_still_counts(self, tmp_path, monkeypatch, capsys):
+        """A contract bump changes what the interpreted keys mean, never whether a
+        refresh completed — so an index from a newer hub is still an index.
+        """
+        from pipecat.cli.commands.init import _offer_context_hub_index
+
+        self._index(tmp_path, metadata_contract_version=99, last_refresh_at="2026-08-03T00:00:00Z")
         monkeypatch.setattr("pipecat.cli.commands.init._is_interactive", lambda: True)
         _offer_context_hub_index()
         assert capsys.readouterr().out == ""
@@ -87,16 +118,17 @@ class TestIndexPrompt:
     def test_non_interactive_prints_the_command_instead_of_asking(self, monkeypatch, capsys):
         from pipecat.cli.commands.init import _offer_context_hub_index
 
-        self._index(monkeypatch, None)
         monkeypatch.setattr("pipecat.cli.commands.init._is_interactive", lambda: False)
         _offer_context_hub_index()
         assert "pipecat context-hub refresh" in capsys.readouterr().out
 
-    def test_an_index_without_a_completed_refresh_still_prompts(self, monkeypatch, capsys):
+    def test_an_index_without_a_completed_refresh_still_prompts(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """Metadata can exist before any refresh finished; that is not a built index."""
         from pipecat.cli.commands.init import _offer_context_hub_index
 
-        self._index(monkeypatch, {"metadata_contract_version": "1"})
+        self._index(tmp_path, metadata_contract_version=2)
         monkeypatch.setattr("pipecat.cli.commands.init._is_interactive", lambda: False)
         _offer_context_hub_index()
         assert "pipecat context-hub refresh" in capsys.readouterr().out
