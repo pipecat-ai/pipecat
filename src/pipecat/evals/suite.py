@@ -76,6 +76,8 @@ BOT_CONNECT_TIMEOUT_S = 60.0
 BOT_STOP_TIMEOUT_S = 10.0
 # Default spawn template; {python}/{bot}/{port} are substituted per run.
 DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
+# What a scenario file may be named, wherever one is looked for.
+SCENARIO_SUFFIXES = (".yaml", ".yml")
 
 # The harness runs three sub-pipelines in-process and tags each one's logs with an
 # ``eval_pipeline`` context value via logger.contextualize (see harness.py),
@@ -355,7 +357,7 @@ class EvalManifest:
                 scenario = str(scenario)
                 # A scenario may be a bare name (resolved under scenarios_dir) or a
                 # path/.yaml relative to the manifest.
-                if scenario.endswith((".yaml", ".yml")) or "/" in scenario:
+                if scenario.endswith(SCENARIO_SUFFIXES) or "/" in scenario:
                     scenario_path = (base / scenario).resolve()
                     name = Path(scenario).stem
                 else:
