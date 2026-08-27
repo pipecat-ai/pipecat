@@ -32,6 +32,7 @@ from rich.text import Text
 from pipecat.evals.harness import EvalSession, EvalTurnProgress
 from pipecat.evals.scenario import EvalScenario, describe_config
 from pipecat.evals.suite import (
+    SCENARIO_SUFFIXES,
     EvalManifest,
     EvalRun,
     EvalSuite,
@@ -138,7 +139,11 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
 
 
 def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
-    """Expand directory arguments into sorted YAML scenario paths."""
+    """Expand directory arguments into sorted YAML scenario paths.
+
+    Both YAML suffixes are taken, matching the scenario names a manifest
+    resolves.
+    """
     expanded: list[Path] = []
     for path in paths:
         if not path.is_dir():
@@ -146,10 +151,12 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
             continue
 
         scenario_paths = sorted(
-            scenario_path for scenario_path in path.glob("*.yaml") if scenario_path.is_file()
+            scenario_path
+            for scenario_path in path.iterdir()
+            if scenario_path.suffix in SCENARIO_SUFFIXES and scenario_path.is_file()
         )
         if not scenario_paths:
-            raise typer.BadParameter(f"No .yaml scenario files found in {path}")
+            raise typer.BadParameter(f"No .yaml or .yml scenario files found in {path}")
         expanded.extend(scenario_paths)
     return expanded
 
@@ -285,7 +292,9 @@ async def _run_scenarios_all(
 
 @eval_app.command("run")
 def run(
-    scenarios: list[Path] = typer.Argument(..., help="One or more scenario YAML files."),
+    scenarios: list[Path] = typer.Argument(
+        ..., help="One or more scenario YAML files, or directories of them."
+    ),
     bot_url: str = typer.Option(
         "ws://localhost:7860",
         "--bot-url",

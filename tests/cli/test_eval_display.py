@@ -56,12 +56,22 @@ class TestScenarioPathExpansion(unittest.TestCase):
             directory = Path(tmp)
             (directory / "zeta.yaml").write_text("name: zeta\n")
             (directory / "alpha.yaml").write_text("name: alpha\n")
-            (directory / "ignored.yml").write_text("name: ignored\n")
             (directory / "notes.txt").write_text("not a scenario\n")
 
             paths = _expand_scenario_paths([directory])
 
         self.assertEqual(paths, [directory / "alpha.yaml", directory / "zeta.yaml"])
+
+    def test_both_yaml_suffixes_are_taken(self):
+        """A manifest resolves either suffix, so a directory does too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "beta.yml").write_text("name: beta\n")
+            (directory / "alpha.yaml").write_text("name: alpha\n")
+
+            paths = _expand_scenario_paths([directory])
+
+        self.assertEqual(paths, [directory / "alpha.yaml", directory / "beta.yml"])
 
     def test_file_arguments_are_preserved(self):
         scenario = Path("scenario.yaml")
@@ -69,5 +79,5 @@ class TestScenarioPathExpansion(unittest.TestCase):
 
     def test_empty_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(Exception, "No \.yaml scenario files found"):
+            with self.assertRaisesRegex(Exception, "No \.yaml or \.yml scenario files found"):
                 _expand_scenario_paths([Path(tmp)])
