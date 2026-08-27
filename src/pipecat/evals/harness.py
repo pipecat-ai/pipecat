@@ -1171,11 +1171,11 @@ class EvalSession(BaseObject):
         if msg_type == "user-started-speaking":
             # A new user turn: drop any leftover bot output from a prior turn so it
             # isn't aggregated into this one.
-            self._discard_interrupted_output()
+            self._drop_pending_bot_output("on interruption")
             self._awaiting_llm_restart = True
             return [{"type": "user_started_speaking"}]
         if msg_type == "bot-interrupted":
-            self._discard_interrupted_output()
+            self._drop_pending_bot_output("on interruption")
             self._awaiting_llm_restart = True
             return [{"type": "bot_interrupted"}]
         if msg_type == "user-stopped-speaking":
@@ -1309,13 +1309,9 @@ class EvalSession(BaseObject):
                 self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
 
         if turn.user is not None or turn.dtmf is not None:
-            # Start the turn clean: drop bot output still queued from the previous
-            # turn (e.g. a long greeting only partly consumed, whose extra segments
-            # would otherwise be matched as this turn's response), and suppress
-            # in-flight stragglers until the bot's fresh response begins
+            # Suppress in-flight stragglers until the bot's fresh response begins
             # (bot-llm-started clears the flag), so this turn matches only what the
             # bot says in reply to this input.
-            self._discard_interrupted_output()
             self._awaiting_llm_restart = True
 
         await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
