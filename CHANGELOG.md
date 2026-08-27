@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [1.8.1] - 2026-08-27
+
+### Fixed
+
+- A directory passed to `pipecat eval run` now reads `.yml` files as well as
+  its `.yaml` ones, matching the scenario names a manifest resolves. A
+  directory holding neither is still an error rather than an empty run.
+  (PR [#5463](https://github.com/pipecat-ai/pipecat/pull/5463))
+
+- Fixed `pipecat init` repeatedly offering to build a Context Hub index that
+  already exists, and the stale-index warning never appearing, on any index
+  refreshed by Context Hub v0.5.3 or later. A future hub release can no longer
+  silence these checks.
+  (PR [#5468](https://github.com/pipecat-ai/pipecat/pull/5468))
+
 ## [1.8.0] - 2026-08-26
 
 ### Added
