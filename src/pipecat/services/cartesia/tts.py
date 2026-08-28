@@ -59,7 +59,7 @@ class GenerationConfig(BaseModel):
     """Configuration for Cartesia generation parameters.
 
     Cartesia interprets these parameters as guidance to ensure natural speech.
-    Test against your content for best results. Applicable to sonic-3 and sonic-3.5 models.
+    Test against your content for best results. Applicable to sonic-3 series models.
 
     Parameters:
         volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
@@ -326,7 +326,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3.5",
+            model="sonic-3.6",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -867,7 +867,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3.5",
+            model="sonic-3.6",
             voice=None,
             language=Language.EN,
             generation_config=None,
