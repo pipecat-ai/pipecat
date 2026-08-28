@@ -342,11 +342,22 @@ class EvalTurn:
     bot-first scenarios like opening greetings). ``user`` and ``dtmf`` are
     mutually exclusive: a turn is one or the other.
 
+    A ``user`` turn is spoken by the harness's TTS unless the turn names an
+    ``audio`` file to play instead.
+
     Parameters:
         user: Optional text the harness sends as the user's turn — an RTVI
             ``send-text`` in text modality, or synthesized speech (``raw-audio``)
             in audio modality. If absent, the turn just waits for and asserts on
             expected events.
+        audio: Optional path to an audio file (resolved relative to the scenario
+            file) played as this turn instead of synthesizing ``user``. Any
+            format ``soundfile`` reads works (WAV, MP3, FLAC, OGG, ...);
+            multi-channel audio is downmixed to mono. ``user`` is required
+            alongside it and is what the recording says — the judge reads it as
+            the turn's input and ``text_contains`` matches against it, neither of
+            which can be recovered from the audio. Requires
+            ``user.modality: audio``, and is mutually exclusive with ``dtmf``.
         dtmf: Optional DTMF keypad sequence the harness sends, one
             :class:`~pipecat.frames.frames.InputDTMFFrame` per character (e.g.
             ``"123#"``). Each character must be a valid
@@ -369,6 +380,7 @@ class EvalTurn:
 
     user: str | None
     expect: list[EvalExpectation] = field(default_factory=list)
+    audio: str | None = None
     dtmf: str | None = None
     send_after: EvalSendAfter | None = None
     image: str | None = None
@@ -496,6 +508,7 @@ class EvalScenario:
         # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
         # turn via TTS (exercising the bot's STT); text sends it as text.
         user_audio, user_speech = _parse_user_block(data.get("user"), path)
+        _check_user_audio(turns, user_audio, user_speech, path)
 
         # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
         # means the bot speaks and the judge evaluates the transcription of its
@@ -541,12 +554,31 @@ def _parse_user_block(user: Any, path: Path) -> tuple[bool, dict | None]:
     if modality == "text":
         return False, None
     speech = user.get("speech")
-    if not isinstance(speech, dict):
-        raise ValueError(
-            f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
-            "(TTS service + voice to synthesize the user's turns)"
-        )
+    if speech is not None and not isinstance(speech, dict):
+        raise ValueError(f"{path}: 'user.speech:' must be a mapping")
     return True, speech
+
+
+def _check_user_audio(
+    turns: list[EvalTurn], user_audio: bool, speech: dict | None, path: Path
+) -> None:
+    """Check the turns against the ``user:`` block they are delivered by."""
+    for idx, turn in enumerate(turns):
+        if turn.audio is not None and not user_audio:
+            raise ValueError(
+                f"{path}: turn #{idx} has 'audio:' but the scenario is text modality — "
+                "set 'user.modality: audio' to play it to the bot"
+            )
+
+    # A turn naming a file is played as-is; only the rest need a voice to speak them.
+    if user_audio and speech is None:
+        spoken = [i for i, t in enumerate(turns) if t.user is not None and t.audio is None]
+        if spoken:
+            raise ValueError(
+                f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
+                f"(TTS service + voice) to synthesize turn(s) {spoken} — "
+                "or give each of them an 'audio:' file"
+            )
 
 
 def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]:
@@ -686,6 +718,22 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
             "send_after only schedules when the turn's input gets sent"
         )
 
+    # Audio paths resolve relative to the scenario file, so a scenario is portable.
+    audio = t.get("audio")
+    if audio is not None:
+        if not isinstance(audio, str):
+            raise ValueError(f"{path}: turn #{idx} 'audio:' must be a path string")
+        if dtmf is not None:
+            raise ValueError(
+                f"{path}: turn #{idx} has both 'audio:' and 'dtmf:' — a turn is one or the other"
+            )
+        if user is None:
+            raise ValueError(
+                f"{path}: turn #{idx} has 'audio:' but no 'user:' — give the text the "
+                "recording says, so the judge and 'text_contains' have the turn's input"
+            )
+        audio = str((path.parent / audio).resolve())
+
     # Image paths resolve relative to the scenario file, so a scenario is portable.
     image = t.get("image")
     if image is not None:
@@ -693,7 +741,9 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
             raise ValueError(f"{path}: turn #{idx} 'image:' must be a path string")
         image = str((path.parent / image).resolve())
 
-    return EvalTurn(user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image)
+    return EvalTurn(
+        user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image, audio=audio
+    )
 
 
 def _parse_dtmf(dtmf: Any, path: Path, turn_idx: int) -> str | None:

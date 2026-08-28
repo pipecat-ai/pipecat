@@ -594,3 +594,77 @@ class TestEvalsScenarioParser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTurnAudioFile(unittest.TestCase):
+    """A turn can name an audio file to play instead of synthesizing its text."""
+
+    AUDIO_USER = "user:\n  modality: audio\n  speech: {service: kokoro, voice: af_heart}\n"
+
+    def test_audio_path_resolves_against_the_scenario(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "clips").mkdir()
+        (d / "clips" / "hi.wav").write_bytes(b"")
+        scenario = d / "s.yaml"
+        scenario.write_text(
+            "name: a\n" + self.AUDIO_USER + "turns: [{user: hi, audio: clips/hi.wav}]\n",
+            encoding="utf-8",
+        )
+
+        s = EvalScenario.load(scenario)
+        self.assertEqual(s.turns[0].audio, str((d / "clips" / "hi.wav").resolve()))
+        # The text stays the turn's input for the judge and text_contains.
+        self.assertEqual(s.turns[0].user, "hi")
+
+    def test_audio_without_user_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: a\n" + self.AUDIO_USER + "turns: [{audio: hi.wav}]\n"))
+        self.assertIn("no 'user:'", str(cm.exception))
+
+    def test_audio_with_dtmf_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write(
+                    "name: a\n"
+                    + self.AUDIO_USER
+                    + 'turns: [{user: hi, audio: hi.wav, dtmf: "1"}]\n'
+                )
+            )
+        self.assertIn("one or the other", str(cm.exception))
+
+    def test_audio_needs_audio_modality(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: a\nturns: [{user: hi, audio: hi.wav}]\n"))
+        self.assertIn("text modality", str(cm.exception))
+
+    def test_audio_must_be_a_path(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write("name: a\n" + self.AUDIO_USER + "turns: [{user: hi, audio: 3}]\n")
+            )
+        self.assertIn("must be a path string", str(cm.exception))
+
+    def test_file_only_scenario_needs_no_speech_config(self):
+        # Nothing is synthesized, so the scenario should not have to name a TTS
+        # (building one loads a model for no reason).
+        d = Path(tempfile.mkdtemp())
+        (d / "hi.wav").write_bytes(b"")
+        scenario = d / "s.yaml"
+        scenario.write_text(
+            "name: a\nuser: {modality: audio}\nturns: [{user: hi, audio: hi.wav}]\n",
+            encoding="utf-8",
+        )
+
+        s = EvalScenario.load(scenario)
+        self.assertTrue(s.user_audio)
+        self.assertIsNone(s.user_speech)
+
+    def test_a_synthesized_turn_still_needs_speech(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write(
+                    "name: a\nuser: {modality: audio}\n"
+                    "turns: [{user: recorded, audio: hi.wav}, {user: synthesized}]\n"
+                )
+            )
+        self.assertIn("turn(s) [1]", str(cm.exception))
