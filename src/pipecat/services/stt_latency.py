@@ -47,6 +47,9 @@ DEEPGRAM_SAGEMAKER_TTFS_P99: float = 0.35
 ELEVENLABS_TTFS_P99: float = 2.01
 ELEVENLABS_REALTIME_TTFS_P99: float = 0.41
 FAL_TTFS_P99: float = 2.07
+# Unmeasured: Fish Audio transcribes an uploaded file, so its latency is in the
+# same range as the other file-upload services here.
+FISH_TTFS_P99: float = 2.0
 GLADIA_TTFS_P99: float = 1.49
 GOOGLE_TTFS_P99: float = 1.57
 GRADIUM_TTFS_P99: float = 0.62
