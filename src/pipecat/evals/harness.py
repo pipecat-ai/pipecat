@@ -89,6 +89,7 @@ from loguru import logger
 from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.evals.audio import load_user_audio
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import (
     FUNCTION_CALL_EVENTS,
@@ -681,7 +682,8 @@ class EvalSession(BaseObject):
         transport must read it at connect time because frames are ordered and a
         later message can't precede an on-connect greeting (see
         :mod:`pipecat.evals.transport`). ``user_audio`` turns on the transport's
-        virtual mic for audio-mode scenarios; without it the transport plays no
+        virtual mic whenever the harness sends audio, whether synthesized or
+        played from a turn's ``audio:`` file; without it the transport plays no
         mic at all, so a text-mode scenario never feeds silence into the bot's
         STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
         ``tts_response`` transcription. ``record`` asks the eval transport to
@@ -694,7 +696,7 @@ class EvalSession(BaseObject):
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
-        if self._speech is not None:
+        if self._speech is not None or any(t.audio for t in self._scenario.turns):
             flags.append("user_audio=true")
         if self._wants_response:
             flags.append("capture_bot_audio=true")
@@ -1062,9 +1064,10 @@ class EvalSession(BaseObject):
     async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: optionally honor send_after, send user input, match expectations.
 
-        The user turn is sent as ``send-text`` (text mode) or, when the scenario
-        provides a ``user_audio`` block, as chunked ``raw-audio`` messages that
-        the bot's STT transcribes for real.
+        The user turn is sent as ``send-text`` (text mode) or, in audio mode, as
+        chunked ``raw-audio`` messages that the bot's STT transcribes for real --
+        the turn's ``audio:`` recording when it names one, otherwise its text
+        synthesized by the user TTS.
         """
         failures: list[EvalAssertionFailure] = []
         # The turn's function calls match by name in any order; start each turn
@@ -1114,8 +1117,11 @@ class EvalSession(BaseObject):
             self._drop_pending_bot_output("before send")
 
         if turn.user is not None:
-            self._debug(f"send: {turn.user!r} ({'audio' if self._speech is not None else 'text'})")
-            if self._speech is not None:
+            how = turn.audio or ("audio" if self._speech is not None else "text")
+            self._debug(f"send: {turn.user!r} ({how})")
+            if turn.audio is not None:
+                await self._send_audio_file(turn.audio)
+            elif self._speech is not None:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
@@ -1236,6 +1242,16 @@ class EvalSession(BaseObject):
         """
         assert self._speech is not None  # only called for audio-mode turns
         pcm, sample_rate = await self._speech.generate(text)
+        for chunk in _audio_chunks(pcm, sample_rate):
+            await self._send_raw_audio(chunk, sample_rate)
+
+    async def _send_audio_file(self, path: str) -> None:
+        """Play a turn's ``audio:`` recording to the bot in place of synthesizing it.
+
+        The file's own sample rate travels with the audio, so a recording does
+        not have to match the bot's input rate.
+        """
+        pcm, sample_rate = await load_user_audio(path)
         for chunk in _audio_chunks(pcm, sample_rate):
             await self._send_raw_audio(chunk, sample_rate)
 

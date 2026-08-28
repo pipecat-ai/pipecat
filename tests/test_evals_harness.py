@@ -19,14 +19,18 @@ Two layers:
 """
 
 import asyncio
+import base64
 import json
 import socket
+import tempfile
 import unittest
 import warnings
+from pathlib import Path
 
 import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.evals.audio import load_user_audio
 from pipecat.evals.harness import EvalSession
 from pipecat.evals.scenario import (
     EvalExpectation,
@@ -456,6 +460,84 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(rate == 16000 for _, rate in sent))
 
 
+class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
+    """A turn's ``audio:`` file is played to the bot instead of being synthesized."""
+
+    @staticmethod
+    def _write_tone(path, sample_rate=16000, seconds=2.0, channels=1):
+        import numpy as np
+        import soundfile as sf
+
+        t = np.linspace(0, seconds, int(sample_rate * seconds), endpoint=False)
+        tone = (0.3 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        data = tone if channels == 1 else np.column_stack([tone] * channels)
+        sf.write(str(path), data, sample_rate)
+        return tone
+
+    async def test_file_is_sent_as_raw_audio_at_its_own_rate(self):
+        d = Path(tempfile.mkdtemp())
+        tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
+
+        s = _session(bot_audio=True)
+        sent: list[tuple[bytes, int]] = []
+
+        async def fake_send_raw(chunk, sample_rate):
+            sent.append((chunk, sample_rate))
+
+        s._send_raw_audio = fake_send_raw
+        await s._send_audio_file(str(d / "hi.wav"))
+
+        self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
+        self.assertTrue(all(rate == 16000 for _, rate in sent))
+        self.assertEqual(b"".join(chunk for chunk, _ in sent), tone.tobytes())
+
+    async def test_non_native_rate_is_preserved(self):
+        # The rate travels with the audio, so a recording need not match the bot.
+        d = Path(tempfile.mkdtemp())
+        self._write_tone(d / "hi.wav", sample_rate=44100, seconds=0.5)
+
+        s = _session(bot_audio=True)
+        sent: list[tuple[bytes, int]] = []
+
+        async def fake_send_raw(chunk, sample_rate):
+            sent.append((chunk, sample_rate))
+
+        s._send_raw_audio = fake_send_raw
+        await s._send_audio_file(str(d / "hi.wav"))
+
+        self.assertTrue(sent)
+        self.assertTrue(all(rate == 44100 for _, rate in sent))
+
+    async def test_stereo_is_downmixed_to_mono(self):
+        d = Path(tempfile.mkdtemp())
+        tone = self._write_tone(d / "s.wav", sample_rate=16000, seconds=0.5, channels=2)
+
+        pcm, rate = await load_user_audio(str(d / "s.wav"))
+        self.assertEqual(rate, 16000)
+        self.assertEqual(pcm, tone.tobytes())
+
+    async def test_unreadable_file_reports_the_path(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "x.txt").write_text("not audio", encoding="utf-8")
+        with self.assertRaises(ValueError) as cm:
+            await load_user_audio(str(d / "x.txt"))
+        self.assertIn("x.txt", str(cm.exception))
+
+
+class TestAudioFileEnablesMic(unittest.TestCase):
+    def test_audio_turn_adds_user_audio_flag(self):
+        # Without the flag the transport runs no mic and the audio is dropped,
+        # even though the scenario names no TTS.
+        scenario = EvalScenario(
+            name="t",
+            turns=[EvalTurn(user="hi", audio="/tmp/hi.wav")],
+            bot_audio=True,
+            user_audio=True,
+        )
+        url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
+        self.assertIn("user_audio=true", url)
+
+
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
     """A dtmf turn sends one RTVI ``dtmf`` message with all keys."""
 
@@ -520,6 +602,11 @@ class _FakeRTVIServer:
                     await ws.send(_rtvi("bot-ready", {"version": RTVI.PROTOCOL_VERSION}))
                 case "send-text":
                     for out in self.script.get(msg["data"]["content"], []):
+                        await ws.send(out)
+                case "raw-audio":
+                    # A real bot transcribes the audio; the fake one answers the
+                    # single scripted reply, so an audio turn can be driven.
+                    for out in next(iter(self.script.values()), []):
                         await ws.send(out)
 
     async def start(self):
@@ -1032,6 +1119,50 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
         # The raise came before any turn started, so none of them are scored.
         self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_audio_turn_sends_the_file_not_synthesized_text(self):
+        import numpy as np
+        import soundfile as sf
+
+        d = Path(tempfile.mkdtemp())
+        sr = 16000
+        t = np.linspace(0, 0.5, sr // 2, endpoint=False)
+        tone = (0.3 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        sf.write(str(d / "hi.wav"), tone, sr)
+
+        self.server.on_text(
+            "hello there",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hi!"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScenario(
+            name="audio-turn",
+            bot_audio=False,
+            user_audio=True,
+            turns=[
+                EvalTurn(
+                    user="hello there",
+                    audio=str(d / "hi.wav"),
+                    expect=[EvalExpectation(event="llm_started", within_ms=2000)],
+                )
+            ],
+        )
+
+        # No speech= override: the file is played, so nothing has to synthesize it.
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+        audio_msgs = [m for m in self.server.received if m.get("type") == "raw-audio"]
+        self.assertTrue(audio_msgs, "the turn's audio file never reached the bot")
+        self.assertEqual(
+            [m for m in self.server.received if m.get("type") == "send-text"],
+            [],
+            "an audio turn must not also be sent as text",
+        )
+        got = b"".join(base64.b64decode(m["data"]["base64Audio"]) for m in audio_msgs)
+        self.assertEqual(got, tone.tobytes())
+        self.assertTrue(all(m["data"]["sampleRate"] == sr for m in audio_msgs))
 
     async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
