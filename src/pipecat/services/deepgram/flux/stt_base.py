@@ -644,8 +644,9 @@ class DeepgramFluxSTTBase(STTService):
         Raises:
             Exception: Always raises to trigger error handling in the transport layer.
         """
-        error_msg = data.get("error", "Unknown error")
-        deepgram_error = f"Fatal error: {error_msg}"
+        error_code = data.get("code", "unknown")
+        description = data.get("description", "no description")
+        deepgram_error = f"{self}: Fatal error [{error_code}] {description}"
         logger.error(deepgram_error)
         # Error will be handled by the transport's receive loop error handler
         raise Exception(deepgram_error)

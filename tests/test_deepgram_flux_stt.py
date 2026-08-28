@@ -242,5 +242,17 @@ async def test_update_settings_configures_without_reconnecting():
     assert service.reconnect_requests == 0
 
 
+@pytest.mark.asyncio
+async def test_fatal_error_reports_code_and_description():
+    """A FatalError raises with the code and description Flux sends."""
+    service = _make_fake_flux_service()
+
+    with pytest.raises(Exception) as excinfo:
+        await service._handle_fatal_error({"code": "INVALID_AUTH", "description": "Bad key"})
+
+    assert "INVALID_AUTH" in str(excinfo.value)
+    assert "Bad key" in str(excinfo.value)
+
+
 if __name__ == "__main__":
     unittest.main()
