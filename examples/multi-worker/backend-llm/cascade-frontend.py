@@ -131,7 +131,7 @@ async def delegate(params: FunctionCallParams, task: str):
 
     async def on_update(kind: str, text: str):
         # Intermediate responses (e.g. "Let me check.") reach the user while
-        # the backend keeps working.
+        # the backend keeps working; its final answer is the tool result.
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
                 messages=[{"role": "developer", "content": f"Backend update: {text}"}],

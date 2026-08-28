@@ -9,9 +9,9 @@
 A frontend conversational model — a speech-to-speech model such as OpenAI Live,
 or a fast cascade LLM — hands off requests that need tools or careful
 reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its
-own context and multi-step tool calling, to do that work and streams what it
-says back over the worker job API. :func:`run_backend_job` is the caller side
-of that contract.
+own context and multi-step tool calling, to do that work: over the worker job
+API it streams back what it says along the way and returns its final answer.
+:func:`run_backend_job` is the caller side of that contract.
 """
 
 import asyncio
@@ -39,7 +39,7 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
 
-#: Called with ``(kind, text)`` for each update a backend streams back.
+#: Called with ``(kind, text)`` for each update a backend streams back while it works.
 BackendUpdateCallback = Callable[[str, str], Awaitable[None]]
 
 
@@ -80,7 +80,7 @@ class _BackendRun:
     job_id: str
     runs_requested: int = 0
     runs_completed: int = 0
-    last_text: str = ""
+    final_text: str = ""
     finished: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -91,17 +91,19 @@ class BackendLLMWorker(LLMContextWorker):
     aggregator pair, so multi-step tool calling works as it does in any
     pipeline. Each delegated task arrives as a ``run`` job, is appended to the
     context as one user message (the voice turns since the previous task, then
-    the task), and runs the LLM until it produces a final answer. Every
-    assistant response along the way is streamed back as a job update.
+    the task), and runs the LLM until it produces a final answer. Responses
+    along the way — what the backend says before calling tools — are streamed
+    back as job updates; the final answer is the job response.
 
     Job contract (``@job(name="run")``, one task at a time):
 
     - request payload: ``{"task": str, "messages": [{"role": "user" | "assistant",
       "content": str}, ...]}``
-    - updates: ``{"kind": "text", "text": str}`` — an assistant response,
-      suitable for the frontend to speak
-    - response: ``{"text": str}`` — the last response, or ``""`` if the run
-      produced none
+    - updates: ``{"kind": "text", "text": str}`` — an intermediate assistant
+      response, suitable for the frontend to speak while the backend keeps
+      working
+    - response: ``{"text": str}`` — the final assistant response, or ``""`` if
+      the task ended without one
 
     :func:`run_backend_job` wraps the caller side.
 
@@ -151,12 +153,11 @@ class BackendLLMWorker(LLMContextWorker):
         self._run: _BackendRun | None = None
         self._jobs_run = 0
 
-        # Every LLMContextFrame that reaches the LLM starts a run: the task's
-        # own, and the re-runs the assistant aggregator requests after tool
-        # results. Counting them synchronously as the LLM picks them up (and
-        # checking its queue for one still waiting) is what makes "the run is
-        # finished" exact even when a tool returns before the response that
-        # called it has ended.
+        # A task takes one or more LLM runs: the first for the task itself,
+        # then one per round of tool results (the assistant aggregator pushes
+        # an LLMContextFrame back to the LLM after each). Runs are counted as
+        # the LLM picks them up and responses as they end; the task is
+        # finished when the two match and no further run is on the way.
         @self.llm.event_handler("on_before_process_frame")
         async def on_before_process_frame(llm, frame):
             if isinstance(frame, LLMContextFrame) and self._run is not None:
@@ -168,7 +169,7 @@ class BackendLLMWorker(LLMContextWorker):
 
     @job(name=BACKEND_JOB_NAME, sequential=True)
     async def run_task(self, message: BusJobRequestMessage):
-        """Run one delegated task to completion, streaming responses as updates.
+        """Run one delegated task to completion, streaming intermediate responses as updates.
 
         Args:
             message: The job request; see the class docstring for the payload.
@@ -191,23 +192,27 @@ class BackendLLMWorker(LLMContextWorker):
             await run.finished.wait()
         finally:
             self._run = None
-        await self.send_job_response(message.job_id, {"text": run.last_text})
+        await self.send_job_response(message.job_id, {"text": run.final_text})
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         run = self._run
         if run is None:
             return
         run.runs_completed += 1
-        text = (message.content or "").strip()
-        if text:
-            run.last_text = text
-            await self.send_job_update(run.job_id, {"kind": "text", "text": text})
-        if (
+        # A further run is on the way while a tool call is in flight, or while
+        # a re-run is queued that the LLM hasn't picked up yet (a tool that
+        # returns before its response ends queues one early).
+        finished = (
             run.runs_completed >= run.runs_requested
             and not self.assistant_aggregator.has_function_calls_in_progress
             and not self.llm.has_queued_frame(LLMContextFrame)
-        ):
+        )
+        text = (message.content or "").strip()
+        if finished:
+            run.final_text = text
             run.finished.set()
+        elif text:
+            await self.send_job_update(run.job_id, {"kind": "text", "text": text})
 
 
 async def run_backend_job(
@@ -227,8 +232,9 @@ async def run_backend_job(
         backend_name: Name of the backend worker.
         task: The request to delegate.
         messages: Voice conversation turns the backend hasn't seen yet.
-        on_update: Called with ``(kind, text)`` for each update the backend
-            streams back before its final response.
+        on_update: Called with ``(kind, text)`` for each intermediate response
+            the backend streams back while it works; the final response is
+            returned, not passed here.
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
 

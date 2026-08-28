@@ -809,7 +809,6 @@ async def test_client_delegation_runs_the_backend_with_the_turns_since_the_last_
         calls.append((worker, backend_name, task, messages, timeout_secs))
         await on_update("text", "Checking the weather.")
         await on_update("progress", "Still looking.")
-        await on_update("text", "It's 62 and raining in Seattle.")
         return "It's 62 and raining in Seattle."
 
     service, recorder = _client_delegation_service(monkeypatch, fake_run_backend_job)

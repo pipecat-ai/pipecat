@@ -838,7 +838,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._send_delegation_context(item.id, text, channel=channel)
 
         try:
-            await run_backend_job(
+            text = await run_backend_job(
                 self.pipeline_worker,
                 delegation.backend.name,
                 task=item.text,
@@ -854,6 +854,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 channel="commentary",
             )
             await self.push_error(error_msg=f"Delegation {item.id} failed: {e}", exception=e)
+            return
+        if text:
+            await self._send_delegation_context(item.id, text, channel="speakable")
 
     async def _send_delegation_context(
         self, delegation_id: str, text: str, *, channel: events.DelegationChannel

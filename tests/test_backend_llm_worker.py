@@ -138,7 +138,7 @@ async def _run_backend(
 
 
 @pytest.mark.asyncio
-async def test_backend_runs_a_tool_loop_and_streams_each_response():
+async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     llm = _ScriptedLLM(
         [
             [("text", "Let me check."), ("call", "get_weather", "call_1", {"location": "Seattle"})],
@@ -156,10 +156,7 @@ async def test_backend_runs_a_tool_loop_and_streams_each_response():
     )
 
     assert text == "It's 62 and raining in Seattle."
-    assert updates == [
-        ("text", "Let me check."),
-        ("text", "It's 62 and raining in Seattle."),
-    ]
+    assert updates == [("text", "Let me check.")]
 
     # The backend saw the rendered request first, then the tool result.
     first_request = llm.contexts_seen[0][-1]
@@ -189,7 +186,7 @@ async def test_fast_tool_result_before_response_end_does_not_finish_the_run_earl
     text, updates, _ = await _run_backend(llm, task="Weather in Seattle?")
 
     assert text == "Rain, 62 degrees."
-    assert updates == [("text", "Checking."), ("text", "Rain, 62 degrees.")]
+    assert updates == [("text", "Checking.")]
 
 
 @pytest.mark.asyncio
@@ -204,7 +201,7 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
     text, updates, _ = await _run_backend(llm, task="Weather?")
 
     assert text == "It's raining."
-    assert updates == [("text", "It's raining.")]
+    assert updates == []
 
 
 @pytest.mark.asyncio
