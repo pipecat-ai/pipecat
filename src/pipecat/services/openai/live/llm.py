@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,6 +56,8 @@ from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+from pipecat.workers.base_worker import BaseWorker
+from pipecat.workers.llm.backend_llm_worker import run_backend_job
 
 from . import events
 
@@ -64,6 +67,10 @@ DEFAULT_VOICE = "marin"
 # The server drains delegation and output work for at most 10 seconds after
 # `session.close` before emitting `session.closed`.
 SESSION_CLOSE_TIMEOUT_SECS = 10.0
+
+# Each context append takes one text part of at most 500 tokens; this keeps
+# a chunk comfortably below that.
+MAX_CONTEXT_APPEND_CHARS = 1200
 
 
 @dataclass
@@ -106,6 +113,28 @@ class ResponsesDelegation:
     service_tier: str | None = None
 
 
+@dataclass
+class ClientDelegation:
+    """Client delegation: a Pipecat worker is the backend the live model delegates to.
+
+    Each delegated request is sent to the backend as a ``run`` job together
+    with the conversation turns since the previous request; what the backend
+    says comes back as ``speakable`` context for the model to relay.
+
+    Parameters:
+        backend: The worker that runs delegated tasks — normally a
+            :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker`
+            wrapping any LLM service. The service registers it as a child of
+            the pipeline worker at setup, so the pipeline must run under a
+            ``WorkerRunner``.
+        timeout_secs: How long a delegated task may take before it is
+            abandoned.
+    """
+
+    backend: BaseWorker
+    timeout_secs: float = 120.0
+
+
 class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     """OpenAI Live LLM service: full-duplex speech-to-speech over WebSocket.
 
@@ -122,8 +151,13 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
       model. Function calls it makes are executed here with the handlers
       registered for the pipeline context's tools; results go back to the API
       as soon as they are available.
-    - ``None`` — the session runs in client delegation mode with no backend
-      configured; delegated requests are declined.
+    - :class:`ClientDelegation` — a
+      :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker` running
+      any Pipecat LLM service is the backend. The model does not share its
+      conversation with the backend, so the service ships the transcript turns
+      since the previous delegation along with each request.
+    - ``None`` — client delegation mode with no backend configured; delegated
+      requests are declined.
 
     Turn frames: the service proposes user turn boundaries from the API's
     projected transcript turns, and the recommended
@@ -162,6 +196,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
     Settings = OpenAILiveLLMSettings
     ResponsesDelegation = ResponsesDelegation
+    ClientDelegation = ClientDelegation
     _settings: Settings
 
     adapter_class = OpenAILiveLLMAdapter
@@ -172,7 +207,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         api_key: str,
         base_url: str = "wss://api.openai.com/v1/live",
         settings: Settings | None = None,
-        delegation: ResponsesDelegation | None = None,
+        delegation: ResponsesDelegation | ClientDelegation | None = None,
         **kwargs,
     ):
         """Initialize the OpenAI Live LLM service.
@@ -235,6 +270,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         # Responses delegation function calls awaiting an output.
         self._open_function_calls: set[str] = set()
 
+        # Client delegation: finished turns not yet sent to the backend, and
+        # the delegations in flight, by delegation item id.
+        self._delegated_turns: list[dict[str, str]] = []
+        self._delegation_tasks: dict[str, asyncio.Task] = {}
+
         self._usage: events.Usage | None = None
 
         self._register_event_handler("on_session_started")
@@ -261,12 +301,15 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     #
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Set up the service and connect.
+        """Set up the service, register the client-delegation backend, and connect.
 
         Args:
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        if isinstance(self._delegation, ClientDelegation):
+            # A child of the pipeline worker: ended and cancelled with it.
+            await self.pipeline_worker.add_workers(self._delegation.backend)
         await self._connect()
 
     async def cleanup(self):
@@ -497,6 +540,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             if self._receive_task:
                 await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
+            for task in list(self._delegation_tasks.values()):
+                await self.cancel_task(task)
+            self._delegation_tasks.clear()
+            self._delegated_turns.clear()
             self._sent_tools_snapshot = None
             self._turn_roles.clear()
             self._user_turn_transcripts.clear()
@@ -678,6 +725,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if turn.role == "assistant":
             if self._assistant_turn_id == turn.id:
                 await self._end_assistant_turn()
+            self._remember_turn("assistant", turn.transcript)
         elif turn.role == "user":
             transcript = turn.transcript or self._user_turn_transcripts.get(turn.id, "")
             self._user_turn_transcripts.pop(turn.id, None)
@@ -687,6 +735,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                     FrameDirection.UPSTREAM,
                 )
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+            self._remember_turn("user", transcript)
+
+    def _remember_turn(self, role: str, transcript: str):
+        """Keep a finished turn for the next client delegation."""
+        if isinstance(self._delegation, ClientDelegation) and transcript.strip():
+            self._delegated_turns.append({"role": role, "content": transcript.strip()})
 
     async def _start_assistant_turn(self, turn_id: str):
         if self._assistant_turn_id is not None:
@@ -736,21 +790,59 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._handle_client_delegation(item)
 
     async def _handle_client_delegation(self, item: events.DelegationItem):
-        logger.warning(
-            f"{self}: the model delegated {item.text!r} but no backend is configured to "
-            "handle client delegations; declining"
-        )
-        await self.send_client_event(
-            events.DelegationContextAppendEvent(
-                delegation_item_id=item.id,
-                channel="commentary",
-                content=[
-                    events.InputTextContent(
-                        text="No backend is available to handle delegated work in this session."
-                    )
-                ],
+        if not isinstance(self._delegation, ClientDelegation):
+            logger.warning(
+                f"{self}: the model delegated {item.text!r} but no backend is configured to "
+                "handle client delegations; declining"
             )
-        )
+            await self._send_delegation_context(
+                item.id,
+                "No backend is available to handle delegated work in this session.",
+                channel="commentary",
+            )
+            return
+        task = self.create_task(self._run_client_delegation(item), f"delegation:{item.id}")
+        self._delegation_tasks[item.id] = task
+        task.add_done_callback(lambda _: self._delegation_tasks.pop(item.id, None))
+
+    async def _run_client_delegation(self, item: events.DelegationItem):
+        delegation = self._delegation
+        assert isinstance(delegation, ClientDelegation)
+        turns, self._delegated_turns = self._delegated_turns, []
+
+        async def on_update(kind: str, text: str):
+            channel = "speakable" if kind == "text" else "commentary"
+            await self._send_delegation_context(item.id, text, channel=channel)
+
+        try:
+            await run_backend_job(
+                self.pipeline_worker,
+                delegation.backend.name,
+                task=item.text,
+                messages=turns,
+                on_update=on_update,
+                timeout_secs=delegation.timeout_secs,
+            )
+        except Exception as e:
+            logger.warning(f"{self}: delegation {item.id} failed: {e}")
+            await self._send_delegation_context(
+                item.id,
+                f"The delegated task could not be completed: {e}",
+                channel="commentary",
+            )
+            await self.push_error(error_msg=f"Delegation {item.id} failed: {e}", exception=e)
+
+    async def _send_delegation_context(
+        self, delegation_id: str, text: str, *, channel: events.DelegationChannel
+    ):
+        for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_CHARS):
+            await self.send_client_event(
+                events.DelegationContextAppendEvent(
+                    delegation_item_id=delegation_id,
+                    channel=channel,
+                    content=[events.InputTextContent(text=chunk)],
+                )
+            )
 
     async def _handle_evt_response(self, evt: events.ResponseEvent):
         if evt.type in ("response.failed", "response.incomplete"):
@@ -923,3 +1015,40 @@ def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, A
 
     config.update(settings.extra)
     return config
+
+
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _chunk_text(text: str, limit: int) -> list[str]:
+    """Split text into chunks of at most ``limit`` characters, preferring sentence boundaries."""
+    text = text.strip()
+    if len(text) <= limit:
+        return [text] if text else []
+
+    chunks: list[str] = []
+    current = ""
+
+    def flush():
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ""
+
+    for piece in _SENTENCE_BOUNDARY.split(text):
+        piece = piece.strip()
+        while len(piece) > limit:
+            # An overlong sentence: cut at the last space before the limit.
+            cut = piece.rfind(" ", 0, limit)
+            if cut <= 0:
+                cut = limit
+            flush()
+            chunks.append(piece[:cut].strip())
+            piece = piece[cut:].strip()
+        if not piece:
+            continue
+        if current and len(current) + 1 + len(piece) > limit:
+            flush()
+        current = f"{current} {piece}".strip()
+    flush()
+    return chunks

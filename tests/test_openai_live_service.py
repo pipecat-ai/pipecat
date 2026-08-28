@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.pipeline.job_context import JobError
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.live import events
@@ -765,3 +766,118 @@ async def test_reset_conversation_starts_a_new_session_from_the_current_context(
         }
     ]
     assert service._needs_session_config is False
+
+
+# ---------------------------------------------------------------------------
+# Client delegation
+# ---------------------------------------------------------------------------
+
+
+class _FakeBackend:
+    name = "backend"
+
+
+def _client_delegation_service(monkeypatch, run_backend_job):
+    service = _make_service(
+        delegation=OpenAILiveLLMService.ClientDelegation(backend=_FakeBackend(), timeout_secs=5)
+    )
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    monkeypatch.setattr(live_llm, "run_backend_job", run_backend_job)
+    monkeypatch.setattr(type(service), "pipeline_worker", property(lambda self: "worker"))
+    return service, recorder
+
+
+def _delegation_item(item_id: str, text: str) -> events.DelegationItem:
+    return events.DelegationItem(
+        id=item_id, target="client", content=[events.InputTextContent(text=text)]
+    )
+
+
+@pytest.mark.asyncio
+async def test_client_delegation_runs_the_backend_with_the_turns_since_the_last_one(monkeypatch):
+    calls = []
+
+    async def fake_run_backend_job(
+        worker, backend_name, *, task, messages, on_update, timeout_secs
+    ):
+        calls.append((worker, backend_name, task, messages, timeout_secs))
+        await on_update("text", "Checking the weather.")
+        await on_update("progress", "Still looking.")
+        await on_update("text", "It's 62 and raining in Seattle.")
+        return "It's 62 and raining in Seattle."
+
+    service, recorder = _client_delegation_service(monkeypatch, fake_run_backend_job)
+
+    await _drive(
+        service,
+        [
+            _turn_created("t1", "user"),
+            _turn_done("t1", "user", "what's the weather in seattle"),
+            _turn_created("t2", "assistant"),
+            _turn_done("t2", "assistant", "Let me check."),
+        ],
+    )
+    await service._run_client_delegation(_delegation_item("item_d1", "Weather in Seattle?"))
+
+    assert calls == [
+        (
+            "worker",
+            "backend",
+            "Weather in Seattle?",
+            [
+                {"role": "user", "content": "what's the weather in seattle"},
+                {"role": "assistant", "content": "Let me check."},
+            ],
+            5,
+        )
+    ]
+    assert service._delegated_turns == []
+    appends = recorder.of_type("delegation.context.append")
+    assert [(a["delegation_item_id"], a["channel"], a["content"][0]["text"]) for a in appends] == [
+        ("item_d1", "speakable", "Checking the weather."),
+        ("item_d1", "commentary", "Still looking."),
+        ("item_d1", "speakable", "It's 62 and raining in Seattle."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_client_delegation_failure_is_reported_as_commentary(monkeypatch):
+    async def failing_run_backend_job(*args, **kwargs):
+        raise JobError("timed out")
+
+    service, recorder = _client_delegation_service(monkeypatch, failing_run_backend_job)
+    service.push_error = AsyncMock()
+
+    await service._run_client_delegation(_delegation_item("item_d1", "Weather?"))
+
+    (append,) = recorder.of_type("delegation.context.append")
+    assert append["channel"] == "commentary"
+    assert "timed out" in append["content"][0]["text"]
+    service.push_error.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
+    async def run_backend_job(*args, on_update, **kwargs):
+        await on_update("text", " ".join(f"Sentence number {i} is here." for i in range(120)))
+        return ""
+
+    service, recorder = _client_delegation_service(monkeypatch, run_backend_job)
+    await service._run_client_delegation(_delegation_item("item_d1", "Tell me everything"))
+
+    appends = recorder.of_type("delegation.context.append")
+    assert len(appends) > 1
+    for append in appends:
+        text = append["content"][0]["text"]
+        assert len(text) <= live_llm.MAX_CONTEXT_APPEND_CHARS
+        assert text.endswith(".")
+    assert " ".join(a["content"][0]["text"] for a in appends).count("Sentence number") == 120
+
+
+def test_chunk_text_splits_overlong_sentences_on_whitespace():
+    words = " ".join(["word"] * 400)
+    chunks = live_llm._chunk_text(words, 100)
+    assert all(len(c) <= 100 for c in chunks)
+    assert " ".join(chunks) == words
+    assert live_llm._chunk_text("   ", 100) == []
