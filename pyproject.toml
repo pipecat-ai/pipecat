@@ -35,6 +35,7 @@ dependencies = [
     # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
     "pydantic>=2.13; python_full_version >= '3.14'",
     "resampy~=0.4.3",
+    "soundfile~=0.13.1",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
     "typing_extensions>=4.9",
@@ -136,7 +137,7 @@ silero = []
 simli = [ "simli-ai~=2.0.1"]
 smallest = []
 soniox = []
-soundfile = [ "soundfile~=0.13.1" ]
+soundfile = []
 speechify = []
 speechmatics = [ "speechmatics-voice[smart]~=0.2.8" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
