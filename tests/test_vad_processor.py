@@ -95,7 +95,7 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_pushes_user_speaking_frame(self):
         """Test that UserSpeakingFrame is pushed while speaking."""
         analyzer = MockVADAnalyzer([VADState.SPEAKING, VADState.SPEAKING])
-        processor = VADProcessor(vad_analyzer=analyzer)
+        processor = VADProcessor(vad_analyzer=analyzer, speech_activity_period=0.0)
 
         # Audio frames are forwarded first, then VAD processes and broadcasts VAD frames
         await run_test(
