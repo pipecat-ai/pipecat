@@ -192,7 +192,7 @@ class ImageRawFrame:
     format: str | None
 
 
-FileSourceType = Literal["bytes", "url", "id"]
+FileSourceType = Literal["bytes", "url"]
 
 
 @dataclass
@@ -201,7 +201,7 @@ class FileRawFrame:
 
     Parameters:
         file: Raw file bytes, base64 data URL, or URL string depending on ``type``.
-        type: Type of the file ('bytes', 'url', or 'id'),
+        type: Type of the file ('bytes' or 'url'),
         filename: Optional name of the file.
         format: File format (expected in Mime Format).
     """

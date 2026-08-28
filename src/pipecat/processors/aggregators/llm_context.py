@@ -36,7 +36,7 @@ from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import pcm_to_wav
-from pipecat.frames.frames import AudioRawFrame
+from pipecat.frames.frames import AudioRawFrame, FileSourceType
 
 # The sentinel is part of LLMContext's public surface — tools and tool_choice
 # default to it — so it is re-exported here for callers. The redundant aliases
@@ -186,7 +186,7 @@ class LLMContext:
     async def create_file_message(
         *,
         role: str = "user",
-        type: str,
+        type: FileSourceType,
         format: str,
         file: str,
         name: str | None = None,
@@ -196,7 +196,7 @@ class LLMContext:
 
         Args:
             role: The role of this message (defaults to "user").
-            type: The type of the file (e.g., "bytes" or "url").
+            type: The type of the file.
             format: MIME type of the file (e.g., "application/pdf").
             file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
             name: Optional name of the file.
@@ -516,7 +516,7 @@ class LLMContext:
     async def add_file_frame_message(
         self,
         *,
-        type: str,
+        type: FileSourceType,
         format: str,
         file: str,
         text: str | None = None,
@@ -526,7 +526,7 @@ class LLMContext:
         """Add a message containing a file frame.
 
         Args:
-            type: File source type ('bytes' or 'url').
+            type: File source type.
             format: MIME type of the file (e.g., 'application/pdf').
             file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
                 URL fetching for providers that require bytes is handled by the
