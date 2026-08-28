@@ -25,7 +25,7 @@ async def on_client_connected(transport, client):
 @transport.event_handler("on_client_disconnected")
 async def on_client_disconnected(transport, client):
     logger.info("Client disconnected")
-    await worker.cancel()
+    await runner.cancel()
 {% endmacro %}
 
 {# Daily PSTN dial-in event handlers #}
@@ -40,12 +40,12 @@ async def on_first_participant_joined(transport, participant):
 @transport.event_handler("on_client_disconnected")
 async def on_client_disconnected(transport, client):
     logger.info("Client disconnected")
-    await worker.cancel()
+    await runner.cancel()
 
 @transport.event_handler("on_dialin_error")
 async def on_dialin_error(transport, data):
     logger.error(f"Dial-in error: {data}")
-    await worker.cancel()
+    await runner.cancel()
 {% endmacro %}
 
 {# Dial-out call handlers shared by Daily PSTN and Twilio + Daily SIP dial-out #}
@@ -67,7 +67,7 @@ async def on_dialout_error(transport, data: Any):
         await dialout_manager.attempt_dialout()
     else:
         logger.error("No more retries allowed, stopping bot.")
-        await worker.cancel()
+        await runner.cancel()
 {% endmacro %}
 
 {# Daily PSTN dial-out event handlers. With guarded=True the bot also supports
@@ -87,7 +87,7 @@ if dialout_settings:
 @transport.event_handler("on_client_disconnected")
 async def on_client_disconnected(transport, client):
     logger.info("Client disconnected")
-    await worker.cancel()
+    await runner.cancel()
 {% endmacro %}
 
 {# Twilio call-forwarding handlers used by the SIP dial-in scenario #}
@@ -106,12 +106,12 @@ async def on_dialin_ready(transport, sip_endpoint):
         logger.info("Call forwarded successfully")
     except Exception as e:
         logger.error(f"Failed to forward call: {str(e)}")
-        await worker.cancel()
+        await runner.cancel()
 
 @transport.event_handler("on_dialin_error")
 async def on_dialin_error(transport, data):
     logger.error(f"Dial-in error: {data}")
-    await worker.cancel()
+    await runner.cancel()
 {% endmacro %}
 
 {# Twilio + Daily SIP dial-in event handlers. With guarded=True the bot also
@@ -135,7 +135,7 @@ async def on_client_connected(transport, client):
 @transport.event_handler("on_client_disconnected")
 async def on_client_disconnected(transport, client):
     logger.info("Client disconnected")
-    await worker.cancel()
+    await runner.cancel()
 {% endmacro %}
 
 {# Twilio + Daily SIP dial-out event handlers (same as Daily PSTN dial-out) #}
