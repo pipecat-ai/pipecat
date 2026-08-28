@@ -32,8 +32,8 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    SpeechOutputAudioRawFrame,
     TranscriptionFrame,
-    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
@@ -345,7 +345,7 @@ async def test_tools_change_sends_sparse_update_in_responses_mode():
 
 
 @pytest.mark.asyncio
-async def test_output_audio_delta_pushes_24khz_tts_audio_frame():
+async def test_output_audio_delta_pushes_24khz_speech_audio_frame():
     service = _make_service()
     recorder = _FrameRecorder()
     service.push_frame = recorder
@@ -363,7 +363,7 @@ async def test_output_audio_delta_pushes_24khz_tts_audio_frame():
         ],
     )
 
-    (frame,) = recorder.of_types(TTSAudioRawFrame)
+    (frame,) = recorder.of_types(SpeechOutputAudioRawFrame)
     assert frame.audio == audio
     assert frame.sample_rate == 24000
     assert frame.num_channels == 1
@@ -881,3 +881,54 @@ def test_chunk_text_splits_overlong_sentences_on_whitespace():
     assert all(len(c) <= 100 for c in chunks)
     assert " ".join(chunks) == words
     assert live_llm._chunk_text("   ", 100) == []
+
+
+@pytest.mark.asyncio
+async def test_usage_reports_backend_model_token_deltas_for_the_duration_shape():
+    service = _make_service()
+    service.start_llm_usage_metrics = AsyncMock()
+
+    def usage(audio_ms, backends):
+        return {
+            "type": "session.usage.updated",
+            "usage": {"audio_duration_ms": audio_ms, "backend_model_usage": backends},
+        }
+
+    await _drive(
+        service,
+        [
+            usage(1000, []),
+            usage(
+                2000,
+                [
+                    {
+                        "model": "gpt-5.4-mini",
+                        "input_tokens": 420,
+                        "input_tokens_details": {"cached_tokens": 128},
+                        "output_tokens": 96,
+                        "output_tokens_details": {"reasoning_tokens": 48},
+                        "total_tokens": 516,
+                    }
+                ],
+            ),
+            usage(
+                3000,
+                [
+                    {
+                        "model": "gpt-5.4-mini",
+                        "input_tokens": 520,
+                        "input_tokens_details": {"cached_tokens": 128},
+                        "output_tokens": 126,
+                        "output_tokens_details": {"reasoning_tokens": 58},
+                        "total_tokens": 646,
+                    }
+                ],
+            ),
+        ],
+    )
+
+    first, second = [c.args[0] for c in service.start_llm_usage_metrics.call_args_list]
+    assert (first.prompt_tokens, first.completion_tokens, first.total_tokens) == (420, 96, 516)
+    assert (first.cache_read_input_tokens, first.reasoning_tokens) == (128, 48)
+    assert (second.prompt_tokens, second.completion_tokens, second.total_tokens) == (100, 30, 130)
+    assert (second.cache_read_input_tokens, second.reasoning_tokens) == (0, 10)

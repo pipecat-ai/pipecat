@@ -40,8 +40,8 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    SpeechOutputAudioRawFrame,
     TranscriptionFrame,
-    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
@@ -681,8 +681,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         await self.send_client_event(events.InputAudioAppendEvent(audio=payload))
 
     async def _handle_evt_audio_delta(self, evt: events.OutputAudioDeltaEvent):
+        # The model streams output continuously at real-time pace, silence
+        # included, so this is a speech stream rather than TTS output: the
+        # output transport derives BotStarted/StoppedSpeakingFrame from the
+        # audio itself instead of from TTSStarted/StoppedFrame.
         await self.push_frame(
-            TTSAudioRawFrame(
+            SpeechOutputAudioRawFrame(
                 audio=base64.b64decode(evt.audio),
                 sample_rate=OPENAI_SAMPLE_RATE,
                 num_channels=1,
@@ -932,15 +936,37 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     #
 
     async def _report_usage(self, usage: events.Usage):
-        """Report the tokens used since the previous cumulative usage report."""
-        if usage.total_tokens is None:
-            logger.debug(f"{self}: usage: {usage.model_dump(exclude_none=True)}")
-            return
+        """Report the tokens used since the previous cumulative usage report.
+
+        Usage comes in one of two shapes: token counts for the whole session,
+        or the frontend's audio duration plus per-backend-model token counts.
+        Both are cumulative, so the difference from the previous report is
+        what gets reported.
+        """
         previous = self._usage
         self._usage = usage
 
         def delta(current: int | None, before: int | None) -> int:
             return (current or 0) - (before or 0)
+
+        if usage.total_tokens is None:
+            logger.debug(f"{self}: usage: {usage.model_dump(exclude_none=True)}")
+            current = _backend_model_tokens(usage)
+            before = _backend_model_tokens(previous) if previous else {}
+            tokens = LLMTokenUsage(
+                prompt_tokens=delta(current.get("input_tokens"), before.get("input_tokens")),
+                completion_tokens=delta(current.get("output_tokens"), before.get("output_tokens")),
+                total_tokens=delta(current.get("total_tokens"), before.get("total_tokens")),
+                cache_read_input_tokens=delta(
+                    current.get("cached_tokens"), before.get("cached_tokens")
+                ),
+                reasoning_tokens=delta(
+                    current.get("reasoning_tokens"), before.get("reasoning_tokens")
+                ),
+            )
+            if tokens.total_tokens > 0:
+                await self.start_llm_usage_metrics(tokens)
+            return
 
         def detail(details: events.UsageTokenDetails | None, name: str) -> int | None:
             return getattr(details, name, None) if details else None
@@ -968,6 +994,23 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
         if tokens.total_tokens > 0:
             await self.start_llm_usage_metrics(tokens)
+
+
+def _backend_model_tokens(usage: events.Usage) -> dict[str, int]:
+    """Sum the per-backend-model token counts of a duration-shaped usage report."""
+    totals: dict[str, int] = {}
+    for entry in usage.backend_model_usage or []:
+        for name in ("input_tokens", "output_tokens", "total_tokens"):
+            totals[name] = totals.get(name, 0) + int(entry.get(name) or 0)
+        input_details = entry.get("input_tokens_details") or {}
+        output_details = entry.get("output_tokens_details") or {}
+        totals["cached_tokens"] = totals.get("cached_tokens", 0) + int(
+            input_details.get("cached_tokens") or 0
+        )
+        totals["reasoning_tokens"] = totals.get("reasoning_tokens", 0) + int(
+            output_details.get("reasoning_tokens") or 0
+        )
+    return totals
 
 
 def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, Any]:
