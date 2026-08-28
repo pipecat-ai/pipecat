@@ -734,3 +734,34 @@ async def test_close_session_waits_for_session_closed(monkeypatch):
     monkeypatch.setattr(live_llm, "SESSION_CLOSE_TIMEOUT_SECS", 0.01)
     await service._close_session()
     assert len(recorder.of_type("session.close")) == 2
+
+
+@pytest.mark.asyncio
+async def test_reset_conversation_starts_a_new_session_from_the_current_context():
+    service = _make_service()
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    service._close_session = AsyncMock()
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+
+    context = LLMContext([{"role": "user", "content": "hi"}])
+    await service._handle_context(context)
+    service._session_started = True
+
+    context.set_messages([{"role": "assistant", "content": "Restored history."}])
+    await service.reset_conversation()
+
+    service._close_session.assert_awaited_once()
+    service._disconnect.assert_awaited_once()
+    service._connect.assert_awaited_once()
+    updates = recorder.of_type("session.update")
+    assert len(updates) == 2
+    assert updates[1]["session"]["initial_items"] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Restored history."}],
+        }
+    ]
+    assert service._needs_session_config is False

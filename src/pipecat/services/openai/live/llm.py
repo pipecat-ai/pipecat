@@ -303,6 +303,22 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             )
         return changed
 
+    async def reset_conversation(self):
+        """Start a new session seeded from the current context.
+
+        The Live API only takes conversation history at session start, so
+        replacing the context (for example to restore a saved conversation)
+        means closing the session and opening a new one configured from the
+        context as it is now. Must not be called from the receive task.
+        """
+        logger.debug(f"{self}: resetting conversation")
+        await self._close_session()
+        await self._disconnect()
+        self._needs_session_config = True
+        await self._connect()
+        if self._context is not None:
+            await self._send_session_config()
+
     #
     # frame processing
     #
