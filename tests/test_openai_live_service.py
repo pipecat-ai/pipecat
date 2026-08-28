@@ -471,7 +471,7 @@ async def test_user_turn_emits_proposed_speaking_frames_and_transcriptions():
 def test_metadata_frame_recommends_external_turns_without_interruptions():
     service = _make_service()
     frame = service.service_metadata_frame()
-    assert frame.is_realtime_service is True
+    assert frame.is_realtime_service is False
     assert frame.user_turn_strategies is not None
     assert frame.user_turn_strategies.enable_interruptions is False
 
@@ -751,10 +751,15 @@ async def test_reset_conversation_starts_a_new_session_from_the_current_context(
     service._session_started = True
 
     context.set_messages([{"role": "assistant", "content": "Restored history."}])
+    frames = _FrameRecorder()
+    service.push_frame = frames
+    service._assistant_turn_id = "turn_open"
     await service.reset_conversation()
 
-    service._close_session.assert_awaited_once()
+    # The old session is dropped, not drained, and its open assistant turn is closed.
+    service._close_session.assert_not_awaited()
     service._disconnect.assert_awaited_once()
+    assert [type(f) for f, _ in frames.frames] == [TTSStoppedFrame, LLMFullResponseEndFrame]
     service._connect.assert_awaited_once()
     updates = recorder.of_type("session.update")
     assert len(updates) == 2

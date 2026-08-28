@@ -151,7 +151,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # OpenAI Live is full-duplex: it detects the user's turns itself and
     # handles being interrupted, so there is no local VAD and interruptions
-    # are never broadcast. Realtime-service mode is auto-detected.
+    # are never broadcast.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -198,9 +198,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
         logger.info(f"Backend said: {message.content}")
 
-    # In realtime mode the user message is written to the context when the
-    # assistant responds, so subscribe to on_user_turn_message_added for the
-    # finalized user text.
     @user_aggregator.event_handler("on_user_turn_message_added")
     async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         logger.info(f"Transcript: user: {message.content}")

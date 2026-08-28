@@ -168,8 +168,14 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     expected to disregard results the conversation has moved past). As a
     consequence every tool behaves as ``cancel_on_interruption=False``; use
     ``cancellable_by_llm=True`` for tools the model should be able to cancel on
-    request. ``LLMContextAggregatorPair`` auto-detects this realtime service
-    and records both sides of the conversation from the transcript frames.
+    request.
+
+    The context aggregators record both sides of the conversation from the
+    transcript frames. Unlike the Realtime services, this one is not flagged
+    as a realtime service for the aggregators: a user turn's final transcript
+    arrives with its ``turn.done``, so the user aggregator writes each user
+    turn to the context as it ends — before any tool calls it triggers —
+    rather than when the assistant starts to respond.
 
     The session starts on the first ``LLMContextFrame`` (typically queued as an
     ``LLMRunFrame``): the context's leading system message (or
@@ -289,10 +295,15 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         return True
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
-        """Realtime service whose user turns are resolved from the API's projected turns."""
+        """Recommend external turn strategies, resolved from the API's projected turns.
+
+        ``is_realtime_service`` is left off on purpose: the aggregators'
+        realtime mode defers the user-message write until the assistant
+        responds, to absorb late transcripts, and here that would place a
+        delegation's tool calls ahead of the user message that caused them.
+        """
         return LLMServiceMetadataFrame(
             service_name=self.name,
-            is_realtime_service=True,
             user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=False),
         )
 
@@ -351,11 +362,17 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         The Live API only takes conversation history at session start, so
         replacing the context (for example to restore a saved conversation)
-        means closing the session and opening a new one configured from the
-        context as it is now. Must not be called from the receive task.
+        means dropping the session and opening a new one configured from the
+        context as it is now. The old session is abandoned rather than closed
+        gracefully: a graceful close waits for its in-flight delegations to
+        drain, and their results belong to the conversation being replaced.
+        Must not be called from the receive task.
         """
         logger.debug(f"{self}: resetting conversation")
-        await self._close_session()
+        # Close out an assistant turn the old session was in the middle of, so
+        # the aggregator records what was said and the response frames stay
+        # balanced for the new session's turns.
+        await self._end_assistant_turn()
         await self._disconnect()
         self._needs_session_config = True
         await self._connect()
