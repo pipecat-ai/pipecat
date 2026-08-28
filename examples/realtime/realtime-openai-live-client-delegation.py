@@ -130,7 +130,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # The backend: any LLM service, with its own context and tools. The live
     # service registers it with the runner as a child of the pipeline worker.
     backend = BackendLLMWorker(
-        llm=AnthropicLLMService(api_key=os.environ["ANTHROPIC_API_KEY"]),
+        # Thinking summaries stream back to the frontend as "thought" updates.
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
         context=LLMContext(
             [{"role": "system", "content": BACKEND_INSTRUCTIONS}],
             [get_current_weather, get_restaurant_recommendation],

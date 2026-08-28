@@ -118,8 +118,10 @@ class ClientDelegation:
     """Client delegation: a Pipecat worker is the backend the live model delegates to.
 
     Each delegated request is sent to the backend as a ``run`` job together
-    with the conversation turns since the previous request; what the backend
-    says comes back as ``speakable`` context for the model to relay.
+    with the conversation turns since the previous request. What the backend
+    says comes back as ``speakable`` context for the model to relay; its
+    reasoning summaries come back as ``commentary``, silent context the model
+    can draw on while the work is in progress.
 
     Parameters:
         backend: The worker that runs delegated tasks — normally a
@@ -862,6 +864,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self, delegation_id: str, text: str, *, channel: events.DelegationChannel
     ):
         for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_CHARS):
+            logger.debug(f"{self}: delegation {delegation_id} {channel} context: {chunk!r}")
             await self.send_client_event(
                 events.DelegationContextAppendEvent(
                     delegation_item_id=delegation_id,

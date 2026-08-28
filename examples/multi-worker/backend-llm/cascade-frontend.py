@@ -130,12 +130,17 @@ async def delegate(params: FunctionCallParams, task: str):
     logger.info(f"Delegating to the backend: {task!r}")
 
     async def on_update(kind: str, text: str):
-        # Intermediate responses (e.g. "Let me check.") reach the user while
-        # the backend keeps working; its final answer is the tool result.
+        if kind == "text":
+            # Intermediate responses (e.g. "Let me check.") reach the user while
+            # the backend keeps working; its final answer is the tool result.
+            content, run_llm = f"Backend update: {text}", True
+        else:
+            # Reasoning summaries keep the frontend informed of the backend's
+            # progress without prompting a reply.
+            content, run_llm = f"Backend progress: {text}", False
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
-                messages=[{"role": "developer", "content": f"Backend update: {text}"}],
-                run_llm=True,
+                messages=[{"role": "developer", "content": content}], run_llm=run_llm
             )
         )
 
@@ -198,7 +203,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     backend = BackendLLMWorker(
         name=BACKEND_NAME,
-        llm=AnthropicLLMService(api_key=os.environ["ANTHROPIC_API_KEY"]),
+        # Thinking summaries stream back to the frontend as "thought" updates.
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
         context=LLMContext(
             [{"role": "system", "content": BACKEND_INSTRUCTIONS}],
             [get_current_weather, get_restaurant_recommendation],

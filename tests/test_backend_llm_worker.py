@@ -23,6 +23,9 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -37,7 +40,8 @@ from pipecat.workers.runner import WorkerRunner
 class _ScriptedLLM(LLMService):
     """Plays one scripted response per LLMContextFrame.
 
-    A script step is ``("text", str)`` or ``("call", name, call_id, args)``.
+    A script step is ``("text", str)``, ``("thought", str)`` or
+    ``("call", name, call_id, args)``.
     ``settle_secs`` holds the response open after issuing its calls so a fast
     tool can return before the response ends.
     """
@@ -75,6 +79,10 @@ class _ScriptedLLM(LLMService):
         for step in steps:
             if step[0] == "text":
                 await self.push_frame(LLMTextFrame(step[1]))
+            elif step[0] == "thought":
+                await self.push_frame(LLMThoughtStartFrame())
+                await self.push_frame(LLMThoughtTextFrame(step[1]))
+                await self.push_frame(LLMThoughtEndFrame())
             else:
                 _, name, call_id, args = step
                 calls.append(
@@ -202,6 +210,27 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
 
     assert text == "It's raining."
     assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_thoughts_are_streamed_as_thought_updates():
+    llm = _ScriptedLLM(
+        [
+            [
+                ("thought", "I should check the weather."),
+                ("call", "get_weather", "call_1", {"location": "Seattle"}),
+            ],
+            [("thought", "Rain; keep it short."), ("text", "It's raining.")],
+        ]
+    )
+
+    text, updates, _ = await _run_backend(llm, task="Weather?")
+
+    assert text == "It's raining."
+    assert updates == [
+        ("thought", "I should check the weather."),
+        ("thought", "Rain; keep it short."),
+    ]
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,7 @@ from pipecat.pipeline.job_context import JobEvent, JobParams
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -92,16 +93,19 @@ class BackendLLMWorker(LLMContextWorker):
     pipeline. Each delegated task arrives as a ``run`` job, is appended to the
     context as one user message (the voice turns since the previous task, then
     the task), and runs the LLM until it produces a final answer. Responses
-    along the way — what the backend says before calling tools — are streamed
-    back as job updates; the final answer is the job response.
+    along the way — what the backend says before calling tools — and its
+    reasoning summaries are streamed back as job updates; the final answer is
+    the job response.
 
     Job contract (``@job(name="run")``, one task at a time):
 
     - request payload: ``{"task": str, "messages": [{"role": "user" | "assistant",
       "content": str}, ...]}``
-    - updates: ``{"kind": "text", "text": str}`` — an intermediate assistant
-      response, suitable for the frontend to speak while the backend keeps
-      working
+    - updates: ``{"kind": "text" | "thought", "text": str}`` — ``text`` is an
+      intermediate assistant response, suitable for the frontend to speak
+      while the backend keeps working; ``thought`` is a reasoning summary
+      (from the LLM's thought frames), progress the frontend may draw on but
+      not speak
     - response: ``{"text": str}`` — the final assistant response, or ``""`` if
       the task ended without one
 
@@ -167,6 +171,10 @@ class BackendLLMWorker(LLMContextWorker):
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
             await self._on_assistant_turn_stopped(message)
 
+        @self.assistant_aggregator.event_handler("on_assistant_thought")
+        async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
+            await self._on_assistant_thought(message)
+
     @job(name=BACKEND_JOB_NAME, sequential=True)
     async def run_task(self, message: BusJobRequestMessage):
         """Run one delegated task to completion, streaming intermediate responses as updates.
@@ -214,6 +222,12 @@ class BackendLLMWorker(LLMContextWorker):
         elif text:
             await self.send_job_update(run.job_id, {"kind": "text", "text": text})
 
+    async def _on_assistant_thought(self, message: AssistantThoughtMessage):
+        run = self._run
+        text = (message.content or "").strip()
+        if run is not None and text:
+            await self.send_job_update(run.job_id, {"kind": "thought", "text": text})
+
 
 async def run_backend_job(
     worker: BaseWorker,
@@ -233,8 +247,9 @@ async def run_backend_job(
         task: The request to delegate.
         messages: Voice conversation turns the backend hasn't seen yet.
         on_update: Called with ``(kind, text)`` for each intermediate response
-            the backend streams back while it works; the final response is
-            returned, not passed here.
+            (``"text"``) or reasoning summary (``"thought"``) the backend
+            streams back while it works; the final response is returned, not
+            passed here.
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
 

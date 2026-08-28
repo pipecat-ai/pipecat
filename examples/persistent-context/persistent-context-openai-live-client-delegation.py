@@ -159,7 +159,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         asyncio.create_task(_reset())
 
     backend = BackendLLMWorker(
-        llm=AnthropicLLMService(api_key=os.environ["ANTHROPIC_API_KEY"]),
+        # Thinking summaries stream back to the frontend as "thought" updates.
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
         context=backend_context,
     )
     backend_context.set_tools(
