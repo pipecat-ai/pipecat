@@ -38,6 +38,47 @@ _MIME_TO_BEDROCK_FORMAT: dict[str, str] = {
     "text/markdown": "md",
 }
 
+_MIME_TO_BEDROCK_IMAGE_FORMAT: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpeg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
+
+_MIME_TO_BEDROCK_VIDEO_FORMAT: dict[str, str] = {
+    "video/x-flv": "flv",
+    "video/x-matroska": "mkv",
+    "video/quicktime": "mov",
+    "video/mpeg": "mpeg",
+    "video/mp4": "mp4",
+    "video/3gpp": "three_gp",
+    "video/webm": "webm",
+    "video/x-ms-wmv": "wmv",
+}
+
+
+def _bedrock_video_format(mime_type: str, filename: str | None) -> str | None:
+    """Map a video MIME type to Bedrock's video format.
+
+    ``video/mpeg`` covers both the ``mpeg`` and ``mpg`` Bedrock formats, which
+    aren't distinguishable by MIME type alone, so fall back to the filename
+    extension to disambiguate.
+    """
+    if mime_type == "video/mpeg" and filename and filename.lower().endswith(".mpg"):
+        return "mpg"
+    return _MIME_TO_BEDROCK_VIDEO_FORMAT.get(mime_type)
+
+
+# Bedrock's API reference documents an AudioBlock content type
+# (https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_AudioBlock.html),
+# but in practice ConverseStream rejects it outright ("ContentBlock object
+# ... must set one of the following keys: text, image, toolUse, toolResult,
+# document, video, cachePoint, searchResult") regardless of model, unlike
+# unsupported image/video/document blocks, which are rejected per-model with
+# a specific "this model doesn't support the X content block" error. So
+# audio files aren't handled as a distinct content block below; treat this
+# as unsupported until the live API actually accepts it.
+
 # Bedrock's document name only allows alphanumerics, whitespace, hyphens,
 # parentheses, and square brackets, with no consecutive whitespace — notably
 # no ".", so an ordinary filename like "notes.pdf" is rejected as-is.
@@ -143,6 +184,8 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                             item["image"]["source"]["bytes"] = "..."
                         if item.get("document"):
                             item["document"]["source"]["bytes"] = "..."
+                        if item.get("video"):
+                            item["video"]["source"]["bytes"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -352,13 +395,24 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 elif item["type"] == "file_base64":
                     f_data = item["file"]
                     mime_type = f_data["mime_type"]
+                    file_data_url = f_data["file_data"]
+                    raw_bytes = base64.b64decode(file_data_url.split(",")[1])
+                    video_format = _bedrock_video_format(mime_type, f_data["filename"])
+                    if video_format is not None:
+                        new_content.append(
+                            {
+                                "video": {
+                                    "format": video_format,
+                                    "source": {"bytes": raw_bytes},
+                                }
+                            }
+                        )
+                        continue
                     bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
                     if bedrock_format is None:
                         # Wrapped as LLMContextConversionError by the caller in
                         # _from_universal_context_messages.
                         raise ValueError(f"Unsupported 'file' MIME type for Bedrock: {mime_type}")
-                    file_data_url = f_data["file_data"]
-                    raw_bytes = base64.b64decode(file_data_url.split(",")[1])
                     new_content.append(
                         {
                             "document": {
@@ -375,12 +429,34 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     url = f_data["url"]
                     if url.startswith("s3://"):
                         mime_type = f_data["mime_type"]
+                        image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
+                        if image_format is not None:
+                            new_content.append(
+                                {
+                                    "image": {
+                                        "format": image_format,
+                                        "source": {"s3Location": {"uri": url}},
+                                    }
+                                }
+                            )
+                            continue
+                        video_format = _bedrock_video_format(mime_type, f_data["filename"])
+                        if video_format is not None:
+                            new_content.append(
+                                {
+                                    "video": {
+                                        "format": video_format,
+                                        "source": {"s3Location": {"uri": url}},
+                                    }
+                                }
+                            )
+                            continue
                         bedrock_format = _MIME_TO_BEDROCK_FORMAT.get(mime_type)
                         if bedrock_format is None:
                             # Wrapped as LLMContextConversionError by the caller in
                             # _from_universal_context_messages.
                             raise ValueError(
-                                f"Unsupported 'file' MIME type for Bedrock: {mime_type}"
+                                f"Unsupported MIME type for Bedrock S3 URI: {mime_type}"
                             )
                         new_content.append(
                             {
@@ -398,18 +474,19 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                         # _from_universal_context_messages.
                         raise ValueError(f"Bedrock only supports S3 URLs for file sources: {url}")
 
-            # In the case where there's a single image in the list (like what
-            # would result from a UserImageRawFrame), ensure that the image
-            # comes before text
-            image_indices = [i for i, item in enumerate(new_content) if "image" in item]
-            text_indices = [i for i, item in enumerate(new_content) if "text" in item]
-            if len(image_indices) == 1 and text_indices:
-                img_idx = image_indices[0]
-                first_txt_idx = text_indices[0]
-                if img_idx > first_txt_idx:
-                    # Move image before the first text
-                    image_item = new_content.pop(img_idx)
-                    new_content.insert(first_txt_idx, image_item)
+            # In the case where there's a single image, document, or video in
+            # the list (like what would result from a UserImageRawFrame),
+            # ensure it comes before text
+            for key in ("image", "document", "video"):
+                media_indices = [i for i, item in enumerate(new_content) if key in item]
+                text_indices = [i for i, item in enumerate(new_content) if "text" in item]
+                if len(media_indices) == 1 and text_indices:
+                    media_idx = media_indices[0]
+                    first_txt_idx = text_indices[0]
+                    if media_idx > first_txt_idx:
+                        # Move the media item before the first text
+                        media_item = new_content.pop(media_idx)
+                        new_content.insert(first_txt_idx, media_item)
             return {"role": msg["role"], "content": new_content}
 
         return msg
