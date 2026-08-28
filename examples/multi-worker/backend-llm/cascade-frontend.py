@@ -9,8 +9,8 @@
 The frontend keeps the conversation moving with a small, fast model and no
 tools of its own. Anything that needs tools or careful reasoning it hands to
 a ``BackendLLMWorker`` running Claude, through the ``delegate`` tool, and
-relays what the backend says. This is the same backend worker and job
-contract ``OpenAILiveLLMService`` uses for client delegation.
+relays its answer. This is the same backend worker and job contract
+``OpenAILiveLLMService`` uses for client delegation.
 
 Architecture::
 
@@ -34,7 +34,7 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -130,18 +130,13 @@ async def delegate(params: FunctionCallParams, task: str):
     logger.info(f"Delegating to the backend: {task!r}")
 
     async def on_update(kind: str, text: str):
-        if kind == "text":
-            # Intermediate responses (e.g. "Let me check.") reach the user while
-            # the backend keeps working; its final answer is the tool result.
-            content, run_llm = f"Backend update: {text}", True
-        else:
-            # Reasoning summaries keep the frontend informed of the backend's
-            # progress without prompting a reply.
-            content, run_llm = f"Backend progress: {text}", False
-        await params.llm.queue_frame(
-            LLMMessagesAppendFrame(
-                messages=[{"role": "developer", "content": content}], run_llm=run_llm
-            )
+        # Progress — what the backend says before calling tools, and its
+        # reasoning summaries — is recorded as intermediate results of this
+        # call: context the frontend can draw on if asked, without prompting a
+        # reply. The final answer is the tool result.
+        await params.result_callback(
+            {"kind": kind, "text": text},
+            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
         )
 
     text = await run_backend_job(

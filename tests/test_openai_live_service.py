@@ -839,7 +839,7 @@ async def test_client_delegation_runs_the_backend_with_the_turns_since_the_last_
     assert service._delegated_turns == []
     appends = recorder.of_type("delegation.context.append")
     assert [(a["delegation_item_id"], a["channel"], a["content"][0]["text"]) for a in appends] == [
-        ("item_d1", "speakable", "Checking the weather."),
+        ("item_d1", "commentary", "Checking the weather."),
         ("item_d1", "commentary", "Still looking."),
         ("item_d1", "speakable", "It's 62 and raining in Seattle."),
     ]

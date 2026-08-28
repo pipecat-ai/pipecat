@@ -102,10 +102,9 @@ class BackendLLMWorker(LLMContextWorker):
     - request payload: ``{"task": str, "messages": [{"role": "user" | "assistant",
       "content": str}, ...]}``
     - updates: ``{"kind": "text" | "thought", "text": str}`` — ``text`` is an
-      intermediate assistant response, suitable for the frontend to speak
-      while the backend keeps working; ``thought`` is a reasoning summary
-      (from the LLM's thought frames), progress the frontend may draw on but
-      not speak
+      intermediate response (what the backend said before calling tools) and
+      ``thought`` a reasoning summary from the LLM's thought frames: progress
+      the frontend can draw on while the backend works
     - response: ``{"text": str}`` — the final assistant response, or ``""`` if
       the task ended without one
 
