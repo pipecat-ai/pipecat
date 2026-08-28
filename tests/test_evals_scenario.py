@@ -89,7 +89,8 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 "turns: [{user: hi, expect: [{event: llm_started}]}]\n"
             )
         )
-        self.assertEqual(s.user_audio, {"service": "cartesia", "voice": "v1"})
+        self.assertTrue(s.user_audio)
+        self.assertEqual(s.user_speech, {"service": "cartesia", "voice": "v1"})
 
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
@@ -571,7 +572,8 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertTrue(s.bot_audio)
         self.assertEqual(s.transcriber, {"service": "whisper", "model": "base"})
         self.assertEqual(s.judge, {"service": "ollama", "model": "llama3:latest"})
-        self.assertEqual(s.user_audio, {"service": "kokoro", "voice": "af_heart"})
+        self.assertTrue(s.user_audio)
+        self.assertEqual(s.user_speech, {"service": "kokoro", "voice": "af_heart"})
 
     def test_stop_on_failure_defaults_true(self):
         s = EvalScenario.load(

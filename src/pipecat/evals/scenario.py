@@ -404,12 +404,15 @@ class EvalScenario:
             ``response`` event (``None`` in text modality). Set ``language`` when
             the bot speaks a non-English language so the STT doesn't default to
             English.
-        user_audio: TTS config the harness uses to generate user audio. When
-            present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
-            to the bot, exercising its STT for real. Mapping with ``service``,
-            ``voice``, and optional ``model`` / ``language`` / ``sample_rate`` /
-            ``api_key``. Set ``language`` (a code like ``zh``) to synthesize
-            non-English user turns. Omit for text-only evals (default).
+        user_audio: Whether the user's turns reach the bot as speech, derived
+            from ``user.modality``. False (text, the default): each turn is sent
+            as an RTVI ``send-text``. True (audio): the harness streams RTVI
+            ``raw-audio``, exercising the bot's STT for real.
+        user_speech: Parsed from the ``user.speech:`` block; the TTS config the
+            harness synthesizes user turns with (``None`` in text modality).
+            Mapping with ``service``, ``voice``, and optional ``model`` /
+            ``language`` / ``sample_rate`` / ``api_key``. Set ``language`` (a
+            code like ``zh``) to synthesize non-English user turns.
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when this scenario's connection
             ends. Bots often cancel their pipeline there, so this is False by
@@ -435,7 +438,8 @@ class EvalScenario:
     judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
     bot_audio: bool = False
     transcriber: dict | None = None
-    user_audio: dict | None = None
+    user_audio: bool = False
+    user_speech: dict | None = None
     trigger_disconnect: bool = False
     stop_on_failure: bool = True
     source_path: Path | None = None
@@ -490,9 +494,8 @@ class EvalScenario:
             raise ValueError(f"{path}: 'context:' must be a list of message dicts")
 
         # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
-        # turn via TTS (exercising the bot's STT); text sends it as text. Stored
-        # internally as user_audio (the speech config when audio, else None).
-        user_audio = _parse_user_block(data.get("user"), path)
+        # turn via TTS (exercising the bot's STT); text sends it as text.
+        user_audio, user_speech = _parse_user_block(data.get("user"), path)
 
         # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
         # means the bot speaks and the judge evaluates the transcription of its
@@ -512,6 +515,7 @@ class EvalScenario:
             bot_audio=bot_audio,
             transcriber=transcriber,
             user_audio=user_audio,
+            user_speech=user_speech,
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             stop_on_failure=bool(data.get("stop_on_failure", True)),
             source_path=path,
@@ -525,24 +529,24 @@ _DEFAULT_JUDGE = {
 }
 
 
-def _parse_user_block(user: Any, path: Path) -> dict | None:
-    """Parse the ``user:`` block into the internal user_audio (speech config or None)."""
+def _parse_user_block(user: Any, path: Path) -> tuple[bool, dict | None]:
+    """Parse the ``user:`` block into ``(user_audio, speech config)``."""
     if user is None:
-        return None  # default: text modality
+        return False, None  # default: text modality
     if not isinstance(user, dict):
         raise ValueError(f"{path}: 'user:' must be a mapping")
     modality = user.get("modality", "text")
     if modality not in ("audio", "text"):
         raise ValueError(f"{path}: 'user.modality:' must be 'audio' or 'text', got {modality!r}")
     if modality == "text":
-        return None
+        return False, None
     speech = user.get("speech")
     if not isinstance(speech, dict):
         raise ValueError(
             f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
             "(TTS service + voice to synthesize the user's turns)"
         )
-    return speech
+    return True, speech
 
 
 def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]:
@@ -630,9 +634,9 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         return f"{service}/{model}" if model else str(service)
 
     user_segs = [seg("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
-    if scenario.user_audio:
+    if scenario.user_speech:
         # The TTS "voice" is the speech config's model-equivalent.
-        user_segs.append(seg("speech", svc_model(scenario.user_audio, "?", "voice"), _CFG_SERVICE))
+        user_segs.append(seg("speech", svc_model(scenario.user_speech, "?", "voice"), _CFG_SERVICE))
 
     eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
     judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]

@@ -448,7 +448,7 @@ class EvalSession(BaseObject):
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
             speech: Override the user-audio generator (default: built from
-                ``scenario.user_audio`` in audio mode).
+                ``scenario.user_speech`` in audio mode).
             transcriber: Override the bot-audio transcriber (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
 
@@ -460,10 +460,10 @@ class EvalSession(BaseObject):
             with logger.contextualize(eval_pipeline="judge"):
                 judge = EvalJudge.from_config(scenario.judge)
 
-        if speech is None and scenario.user_audio is not None:
+        if speech is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
                 speech = EvalSpeech.from_config(
-                    scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
+                    scenario.user_speech, cache_dir=cache_dir, use_cache=use_cache
                 )
 
         wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
