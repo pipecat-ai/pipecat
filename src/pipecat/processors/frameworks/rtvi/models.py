@@ -25,9 +25,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
-    FileSourceType,
 )
 from pipecat.utils.deprecation import deprecated
+
+RTVIFileSourceType = Literal["bytes", "url", "id"]
+"""Source type for an RTVI ``send-file`` message.
+
+Broader than :data:`~pipecat.frames.frames.FileSourceType`: ``"id"`` refers to
+a file already stored locally and addressed by ID via a
+:class:`~pipecat.utils.file_storage.FileStorage` backend, a concept specific
+to the RTVI protocol. ``RTVIProcessor`` resolves it to raw bytes before
+constructing a :class:`~pipecat.frames.frames.UserFileRawFrame`, so ``"id"``
+never reaches the frame layer.
+"""
 
 # -- Constants --
 PROTOCOL_VERSION = "2.2.0"
@@ -245,13 +255,13 @@ class SendTextData(BaseModel):
 class FileSource(BaseModel):
     """Base class for RTVI file sources."""
 
-    type: FileSourceType
+    type: RTVIFileSourceType
 
 
 class FileBytes(FileSource):
     """File source as base64-encoded bytes."""
 
-    type: FileSourceType = "bytes"
+    type: RTVIFileSourceType = "bytes"
     bytes: str  # base64-encoded string
     width: int | None = None
     height: int | None = None
@@ -260,7 +270,7 @@ class FileBytes(FileSource):
 class FileUrl(FileSource):
     """File source as a URL."""
 
-    type: FileSourceType = "url"
+    type: RTVIFileSourceType = "url"
     url: str
     public: bool = True
 
@@ -268,7 +278,7 @@ class FileUrl(FileSource):
 class FileId(FileSource):
     """File source as a file ID."""
 
-    type: FileSourceType = "id"
+    type: RTVIFileSourceType = "id"
     id: str
 
 
