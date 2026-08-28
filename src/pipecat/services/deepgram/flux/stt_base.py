@@ -586,7 +586,7 @@ class DeepgramFluxSTTBase(STTService):
 
         match flux_message_type:
             case FluxMessageType.RECEIVE_CONNECTED:
-                await self._handle_connection_established()
+                await self._handle_connection_established(data)
             case FluxMessageType.RECEIVE_FATAL_ERROR:
                 await self._handle_fatal_error(data)
             case FluxMessageType.TURN_INFO:
@@ -602,13 +602,14 @@ class DeepgramFluxSTTBase(STTService):
                 await self._on_configure_acked()
                 await self.push_error(error_msg=error_msg)
 
-    async def _handle_connection_established(self):
+    async def _handle_connection_established(self, data: dict[str, Any]):
         """Handle successful connection establishment to Deepgram Flux.
 
         This event is fired when the connection to Deepgram Flux is successfully
         established and ready to receive audio data for transcription processing.
         """
-        logger.info("Connected to Flux - ready to stream audio")
+        request_id = data.get("request_id")
+        logger.info(f"{self}: Connected to Flux - ready to stream audio ({request_id=})")
         # Notify connection is established
         self._connection_established_event.set()
 
