@@ -40,6 +40,8 @@ def _make_fake_flux_service():
             self._active = True
             self.sent_messages = []
             self.errors = []
+            self.reconnect_requests = 0
+            self.connection_events = []
 
         async def _transport_send_audio(self, audio: bytes):
             pass
@@ -51,9 +53,15 @@ def _make_fake_flux_service():
             return self._active
 
         async def _connect(self):
-            pass
+            self.connection_events.append("connect")
 
         async def _disconnect(self):
+            self.connection_events.append("disconnect")
+
+        async def _request_reconnect(self):
+            self.reconnect_requests += 1
+
+        async def set_usable(self, usable: bool):
             pass
 
         async def run_stt(self, audio: bytes):
@@ -200,6 +208,38 @@ def test_reset_configure_state_with_nothing_in_flight_is_safe():
 
     assert not service._configure_in_flight
     assert service._configure_pending_fields is None
+
+
+@pytest.mark.asyncio
+async def test_do_reconnect_tears_down_before_re_establishing():
+    """A reconnect drops the current connection before opening a new one."""
+    service = _make_fake_flux_service()
+
+    await service._do_reconnect()
+
+    assert service.connection_events == ["disconnect", "connect"]
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_for_connection_only_field():
+    """Fields Flux only reads from the connection URL are applied by reconnecting."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+
+    assert service.reconnect_requests == 1
+    assert service.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_update_settings_configures_without_reconnecting():
+    """Configure-able fields reach the live connection without dropping it."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+
+    assert service.sent_messages == [{"type": "Configure", "thresholds": {"eot_threshold": 0.9}}]
+    assert service.reconnect_requests == 0
 
 
 if __name__ == "__main__":

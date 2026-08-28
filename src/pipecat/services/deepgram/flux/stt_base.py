@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
+from typing_extensions import override
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -160,6 +161,10 @@ class DeepgramFluxSTTBase(STTService):
         "eot_timeout_ms",
         "language_hints",
     }
+    # Fields Flux only accepts in the connection URL, so changing them reconnects.
+    _CONNECTION_FIELDS = {"model", "numerals"}
+    # Fields applied to results as they arrive, so no connection change is needed.
+    _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
     # How long an in-flight Configure is trusted before a new update supersedes
     # it outright. Flux caps the number of un-acked Configure messages, so at
@@ -284,6 +289,15 @@ class DeepgramFluxSTTBase(STTService):
     # ------------------------------------------------------------------
     # Connection helpers
     # ------------------------------------------------------------------
+
+    @override
+    async def _do_reconnect(self):
+        """Tear down the transport connection and re-establish it.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        """
+        await self._disconnect()
+        await self._connect()
 
     def _build_query_string(self) -> str:
         """Build query string from current settings and init-only connection config."""
@@ -523,8 +537,8 @@ class DeepgramFluxSTTBase(STTService):
 
         Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
         eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
-        message. Other fields are stored but cannot be applied to the active
-        connection.
+        message. Fields Flux only reads from the connection URL trigger a
+        reconnect, which waits until the user stops speaking.
         """
         changed = await super()._update_settings(delta)
 
@@ -535,7 +549,12 @@ class DeepgramFluxSTTBase(STTService):
         if configure_fields and self._transport_is_active():
             await self._send_configure(configure_fields)
 
-        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
+        if changed.keys() & self._CONNECTION_FIELDS:
+            await self._request_reconnect()
+
+        self._warn_unhandled_updated_settings(
+            changed.keys() - self._CONFIGURE_FIELDS - self._CONNECTION_FIELDS - self._LOCAL_FIELDS
+        )
 
         return changed
 
