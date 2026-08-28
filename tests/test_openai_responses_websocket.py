@@ -378,6 +378,7 @@ class TestReceiveResponseEventsText:
                 "response": {
                     "id": "resp_1",
                     "model": "gpt-4.1",
+                    "service_tier": "fast",
                     "usage": {
                         "input_tokens": 100,
                         "output_tokens": 50,
@@ -399,6 +400,7 @@ class TestReceiveResponseEventsText:
         assert tokens.total_tokens == 150
         assert tokens.cache_read_input_tokens == 20
         assert tokens.reasoning_tokens == 10
+        assert tokens.service_tier == "fast"
 
 
 # ---------------------------------------------------------------------------

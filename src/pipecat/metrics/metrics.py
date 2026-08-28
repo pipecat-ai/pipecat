@@ -127,6 +127,7 @@ class LLMTokenUsage(BaseModel):
         input_audio_tokens: Number of prompt tokens that were audio, if applicable.
         output_audio_tokens: Number of completion tokens that were audio, if applicable.
         cache_read_input_audio_tokens: Number of cache-read tokens that were audio, if applicable.
+        service_tier: Actual service tier echoed by the LLM provider for this response, if applicable.
     """
 
     prompt_tokens: int
@@ -138,6 +139,7 @@ class LLMTokenUsage(BaseModel):
     input_audio_tokens: int | None = None
     output_audio_tokens: int | None = None
     cache_read_input_audio_tokens: int | None = None
+    service_tier: str | None = None
 
 
 class LLMUsageMetricsData(MetricsData):

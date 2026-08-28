@@ -487,12 +487,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             if chunk.usage.completion_tokens_details
                             else None
                         )
+                        service_tier = getattr(chunk, "service_tier", None)
                         token_usage = LLMTokenUsage(
                             prompt_tokens=chunk.usage.prompt_tokens,
                             completion_tokens=chunk.usage.completion_tokens,
                             total_tokens=chunk.usage.total_tokens,
                             cache_read_input_tokens=cached_tokens,
                             reasoning_tokens=reasoning_tokens,
+                            service_tier=service_tier if isinstance(service_tier, str) else None,
                         )
 
                     if chunk.model and self.get_full_model_name() != chunk.model:

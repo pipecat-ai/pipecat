@@ -87,11 +87,12 @@ class _FakeAsyncStream:
         pass
 
 
-def _completed_event(usage):
+def _completed_event(usage, service_tier=None):
     """Build a ResponseCompletedEvent carrying the given usage object."""
     response = MagicMock()
     response.usage = usage
     response.model = "gpt-4.1"
+    response.service_tier = service_tier
     event = MagicMock(spec=ResponseCompletedEvent)
     event.response = response
     return event
@@ -153,7 +154,7 @@ class TestHttpTokenUsageMetrics:
             input_tokens_details=InputTokensDetails(cached_tokens=20, cache_write_tokens=0),
             output_tokens_details=OutputTokensDetails(reasoning_tokens=10),
         )
-        await _run(service, _completed_event(usage))
+        await _run(service, _completed_event(usage, service_tier="fast"))
 
         tokens = service.start_llm_usage_metrics.call_args[0][0]
         assert tokens.prompt_tokens == 100
@@ -161,6 +162,7 @@ class TestHttpTokenUsageMetrics:
         assert tokens.total_tokens == 150
         assert tokens.cache_read_input_tokens == 20
         assert tokens.reasoning_tokens == 10
+        assert tokens.service_tier == "fast"
 
     @pytest.mark.asyncio
     async def test_token_usage_with_missing_details(self):
