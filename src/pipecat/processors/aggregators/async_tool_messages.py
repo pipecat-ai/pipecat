@@ -96,30 +96,39 @@ _CANCELLED_DESCRIPTION = (
 
 # Standing guidance composed into the system instruction whenever an async tool is
 # registered. The per-result message says the same thing, but it arrives buried in a
-# context whose most recent turn is the user asking for something else; a model
+# context whose most recent turn may be the user asking for something else; a model
 # weighing the two follows the nearer, louder request. This states the policy before
 # any result exists, so it is in force when one arrives.
+#
+# A result reaches the model in one of two situations, and the guidance names both:
+# mid-conversation, when the user has just said something the model hasn't answered,
+# or on a run of its own, once the reply it landed behind has been spoken (the
+# aggregator holds a result until the bot stops speaking). A model given only the
+# first case re-answers the user's last message before delivering the result.
 ASYNC_TOOL_INSTRUCTIONS = """ASYNC TOOLS:
 Some of your tools keep running after you have replied. Their results arrive later as \
-messages in the conversation, on whatever turn happens to be in progress by then.
+messages in the conversation, sometimes while you are answering something else and sometimes \
+on their own, after you have already answered.
 
 A result that has arrived is owed to the user, whatever the conversation has moved on to. \
-Answer what the user just said first, then add the result at the end of that same reply — \
-never before your answer, and never as a reply of its own. State a short result outright; \
-for a long one, say what came back and offer the details. Say it once, and do not repeat \
-it in later replies."""
+If the user has said something you have not answered yet, answer that first and add the \
+result at the end of the same reply. If you have already answered everything the user said, \
+deliver just the result — do not repeat or rephrase your earlier reply. State a short result \
+outright; for a long one, say what came back and offer the details. Say it once, and do not \
+repeat it in later replies."""
 
 # Description shipped on the final-result message.
 _FINAL_DESCRIPTION = (
     "This is the final result for the asynchronous task associated with this "
     "tool_call_id. The task has completed. No further results will arrive for "
     "this tool_call_id. You must convey this result to the user, even if the "
-    "conversation has moved on. Never leave it unsaid. First finish responding "
-    "to whatever the user is talking about now, then deliver the result at the "
-    "end of your response. How you deliver it depends on its size: if the "
-    "result is short, simply state it; if it is long or complex, name what has "
-    "come back and offer the details. Convey it once; do not repeat it in "
-    "later responses."
+    "conversation has moved on. Never leave it unsaid. If the user has said "
+    "something you have not answered yet, answer that first and deliver the "
+    "result at the end of the same response; if you have already answered, "
+    "deliver just the result and do not repeat your earlier reply. How you "
+    "deliver it depends on its size: if the result is short, simply state it; "
+    "if it is long or complex, name what has come back and offer the details. "
+    "Convey it once; do not repeat it in later responses."
 )
 
 
