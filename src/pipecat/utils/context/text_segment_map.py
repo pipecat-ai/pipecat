@@ -498,6 +498,10 @@ class TextSegmentMap:
         before: :meth:`_literal_hop`, then :meth:`_folded_hop`, then
         :meth:`_markup_hop`. Any of them can report that the word fits here
         (``PLACED``) or that it runs past the end of the segment (``CROSSES``).
+        As a last resort the first two are retried with the word's own leading
+        punctuation stripped, mirroring the skip the candidates already apply to
+        the segment side, so a stripped-word match only ever rescues what would
+        otherwise be ``NO_MATCH``.
 
         If none of them match, the answer depends on what is left in the segment:
 
@@ -524,6 +528,21 @@ class TextSegmentMap:
         # can try the next one.
         if not has_alnum(segment_remaining):
             return _Hop(_HopKind.EXHAUSTED)
+
+        # The candidates skip the segment's leading punctuation, but the word may
+        # carry its own ('"Pookie,' against '*\n\n"Pookie,'). Mirror that skip on
+        # the word before giving up, so both sides are normalised the same way.
+        lead = TextSegmentMap._leading_nonalnum_len(remaining_word, stop_at_markup=True)
+        if 0 < lead < len(remaining_word):
+            trimmed = remaining_word[lead:]
+            hop = TextSegmentMap._literal_hop(candidates, trimmed)
+            if hop is None:
+                hop = TextSegmentMap._folded_hop(candidates, trimmed)
+            if hop is not None:
+                if hop.kind is _HopKind.CROSSES:
+                    # word_consumed counts the original word, stripped run included.
+                    return _Hop(_HopKind.CROSSES, word_consumed=lead + hop.word_consumed)
+                return hop
 
         # Foreign token: nudge past leading punctuation only, then stop. Unlike
         # the skip candidates this does not stop at markup -- it moves the raw
