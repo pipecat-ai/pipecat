@@ -226,6 +226,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         project=None,
         default_headers: Mapping[str, str] | None = None,
         service_tier: str | None = None,
+        prompt_cache_key: str | None = None,
         settings: Settings | None = None,
         retry_timeout_secs: float | None = 5.0,
         retry_on_timeout: bool | None = False,
@@ -240,6 +241,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            prompt_cache_key: Optional cache-routing key passed through to OpenAI's
+                prompt caching (see OpenAI's prompt caching guide). Reusing the same
+                key for requests that share a long common prompt prefix improves
+                cache hit rates. Only sent when set; requires an ``openai`` SDK
+                version that supports ``prompt_cache_key``.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -279,6 +285,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         # variant connects via raw websockets and needs the key explicitly.
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._service_tier = service_tier
+        self._prompt_cache_key = prompt_cache_key
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         # Tracks the model we've already warned about (reasoning configured on a
@@ -368,6 +375,12 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if self._service_tier is not None:
             params["service_tier"] = self._service_tier
+
+        # Only include prompt_cache_key when set: the parameter requires a newer
+        # openai SDK than this package's minimum, so setting it unconditionally
+        # would break older installs.
+        if self._prompt_cache_key is not None:
+            params["prompt_cache_key"] = self._prompt_cache_key
 
         # Tools
         tools = invocation_params.get("tools")
@@ -587,7 +600,7 @@ class OpenAIResponsesLLMService(
                 Defaults to ``wss://api.openai.com/v1/responses``.
             **kwargs: Additional arguments passed to the base class (api_key,
                 base_url, organization, project, default_headers, service_tier,
-                settings, etc.).
+                prompt_cache_key, settings, etc.).
         """
         super().__init__(**kwargs)
 
