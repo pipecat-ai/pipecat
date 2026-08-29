@@ -1170,12 +1170,28 @@ class OpenAIResponsesLLMService(
 
                 break  # Response complete
 
-            elif event_type in ("response.failed", "response.incomplete"):
-                response = event.get("response", {})
-                status_details = response.get("status_details") or {}
-                error_info = status_details.get("error") or {}
-                error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
-                await self.push_error(error_msg=f"LLM response error: {error_msg}")
+            elif event_type == "response.failed":
+                # `status_details` is a Realtime field. A Responses `Response`
+                # carries the failure on `error` and the truncation reason on
+                # `incomplete_details`, so the two events read different fields.
+                # Both are only as reliable as the server, so coalesce to the
+                # generic message the HTTP variant uses and keep the two paths'
+                # error text identical.
+                response = event.get("response") or {}
+                error_info = response.get("error") or {}
+                message = error_info.get("message")
+                await self.push_error(
+                    error_msg=f"LLM response error: {message or 'Response failed'}"
+                )
+                break
+
+            elif event_type == "response.incomplete":
+                response = event.get("response") or {}
+                details = response.get("incomplete_details") or {}
+                reason = details.get("reason")
+                await self.push_error(
+                    error_msg=f"LLM response error: {reason or 'Response incomplete'}"
+                )
                 break
 
             elif event_type == "error":
