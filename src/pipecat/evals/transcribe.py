@@ -35,7 +35,7 @@ from typing import cast
 
 from loguru import logger
 
-from pipecat.evals.services import moonshine_service, whisper_service
+from pipecat.evals.services import moonshine_service, sarvam_service, whisper_service
 from pipecat.services.stt_service import STTService
 
 # STT services expect 16 kHz mono audio.
@@ -123,9 +123,11 @@ class EvalTranscriber:
             return cls(whisper_service(config), padding_secs=padding_secs)
         if name == "moonshine":
             return cls(moonshine_service(config), padding_secs=padding_secs)
+        if name == "sarvam":
+            return cls(sarvam_service(config), padding_secs=padding_secs)
 
         raise ValueError(
-            f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
+            f"Unknown STT service: {name!r}. Known: whisper, moonshine, sarvam. "
             "Or set transcription.factory to a 'module.func' returning an STTService."
         )
 
@@ -164,6 +166,15 @@ class EvalTranscriber:
         if self._padding_secs:
             pad = b"\x00\x00" * int(STT_SAMPLE_RATE * self._padding_secs)
             pcm = pad + pcm + pad
+
+        # Segmented services that take their segments as WAV containers (HTTP
+        # services whose provider upload APIs want a file) get that wrap from
+        # SegmentedSTTService in a pipeline; calling run_stt() directly means
+        # doing it here. Local models take the raw buffer.
+        if getattr(self._service, "wants_wav_segments", False):
+            from pipecat.audio.utils import pcm_to_wav
+
+            pcm = pcm_to_wav(pcm, STT_SAMPLE_RATE)
 
         # run_stt transcribes the whole buffer and yields its TranscriptionFrame(s),
         # then the generator ends — so we just collect and join. No pipeline, no

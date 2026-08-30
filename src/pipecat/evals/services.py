@@ -213,6 +213,51 @@ def moonshine_service(config: dict) -> STTService:
     )
 
 
+def sarvam_service(config: dict) -> STTService:
+    """Build a Sarvam HTTP STT service from the ``bot_audio`` config.
+
+    Sarvam's Saaras models are strong on Indian languages and Hindi/English
+    code-mix ("Hinglish") speech, which the local transcribers handle poorly:
+    Moonshine is English-only and Whisper tends to script-switch on code-mix.
+    Uses :class:`~pipecat.services.sarvam.stt.SarvamHttpSTTService`, whose
+    ``run_stt()`` transcribes the buffer inline over REST; the WebSocket
+    Sarvam services can't back the transcriber (see
+    :mod:`pipecat.evals.transcribe`).
+
+    Args:
+        config: The ``judge.transcription`` config mapping:
+
+            - ``model``: Optional Sarvam model (default ``saaras:v4``).
+            - ``language``: Optional language code (e.g. ``hi-IN``) or
+              ``Language``. When omitted, Sarvam auto-detects, which is the
+              right default for code-mix audio.
+            - ``mode``: Optional operation mode (``transcribe``, ``codemix``,
+              ...). Only ``saaras:v3`` supports it on the REST API.
+            - ``api_key``: Optional key (falls back to ``$SARVAM_API_KEY``).
+
+    Raises:
+        RuntimeError: If no API key is given in the config or the environment.
+    """
+    from pipecat.services.sarvam.stt import SarvamHttpSTTService
+
+    # Prefer an explicit api_key in the config; fall back to the env var so
+    # committed scenarios don't carry secrets.
+    api_key = config.get("api_key") or os.environ.get("SARVAM_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Sarvam API key not found — set $SARVAM_API_KEY or transcription.api_key"
+        )
+
+    return SarvamHttpSTTService(
+        api_key=api_key,
+        mode=config.get("mode"),
+        settings=SarvamHttpSTTService.Settings(
+            model=config.get("model", NOT_GIVEN),
+            language=_cfg_language(config),
+        ),
+    )
+
+
 DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
 
 # The default judge is thinking-capable, and only its JSON verdict is ever read,
