@@ -760,6 +760,32 @@ wheels = [
 ]
 
 [[package]]
+name = "baresip-python"
+version = "0.4.1a1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/03/1921db715ff832d5c3cc60747b21e33b2135c33d3ca0a00c77ed1584d5cc/baresip_python-0.4.1a1-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:f332a667145d29e6adededc92fb8fc7a08fd6c87034f89164ae5bbef4a645fdc", size = 4169980, upload-time = "2026-09-05T15:09:20.029Z" },
+    { url = "https://files.pythonhosted.org/packages/43/9d/a3dd8aa1a1f33a60ae0213d9f66f870e4d644479c311ef59af194d92de21/baresip_python-0.4.1a1-cp311-cp311-macosx_15_0_x86_64.whl", hash = "sha256:24596eb27a686d3337d130ffabf0eec6e792d911d09149e2d5288cacad34330d", size = 4021856, upload-time = "2026-09-05T15:09:21.831Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/46/4c66bfe1e93a2ad56eef182bcaf188d7fc6364fc5019721b21e775a37e7e/baresip_python-0.4.1a1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd46d58e78ee031b29b79243c47a7c1fa2df788695010fb540757d54f876bb62", size = 3833236, upload-time = "2026-09-05T15:09:23.508Z" },
+    { url = "https://files.pythonhosted.org/packages/13/38/ef5f93084131abe1875338aeecd8872ef848f5e8c8abfbca68103c67ac5b/baresip_python-0.4.1a1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:41a7fdae1b4e674ba3ca4c8e7597381f540a0c284d7406ad6037b322eacf2bd7", size = 4072794, upload-time = "2026-09-05T15:09:25.078Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/7a/84698fb0d19132ac0e7396332ed20c238a467d7c9c417253ff9c5d5f2e1f/baresip_python-0.4.1a1-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:93d33f32fea0658bd0750fededaf83d1de70fc95a92786bbb460f96a6848e55c", size = 4170062, upload-time = "2026-09-05T15:09:26.612Z" },
+    { url = "https://files.pythonhosted.org/packages/85/22/1f9d3ee234511fb52c6bee835384b0f2470ff5be0a753c935fe17d719db3/baresip_python-0.4.1a1-cp312-cp312-macosx_15_0_x86_64.whl", hash = "sha256:8badc781b7a40dcd45b8179d61fd1208ec9026479dee09c8935a3965bc0f8954", size = 4021869, upload-time = "2026-09-05T15:09:28.842Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/2a/67be3ad110eac9b7bc2e3749d8becafd291d18b59751204c7f012b0bdb03/baresip_python-0.4.1a1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be3e1ea32008ddb8794041ee70a8146ddb9b0f851fdf39777a8818954723a5aa", size = 3833136, upload-time = "2026-09-05T15:09:30.356Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/bd/8402546faa78c844c728f783e7edc4b3a98baadde757a2058494248a98a7/baresip_python-0.4.1a1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0fe32b036cb37e0764ac75628f938ae1e56f0a577825a4d713dd4b8c02daa880", size = 4073488, upload-time = "2026-09-05T15:09:32.254Z" },
+    { url = "https://files.pythonhosted.org/packages/23/0c/7771616ac7d28ff58b851c17ba004d708e7a5064e264651b515ed28e57ab/baresip_python-0.4.1a1-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:4fb381b685deea325288d5e774f707dbe5ac2f73cb0b234ef9a3aa9b13ff12df", size = 4170059, upload-time = "2026-09-05T15:09:33.681Z" },
+    { url = "https://files.pythonhosted.org/packages/29/99/c913fe9cf2cd8105f211cf4e7d8a001e978863800588e07821d4dbce6c3f/baresip_python-0.4.1a1-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:6b7eaf3b3ac2ccfbad8429b64ce1dc0b398d75e42d2224649c6cdd6d2daa7851", size = 4021862, upload-time = "2026-09-05T15:09:35.169Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/20/a4600b7744cbfc08cafe6f0eaac229b61e250eca7f349590b972cbfa54a6/baresip_python-0.4.1a1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5babb674f10344acfd67bdd6fd12dc193687c02ffcf2869fa3d19f109757f768", size = 3833184, upload-time = "2026-09-05T15:09:38.751Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/fa/5a16d7ca652216b49d8b5809edf2ca77c3826772b8135c90bbf2acf9b855/baresip_python-0.4.1a1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ca07518a7d002b537f8992d2c5e897b2d21cf8a3b250121dd50cb45d4906dcfb", size = 4073465, upload-time = "2026-09-05T15:09:40.157Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/d5/15c6f0c11e6fc134d91d2245760431d4c31ddc037e83dd07ac14d628a448/baresip_python-0.4.1a1-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:2db2c8bb6b599a7647b462d8fde8aae8ed469d168fa82c7997750338fe586d2f", size = 4170018, upload-time = "2026-09-05T15:09:41.674Z" },
+    { url = "https://files.pythonhosted.org/packages/34/64/72d130c8e03e2db8e1b601badb2ee5532bd930272401e0298564fe9947c2/baresip_python-0.4.1a1-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:3f10701ba662513edb7cb4295fd333db822555e799a9df1eb0f6acf64ca31b61", size = 4021871, upload-time = "2026-09-05T15:09:43.206Z" },
+    { url = "https://files.pythonhosted.org/packages/88/5b/37f3c1fcd92e717675dcbfdcd42575a22b988e58a985d190fe3b2c521a44/baresip_python-0.4.1a1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e3cefd246c787445fae78df177648f5ec1fdd16e02b579f6e94c4e741e9a8e82", size = 3833319, upload-time = "2026-09-05T15:09:45.009Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/59/dea0014562d61492174b1bcc1f68d33ff4e2b847dd9382488da01154b65f/baresip_python-0.4.1a1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:65e1c6582364f5da4728b794c3fae1ebd09985315de9db32460da98a650b332c", size = 4073750, upload-time = "2026-09-05T15:09:46.82Z" },
+]
+
+[[package]]
 name = "bcrypt"
 version = "5.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -6173,6 +6199,9 @@ sentry = [
 simli = [
     { name = "simli-ai" },
 ]
+sip = [
+    { name = "baresip-python" },
+]
 speechmatics = [
     { name = "speechmatics-agent-stt" },
 ]
@@ -6251,6 +6280,7 @@ requires-dist = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = ">=0.6.0,<0.10" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'", specifier = ">=0.6.0,<0.10" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
+    { name = "baresip-python", marker = "extra == 'sip'", specifier = ">=0.4.0a1,<0.5" },
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "cryptography", marker = "extra == 'moq'", specifier = ">=45.0.0" },
@@ -6356,7 +6386,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "sip", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
