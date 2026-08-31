@@ -247,7 +247,9 @@ async def test_call_events_relay_established_and_closed(env):
 
     listener(StackEvent(event=Event.CALL_ESTABLISHED, call=call.handle))
     await asyncio.wait_for(established.wait(), EVENT_TIMEOUT)
-    assert established_payloads[0]["sipFrom"] == "sip:2002@example.com"
+    assert established_payloads[0]["destination"] == "sip:2002@example.com"
+    assert established_payloads[0]["sipCallId"] == "abc123"
+    assert established_payloads[0]["direction"] == "out"
 
     listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="hangup"))
     await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
@@ -290,7 +292,7 @@ async def test_media_taps_without_call_are_quiet(env):
     connection = make_connection()
 
     assert connection.read_audio(320) == b""
-    assert connection.write_audio(b"\x00" * 320) is False
+    assert connection.write_audio(b"\x00" * 320) == 0
     assert connection.read_video_frame() is None
     assert connection.write_video_frame(b"\x00") is False
     assert connection.audio_info() is None
@@ -300,6 +302,26 @@ async def test_media_taps_without_call_are_quiet(env):
 @pytest.mark.asyncio
 async def test_register_failure_releases_runtime(env):
     env.ua.register = AsyncMock(side_effect=RuntimeError("401"))
+    connection = make_connection()
+
+    with pytest.raises(RuntimeError):
+        await connection.connect()
+
+    env.runtime.close.assert_awaited_once()
+    assert not connection.is_connected
+
+    # A failed connect is terminal: the same error re-raises, unretried.
+    env.ua.register = AsyncMock()
+    with pytest.raises(RuntimeError):
+        await connection.connect()
+    env.ua.register.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ua_create_failure_releases_runtime(env, monkeypatch):
+    failing_user_agent = Mock()
+    failing_user_agent.create = AsyncMock(side_effect=RuntimeError("alloc failed"))
+    monkeypatch.setattr(sip_connection, "UserAgent", failing_user_agent)
     connection = make_connection()
 
     with pytest.raises(RuntimeError):
