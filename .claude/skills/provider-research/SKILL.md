@@ -5,7 +5,7 @@ disable-model-invocation: true
 argument-hint: "[--only a,b] [--date YYYY-MM-DD] [--limit N] [--concurrency N]"
 ---
 
-Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit, a local digest, and a committed branch for every change a researcher is confident about. Everything stays local — this skill publishes nothing. Pushing reports, opening draft PRs on pipecat and filing the digest issue are `scripts/provider-watch/publish.py`'s job, run after the research by whoever invoked it; the run ends by printing the commands. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
+Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit, and a committed branch for every change a researcher is confident about. Everything stays local — this skill publishes nothing. Pushing reports, opening draft PRs on pipecat and filing the digest issue are `scripts/provider-watch/publish.py`'s job, run after the research by whoever invoked it; the run ends by printing the commands. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
 
 ## Arguments
 
