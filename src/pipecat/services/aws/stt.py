@@ -366,7 +366,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Source:
         https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
-        All language codes that support streaming are included.
+        Covers every code AWS Transcribe accepts for streaming that has a
+        matching :class:`Language` member. AWS also streams ``ckb-IQ``,
+        ``ckb-IR``, ``en-AB``, ``en-WL``, ``fa-AF``, ``kab-DZ``, ``sw-BI``,
+        ``sw-RW`` and ``sw-UG``, which have no enum equivalent.
 
         Args:
             language: Internal language enumeration value.
@@ -378,13 +381,37 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Afrikaans
             Language.AF: "af-ZA",
             Language.AF_ZA: "af-ZA",
+            # Albanian
+            Language.SQ: "sq-AL",
+            Language.SQ_AL: "sq-AL",
+            # Amharic
+            Language.AM: "am-ET",
+            Language.AM_ET: "am-ET",
             # Arabic
             Language.AR: "ar-SA",  # Default to Modern Standard Arabic
             Language.AR_AE: "ar-AE",  # Gulf Arabic
             Language.AR_SA: "ar-SA",  # Modern Standard Arabic
+            # Armenian
+            Language.HY: "hy-AM",
+            Language.HY_AM: "hy-AM",
             # Basque
             Language.EU: "eu-ES",
             Language.EU_ES: "eu-ES",
+            # Belarusian
+            Language.BE: "be-BY",
+            Language.BE_BY: "be-BY",
+            # Bengali
+            Language.BN: "bn-IN",  # AWS streams only the Indian variety
+            Language.BN_IN: "bn-IN",
+            # Bosnian
+            Language.BS: "bs-BA",
+            Language.BS_BA: "bs-BA",
+            # Bulgarian
+            Language.BG: "bg-BG",
+            Language.BG_BG: "bg-BG",
+            # Burmese
+            Language.MY: "my-MM",
+            Language.MY_MM: "my-MM",
             # Catalan
             Language.CA: "ca-ES",
             Language.CA_ES: "ca-ES",
@@ -416,6 +443,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Note: Scottish (en-AB) and Welsh (en-WL) don't have direct Language enum matches
             Language.EN_ZA: "en-ZA",  # South African
             Language.EN_US: "en-US",  # US
+            # Estonian
+            Language.ET: "et-ET",  # AWS uses et-ET rather than the BCP 47 et-EE
+            Language.ET_EE: "et-ET",
             # Persian/Farsi
             Language.FA: "fa-IR",
             Language.FA_IR: "fa-IR",
@@ -439,12 +469,24 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Greek
             Language.EL: "el-GR",
             Language.EL_GR: "el-GR",
+            # Gujarati
+            Language.GU: "gu-IN",
+            Language.GU_IN: "gu-IN",
+            # Haitian Creole
+            Language.HT: "ht-HT",
+            Language.HT_HT: "ht-HT",
             # Hebrew
             Language.HE: "he-IL",
             Language.HE_IL: "he-IL",
             # Hindi
             Language.HI: "hi-IN",
             Language.HI_IN: "hi-IN",
+            # Hungarian
+            Language.HU: "hu-HU",
+            Language.HU_HU: "hu-HU",
+            # Icelandic
+            Language.IS: "is-IS",
+            Language.IS_IS: "is-IS",
             # Indonesian
             Language.ID: "id-ID",
             Language.ID_ID: "id-ID",
@@ -454,19 +496,54 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Japanese
             Language.JA: "ja-JP",
             Language.JA_JP: "ja-JP",
+            # Javanese
+            Language.JV: "jv-ID",
+            Language.JV_ID: "jv-ID",
+            # Kannada
+            Language.KN: "kn-IN",
+            Language.KN_IN: "kn-IN",
+            # Kazakh
+            Language.KK: "kk-KZ",
+            Language.KK_KZ: "kk-KZ",
+            # Khmer
+            Language.KM: "km-KH",
+            Language.KM_KH: "km-KH",
             # Korean
             Language.KO: "ko-KR",
             Language.KO_KR: "ko-KR",
             # Latvian
             Language.LV: "lv-LV",
             Language.LV_LV: "lv-LV",
+            # Lithuanian
+            Language.LT: "lt-LT",
+            Language.LT_LT: "lt-LT",
+            # Luganda
+            Language.LG: "lg-IN",  # AWS uses lg-IN rather than the BCP 47 lg-UG
+            # Macedonian
+            Language.MK: "mk-MK",
+            Language.MK_MK: "mk-MK",
             # Malay
             Language.MS: "ms-MY",
             Language.MS_MY: "ms-MY",
+            # Malayalam
+            Language.ML: "ml-IN",
+            Language.ML_IN: "ml-IN",
+            # Marathi
+            Language.MR: "mr-IN",
+            Language.MR_IN: "mr-IN",
+            # Nepali
+            Language.NE: "ne-NP",
+            Language.NE_NP: "ne-NP",
             # Norwegian
             Language.NB: "no-NO",  # Norwegian Bokmål
             Language.NB_NO: "no-NO",
             Language.NO: "no-NO",
+            # Odia
+            Language.OR: "or-IN",
+            Language.OR_IN: "or-IN",
+            # Pashto
+            Language.PS: "ps-AF",
+            Language.PS_AF: "ps-AF",
             # Polish
             Language.PL: "pl-PL",
             Language.PL_PL: "pl-PL",
@@ -474,6 +551,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             Language.PT: "pt-PT",  # Default to Portugal
             Language.PT_PT: "pt-PT",
             Language.PT_BR: "pt-BR",  # Brazilian
+            # Punjabi
+            Language.PA: "pa-IN",
+            Language.PA_IN: "pa-IN",
             # Romanian
             Language.RO: "ro-RO",
             Language.RO_RO: "ro-RO",
@@ -483,16 +563,30 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Serbian
             Language.SR: "sr-RS",
             Language.SR_RS: "sr-RS",
+            # Sinhala
+            Language.SI: "si-LK",
+            Language.SI_LK: "si-LK",
             # Slovak
             Language.SK: "sk-SK",
             Language.SK_SK: "sk-SK",
+            # Slovenian
+            Language.SL: "sl-SI",
+            Language.SL_SI: "sl-SI",
             # Somali
             Language.SO: "so-SO",
             Language.SO_SO: "so-SO",
             # Spanish
             Language.ES: "es-ES",  # Default to Spain
             Language.ES_ES: "es-ES",
+            Language.ES_MX: "es-MX",  # Mexican
             Language.ES_US: "es-US",  # US Spanish
+            # Sundanese
+            Language.SU: "su-ID",
+            Language.SU_ID: "su-ID",
+            # Swahili
+            Language.SW: "sw-KE",  # Default to Kenya
+            Language.SW_KE: "sw-KE",
+            Language.SW_TZ: "sw-TZ",
             # Swedish
             Language.SV: "sv-SE",
             Language.SV_SE: "sv-SE",
@@ -500,15 +594,30 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             Language.TL: "tl-PH",
             Language.FIL: "tl-PH",  # Filipino maps to Tagalog
             Language.FIL_PH: "tl-PH",
+            # Tamil
+            Language.TA: "ta-IN",
+            Language.TA_IN: "ta-IN",
+            # Telugu
+            Language.TE: "te-IN",
+            Language.TE_IN: "te-IN",
             # Thai
             Language.TH: "th-TH",
             Language.TH_TH: "th-TH",
+            # Turkish
+            Language.TR: "tr-TR",
+            Language.TR_TR: "tr-TR",
             # Ukrainian
             Language.UK: "uk-UA",
             Language.UK_UA: "uk-UA",
+            # Uzbek
+            Language.UZ: "uz-UZ",
+            Language.UZ_UZ: "uz-UZ",
             # Vietnamese
             Language.VI: "vi-VN",
             Language.VI_VN: "vi-VN",
+            # Welsh
+            Language.CY: "cy-WL",  # AWS uses cy-WL rather than the BCP 47 cy-GB
+            Language.CY_GB: "cy-WL",
             # Zulu
             Language.ZU: "zu-ZA",
             Language.ZU_ZA: "zu-ZA",
