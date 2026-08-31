@@ -27,6 +27,13 @@ try:
 except ImportError:
     DAILY_AVAILABLE = False
 
+try:
+    import baresip  # noqa: F401
+
+    BARESIP_AVAILABLE = True
+except ImportError:
+    BARESIP_AVAILABLE = False
+
 
 class TestCallData(unittest.TestCase):
     """CallData gives typed attribute access while staying dict-compatible."""
@@ -277,6 +284,31 @@ class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
         # Both styles work: typed attribute access and dict-style subscript.
         self.assertEqual(args.call_data.call_id, "CA9")
         self.assertEqual(args.call_data["call_id"], "CA9")
+
+
+@unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
+    async def test_sip_runner_args_build_sip_transport(self):
+        from pipecat.runner.types import SIPRunnerArguments
+        from pipecat.transports.sip.transport import SIPParams, SIPTransport
+
+        args = SIPRunnerArguments(
+            user="1001",
+            domain="example.com",
+            password="secret",
+            audio_codecs=("PCMU/8000/1",),
+            auth_user="trunk-user",
+            reg_interval=0,
+        )
+        transport = await create_transport(
+            args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
+        )
+
+        self.assertIsInstance(transport, SIPTransport)
+        self.assertEqual(transport._connection.aor, "sip:1001@example.com")
+        self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
+        self.assertEqual(transport._connection._account.auth_user, "trunk-user")
+        self.assertEqual(transport._connection._account.reg_interval, 0)
 
 
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")

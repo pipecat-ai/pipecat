@@ -40,6 +40,9 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 version re-anchors the call in its cloud, and substituting a REFER
 would silently change the semantics (mediated transfer, with the bot
 bridging both legs, is the planned faithful implementation).
+``on_connected`` fires with no payload (as on LiveKit), while Daily
+passes its join data — a cross-transport handler should accept an
+optional second argument (``on_connected(transport, data=None)``).
 ``send_dtmf`` supports both ``"telephone-event"`` and ``"sip-info"``,
 but the method is a property of the connection
 (``SIPConnection(dtmf_mode=...)``) rather than switchable per request,

@@ -267,6 +267,38 @@ class EvalRunnerArguments(RunnerArguments):
 
 
 @dataclass
+class SIPRunnerArguments(RunnerArguments):
+    """SIP transport session arguments for the runner.
+
+    Used to launch a bot on a :class:`~pipecat.transports.sip.transport.SIPTransport`.
+    baresip registers with the SIP server itself, so there is no HTTP signaling
+    route; the development runner reads the account from the ``SIP_USER``,
+    ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
+    ``SIP_AUTH_USER``, and ``SIP_REG_INTERVAL`` environment variables.
+
+    Parameters:
+        user: The user part of ``sip:user@domain``.
+        domain: Registration domain; may carry a port.
+        password: Authentication password; may be empty.
+        transport: SIP transport: "udp", "tcp", or "tls".
+        audio_codecs: Codec preference order by stack name (e.g.
+            ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
+        auth_user: Digest username when the credential store keys it
+            differently from ``user`` (credential-list trunks).
+        reg_interval: Seconds between registration refreshes; 0 disables
+            registration entirely (trunk mode).
+    """
+
+    user: str
+    domain: str
+    password: str = ""
+    transport: str = "udp"
+    audio_codecs: tuple | None = None
+    auth_user: str | None = None
+    reg_interval: int = 600
+
+
+@dataclass
 class MOQRunnerArguments(RunnerArguments):
     """MOQ (Media over QUIC) transport session arguments for the runner.
 
