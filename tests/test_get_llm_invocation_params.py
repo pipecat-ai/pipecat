@@ -64,6 +64,7 @@ For OpenAI Responses adapter:
 6. Tools schema flattening (nested function dict -> flat format)
 7. system_instruction sets instructions (or becomes developer message if input is empty)
 8. Developer messages pass through as developer role without triggering warnings
+9. Encrypted reasoning messages remain scoped to compatible adapter instances
 
 For BaseLLMAdapter helpers:
 1. _extract_initial_system: system extraction and conversion logic
@@ -2605,7 +2606,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["input"], [])
 
     def test_llm_specific_message_passthrough(self):
-        """LLMSpecificMessage with llm='openai_responses' passes through."""
+        """A message created by this Responses adapter passes through."""
         specific_msg = self.adapter.create_llm_specific_message(
             {"type": "function_call", "call_id": "x", "name": "foo", "arguments": "{}"}
         )
@@ -2667,8 +2668,41 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertNotIn("encrypted_content", params["input"][0])
 
     def test_id_for_llm_specific_messages(self):
-        """Adapter identifier is 'openai_responses'."""
-        self.assertEqual(self.adapter.id_for_llm_specific_messages, "openai_responses")
+        """Each adapter instance gets a separate message identifier."""
+        other_adapter = OpenAIResponsesLLMAdapter()
+
+        self.assertTrue(self.adapter.id_for_llm_specific_messages.startswith("openai_responses:"))
+        self.assertNotEqual(
+            self.adapter.id_for_llm_specific_messages,
+            other_adapter.id_for_llm_specific_messages,
+        )
+
+    def test_empty_llm_specific_message_id_is_rejected(self):
+        """An explicit message identifier must not be empty."""
+        with self.assertRaises(ValueError):
+            OpenAIResponsesLLMAdapter(llm_specific_message_id="")
+
+    def test_reasoning_message_does_not_cross_adapter_instances(self):
+        """Encrypted reasoning remains scoped to the adapter that created it."""
+        provider_a = OpenAIResponsesLLMAdapter()
+        provider_b = OpenAIResponsesLLMAdapter()
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "hello"},
+                provider_a.create_llm_specific_message(
+                    {
+                        "type": "reasoning",
+                        "id": "rs_provider_a",
+                        "summary": [],
+                        "encrypted_content": "provider-a-ciphertext",
+                    }
+                ),
+            ]
+        )
+
+        provider_b_input = provider_b.get_llm_invocation_params(context)["input"]
+
+        self.assertEqual(provider_b_input, [{"role": "user", "content": "hello"}])
 
     def test_system_instruction_with_messages_sets_instructions(self):
         """When system_instruction is provided and input is non-empty, sets instructions."""

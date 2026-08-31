@@ -12,6 +12,7 @@ import json
 import os
 import re
 import time
+import uuid
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -226,6 +227,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         project=None,
         default_headers: Mapping[str, str] | None = None,
         service_tier: str | None = None,
+        reasoning_context_id: str | None = None,
         settings: Settings | None = None,
         retry_timeout_secs: float | None = 5.0,
         retry_on_timeout: bool | None = False,
@@ -240,6 +242,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            reasoning_context_id: Identifier for sharing encrypted reasoning between
+                compatible service instances. By default, reasoning is scoped to this
+                service instance and model. Use the same identifier only for services
+                whose backends can decrypt each other's reasoning payloads.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -248,7 +254,14 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
                 attempt produces no output within ``retry_timeout_secs``. The
                 retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
+
+        Raises:
+            ValueError: If ``reasoning_context_id`` is empty.
         """
+        if reasoning_context_id == "":
+            raise ValueError("reasoning_context_id must not be empty")
+        self._reasoning_context_id = reasoning_context_id or uuid.uuid4().hex
+
         default_settings = self.Settings(
             model="gpt-4.1",
             system_instruction=None,
@@ -273,6 +286,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             settings=default_settings,
             **kwargs,
         )
+        self._sync_reasoning_context_id()
 
         # Resolve the API key from the environment if not provided. The
         # AsyncOpenAI HTTP client does this automatically, but the WebSocket
@@ -294,6 +308,27 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
+
+    def _sync_reasoning_context_id(self) -> None:
+        """Scope encrypted reasoning to this service context and model."""
+        model = assert_given(self._settings.model)
+        self.get_llm_adapter().id_for_llm_specific_messages = (
+            f"openai_responses:{model}:{self._reasoning_context_id}"
+        )
+
+    async def _update_settings(self, delta: OpenAIResponsesLLMSettings) -> dict[str, Any]:
+        """Apply settings and update the reasoning scope after a model change.
+
+        Args:
+            delta: Settings fields to update.
+
+        Returns:
+            Mapping of changed fields to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if "model" in changed:
+            self._sync_reasoning_context_id()
+        return changed
 
     def _create_client(
         self,
@@ -603,6 +638,20 @@ class OpenAIResponsesLLMService(
         self._current_response_id: str | None = None  # ID of current non-cancelled response
         self._cancel_pending_response: bool = False
         self._needs_drain: bool = False
+
+    async def _update_settings(self, delta: OpenAIResponsesLLMSettings) -> dict[str, Any]:
+        """Apply settings and discard cached provider state after a model change.
+
+        Args:
+            delta: Settings fields to update.
+
+        Returns:
+            Mapping of changed fields to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if "model" in changed:
+            self._clear_previous_response_state()
+        return changed
 
     # -- WebsocketLLMService interface ----------------------------------------
 
