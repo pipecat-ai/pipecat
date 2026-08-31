@@ -19,12 +19,15 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
     StopFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -740,6 +743,58 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
 
         # Wait for the pending tasks to complete.
         await asyncio.gather(*pending)
+
+    async def test_idle_task_default_frames_external_turn_detection(self):
+        """The default ``idle_timeout_frames`` also resets on provider-owned turn detection.
+
+        A provider-owned turn detector (e.g. server-side VAD) emits
+        ``UserStartedSpeakingFrame`` and transcription frames instead of the
+        local-VAD-only ``UserSpeakingFrame``. The default tuple must treat those
+        as activity too, or the idle timeout fires mid-conversation. Regression
+        test for https://github.com/pipecat-ai/pipecat/issues/5479.
+        """
+        idle_timeout_secs = 0.2
+        send_interval_secs = 0.05
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=idle_timeout_secs,
+            cancel_on_idle_timeout=False,
+        )
+
+        idle_timeout_count = 0
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle_timeout(worker: PipelineWorker):
+            nonlocal idle_timeout_count
+            idle_timeout_count += 1
+
+        async def send_turn_activity():
+            """Sending external-turn-detection frames, never a UserSpeakingFrame.
+
+            This spans several idle-timeout windows. If the default tuple
+            doesn't treat these frame types as activity, the idle timeout
+            fires while this loop is still running.
+            """
+            for _ in range(6):
+                await worker.queue_frame(UserStartedSpeakingFrame())
+                await asyncio.sleep(send_interval_secs)
+                await worker.queue_frame(
+                    InterimTranscriptionFrame(text="Hel", user_id="user", timestamp="now")
+                )
+                await asyncio.sleep(send_interval_secs)
+                await worker.queue_frame(
+                    TranscriptionFrame(text="Hello Pipecat!", user_id="user", timestamp="now")
+                )
+                await asyncio.sleep(send_interval_secs)
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.gather(
+            send_turn_activity(), worker.run(WorkerParams(task_manager=TaskManager()))
+        )
+        assert idle_timeout_count == 0
 
     async def test_idle_task_swallowed_frames(self):
         idle_timeout_secs = 0.2
