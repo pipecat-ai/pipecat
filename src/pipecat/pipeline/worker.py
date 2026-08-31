@@ -53,6 +53,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     InterruptionWorkerFrame,
     MetricsFrame,
@@ -60,8 +61,10 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     StopWorkerFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
     UserSpeakingFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
@@ -295,7 +298,13 @@ class PipelineWorker(BaseWorker):
         handle_flush_frame: bool | None = None,
         enable_rtvi: bool = True,
         exclude_frames: tuple[type[Frame], ...] | None = None,
-        idle_timeout_frames: tuple[type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
+        idle_timeout_frames: tuple[type[Frame], ...] = (
+            BotSpeakingFrame,
+            InterimTranscriptionFrame,
+            TranscriptionFrame,
+            UserSpeakingFrame,
+            UserStartedSpeakingFrame,
+        ),
         idle_timeout_secs: float | None = IDLE_TIMEOUT_SECS,
         name: str | None = None,
         observers: list[BaseObserver] | None = None,
@@ -368,7 +377,9 @@ class PipelineWorker(BaseWorker):
                 that should not cross the bus (lifecycle frames are
                 always excluded).
             idle_timeout_frames: A tuple with the frames that should trigger an idle
-                timeout if not received within `idle_timeout_seconds`.
+                timeout if not received within `idle_timeout_secs`. The default
+                pairs the VAD-only `UserSpeakingFrame` with the turn and
+                transcription frames a provider-driven pipeline reports instead.
             idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
                 None. If a pipeline is idle the pipeline worker will be cancelled
                 automatically.
