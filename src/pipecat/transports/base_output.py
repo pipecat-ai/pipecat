@@ -261,6 +261,25 @@ class BaseOutputTransport(FrameProcessor):
         """
         return False
 
+    def _prepare_audio_interruption(self, destination: str | None) -> bool:
+        """Prepare transport-owned playout audio for an interruption.
+
+        The media sender owns audio that has not reached the transport yet and
+        clears it separately. Subclasses can override this hook when they also
+        own a transport-level playout buffer that needs interruption handling.
+        Implementations must not yield: the hook runs before interruption
+        bookkeeping so event-loop-owned state cannot interleave with it.
+        Overrides remain responsible for synchronization with external threads.
+
+        Args:
+            destination: The destination whose audio was interrupted.
+
+        Returns:
+            Whether to request immediate cancellation of the audio writer. The
+            normal interruption path still awaits and recreates it afterward.
+        """
+        return False
+
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Write a DTMF tone using the transport's preferred method.
 
@@ -342,6 +361,13 @@ class BaseOutputTransport(FrameProcessor):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        # Capture the current transport-owned queue boundary before interruption
+        # bookkeeping or frame forwarding yields to another task.
+        if isinstance(frame, InterruptionFrame):
+            sender = self._media_senders.get(frame.transport_destination)
+            if sender:
+                await sender._prepare_audio_interruption()
+
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
@@ -468,6 +494,7 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_task: asyncio.Task | None = None
             self._video_task: asyncio.Task | None = None
             self._clock_task: asyncio.Task | None = None
+            self._audio_interruption_prepared = False
 
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
@@ -573,7 +600,10 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-            if self._audio_queue.has_uninterruptible or self._mixer:
+            if self._audio_interruption_prepared:
+                self._audio_interruption_prepared = False
+                self._create_audio_task(preserve_uninterruptible=True)
+            elif self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
                 # so the pending UninterruptibleFrames are still delivered. With
                 # a mixer, cancelling the task would also stop mixer-only output
@@ -591,6 +621,22 @@ class BaseOutputTransport(FrameProcessor):
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
+
+        async def _prepare_audio_interruption(self) -> None:
+            """Prepare transport-owned audio before asynchronous interruption work."""
+            if self._audio_queue.has_uninterruptible or self._mixer:
+                return
+
+            try:
+                cancel_immediately = self._transport._prepare_audio_interruption(self._destination)
+            except Exception as e:
+                logger.warning(f"{self._transport} failed to release interrupted audio: {e}")
+                return
+
+            if cancel_immediately:
+                self._audio_queue.reset()
+                await self._cancel_audio_task()
+                self._audio_interruption_prepared = True
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -684,10 +730,22 @@ class BaseOutputTransport(FrameProcessor):
         # Audio handling
         #
 
-        def _create_audio_task(self):
-            """Create the audio processing task."""
+        def _create_audio_task(self, *, preserve_uninterruptible: bool = False):
+            """Create the audio processing task.
+
+            Args:
+                preserve_uninterruptible: Whether to move uninterruptible frames
+                    received during early interruption cleanup into the new queue.
+            """
             if not self._audio_task:
+                previous_queue = getattr(self, "_audio_queue", None)
                 self._audio_queue = FrameQueue()
+                if preserve_uninterruptible and previous_queue:
+                    previous_queue.reset()
+                    while not previous_queue.empty():
+                        frame = previous_queue.get_nowait()
+                        self._audio_queue.put_nowait(frame)
+                        previous_queue.task_done()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
         async def _cancel_audio_task(self):
