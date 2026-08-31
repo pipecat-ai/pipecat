@@ -120,6 +120,48 @@ class TestInventory:
         assert {u["id"] for u in data} == {"cartesia/stt", "cartesia/tts", "cartesia/turns-stt"}
 
 
+class TestPlan:
+    """plan.py slices the inventory into matrix groups."""
+
+    def test_groups_cover_every_unit_once_in_order(self, units):
+        import plan
+
+        ids = [u.id for u in units]
+        groups = plan.plan_groups(ids, 12)
+        assert [i for g in groups for i in g["units"].split(",")] == ids
+        assert all(len(g["units"].split(",")) <= 12 for g in groups)
+
+    def test_group_names_are_unique_and_artifact_safe(self, units):
+        import re
+
+        import plan
+
+        groups = plan.plan_groups([u.id for u in units], 12)
+        names = [g["name"] for g in groups]
+        assert len(set(names)) == len(names)
+        assert all(re.fullmatch(r"[a-z0-9._-]+", n) for n in names)
+
+    def test_cli_emits_the_matrix_json(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "plan.py"),
+                "--json",
+                "--group-size",
+                "3",
+                "--only",
+                "cartesia,deepgram",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0, result.stderr
+        groups = json.loads(result.stdout)
+        assert groups and set(groups[0]) == {"name", "units"}
+        assert all(len(g["units"].split(",")) <= 3 for g in groups)
+
+
 class TestDigest:
     @pytest.fixture
     def reports_dir(self, tmp_path):

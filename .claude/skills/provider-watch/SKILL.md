@@ -2,7 +2,7 @@
 name: provider-watch
 description: Research every provider behind Pipecat's services for new models and API affordances, write per-service reports to the provider-watch reports repo, and propose draft PRs for clear-cut updates
 disable-model-invocation: true
-argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive]"
+argument-hint: "[--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive] [--no-finalize]"
 ---
 
 Run a provider-research sweep: one researcher subagent per service unit, a concise dated report per unit, a digest, and a branch for every change a researcher is confident about. All of that is produced locally first; publishing — pushing reports, opening draft PRs on pipecat, filing the digest issue — happens through `scripts/provider-watch/publish.py`, either as the run goes (`--publish`) or after the maintainer confirms at the end. You are the orchestrator; the research itself happens in `provider-watch-researcher` subagents following `RESEARCH_GUIDE.md`.
@@ -10,7 +10,7 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 ## Arguments
 
 ```
-/provider-watch [--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive]
+/provider-watch [--only a,b] [--limit N] [--concurrency N] [--publish] [--non-interactive] [--no-finalize]
 ```
 
 - `--only a,b` — providers or unit ids (`openai`, `deepgram/stt`). Default: every unit.
@@ -18,12 +18,13 @@ Run a provider-research sweep: one researcher subagent per service unit, a conci
 - `--concurrency N` — researchers per batch. Default 6; use 1 for a linear test run.
 - `--publish` — publish as the run goes, without asking. Without it, the run is a dry run until Step 5 asks whether to publish; the default answer is no.
 - `--non-interactive` — never ask anything; an unasked question takes its default. Without `--publish` this is an unattended dry run. Also fails fast if prerequisites are missing.
+- `--no-finalize` — skip Step 5 entirely: no digest, no issue, no publish question. For a run that covers one slice of a larger sweep whose digest someone else renders — the weekly workflow's matrix jobs use it.
 
 Examples:
 
 - `/provider-watch --only deepgram,groq --limit 2 --concurrency 1` — smoke test; asks at the end, default no
 - `/provider-watch --only groq` — exercise the branch path; review the branch with the command the report prints
-- `/provider-watch --publish --non-interactive` — what the weekly workflow runs
+- `/provider-watch --only <group> --publish --non-interactive --no-finalize` — what one matrix job of the weekly workflow runs
 
 ## Instructions
 
@@ -83,10 +84,11 @@ Rules for the batch loop:
 
 ### Step 4: Highlights
 
-Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: what a maintainer should look at first (PRs or branches to review, long-open gaps, providers that errored). Skip bullets when nothing stands out.
+Write 3–5 highlight bullets (1–2 with `--no-finalize`, since every slice's bullets are concatenated into one digest) to `<scratch>/highlights.md` from `run.jsonl`: what a maintainer should look at first (PRs or branches to review, long-open gaps, providers that errored). Skip bullets when nothing stands out.
 
 ### Step 5: Publish or ask
 
+- **With `--no-finalize`:** skip this step. Everything reached the reports repo through the per-batch publishes; the digest is rendered elsewhere from what every slice pushed.
 - **With `--publish`:** `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize --highlights <scratch>/highlights.md`. This renders `digests/<RUN_DATE>.md`, pushes it, and opens the digest issue on the reports repo (or updates it on a re-run) when there is anything to review, consider, or fix.
 - **Without `--publish`, interactive:** render the digest locally first — `uv run python scripts/provider-watch/digest.py --reports _reports --date <RUN_DATE> --highlights <scratch>/highlights.md --out _reports/digests/<RUN_DATE>.md` — then ask exactly one question, with **"No — keep everything local"** as the first (default) option and the publish option spelling out the scope: "Publish: push N reports and the digest to pipecat-ai/provider-watch-reports, push M branches and open M draft PRs on pipecat-ai/pipecat, open the digest issue." Only an explicit choice of the publish option publishes; any other answer, no answer, or an interrupted session means no. If yes, run the `--finalize` command above.
 - **Without `--publish`, `--non-interactive`:** render the digest locally as above and publish nothing.
@@ -98,7 +100,7 @@ Write 3–5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl`: wha
 
 ## Unattended runs
 
-The weekly workflow runs `--publish --non-interactive`; its dry-run input runs `--non-interactive` alone. In those modes never ask anything — every decision above has a default — and exit non-zero only when Step 1 prerequisites fail; a researcher failure never aborts the run. The workflow sets the bot git identity before the skill runs.
+The weekly workflow fans the sweep out: a plan job slices the units into groups (`scripts/provider-watch/plan.py`), one matrix job per group runs `--only <group> --publish --non-interactive --no-finalize`, and a digest job renders the digest and opens the issue from everything the groups pushed — GitHub App tokens expire after an hour, so no single job may publish for longer than that. The dry-run input runs the groups with `--non-interactive --no-finalize` and no `--publish`. In those modes never ask anything — every decision above has a default — and exit non-zero only when Step 1 prerequisites fail; a researcher failure never aborts the run. The workflow sets the bot git identity before the skill runs.
 
 ## Guardrails
 
