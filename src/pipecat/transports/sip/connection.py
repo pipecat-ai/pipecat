@@ -223,10 +223,13 @@ class SIPConnection(BaseObject):
 
     Event handlers available:
 
+    - connected: the connection is attached to the running SIP stack
+      (fires once, after the shared connect work completes).
+    - disconnected: the connection detached from the stack.
     - registered: registration succeeded; receives the address-of-record.
     - incoming: an inbound call arrived and this connection took it;
-      receives a payload dict (``sessionId``, ``sipFrom``, ``sipTo``,
-      ``displayName``, ``sipHeaders``).
+      receives a payload dict (``sessionId``, ``direction``, ``sipFrom``,
+      ``sipTo``, ``displayName``, ``sipHeaders``).
     - call_progress: the outbound call is ringing or in early dialog;
       receives a payload dict.
     - call_established: media is up; receives a payload dict.
@@ -236,6 +239,8 @@ class SIPConnection(BaseObject):
       a payload dict with ``error`` (the typed failure's name) and
       ``message``.
     - dtmf: the far end pressed a key; receives the binding's DigitEvent.
+    - remote_hold: the far end put the call on hold or resumed it;
+      receives a payload dict with ``on`` (bool).
     - audio_warning: the call's audio layer reported a warning.
     - media_restarted: a renegotiation replaced the media streams;
       receives ``"audio"`` or ``"video"``. Consumers should rebuild
@@ -283,7 +288,11 @@ class SIPConnection(BaseObject):
                 not the domain itself.
             reg_interval: Seconds between registration refreshes. 0
                 disables registration entirely (trunk mode): the
-                connection dials directly and never registers.
+                connection dials directly and never registers. Without
+                a registration binding, dial-in requires the peer or
+                provider to reach this host's listening socket directly
+                — see the trunk-mode notes in
+                :mod:`pipecat.transports.sip.transport`.
             audio_codecs: Codec preference order by stack name; None uses
                 the binding's default.
             dtmf_mode: How DTMF is sent: "rtpevent", "info", or "auto".
@@ -341,8 +350,11 @@ class SIPConnection(BaseObject):
         self._warning_listener = None
         self._emit_tasks: set = set()
 
+        self._register_event_handler("connected")
+        self._register_event_handler("disconnected")
         self._register_event_handler("registered")
         self._register_event_handler("incoming")
+        self._register_event_handler("remote_hold")
         self._register_event_handler("call_progress")
         self._register_event_handler("call_established")
         self._register_event_handler("call_closed")
@@ -390,7 +402,10 @@ class SIPConnection(BaseObject):
         trunk-mode accounts (``reg_interval=0``); otherwise the
         ``registered`` event fires on success.
 
-        Safe to call from both transport halves: the work runs once.
+        Safe to call from both transport halves: the work runs once. A
+        failed connect is terminal for the instance — later calls
+        re-raise the same error rather than retrying; construct a new
+        connection to retry.
         """
         self._runtime = await _SHARED.acquire(self._settings)
         try:
@@ -406,6 +421,7 @@ class SIPConnection(BaseObject):
             self._ua = None
             raise
         self._connected = True
+        await self._call_event_handler("connected")
 
     @releases("connection")
     async def disconnect(self):
@@ -427,6 +443,7 @@ class SIPConnection(BaseObject):
         await _SHARED.release()
         self._runtime = None
         self._ua = None
+        await self._call_event_handler("disconnected")
 
     async def dial(self, uri: str, headers: dict | None = None, video: bool = False) -> str:
         """Start an outbound call.
@@ -550,24 +567,26 @@ class SIPConnection(BaseObject):
         except AudioNotActive:
             return b""
 
-    def write_audio(self, pcm: bytes) -> bool:
+    def write_audio(self, pcm: bytes) -> int:
         """Queue PCM for transmission on the active call.
 
-        Non-blocking. Returns False when the audio was not accepted — no
-        call, transmit not up, or a renegotiation in progress (which also
-        fires ``media_restarted``). Keep pacing; delivery resumes alone.
+        Non-blocking. Returns the number of bytes accepted — less than
+        ``len(pcm)`` when the transmit buffer is full, in which case the
+        remainder was not taken and should be offered again once the
+        transmit clock drains the buffer. Returns 0 with no call,
+        transmit not up, or a renegotiation in progress (which also
+        fires ``media_restarted``).
         """
         call = self._call
         if call is None:
-            return False
+            return 0
         try:
-            call.audio.write(pcm)
-            return True
+            return call.audio.write(pcm)
         except AudioRestarted:
             self._emit_media_restarted("audio")
-            return False
+            return 0
         except AudioNotActive:
-            return False
+            return 0
 
     def audio_info(self):
         """The active call's audio stream info, or None.
@@ -635,14 +654,36 @@ class SIPConnection(BaseObject):
             raise RuntimeError("SIPConnection has no active call")
         return self._call
 
+    @property
+    def dtmf_mode(self) -> str:
+        """How this connection sends DTMF: "rtpevent", "info", or "auto".
+
+        Fixed at construction — a SIP account property, not a per-send
+        choice.
+        """
+        return self._account.dtmf_mode
+
+    @property
+    def call_direction(self) -> str | None:
+        """``"in"`` or ``"out"`` for the active call, None without one."""
+        if self._call is None:
+            return None
+        return "in" if self._call_incoming else "out"
+
     def _call_payload(self, **extra) -> dict:
         call = self._call
         payload: dict = {"sessionId": str(call.handle) if call else None}
         if call is not None:
-            payload["sipFrom"] = call.peer
-            payload["sipTo"] = self.aor if self._call_incoming else call.peer
-            payload["displayName"] = None
-            payload["sipHeaders"] = dict(call.headers)
+            payload["sipCallId"] = call.call_id
+            payload["direction"] = "in" if self._call_incoming else "out"
+            if self._call_incoming:
+                payload["sipFrom"] = call.peer
+                payload["sipTo"] = self.aor
+                payload["displayName"] = None
+                payload["sipHeaders"] = dict(call.headers)
+            else:
+                payload["origin"] = self.aor
+                payload["destination"] = call.peer
         payload.update(extra)
         return payload
 
@@ -688,6 +729,10 @@ class SIPConnection(BaseObject):
             return
         if event.event is Event.CALL_RINGING or event.event is Event.CALL_PROGRESS:
             self._emit("call_progress", self._call_payload())
+        elif event.event is Event.CALL_HOLD:
+            self._emit("remote_hold", self._call_payload(on=True))
+        elif event.event is Event.CALL_RESUME:
+            self._emit("remote_hold", self._call_payload(on=False))
         elif event.event is Event.CALL_ESTABLISHED:
             self._call_established = True
             self._emit("call_established", self._call_payload())
