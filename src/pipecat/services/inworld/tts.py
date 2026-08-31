@@ -1076,7 +1076,16 @@ class InworldTTSService(WebsocketTTSService):
 
             # timestampInfo is inside audioChunk
             timestamp_info = audio_chunk.get("timestampInfo")
-            if timestamp_info:
+
+            # Closing a context flushes it first, so an interrupted context keeps
+            # sending timestamps and a final flush after its replacement has
+            # started. Only the live context may advance the shared offset, which
+            # is unambiguous while one context is live at a time.
+            context_is_live = not ctx_id or self.audio_context_available(ctx_id)
+            if not context_is_live and (timestamp_info or "flushCompleted" in result):
+                logger.trace(f"{self}: Ignoring generation timing for closed context {ctx_id}")
+
+            if timestamp_info and context_is_live:
                 word_times = self._calculate_word_times(timestamp_info)
                 if word_times:
                     if ctx_id:
@@ -1084,7 +1093,7 @@ class InworldTTSService(WebsocketTTSService):
                     await self.add_word_timestamps(word_times, ctx_id, pre_merge_tokens=True)
 
             # Handle flush completion, which indicates the end of a generation
-            if "flushCompleted" in result:
+            if "flushCompleted" in result and context_is_live:
                 logger.trace(
                     f"{self}: Generation completed - updating cumulative_time: "
                     f"{self._cumulative_time} -> {self._generation_end_time}"
