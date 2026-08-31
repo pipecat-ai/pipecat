@@ -79,6 +79,7 @@ import json
 import mimetypes
 import time
 import traceback
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,7 @@ from pipecat.evals.serializer import (
 )
 from pipecat.evals.speech import EvalSpeech
 from pipecat.evals.transcribe import EvalTranscriber
+from pipecat.utils.base_object import BaseObject
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -254,13 +256,25 @@ class EvalTurnProgress:
     detail: str = ""
 
 
-class EvalSession:
+class EvalSession(BaseObject):
     """Runs one :class:`EvalScenario` against a bot over a single WebSocket session.
 
     Connects as an RTVI client, drives each turn (sending ``send-text``,
     ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and asserts on them.
     Build one with :meth:`from_scenario` (which constructs the judge, speech, and
     transcriber the scenario needs), then await :meth:`run`.
+
+    Event handlers available:
+
+    - on_progress: Called with an :class:`EvalTurnProgress` as each turn and each
+      expectation resolves. Records are emitted in order, and :meth:`run` waits for
+      every handler before it returns.
+
+    Example::
+
+        @session.event_handler("on_progress")
+        async def on_progress(session, progress):
+            print(progress.event_name, progress.status)
     """
 
     def __init__(
@@ -295,6 +309,11 @@ class EvalSession:
                 deadline anchored at the send). Defaults to 60s.
             on_progress: Optional callback invoked with a :class:`EvalTurnProgress`
                 as each turn and expectation resolves (used for verbose output).
+
+                .. deprecated:: 1.9.0
+                    Use the ``on_progress`` event handler instead.
+                    Will be removed in 2.0.0.
+
             record_path: When set (and the scenario is audio mode), asks the eval
                 transport to record the conversation audio to this path (bot-side).
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
@@ -314,11 +333,12 @@ class EvalSession:
                 for the ``response`` event, or ``None`` when unused. Started and
                 stopped by the session.
         """
+        super().__init__()
+
         self._scenario = scenario
         self._bot_url = bot_url
         self._connect_timeout_s = connect_timeout_s
         self._default_timeout_ms = default_timeout_ms
-        self._on_progress = on_progress
         self._record_path = record_path
         self._stop_bot = stop_bot
         # Either the run-wide CLI flag or the scenario's own field opts in.
@@ -370,6 +390,10 @@ class EvalSession:
         self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
         self._tts_sample_rate: int = 0
 
+        self._register_event_handler("on_progress")
+        if on_progress is not None:
+            self._add_legacy_progress_callback(on_progress)
+
     @classmethod
     def from_scenario(
         cls,
@@ -406,6 +430,11 @@ class EvalSession:
             default_timeout_ms: Per-expectation latency budget for expectations
                 without their own ``within_ms``. Defaults to 60s.
             on_progress: Optional per-turn/expectation progress callback (verbose).
+
+                .. deprecated:: 1.9.0
+                    Use the ``on_progress`` event handler instead.
+                    Will be removed in 2.0.0.
+
             record_path: Optional path to record the conversation audio (audio mode).
             cache_dir: Optional directory for cached synthesized user audio
                 (default ``<user-cache-dir>/pipecat/tts``).
@@ -442,12 +471,11 @@ class EvalSession:
             with logger.contextualize(eval_pipeline="transcription"):
                 transcriber = EvalTranscriber.from_config(scenario.transcriber)
 
-        return cls(
+        session = cls(
             scenario,
             bot_url,
             connect_timeout_s=connect_timeout_s,
             default_timeout_ms=default_timeout_ms,
-            on_progress=on_progress,
             record_path=record_path,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
@@ -455,6 +483,9 @@ class EvalSession:
             speech=speech,
             transcriber=transcriber,
         )
+        if on_progress is not None:
+            session._add_legacy_progress_callback(on_progress)
+        return session
 
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
@@ -628,6 +659,9 @@ class EvalSession:
             if self._stop_bot:
                 await self._send_cancel()
             await self._ws.close()
+            # Progress handlers run as tasks; wait them out so every record is
+            # delivered before the caller has the result in hand.
+            await self.cleanup()
 
         self._debug(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
         return EvalResult(
@@ -1005,10 +1039,25 @@ class EvalSession:
             return f"{event.get('name') or '?'}({sig})"
         return event.get("text") or event.get("transcript") or ""
 
-    def _progress(self, record: EvalTurnProgress) -> None:
-        """Emit a progress record to the on_progress callback, if one was given."""
-        if self._on_progress is not None:
-            self._on_progress(record)
+    def _add_legacy_progress_callback(
+        self, on_progress: Callable[[EvalTurnProgress], None]
+    ) -> None:
+        """Register a bare ``on_progress`` callback as an ``on_progress`` handler.
+
+        The callback takes only the record, so it is wrapped to drop the session
+        that event handlers receive as their first argument.
+        """
+        warnings.warn(
+            "`on_progress` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+            "Use the `on_progress` event handler instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        self.add_event_handler("on_progress", lambda _session, record: on_progress(record))
+
+    async def _progress(self, record: EvalTurnProgress) -> None:
+        """Emit a progress record to the ``on_progress`` handlers."""
+        await self._call_event_handler("on_progress", record)
 
     async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: optionally honor send_after, send user input, match expectations.
@@ -1039,7 +1088,7 @@ class EvalSession:
                     )
                 )
                 self._debug(f"FAIL: {event_name}: {failures[-1].reason}")
-                self._progress(
+                await self._progress(
                     EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
                 )
                 return failures
@@ -1082,7 +1131,7 @@ class EvalSession:
             if self._judge is not None:
                 self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
 
-        self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
+        await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
         # All of a turn's expectations share one deadline anchored at the send, so a
         # stalled turn fails within a single ``within_ms`` budget instead of spending
@@ -1108,7 +1157,7 @@ class EvalSession:
                     )
                 )
                 self._debug(f"FAIL: {expectation.event}: {reason}")
-                self._progress(
+                await self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
                 break
@@ -1116,11 +1165,11 @@ class EvalSession:
             if failure:
                 failures.append(failure)
                 self._debug(f"FAIL: {expectation.event}: {failure.reason}")
-                self._progress(
+                await self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
             else:
-                self._progress(
+                await self._progress(
                     EvalTurnProgress(
                         turn_idx, exp_idx, expectation.event, "matched", self._last_match_text
                     )

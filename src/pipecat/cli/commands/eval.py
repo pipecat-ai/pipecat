@@ -18,7 +18,6 @@ import sys
 import time
 import traceback
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 import typer
@@ -116,7 +115,7 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_progress(p: EvalTurnProgress) -> None:
+def _print_progress(session: EvalSession, p: EvalTurnProgress) -> None:
     """Print a per-turn / per-expectation line (verbose mode)."""
     if p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
@@ -195,7 +194,7 @@ async def _execute_scenario(
     debug: bool,
     stop_bot: bool,
     trigger_disconnect: bool,
-    on_progress,
+    verbose: bool,
 ) -> None:
     """Run one scenario against its ``bot_url``, updating ``run`` in place.
 
@@ -211,17 +210,19 @@ async def _execute_scenario(
         scenario = EvalScenario.load(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            run.result = await EvalSession.from_scenario(
+            session = EvalSession.from_scenario(
                 scenario,
                 url,
                 default_timeout_ms=default_timeout_ms,
-                on_progress=on_progress,
                 record_path=record_path,
                 cache_dir=cache_dir,
                 use_cache=use_cache,
                 stop_bot=stop_bot,
                 trigger_disconnect=trigger_disconnect,
-            ).run()
+            )
+            if verbose:
+                session.add_event_handler("on_progress", _print_progress)
+            run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
@@ -263,7 +264,7 @@ async def _run_scenarios_all(
     a piped stdout fall back to streamed result lines instead.
     """
 
-    async def go(run: EvalRun, on_progress) -> None:
+    async def go(run: EvalRun, verbose: bool) -> None:
         await _execute_scenario(
             run,
             audio=audio,
@@ -275,18 +276,18 @@ async def _run_scenarios_all(
             debug=debug,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
-            on_progress=on_progress,
+            verbose=verbose,
         )
 
     if _console.is_terminal and not verbose:
         with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
             for run in runs:
                 if run.status != "done":  # skip a build-time load error
-                    await go(run, None)
+                    await go(run, False)
     else:
         for run in runs:
             if run.status != "done":
-                await go(run, _print_progress if verbose else None)
+                await go(run, verbose)
             _print_eval_line(run)
 
 
@@ -829,11 +830,13 @@ async def _run_suite_all(
                 default_timeout_ms=default_timeout_ms,
             )
     else:
+        suite.add_event_handler(
+            "on_update", lambda _suite, run: _print_eval_line(run, show_attempt=repeat > 1)
+        )
         await suite.run(
             logs_dir,
             record_dir=record_dir,
             results_path=results_path,
-            on_update=partial(_print_eval_line, show_attempt=repeat > 1),
             debug=debug,
             use_cache=use_cache,
             default_timeout_ms=default_timeout_ms,

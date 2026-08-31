@@ -80,6 +80,39 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "EvalSession.from_scenario.on_progress",
+      "module": "pipecat.evals.harness",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/harness.py"
+    },
+    {
+      "subject": "EvalSession.on_progress",
+      "module": "pipecat.evals.harness",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/harness.py"
+    },
+    {
+      "subject": "EvalSuite.run.on_update",
+      "module": "pipecat.evals.suite",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_update",
+      "message": "Use the ``on_update`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",

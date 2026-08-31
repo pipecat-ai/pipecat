@@ -57,6 +57,7 @@ import shlex
 import sys
 import time
 import traceback
+import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -65,6 +66,7 @@ import yaml
 from loguru import logger
 
 from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS, EvalResult, EvalSession
+from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900
 DEFAULT_CONCURRENCY = 4
@@ -393,7 +395,7 @@ class EvalManifest:
         )
 
 
-class EvalSuite:
+class EvalSuite(BaseObject):
     """Runs the (bot, scenario) runs of an :class:`EvalManifest`, spawning each bot.
 
     Spawns each bot with its eval transport on its own port, drives it with the
@@ -401,11 +403,23 @@ class EvalSuite:
     concurrently (up to the manifest's ``concurrency``). The runs are mutated in
     place as they execute so a live display can read their progress.
 
+    Event handlers available:
+
+    - on_update: Called with an :class:`EvalRun` whenever that run changes status.
+      Runs are mutated in place, so handlers run synchronously and must return
+      promptly; they see the run as the change left it rather than however it has
+      moved on since.
+
     Example::
 
         manifest = EvalManifest.load("manifest.yaml")
         suite = EvalSuite(manifest)
         suite.filter(pattern="voice")
+
+        @suite.event_handler("on_update")
+        async def on_update(suite, run):
+            print(run.scenario, run.status)
+
         await suite.run(Path("logs"))
     """
 
@@ -416,8 +430,15 @@ class EvalSuite:
             manifest: The parsed :class:`EvalManifest`; its runs become the suite's
                 working set (narrowed by :meth:`filter`, executed by :meth:`run`).
         """
+        super().__init__()
+
         self.manifest = manifest
         self.runs = list(manifest.runs)
+
+        # Synchronous: an EvalRun is mutated in place as it executes, so a handler
+        # deferred to a task would read whatever the run has since become. A run
+        # that fails before it spawns reaches "done" with no await in between.
+        self._register_event_handler("on_update", sync=True)
 
     def filter(self, *, pattern: str | None = None, scenario: str | None = None) -> list[EvalRun]:
         """Subset the suite's runs by bot-name substring and/or scenario name.
@@ -464,6 +485,11 @@ class EvalSuite:
                 ``None`` to write none. Each line is flushed as its run completes,
                 so an interrupted sweep keeps everything already finished.
             on_update: Called whenever a run changes status, for live display.
+
+                .. deprecated:: 1.9.0
+                    Use the ``on_update`` event handler instead.
+                    Will be removed in 2.0.0.
+
             debug: When True, save each run's combined ``<run>.debug.log``.
             use_cache: When False, ignore cached user audio and force fresh synthesis.
             default_timeout_ms: Per-expectation budget for expectations without
@@ -492,6 +518,17 @@ class EvalSuite:
         if results_path is not None:
             results_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if on_update is not None:
+            warnings.warn(
+                "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+                "Use the `on_update` event handler instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Event handlers take the suite as their first argument; the callback
+            # takes only the run.
+            self.add_event_handler("on_update", lambda _suite, run: on_update(run))
+
         sem = asyncio.Semaphore(self.manifest.concurrency)
         await asyncio.gather(
             *(
@@ -502,7 +539,6 @@ class EvalSuite:
                     record_dir,
                     results_path,
                     sem,
-                    on_update,
                     debug,
                     use_cache,
                     default_timeout_ms,
@@ -519,7 +555,6 @@ class EvalSuite:
         record_dir: Path | None,
         results_path: Path | None,
         sem: asyncio.Semaphore,
-        on_update: Callable[[EvalRun], None] | None,
         debug: bool,
         use_cache: bool,
         default_timeout_ms: int,
@@ -538,8 +573,7 @@ class EvalSuite:
 
             run.status = "running"
             run.started_at = time.monotonic()
-            if on_update:
-                on_update(run)
+            await self._call_event_handler("on_update", run)
 
             proc: asyncio.subprocess.Process | None = None
             logf = None
@@ -606,8 +640,7 @@ class EvalSuite:
                 if run.started_at is not None:
                     run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
                 run.status = "done"
-                if on_update:
-                    on_update(run)
+                await self._call_event_handler("on_update", run)
                 if proc is not None:
                     await self._stop_bot(proc)
                 if logf is not None:

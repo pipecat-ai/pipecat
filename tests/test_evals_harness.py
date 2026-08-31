@@ -14,11 +14,15 @@ Two layers:
   RTVI WebSocket server that replies to ``client-ready``/``send-text`` with
   scripted RTVI server messages — exercising the handshake, send/receive, event
   matching, and context paths without a real bot pipeline.
+- :class:`TestProgressEvent` covers the ``on_progress`` event and the deprecated
+  callback that feeds it.
 """
 
+import asyncio
 import json
 import socket
 import unittest
+import warnings
 
 import websockets
 
@@ -1046,6 +1050,85 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
         self.assertEqual(context_messages, [])
+
+
+class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
+    """``on_progress`` handlers see every turn and expectation, in order."""
+
+    def _scenario(self) -> EvalScenario:
+        return EvalScenario(
+            name="progress",
+            turns=[
+                EvalTurn(
+                    user="hi",
+                    expect=[
+                        EvalExpectation(event="llm_started", within_ms=2000),
+                        EvalExpectation(event="llm_response", within_ms=2000),
+                    ],
+                )
+            ],
+        )
+
+    async def asyncSetUp(self):
+        self.server = _FakeRTVIServer(_free_port())
+        await self.server.start()
+        self.server.on_text(
+            "hi",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "hello"}),
+            _rtvi("bot-llm-stopped"),
+        )
+
+    async def asyncTearDown(self):
+        await self.server.stop()
+
+    async def test_event_handler_receives_records(self):
+        session = EvalSession.from_scenario(self._scenario(), self.server.url)
+        seen = []
+
+        @session.event_handler("on_progress")
+        async def on_progress(source, progress):
+            seen.append((source, progress))
+
+        await session.run()
+
+        self.assertTrue(all(source is session for source, _ in seen))
+        self.assertEqual(
+            [(p.event_name, p.status) for _, p in seen],
+            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+        )
+
+    async def test_records_are_delivered_before_run_returns(self):
+        """Handlers dispatch as tasks, so run() waits them out before it returns."""
+        session = EvalSession.from_scenario(self._scenario(), self.server.url)
+        finished = []
+
+        @session.event_handler("on_progress")
+        async def on_progress(source, progress):
+            await asyncio.sleep(0.01)
+            finished.append(progress.event_name)
+
+        await session.run()
+
+        self.assertEqual(finished, ["hi", "llm_started", "llm_response"])
+
+    async def test_callback_is_deprecated_and_still_called(self):
+        seen = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            session = EvalSession.from_scenario(
+                self._scenario(), self.server.url, on_progress=seen.append
+            )
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+
+        await session.run()
+
+        # The callback takes only the record, not the session an event handler gets.
+        self.assertEqual(
+            [(p.event_name, p.status) for p in seen],
+            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+        )
 
 
 if __name__ == "__main__":
