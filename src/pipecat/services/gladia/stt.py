@@ -470,9 +470,12 @@ class GladiaSTTService(WebsocketSTTService):
         Args:
             frame: The end frame triggering service shutdown.
         """
-        await super().stop(frame)
+        # stop_recording ends the session server-side and has to reach the
+        # socket before teardown closes it. Trailing transcripts are not
+        # waited for: Gladia finalizes the session and its stored result
+        # either way.
         await self._send_stop_recording()
-        await self._disconnect()
+        await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Gladia STT websocket connection.
