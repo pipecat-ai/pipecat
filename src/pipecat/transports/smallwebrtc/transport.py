@@ -127,10 +127,11 @@ class RawAudioTrack(AudioStreamTrack):
     def _release_interrupted_audio(self) -> None:
         """Release the oldest queued write and discard later stale writes.
 
-        Each call to :meth:`add_audio_bytes` ends with a future-bearing chunk.
-        Retaining through the first such chunk keeps only the audio already
-        closest to playout. Applying one envelope across that exact remainder
-        preserves its first sample, ends at silence, and adds no duration.
+        Each non-empty call to :meth:`add_audio_bytes` ends with a
+        future-bearing chunk. Retaining through the first such chunk keeps only
+        the audio already closest to playout. Applying one envelope across that
+        exact remainder preserves its first sample, ends at silence, and adds
+        no duration.
 
         A rapid second interruption can arrive after a new write was appended
         behind a previous release tail. Those later writes have not reached

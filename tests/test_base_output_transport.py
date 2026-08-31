@@ -132,6 +132,31 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_default_transport_hook_keeps_existing_interruption_order(self):
+        transport = await self._make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+            self.assertIsNotNone(task_before)
+            start_interruption = transport._start_interruption
+
+            async def assert_writer_active_during_framework_interruption():
+                self.assertFalse(task_before.done())
+                await start_interruption()
+
+            transport._start_interruption = AsyncMock(
+                side_effect=assert_writer_active_during_framework_interruption
+            )
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertTrue(task_before.done())
+            self.assertIsNot(sender._audio_task, task_before)
+            self.assertIsNotNone(sender._audio_task)
+            transport._start_interruption.assert_awaited_once_with()
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_interruption_recreates_audio_task_when_transport_hook_fails(self):
         transport = await self._make_transport(mixer=None)
         try:
