@@ -58,7 +58,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = AssemblyAISTTService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
+            model="universal-3-5-pro",
         ),
     )
 

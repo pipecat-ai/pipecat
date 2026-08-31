@@ -56,9 +56,9 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """AssemblyAI u3-rt-pro with Built-in Turn Detection
+    """AssemblyAI Universal-3.5 Pro with Built-in Turn Detection
 
-    This example demonstrates using AssemblyAI's u3-rt-pro Speech-to-Text model
+    This example demonstrates using AssemblyAI's universal-3-5-pro Speech-to-Text model
     with AssemblyAI's built-in turn detection for more natural conversation flow.
 
     Key features:
@@ -97,7 +97,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
+            model="universal-3-5-pro",
             # Optional: Tune turn detection timing (defaults shown below)
             # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default
