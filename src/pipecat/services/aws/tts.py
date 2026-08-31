@@ -72,8 +72,10 @@ def language_to_aws_language(language: Language) -> str:
         Language.EN: "en-US",  # Default to US English
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
         Language.EN_IN: "en-IN",
         Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
         Language.EN_US: "en-US",
         Language.EN_ZA: "en-ZA",
         # Finnish
