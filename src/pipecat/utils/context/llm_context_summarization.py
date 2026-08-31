@@ -23,6 +23,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
+    LLMStandardMessage,
 )
 from pipecat.utils.deprecation import deprecated
 
@@ -355,12 +356,11 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def _estimate_message_tokens(message: LLMContextMessage) -> int:
+    def _estimate_message_tokens(message: LLMStandardMessage) -> int:
         """Estimate token count for a single standard context message.
 
         Args:
-            message: The context message to estimate. Must not be an
-                ``LLMSpecificMessage``.
+            message: The standard context message to estimate.
 
         Returns:
             The estimated token count for the message, covering content (text
@@ -405,7 +405,7 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def get_preserved_system_message(context: LLMContext) -> LLMContextMessage | None:
+    def get_preserved_system_message(context: LLMContext) -> LLMStandardMessage | None:
         """Return the system message that summarization always preserves, if any.
 
         Only ``messages[0]`` with role ``system`` counts as the preserved
