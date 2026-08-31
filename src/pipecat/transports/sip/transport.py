@@ -60,6 +60,14 @@ means a different :class:`~pipecat.transports.sip.connection.SIPConnection`.
 pipeline does its own STT, and baresip's ``sndfile`` driver covers
 recording at the stack level), participant permissions, instance ids.
 
+Video (requires the ``sip-video`` extra for OpenCV): calls made or
+answered with a video direction enabled exchange VP8, crossing the
+pipeline boundary as RGB ``InputImageRawFrame``/``OutputImageRawFrame``
+and converted to/from the call's packed I420 at the transport. The
+transport aligns the call's geometry with ``video_out_width/height/
+framerate`` at construction; a peer that declines video leaves a
+working audio call.
+
 Trunk mode (registration-less): ``SIPConnection(reg_interval=0)`` never
 sends REGISTER — dial-out INVITEs go straight to the target (or the
 trunk host), with ``auth_user`` for trunks that digest-challenge
@@ -94,9 +102,11 @@ from pipecat.frames.frames import (
     EndFrame,
     InputAudioRawFrame,
     InputDTMFFrame,
+    InputImageRawFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputImageRawFrame,
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
@@ -110,6 +120,11 @@ from pipecat.transports.sip.connection import SIPConnection
 # poll interval).
 AUDIO_IN_POLL_SECS = 0.01
 AUDIO_IN_CATCHUP = 4
+
+# How often the input reader polls the call for a decoded video frame.
+# The call delivers newest-frame semantics, so polling faster than the
+# sender's fps just returns None between frames.
+VIDEO_IN_POLL_SECS = 1 / 30
 
 # The call's transmit buffer never blocks: writes return the bytes
 # accepted and reject the rest, while the native transmit clock drains
@@ -132,6 +147,38 @@ AUDIO_OUT_RETRY_SECS = 0.01
 # Setting the pipeline rates to the call's rates bypasses resampling
 # entirely (equal rates pass audio through untouched).
 _RESAMPLER_QUALITY = "QQ"
+
+
+def _get_cv2():
+    """Import OpenCV at point of use; video needs the sip-video extra."""
+    try:
+        import cv2
+
+        return cv2
+    except ModuleNotFoundError as e:
+        logger.error(f"Exception: {e}")
+        logger.error('In order to use SIP video, you need to `uv add "pipecat-ai[sip-video]"`.')
+        raise ImportError(f"Missing module: {e}") from e
+
+
+def _i420_to_rgb(data: bytes, width: int, height: int) -> bytes:
+    """Convert one packed I420 frame to RGB bytes."""
+    cv2 = _get_cv2()
+    import numpy as np
+
+    yuv = np.frombuffer(data, dtype=np.uint8).reshape((height * 3 // 2, width))
+    rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB_I420)
+    return rgb.tobytes()
+
+
+def _rgb_to_i420(data: bytes, width: int, height: int) -> bytes:
+    """Convert RGB bytes to one packed I420 frame."""
+    cv2 = _get_cv2()
+    import numpy as np
+
+    rgb = np.frombuffer(data, dtype=np.uint8).reshape((height, width, 3))
+    i420 = cv2.cvtColor(rgb, cv2.COLOR_RGB2YUV_I420)
+    return i420.tobytes()
 
 
 class SIPParams(TransportParams):
@@ -167,7 +214,8 @@ class SIPInputTransport(BaseInputTransport):
         super().__init__(params)
         self._transport = transport
         self._connection = connection
-        self._receive_task: asyncio.Task | None = None
+        self._receive_audio_task: asyncio.Task | None = None
+        self._receive_video_task: asyncio.Task | None = None
         self._resampler = create_stream_resampler(quality=_RESAMPLER_QUALITY)
         self._streaming = False
         connection.add_event_handler("media_restarted", self._on_media_restarted)
@@ -184,8 +232,10 @@ class SIPInputTransport(BaseInputTransport):
         # Readiness must precede the reader: the input audio queue only
         # exists after set_transport_ready().
         await self.set_transport_ready(frame)
-        if self._params.audio_in_enabled and self._receive_task is None:
-            self._receive_task = self.create_task(self._receive_audio())
+        if self._params.audio_in_enabled and self._receive_audio_task is None:
+            self._receive_audio_task = self.create_task(self._receive_audio())
+        if self._params.video_in_enabled and self._receive_video_task is None:
+            self._receive_video_task = self.create_task(self._receive_video())
 
     async def _start_audio_in_streaming(self):
         """Begin pushing received audio, when not streaming from start."""
@@ -207,15 +257,34 @@ class SIPInputTransport(BaseInputTransport):
         await self._teardown()
 
     async def _teardown(self):
-        if self._receive_task is not None:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
+        if self._receive_audio_task is not None:
+            await self.cancel_task(self._receive_audio_task)
+            self._receive_audio_task = None
+        if self._receive_video_task is not None:
+            await self.cancel_task(self._receive_video_task)
+            self._receive_video_task = None
         await self._transport._before_leave()
         await self._connection.disconnect()
 
     async def _on_media_restarted(self, connection, kind: str):
         if kind == "audio":
             self._resampler = create_stream_resampler(quality=_RESAMPLER_QUALITY)
+
+    async def _receive_video(self):
+        try:
+            while True:
+                await asyncio.sleep(VIDEO_IN_POLL_SECS)
+                frame = self._connection.read_video_frame()
+                if frame is None:
+                    continue
+                rgb = _i420_to_rgb(frame.data, frame.width, frame.height)
+                await self.push_video_frame(
+                    InputImageRawFrame(image=rgb, size=(frame.width, frame.height), format="RGB")
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            await self.push_error(f"SIP video reader failed: {e}", exception=e)
 
     async def _receive_audio(self):
         # Expected conditions (no call, audio not active, renegotiation)
@@ -331,6 +400,25 @@ class SIPOutputTransport(BaseOutputTransport):
                 await asyncio.sleep(AUDIO_OUT_RETRY_SECS)
         return True
 
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
+        """Write one video frame to the call, converting RGB to I420.
+
+        The base sender has already resized the frame to
+        ``video_out_width`` × ``video_out_height``, which the transport
+        aligned with the call's geometry at construction.
+        """
+        if frame.format != "RGB":
+            logger.warning(f"{self} dropping video frame with format {frame.format!r} (need RGB)")
+            return False
+        width, height = frame.size
+        i420 = _rgb_to_i420(frame.image, width, height)
+        try:
+            return self._connection.write_video_frame(i420)
+        except ValueError as e:
+            # Geometry drifted from the call's configured size.
+            logger.warning(f"{self} video frame refused: {e}")
+            return False
+
     def _supports_native_dtmf(self) -> bool:
         return True
 
@@ -388,6 +476,15 @@ class SIPTransport(BaseTransport):
         self._dialout_progressed = False
         self._other_participant_has_joined = False
         self._left = False
+
+        # The call's video geometry must match what the base sender
+        # produces; align the (not yet connected) connection with the
+        # params — a late mismatch raises in configure_video.
+        if self._params.video_out_enabled:
+            connection.configure_video(
+                (self._params.video_out_width, self._params.video_out_height),
+                float(self._params.video_out_framerate),
+            )
 
         # Register supported handlers. The user will only be able to
         # register these handlers.
@@ -577,6 +674,14 @@ class SIPTransport(BaseTransport):
             An error description, or None on success.
         """
         return await self._refer(settings)
+
+    async def request_keyframe(self):
+        """Ask the far end for a video keyframe (SIP-only addition).
+
+        Useful for a consumer joining mid-stream that wants a decodable
+        starting point sooner than the next natural keyframe.
+        """
+        await self._connection.request_keyframe()
 
     async def _refer(self, settings) -> str | None:
         settings = settings or {}
