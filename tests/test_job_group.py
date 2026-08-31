@@ -34,6 +34,31 @@ class StubTask(BaseWorker):
     pass
 
 
+class CompletionSignalingTask(StubTask):
+    """Requester that signals when its job group has completed."""
+
+    def __init__(self, name, completed):
+        super().__init__(name)
+        self._completed = completed
+
+    async def on_job_completed(self, result):
+        await super().on_job_completed(result)
+        self._completed.set()
+
+
+class ResponseBeforePublishReturnsBus(AsyncQueueBus):
+    """Bus that lets a fast worker finish before request publication returns."""
+
+    def __init__(self, completed):
+        super().__init__()
+        self._completed = completed
+
+    async def publish(self, message):
+        await super().publish(message)
+        if isinstance(message, BusJobRequestMessage):
+            await asyncio.wait_for(self._completed.wait(), timeout=1.0)
+
+
 class JobWorkerTask(BaseWorker):
     """Worker that automatically responds to job requests via the bus."""
 
@@ -118,6 +143,16 @@ async def create_test_env():
     await bus.start()
     registry = WorkerRegistry(runner_name="test-runner")
     return bus, tm, registry
+
+
+async def create_response_before_publish_env():
+    completed = asyncio.Event()
+    bus = ResponseBeforePublishReturnsBus(completed)
+    tm = TaskManager()
+    await bus.setup(tm)
+    await bus.start()
+    registry = WorkerRegistry(runner_name="test-runner")
+    return bus, tm, registry, completed
 
 
 async def setup_task(bus, registry, task):
@@ -363,6 +398,29 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1].data, {"progress": 75})
         self.assertEqual(tg.responses, {"worker": {"result": "done"}})
 
+    async def test_job_group_buffers_events_before_request_publish_returns(self):
+        """job_group() buffers events when a fast remote worker completes during publish."""
+        await self.bus.stop()
+        self.bus, self.tm, self.registry, completed = await create_response_before_publish_env()
+
+        parent = CompletionSignalingTask("parent", completed)
+        await setup_task(self.bus, self.registry, parent)
+
+        worker = UpdatingWorkerTask("worker", updates=[{"progress": 50}], response={"done": True})
+        await setup_task(self.bus, self.registry, worker)
+
+        async def run_job_group():
+            events = []
+            async with parent.job_group("worker") as group:
+                async for event in group:
+                    events.append(event)
+            return events, group.responses
+
+        events, responses = await asyncio.wait_for(run_job_group(), timeout=1.0)
+
+        self.assertEqual([event.data for event in events], [{"progress": 50}])
+        self.assertEqual(responses, {"worker": {"done": True}})
+
     async def test_job_group_iterates_stream_events(self):
         """async for yields stream_start, stream_data, and stream_end events."""
         parent = StubTask("parent")
@@ -593,6 +651,29 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0].type, JobEvent.UPDATE)
         self.assertIsInstance(events[0], JobEvent)
         self.assertEqual(t.response, {"done": True})
+
+    async def test_job_buffers_events_before_request_publish_returns(self):
+        """job() buffers events when a fast remote worker completes during publish."""
+        await self.bus.stop()
+        self.bus, self.tm, self.registry, completed = await create_response_before_publish_env()
+
+        parent = CompletionSignalingTask("parent", completed)
+        await setup_task(self.bus, self.registry, parent)
+
+        worker = UpdatingWorkerTask("worker", updates=[{"progress": 50}], response={"done": True})
+        await setup_task(self.bus, self.registry, worker)
+
+        async def run_job():
+            events = []
+            async with parent.job("worker") as job:
+                async for event in job:
+                    events.append(event)
+            return events, job.response
+
+        events, response = await asyncio.wait_for(run_job(), timeout=1.0)
+
+        self.assertEqual([event.data for event in events], [{"progress": 50}])
+        self.assertEqual(response, {"done": True})
 
     async def test_job_streams_data(self):
         """job() yields stream events from a streaming worker."""

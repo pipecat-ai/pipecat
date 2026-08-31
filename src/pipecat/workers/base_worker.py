@@ -1042,6 +1042,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         worker_names: list[str],
         *,
         params: JobGroupParams | None = None,
+        event_queue: asyncio.Queue[JobGroupEvent | None] | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
@@ -1057,6 +1058,9 @@ class BaseWorker(BaseObject, BusSubscriber):
         Args:
             worker_names: Names of the workers to send the job to.
             params: How to run the group. See :class:`JobGroupParams`.
+            event_queue: Optional queue for collecting intermediate job events.
+                The queue is attached before the first request is sent so fast
+                workers cannot publish events before the consumer is ready.
             name: Job name.
 
                 .. deprecated:: 1.8.0
@@ -1098,7 +1102,11 @@ class BaseWorker(BaseObject, BusSubscriber):
         except TimeoutError:
             raise JobGroupError("workers not ready within timeout")
 
-        group = self._create_job_group(worker_names, params=group_params)
+        group = self._create_job_group(
+            worker_names,
+            params=group_params,
+            event_queue=event_queue,
+        )
 
         for worker_name in worker_names:
             await self._send_job_request(
@@ -1520,6 +1528,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         worker_names: list[str],
         *,
         params: JobGroupParams,
+        event_queue: asyncio.Queue[JobGroupEvent | None] | None = None,
     ) -> JobGroup:
         job_id = str(uuid.uuid4())
         group = JobGroup(
@@ -1528,6 +1537,7 @@ class BaseWorker(BaseObject, BusSubscriber):
             cancel_on_error=params.cancel_on_error,
             label=params.label,
             cancellable=params.cancellable,
+            event_queue=event_queue,
         )
         self._job_groups[job_id] = group
 

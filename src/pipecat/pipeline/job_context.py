@@ -322,11 +322,12 @@ class JobGroupContext:
         return event
 
     async def __aenter__(self) -> JobGroupContext:
+        event_queue = asyncio.Queue()
         self._group = await self._worker.create_job_group_and_request_job(
             list(self._worker_names),
             params=self._params,
+            event_queue=event_queue,
         )
-        self._group.event_queue = asyncio.Queue()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
@@ -413,11 +414,12 @@ class JobContext:
         return JobEvent(type=event.type, data=event.data)
 
     async def __aenter__(self) -> JobContext:
+        event_queue = asyncio.Queue()
         self._group = await self._worker.create_job_group_and_request_job(
             [self._worker_name],
             params=JobGroupParams(**self._params.model_dump()),
+            event_queue=event_queue,
         )
-        self._group.event_queue = asyncio.Queue()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
