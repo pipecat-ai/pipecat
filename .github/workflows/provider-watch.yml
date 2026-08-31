@@ -58,7 +58,9 @@ jobs:
         run: |
           ONLY="${{ inputs.only }}"
           LIMIT="${{ inputs.limit }}"
-          ARGS=(--json --group-size 12)
+          # Sized so a group's research (two researcher batches) clears the
+          # research step timeout with room to spare.
+          ARGS=(--json --group-size 10)
           [ -n "$ONLY" ] && ARGS+=(--only "$ONLY")
           [ -n "$LIMIT" ] && ARGS+=(--limit "$LIMIT")
           GROUPS_JSON=$(python3 scripts/provider-watch/plan.py "${ARGS[@]}")
