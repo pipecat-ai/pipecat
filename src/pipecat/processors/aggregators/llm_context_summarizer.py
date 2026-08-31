@@ -124,6 +124,7 @@ class LLMContextSummarizer(BaseObject):
 
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
+        self._warned_system_prompt_exceeds_limit = False
 
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
@@ -207,7 +208,8 @@ class LLMContextSummarizer(BaseObject):
 
         Returns:
             True when ``auto_trigger`` is enabled, no summarization is in
-            progress, and either the token count exceeds ``max_context_tokens``
+            progress, and either the summarizable token count (excluding the
+            preserved initial system message) exceeds ``max_context_tokens``
             or the message count since the last summary exceeds
             ``max_unsummarized_messages`` — whichever of the two is set.
         """
@@ -224,9 +226,30 @@ class LLMContextSummarizer(BaseObject):
         total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
         num_messages = len(self._context.messages)
 
+        # Summarization always preserves the initial system message
+        # (messages[0] with role "system") and can never compress it, so its
+        # tokens are excluded from the trigger comparison. Counting them would
+        # make the trigger permanently true for a system prompt larger than
+        # max_context_tokens, firing a useless summarization on every turn.
+        system_tokens = LLMContextSummarizationUtil.estimate_preserved_system_tokens(self._context)
+        summarizable_tokens = total_tokens - system_tokens
+
         # Check if we've reached the token limit
         token_limit = self._auto_config.max_context_tokens
-        token_limit_exceeded = token_limit is not None and total_tokens >= token_limit
+        token_limit_exceeded = token_limit is not None and summarizable_tokens >= token_limit
+
+        if (
+            token_limit is not None
+            and system_tokens >= token_limit
+            and not self._warned_system_prompt_exceeds_limit
+        ):
+            self._warned_system_prompt_exceeds_limit = True
+            logger.warning(
+                f"{self}: The system message alone is ~{system_tokens} tokens, which meets or "
+                f"exceeds max_context_tokens ({token_limit}). Summarization never compresses "
+                f"the system message, so it cannot reduce the context below this limit. "
+                f"Consider raising max_context_tokens or shortening the system prompt."
+            )
 
         # Check if we've exceeded max unsummarized messages
         messages_since_summary = len(self._context.messages) - 1
@@ -237,7 +260,8 @@ class LLMContextSummarizer(BaseObject):
 
         logger.trace(
             f"{self}: Context has {num_messages} messages, "
-            f"~{total_tokens} tokens (limit: {token_limit if token_limit is not None else 'disabled'}), "
+            f"~{total_tokens} tokens total, ~{summarizable_tokens} summarizable "
+            f"(limit: {token_limit if token_limit is not None else 'disabled'}), "
             f"{messages_since_summary} messages since last summary "
             f"(message threshold: {message_threshold if message_threshold is not None else 'disabled'})"
         )
@@ -251,7 +275,7 @@ class LLMContextSummarizer(BaseObject):
 
         reason = []
         if token_limit_exceeded:
-            reason.append(f"~{total_tokens} tokens (>={token_limit} limit)")
+            reason.append(f"~{summarizable_tokens} summarizable tokens (>={token_limit} limit)")
         if message_threshold_exceeded:
             reason.append(f"{messages_since_summary} messages (>={message_threshold} threshold)")
 

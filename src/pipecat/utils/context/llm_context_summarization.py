@@ -128,9 +128,12 @@ class LLMAutoContextSummarizationConfig:
     must be set. Set the other to ``None`` to disable that threshold.
 
     Parameters:
-        max_context_tokens: Maximum allowed context size in tokens. When this
-            limit is reached, summarization is triggered to compress the context.
-            The tokens are calculated using the industry-standard approximation
+        max_context_tokens: Maximum allowed size, in tokens, of the summarizable
+            context. When this limit is reached, summarization is triggered to
+            compress the context. The initial system message (``messages[0]``
+            with role ``system``) is excluded from this count, since
+            summarization always preserves it and can never compress it. The
+            tokens are calculated using the industry-standard approximation
             of 1 token ≈ 4 characters. Set to ``None`` to disable token-based
             triggering.
         max_unsummarized_messages: Maximum number of new messages that can
@@ -346,44 +349,85 @@ class LLMContextSummarizationUtil:
             if isinstance(message, LLMSpecificMessage):
                 continue
 
-            # Role and structure overhead
-            total += TOKEN_OVERHEAD_PER_MESSAGE
-
-            # Message content
-            content = message.get("content", "")
-            if isinstance(content, str):
-                total += LLMContextSummarizationUtil.estimate_tokens(content)
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        item_type = item.get("type", "")
-                        # Text content
-                        if item_type == "text":
-                            total += LLMContextSummarizationUtil.estimate_tokens(
-                                item.get("text", "")
-                            )
-                        # Image content
-                        elif item_type in ("image_url", "image"):
-                            # Images are expensive, rough estimate
-                            total += IMAGE_TOKEN_ESTIMATE
-
-            # Tool calls
-            if "tool_calls" in message:
-                tool_calls = message["tool_calls"]
-                if isinstance(tool_calls, list):
-                    for tool_call in tool_calls:
-                        if isinstance(tool_call, dict):
-                            func = tool_call.get("function", {})
-                            if isinstance(func, dict):
-                                total += LLMContextSummarizationUtil.estimate_tokens(
-                                    func.get("name", "") + func.get("arguments", "")
-                                )
-
-            # Tool call ID
-            if "tool_call_id" in message:
-                total += TOKEN_OVERHEAD_PER_MESSAGE
+            total += LLMContextSummarizationUtil._estimate_message_tokens(message)
 
         return total
+
+    @staticmethod
+    def _estimate_message_tokens(message: LLMContextMessage) -> int:
+        """Estimate token count for a single standard context message.
+
+        Args:
+            message: The context message to estimate. Must not be an
+                ``LLMSpecificMessage``.
+
+        Returns:
+            The estimated token count for the message, covering content (text
+            and images), tool calls and their arguments, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead.
+        """
+        # Role and structure overhead
+        total = TOKEN_OVERHEAD_PER_MESSAGE
+
+        # Message content
+        content = message.get("content", "")
+        if isinstance(content, str):
+            total += LLMContextSummarizationUtil.estimate_tokens(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    item_type = item.get("type", "")
+                    # Text content
+                    if item_type == "text":
+                        total += LLMContextSummarizationUtil.estimate_tokens(item.get("text", ""))
+                    # Image content
+                    elif item_type in ("image_url", "image"):
+                        # Images are expensive, rough estimate
+                        total += IMAGE_TOKEN_ESTIMATE
+
+        # Tool calls
+        if "tool_calls" in message:
+            tool_calls = message["tool_calls"]
+            if isinstance(tool_calls, list):
+                for tool_call in tool_calls:
+                    if isinstance(tool_call, dict):
+                        func = tool_call.get("function", {})
+                        if isinstance(func, dict):
+                            total += LLMContextSummarizationUtil.estimate_tokens(
+                                func.get("name", "") + func.get("arguments", "")
+                            )
+
+        # Tool call ID
+        if "tool_call_id" in message:
+            total += TOKEN_OVERHEAD_PER_MESSAGE
+
+        return total
+
+    @staticmethod
+    def estimate_preserved_system_tokens(context: LLMContext) -> int:
+        """Estimate the token count of the preserved system message, if any.
+
+        Uses the same rule as ``get_messages_to_summarize()``: only
+        ``messages[0]`` with role ``system`` counts as the preserved system
+        preamble. Summarization never compresses that message, so its tokens
+        should not count toward summarization trigger thresholds.
+
+        Args:
+            context: LLM context to inspect.
+
+        Returns:
+            The estimated token count of ``messages[0]`` when it is a system
+            message, otherwise 0.
+        """
+        messages = context.messages
+        first_msg = messages[0] if messages else None
+        if (
+            first_msg is None
+            or isinstance(first_msg, LLMSpecificMessage)
+            or first_msg.get("role") != "system"
+        ):
+            return 0
+        return LLMContextSummarizationUtil._estimate_message_tokens(first_msg)
 
     @staticmethod
     def _is_tool_message_pending(content: str) -> bool:

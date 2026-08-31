@@ -132,6 +132,90 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_oversized_system_prompt_does_not_trigger_by_tokens(self):
+        """Test that a system prompt bigger than the token limit alone does not trigger.
+
+        Summarization preserves the initial system message and can never compress
+        it, so its tokens must not count toward max_context_tokens. Otherwise the
+        trigger is permanently true and summarization fires on every turn with no
+        possible progress.
+        """
+        from loguru import logger
+
+        # System message alone is ~250 tokens (1000 chars / 4), above the limit
+        context = LLMContext(messages=[{"role": "system", "content": "x" * 1000}])
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=200,
+            max_unsummarized_messages=100,  # High so it doesn't trigger by message count
+        )
+
+        summarizer = LLMContextSummarizer(context=context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # A little conversation, well below the limit on its own
+        for i in range(3):
+            context.add_message({"role": "user", "content": "Short message"})
+
+        warnings = []
+        sink_id = logger.add(lambda m: warnings.append(m), level="WARNING")
+        try:
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+        finally:
+            logger.remove(sink_id)
+
+        # Should NOT have triggered summarization
+        self.assertIsNone(request_frame)
+
+        # Should have warned exactly once that the limit is unsatisfiable
+        limit_warnings = [w for w in warnings if "max_context_tokens" in str(w)]
+        self.assertEqual(len(limit_warnings), 1)
+
+        await summarizer.cleanup()
+
+    async def test_oversized_system_prompt_still_triggers_on_conversation(self):
+        """Test that the token trigger still fires when conversation alone exceeds the limit."""
+        # System message alone is ~250 tokens, but that must not disable the trigger
+        context = LLMContext(messages=[{"role": "system", "content": "x" * 1000}])
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100,
+            max_unsummarized_messages=100,  # High so it doesn't trigger by message count
+        )
+
+        summarizer = LLMContextSummarizer(context=context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # Enough conversation to exceed the limit without the system message
+        for i in range(10):
+            context.add_message(
+                {
+                    "role": "user",
+                    "content": "This is a test message that adds tokens to the context.",
+                }
+            )
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        # Should have triggered summarization
+        self.assertIsNotNone(request_frame)
+        self.assertIsInstance(request_frame, LLMContextSummaryRequestFrame)
+
+        await summarizer.cleanup()
+
     async def test_summarization_in_progress_prevents_duplicate(self):
         """Test that a summarization in progress prevents triggering another."""
         config = LLMAutoContextSummarizationConfig(
