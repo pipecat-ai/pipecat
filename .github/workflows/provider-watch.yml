@@ -186,10 +186,27 @@ jobs:
             publish.py over what you leave behind. `gh` is authenticated for
             the read-only lookups the guide calls for. Use
             `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
+
+            Before finishing — including when something stops you early —
+            write your Step 6 summary (or whatever explanation you have) to
+            `$GITHUB_WORKSPACE/.pw-scratch/summary.md`: the workflow uploads
+            it, and it is the only record of your reasoning that survives the
+            runner.
           claude_args: |
             --model claude-opus-5
             --max-turns 120
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
+
+      - name: Verify the group was researched
+        # A run that exits cleanly without doing the work should fail loudly,
+        # not upload an empty artifact and stay green.
+        if: inputs.dry_run != true
+        run: |
+          EXPECTED=$(( $(echo -n "${{ matrix.group.units }}" | tr -cd ',' | wc -c) + 1 ))
+          GOT=$(wc -l < .pw-scratch/run.jsonl 2>/dev/null || echo 0)
+          echo "run.jsonl covers $GOT of $EXPECTED units"
+          [ -f .pw-scratch/summary.md ] && { echo "--- orchestrator summary:"; cat .pw-scratch/summary.md; }
+          [ "$GOT" -ge "$EXPECTED" ]
 
       - name: Generate app token for publishing
         id: publish-token
@@ -228,6 +245,7 @@ jobs:
             _reports/digests
             .pw-scratch/run.jsonl
             .pw-scratch/highlights.md
+            .pw-scratch/summary.md
 
   digest:
     needs: [plan, research]
