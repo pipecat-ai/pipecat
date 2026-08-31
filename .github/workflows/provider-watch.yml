@@ -164,6 +164,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Researcher launches must block until the researcher returns
+          # (launches in one message still run concurrently): in a
+          # non-interactive session, an orchestrator turn that ends with more
+          # than one subagent still pending ends the session and kills them.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           # The provider-watch environment holds the bot's dedicated key,
           # shadowing the repo-level ANTHROPIC_API_KEY for this job.
