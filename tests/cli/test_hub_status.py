@@ -269,7 +269,7 @@ class TestVersionMismatch:
         self._fresh_index(tmp_path, "1.9.0")
         assert freshness_warning(_make_project(tmp_path, "1.6.0")) is None
 
-    def test_unpinned_index_gets_a_minor_of_slack(self, tmp_path):
+    def test_default_branch_index_gets_a_minor_of_slack(self, tmp_path):
         """Tracking the default branch means the recorded tag is a floor.
 
         An index 55 commits past v1.6.0 may already contain 1.7.0's code, so
@@ -279,7 +279,7 @@ class TestVersionMismatch:
         assert freshness_warning(_make_project(tmp_path, "1.7.0")) is None
         assert freshness_warning(_make_project(tmp_path, "1.8.0")) is not None
 
-    def test_pinned_index_gets_no_slack(self, tmp_path):
+    def test_release_tag_index_gets_no_slack(self, tmp_path):
         self._fresh_index(tmp_path, "1.6.0", commits_ahead=0)
         assert freshness_warning(_make_project(tmp_path, "1.7.0")) is not None
 
