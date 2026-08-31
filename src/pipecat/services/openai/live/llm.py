@@ -51,7 +51,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMSettings
+from pipecat.services.openai.responses.llm import (
+    OpenAIResponsesLLMSettings,
+    OpenAIResponsesReasoningConfig,
+)
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
@@ -1055,7 +1058,7 @@ def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, A
         config["instructions"] = settings.system_instruction
     if isinstance(settings.max_completion_tokens, int):
         config["max_output_tokens"] = settings.max_completion_tokens
-    if is_set(settings.reasoning):
+    if isinstance(settings.reasoning, OpenAIResponsesReasoningConfig):
         config["reasoning"] = settings.reasoning.model_dump(exclude_none=True)
     if delegation.service_tier is not None:
         config["service_tier"] = delegation.service_tier

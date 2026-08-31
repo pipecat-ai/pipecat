@@ -759,7 +759,7 @@ _server_event_types: dict[str, type[ServerEvent]] = {
 }
 
 
-def parse_server_event(message: str) -> ServerEvent:
+def parse_server_event(message: str | bytes) -> ServerEvent:
     """Parse a server event from its JSON text.
 
     ``response.*`` events other than ``response.output_item.done`` become
@@ -767,7 +767,7 @@ def parse_server_event(message: str) -> ServerEvent:
     :class:`UnknownServerEvent`.
 
     Args:
-        message: The JSON text of one server event.
+        message: The JSON text of one server event, as ``str`` or UTF-8 ``bytes``.
 
     Returns:
         The parsed event.
