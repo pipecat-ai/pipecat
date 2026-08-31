@@ -30,7 +30,7 @@ digest and opens (or updates) the digest issue on the reports repo when there
 is anything to show. Run::
 
     uv run python scripts/provider-watch/publish.py --date 2026-08-20
-    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize --highlights h.md
+    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize h.md
 """
 
 from __future__ import annotations
@@ -412,10 +412,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reports-repo", default="pipecat-ai/provider-watch-reports")
     parser.add_argument("--pr-cap", type=int, default=DEFAULT_PR_CAP, help="max PRs opened per run")
     parser.add_argument(
-        "--finalize", action="store_true", help="also render the digest and open/update the issue"
-    )
-    parser.add_argument(
-        "--highlights", type=Path, help="Markdown inserted at the top of the digest"
+        "--finalize",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="HIGHLIGHTS",
+        help="also render the digest and open/update the issue, with an optional "
+        "highlights file inserted at the top",
     )
     args = parser.parse_args(argv)
 
@@ -430,10 +433,11 @@ def main(argv: list[str] | None = None) -> int:
         date=args.date,
         cap=args.pr_cap,
     )
-    if args.finalize:
-        render_digest(args.reports, args.date, args.highlights, args.reports_repo)
+    if args.finalize is not None:
+        highlights = Path(args.finalize) if args.finalize else None
+        render_digest(args.reports, args.date, highlights, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
-    if args.finalize and worth_an_issue(reports):
+    if args.finalize is not None and worth_an_issue(reports):
         outcome.issue_url = open_or_update_issue(
             sh, args.reports_repo, args.date, args.reports / "digests" / f"{args.date}.md"
         )

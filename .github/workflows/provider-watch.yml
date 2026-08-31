@@ -312,5 +312,4 @@ jobs:
             --date "${{ needs.plan.outputs.run_date }}" \
             --reports _reports \
             --repo-root . \
-            --finalize \
-            --highlights highlights.md
+            --finalize highlights.md
