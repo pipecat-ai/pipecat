@@ -27,7 +27,7 @@ Examples:
 
 ### Step 1: Resolve paths and prerequisites
 
-1. Parse the arguments. Record `RUN_DATE` as today's date (`YYYY-MM-DD`) and `PIPECAT_COMMIT` as `git rev-parse --short HEAD`.
+1. Parse the arguments. Record `RUN_DATE` as today's date (`YYYY-MM-DD`) — unless the invoker pins one, as the workflow does so a sweep crossing UTC midnight stays on one date — and `PIPECAT_COMMIT` as `git rev-parse --short HEAD`.
 2. Pick a scratch directory outside the repo (your session scratchpad if you have one, else `mktemp -d -t provider-research`). Everything transient — payloads, `run.jsonl`, worktrees — lives there.
 3. Reports checkout: always `./_reports` in this repo (gitignored). If it is missing, `gh repo clone pipecat-ai/provider-watch-reports _reports`; if the clone fails, `git init _reports` and continue with no history. If it exists and has a remote, `git -C _reports pull --ff-only` so the run reads current memory.
 4. Stop with a clear error if `uv run python scripts/provider-watch/inventory.py --md` fails.

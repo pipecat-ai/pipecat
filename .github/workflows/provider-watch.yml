@@ -39,6 +39,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       groups: ${{ steps.groups.outputs.value }}
+      # One date for the whole sweep, so groups that publish after UTC
+      # midnight still write and publish under the date the run started.
+      run_date: ${{ steps.groups.outputs.run_date }}
     steps:
       - name: Checkout pipecat
         uses: actions/checkout@v4
@@ -60,6 +63,7 @@ jobs:
           [ -n "$LIMIT" ] && ARGS+=(--limit "$LIMIT")
           GROUPS_JSON=$(python3 scripts/provider-watch/plan.py "${ARGS[@]}")
           echo "value=$GROUPS_JSON" >> "$GITHUB_OUTPUT"
+          echo "run_date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
           echo "Groups: $GROUPS_JSON"
 
   research:
@@ -170,6 +174,10 @@ jobs:
 
             /provider-research --only ${{ matrix.group.units }}
 
+            Use ${{ needs.plan.outputs.run_date }} as RUN_DATE: the workflow
+            pins one date for every group so a sweep that crosses UTC midnight
+            stays whole.
+
             Read `.claude/skills/provider-research/SKILL.md` and follow it
             exactly, including its "Unattended runs" section. This job
             researches one group of a fanned-out sweep and publishes nothing:
@@ -206,7 +214,7 @@ jobs:
         run: |
           git remote set-url origin "https://x-access-token:${{ steps.publish-token.outputs.token }}@github.com/pipecat-ai/pipecat.git"
           git -C _reports remote set-url origin "https://x-access-token:${{ steps.publish-token.outputs.token }}@github.com/pipecat-ai/provider-watch-reports.git"
-          uv run python scripts/provider-watch/publish.py --date "$(date -u +%F)"
+          uv run python scripts/provider-watch/publish.py --date "${{ needs.plan.outputs.run_date }}"
 
       - name: Upload run artifacts
         if: always()
@@ -287,7 +295,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           .venv/bin/python scripts/provider-watch/publish.py \
-            --date "$(date -u +%F)" \
+            --date "${{ needs.plan.outputs.run_date }}" \
             --reports _reports \
             --repo-root . \
             --finalize \
