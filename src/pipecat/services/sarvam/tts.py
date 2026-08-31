@@ -416,8 +416,9 @@ class SarvamHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
-            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
-                If None, uses model-specific default.
+            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000, and,
+                for bulbul:v3, 32000, 44100, 48000). If None, uses model-specific
+                default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
 
                 .. deprecated:: 0.0.105
@@ -558,7 +559,7 @@ class SarvamHttpTTSService(TTSService):
                 "text": text,
                 "target_language_code": self._settings.language,
                 "speaker": self._settings.voice,
-                "sample_rate": self.sample_rate,
+                "speech_sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings.enable_preprocessing,
                 "model": self._settings.model,
                 "pace": self._settings.pace if self._settings.pace is not None else 1.0,
