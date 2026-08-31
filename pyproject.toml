@@ -185,6 +185,17 @@ docs = [
     "sphinx-rtd-theme",
 ]
 
+[tool.uv]
+# The Vonage-Google package conflict — vonage-video-connector pins pydantic < 2.12,
+# while google-genai >= 2.9.0 (which GeminiSTTService needs) requires pydantic >= 2.12.5
+# — must not prevent GeminiSTTService usage in environments where the Vonage connector
+# can't be installed anyway. Resolving the one environment where it can be installed
+# (Python 3.13 on Linux) apart from every other keeps the rest of the lock current.
+environments = [
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version != '3.13.*' or sys_platform != 'linux'",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
