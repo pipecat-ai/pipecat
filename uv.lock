@@ -5609,7 +5609,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["mcp"], marker = "extra == 'keenable'" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
-    { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.6.0,<1" },
+    { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.7.0,<1" },
     { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.6" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
@@ -5678,7 +5678,7 @@ docs = [
 
 [[package]]
 name = "pipecat-ai-context-hub"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chromadb" },
@@ -5698,9 +5698,9 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-typescript" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/44/720b27277de571db35e253b4ab527462f5e6fb1378ef8ab9901e6338ee1d/pipecat_ai_context_hub-0.6.0.tar.gz", hash = "sha256:0f70c51c8b8c3f1072ce24cf899b08c944732000c83bb035341efdbaf54d1240", size = 1426482, upload-time = "2026-08-28T06:14:53.429Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/0d/8361e8480a27ecd09ee3c06b0e5a174a4974c89d6abd3a6a7e180cf37c0e/pipecat_ai_context_hub-0.7.0.tar.gz", hash = "sha256:52ba8caa2b53c7f896dc28decc59d36ea701bc845ad41166d474ea76be0affe3", size = 1445121, upload-time = "2026-08-31T03:41:13.304Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/9a/4720420d4fba05a2f07c90263e8aca70a7e73f58adf73d52dc127816992b/pipecat_ai_context_hub-0.6.0-py3-none-any.whl", hash = "sha256:990b83f69904f61dfa8e7e6df7cd38da2beaa3a57cca43294419bde3f0f14525", size = 238316, upload-time = "2026-08-28T06:14:54.737Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/ca/714ba365da33ac84fe6e1ec3206ce3104c13d21d149318051e261d3fea4d/pipecat_ai_context_hub-0.7.0-py3-none-any.whl", hash = "sha256:c60557fcd8b463b0a13efea4badcabbbec513c00195fd61a05167ff1e7df2bae", size = 243168, upload-time = "2026-08-31T03:41:14.458Z" },
 ]
 
 [[package]]
