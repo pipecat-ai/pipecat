@@ -140,8 +140,6 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         trigger is permanently true and summarization fires on every turn with no
         possible progress.
         """
-        from loguru import logger
-
         # System message alone is ~250 tokens (1000 chars / 4), above the limit
         context = LLMContext(messages=[{"role": "system", "content": "x" * 1000}])
         config = LLMAutoContextSummarizationConfig(
@@ -163,6 +161,45 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         for i in range(3):
             context.add_message({"role": "user", "content": "Short message"})
 
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        # Should NOT have triggered summarization
+        self.assertIsNone(request_frame)
+
+        await summarizer.cleanup()
+
+    async def test_no_progress_summarization_skipped_with_warning(self):
+        """Test that an exceeded threshold with nothing to summarize does not trigger.
+
+        When every message over the limit is preserved (the initial system
+        message plus the last min_messages_after_summary messages), a
+        summarization request could never make progress, so none should be
+        sent and a warning should be logged once.
+        """
+        from loguru import logger
+
+        context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=500,
+            max_unsummarized_messages=100,  # High so it doesn't trigger by message count
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=4),
+        )
+
+        summarizer = LLMContextSummarizer(context=context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        # Four large messages (~260 tokens each) exceed the limit, but all four
+        # fall inside min_messages_after_summary, so nothing can be summarized.
+        for i in range(4):
+            context.add_message({"role": "user", "content": "x" * 1000})
+
         warnings = []
         sink_id = logger.add(lambda m: warnings.append(m), level="WARNING")
         try:
@@ -171,12 +208,19 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         finally:
             logger.remove(sink_id)
 
-        # Should NOT have triggered summarization
+        # Should NOT have requested summarization, and warned exactly once
         self.assertIsNone(request_frame)
+        no_progress_warnings = [w for w in warnings if "no messages can be summarized" in str(w)]
+        self.assertEqual(len(no_progress_warnings), 1)
 
-        # Should have warned exactly once that the limit is unsatisfiable
-        limit_warnings = [w for w in warnings if "max_context_tokens" in str(w)]
-        self.assertEqual(len(limit_warnings), 1)
+        # Once older messages exist outside the preserved window, it triggers
+        for i in range(2):
+            context.add_message({"role": "user", "content": "x" * 1000})
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+
+        self.assertIsNotNone(request_frame)
+        self.assertIsInstance(request_frame, LLMContextSummaryRequestFrame)
 
         await summarizer.cleanup()
 

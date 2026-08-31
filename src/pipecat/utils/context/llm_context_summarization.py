@@ -195,7 +195,8 @@ class LLMContextSummarizationConfig:
             )
 
     Parameters:
-        max_context_tokens: Maximum allowed context size in tokens.
+        max_context_tokens: Maximum allowed size, in tokens, of the summarizable
+            context (the preserved initial system message is excluded).
             Set to ``None`` to disable token-based triggering.
         target_context_tokens: Maximum token size for the generated summary.
         max_unsummarized_messages: Maximum new messages before triggering summarization.
@@ -404,20 +405,18 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def estimate_preserved_system_tokens(context: LLMContext) -> int:
-        """Estimate the token count of the preserved system message, if any.
+    def get_preserved_system_message(context: LLMContext) -> LLMContextMessage | None:
+        """Return the system message that summarization always preserves, if any.
 
-        Uses the same rule as ``get_messages_to_summarize()``: only
-        ``messages[0]`` with role ``system`` counts as the preserved system
-        preamble. Summarization never compresses that message, so its tokens
-        should not count toward summarization trigger thresholds.
+        Only ``messages[0]`` with role ``system`` counts as the preserved
+        system preamble. System messages at other positions are
+        mid-conversation injections and are summarized normally.
 
         Args:
             context: LLM context to inspect.
 
         Returns:
-            The estimated token count of ``messages[0]`` when it is a system
-            message, otherwise 0.
+            ``messages[0]`` when it is a system message, otherwise None.
         """
         messages = context.messages
         first_msg = messages[0] if messages else None
@@ -426,6 +425,26 @@ class LLMContextSummarizationUtil:
             or isinstance(first_msg, LLMSpecificMessage)
             or first_msg.get("role") != "system"
         ):
+            return None
+        return first_msg
+
+    @staticmethod
+    def estimate_preserved_system_tokens(context: LLMContext) -> int:
+        """Estimate the token count of the preserved system message, if any.
+
+        Summarization never compresses the preserved system message (see
+        ``get_preserved_system_message()``), so its tokens should not count
+        toward summarization trigger thresholds.
+
+        Args:
+            context: LLM context to inspect.
+
+        Returns:
+            The estimated token count of the preserved system message, or 0
+            when there is none.
+        """
+        first_msg = LLMContextSummarizationUtil.get_preserved_system_message(context)
+        if first_msg is None:
             return 0
         return LLMContextSummarizationUtil._estimate_message_tokens(first_msg)
 
@@ -571,18 +590,10 @@ class LLMContextSummarizationUtil:
         if len(messages) <= min_messages_to_keep:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Check if the first message is a system message (initial system prompt).
-        # Only messages[0] is treated as the system message to preserve — system
-        # messages at other positions are mid-conversation injections and should be
-        # included in the summarization range.
-        first_msg = messages[0] if messages else None
+        # Start summarization after the preserved initial system message if present
         first_is_system = (
-            first_msg is not None
-            and not isinstance(first_msg, LLMSpecificMessage)
-            and first_msg.get("role") == "system"
+            LLMContextSummarizationUtil.get_preserved_system_message(context) is not None
         )
-
-        # Start summarization after the initial system message if present
         summary_start = 1 if first_is_system else 0
 
         # Get messages to keep (last N messages)

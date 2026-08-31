@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMSummarizeContextFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.context.llm_context_summarization import (
@@ -124,7 +124,7 @@ class LLMContextSummarizer(BaseObject):
 
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
-        self._warned_system_prompt_exceeds_limit = False
+        self._warned_summarization_no_progress = False
 
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
@@ -208,10 +208,12 @@ class LLMContextSummarizer(BaseObject):
 
         Returns:
             True when ``auto_trigger`` is enabled, no summarization is in
-            progress, and either the summarizable token count (excluding the
+            progress, either the summarizable token count (excluding the
             preserved initial system message) exceeds ``max_context_tokens``
             or the message count since the last summary exceeds
-            ``max_unsummarized_messages`` — whichever of the two is set.
+            ``max_unsummarized_messages`` — whichever of the two is set — and
+            there is at least one message that summarization can actually
+            compress.
         """
         logger.trace(f"{self}: Checking if context summarization is needed")
 
@@ -238,19 +240,6 @@ class LLMContextSummarizer(BaseObject):
         token_limit = self._auto_config.max_context_tokens
         token_limit_exceeded = token_limit is not None and summarizable_tokens >= token_limit
 
-        if (
-            token_limit is not None
-            and system_tokens >= token_limit
-            and not self._warned_system_prompt_exceeds_limit
-        ):
-            self._warned_system_prompt_exceeds_limit = True
-            logger.warning(
-                f"{self}: The system message alone is ~{system_tokens} tokens, which meets or "
-                f"exceeds max_context_tokens ({token_limit}). Summarization never compresses "
-                f"the system message, so it cannot reduce the context below this limit. "
-                f"Consider raising max_context_tokens or shortening the system prompt."
-            )
-
         # Check if we've exceeded max unsummarized messages
         messages_since_summary = len(self._context.messages) - 1
         message_threshold = self._auto_config.max_unsummarized_messages
@@ -272,6 +261,29 @@ class LLMContextSummarizer(BaseObject):
                 f"{self}: Neither token limit nor message threshold exceeded, skipping summarization"
             )
             return False
+
+        # A threshold is exceeded, but only summarize if there is anything to
+        # summarize: the preserved initial system message, the last
+        # min_messages_after_summary messages, and unresolved function call
+        # sequences are all excluded, which can leave an empty range. Without
+        # this guard the trigger would fire a summarization request on every
+        # turn that can never make progress.
+        candidates = LLMContextSummarizationUtil.get_messages_to_summarize(
+            self._context, self._auto_config.summary_config.min_messages_after_summary
+        )
+        if not candidates.messages:
+            if not self._warned_summarization_no_progress:
+                self._warned_summarization_no_progress = True
+                logger.warning(
+                    f"{self}: Summarization was triggered (~{summarizable_tokens} summarizable "
+                    f"tokens, {messages_since_summary} messages) but no messages can be "
+                    f"summarized right now: the initial system message, the last "
+                    f"min_messages_after_summary messages, and unresolved function call "
+                    f"sequences are preserved. If this persists, consider raising "
+                    f"max_context_tokens or lowering min_messages_after_summary."
+                )
+            return False
+        self._warned_summarization_no_progress = False
 
         reason = []
         if token_limit_exceeded:
@@ -440,17 +452,10 @@ class LLMContextSummarizer(BaseObject):
         config = self._auto_config.summary_config
         messages = self._context.messages
 
-        # Preserve the first message if it is a system message (initial system prompt).
-        # Only messages[0] is treated as the system preamble — system messages at
-        # other positions are mid-conversation injections and are not preserved
+        # Preserve the initial system prompt if present. System messages at other
+        # positions are mid-conversation injections and are not preserved
         # separately (they will be part of the summary or the recent messages).
-        first_system_msg = None
-        if (
-            messages
-            and not isinstance(messages[0], LLMSpecificMessage)
-            and messages[0].get("role") == "system"
-        ):
-            first_system_msg = messages[0]
+        first_system_msg = LLMContextSummarizationUtil.get_preserved_system_message(self._context)
 
         # Get recent messages to keep
         recent_messages = messages[last_summarized_index + 1 :]
