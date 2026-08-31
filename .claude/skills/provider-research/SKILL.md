@@ -86,7 +86,9 @@ Write up to 5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl` �
 
 1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the run's output.
 2. Print a summary table — unit, default model, branch, changes to consider, error — plus the review command for each branch (`git show <branch>`).
-3. End with the next steps, which belong to the invoker, not to you — print these commands, never run them: `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>` pushes the branches, opens the draft PRs and pushes the reports; adding `--finalize --highlights <scratch>/highlights.md` renders the digest across every report carrying the date and files the digest issue.
+3. End with the next steps, which belong to the invoker, not to you — print these commands, never run them:
+   - `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>` — publishes everything on disk for the date: pushes the branches, opens their draft PRs, pushes the reports. Idempotent, so it can run again after further same-date research and only picks up what is new.
+   - `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize --highlights <scratch>/highlights.md` — the same publish pass, plus the digest: renders `digests/<RUN_DATE>.md` from every report carrying the date and opens (or updates) the digest issue.
 
 ## Guardrails
 
