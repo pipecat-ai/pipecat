@@ -5,14 +5,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Publish what a provider-watch run has produced locally.
+"""Publish the provider research produced for one date.
 
-Works entirely from disk — the reports for a date under ``_reports`` and the
-local ``provider-watch/*`` branches they name — so it can run after every batch
-of a publishing run, once at the end of a dry run, or by hand to finish a run
-that died. Every step is idempotent: branches already on origin are not pushed
-again, a branch with an open PR adopts that PR, reports already pointing at a
-PR URL are left alone, and the digest issue is edited rather than duplicated.
+Works entirely from disk — the date's reports under ``_reports`` and the local
+``provider-watch/*`` branches they name — so it composes across research runs:
+any number of ``/provider-research`` invocations can write for the same date,
+and each publish pass picks up whatever is new. Every step is idempotent:
+branches already on origin are not pushed again, a branch with an open PR
+adopts that PR, reports already pointing at a PR URL are left alone, and the
+digest issue is edited rather than duplicated.
 
 For each report whose ``prs`` list has an entry in ``state: branch``:
 

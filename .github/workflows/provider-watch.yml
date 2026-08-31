@@ -172,11 +172,7 @@ jobs:
           prompt: |
             Run the provider-research skill unattended:
 
-            /provider-research --only ${{ matrix.group.units }}
-
-            Use ${{ needs.plan.outputs.run_date }} as RUN_DATE: the workflow
-            pins one date for every group so a sweep that crosses UTC midnight
-            stays whole.
+            /provider-research --only ${{ matrix.group.units }} --date ${{ needs.plan.outputs.run_date }}
 
             Read `.claude/skills/provider-research/SKILL.md` and follow it
             exactly, including its "Unattended runs" section. This job
