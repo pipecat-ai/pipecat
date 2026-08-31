@@ -35,7 +35,7 @@ process, one runtime, one user agent for the account, and N connections
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from loguru import logger
@@ -392,6 +392,33 @@ class SIPConnection(BaseObject):
         reporting interval.
         """
         return self._final_stats
+
+    def configure_video(self, size: tuple, fps: float):
+        """Align the connection's video geometry, before it connects.
+
+        Called by the transport so the stack's video size and pacing
+        always match the transport params. Once the shared runtime is up
+        the geometry is fixed; a conflicting late configuration raises.
+
+        Args:
+            size: Video geometry as ``(width, height)``.
+            fps: Transmit frame pacing in frames per second.
+
+        Raises:
+            RuntimeError: The connection is already attached to the
+                stack with different video settings.
+        """
+        size = tuple(size)
+        if size == self._settings.video_size and fps == self._settings.video_fps:
+            return
+        if self._connected:
+            raise RuntimeError(
+                "video geometry is fixed once connected: the stack runs "
+                f"{self._settings.video_size}@{self._settings.video_fps}, "
+                f"requested {size}@{fps}. Construct SIPConnection(video_size=..., "
+                "video_fps=...) to match the transport params."
+            )
+        self._settings = replace(self._settings, video_size=size, video_fps=fps)
 
     @acquires("connection")
     async def connect(self):
