@@ -40,7 +40,7 @@ from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 def language_to_smallest_stt_language(language: Language) -> str:
@@ -112,6 +112,11 @@ class SmallestSTTSettings(STTSettings):
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
         format: Apply punctuation and capitalization to transcripts.
+        eou_timeout_ms: How much trailing silence, in milliseconds, Pulse waits
+            through before finalizing a transcript. Pulse accepts 100–10000; its
+            default is 800. Store-mode default is ``None`` (keep Pulse's
+            default). Lower values give voice agents faster turn-taking, at the
+            cost of splitting speech that contains natural pauses.
     """
 
     word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -124,6 +129,7 @@ class SmallestSTTSettings(STTSettings):
     endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eou_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -188,6 +194,7 @@ class SmallestSTTService(WebsocketSTTService):
             endpointing=True,
             keywords="",
             format=True,
+            eou_timeout_ms=None,
         )
 
         if settings is not None:
@@ -337,6 +344,10 @@ class SmallestSTTService(WebsocketSTTService):
             # so omit the parameter entirely when no keywords are configured.
             if self._settings.keywords:
                 query_params["keywords"] = self._settings.keywords
+
+            eou_timeout_ms = assert_given(self._settings.eou_timeout_ms)
+            if eou_timeout_ms is not None:
+                query_params["eou_timeout_ms"] = str(eou_timeout_ms)
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
