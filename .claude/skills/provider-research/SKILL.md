@@ -78,17 +78,14 @@ Rules for the batch loop:
 - Each researcher returns exactly one JSON line: `{"service", "default_model", "prs", "gaps", "error", "summary", "report_path"}`. Append it to `<scratch>/run.jsonl`. If a researcher fails or returns nothing usable, write the report yourself from `REPORT_TEMPLATE.md` with `error` set to what happened (no secrets), and append a matching line; a researcher failure never aborts the run.
 - If `git status` in this checkout shows changes you did not make, stop and report it.
 
-### Step 4: Highlights
-
-Write up to 5 highlight bullets to `<scratch>/highlights.md` from `run.jsonl` — for a small `--only` slice, only the 1–3 that must surface, since slices' bullets may be concatenated into one digest: what a maintainer should look at first (branches to review, long-open gaps, providers that errored). Skip bullets when nothing stands out.
-
-### Step 5: Clean up and summarize
+### Step 4: Clean up and summarize
 
 1. `git worktree prune` in this checkout and remove `<scratch>/wt-*` directories. Branches stay; they are the run's output.
 2. Print a summary table — unit, default model, branch, changes to consider, error — plus the review command for each branch (`git show <branch>`).
 3. End with the next steps, which belong to the invoker, not to you — print each command together with its explanation below, and never run them:
    - `uv run python scripts/provider-watch/publish.py --date <RUN_DATE>` — publishes everything on disk for the date: pushes the branches, opens their draft PRs, pushes the reports. Idempotent, so it can run again after further same-date research and only picks up what is new.
-   - `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize <scratch>/highlights.md` — the same publish pass, plus the digest: renders `digests/<RUN_DATE>.md` from every report carrying the date and opens (or updates) the digest issue.
+   - `/provider-research-digest --date <RUN_DATE>` — renders `_reports/digests/<RUN_DATE>.md` from every report carrying the date, topped with authored highlight bullets.
+   - `uv run python scripts/provider-watch/publish.py --date <RUN_DATE> --finalize` — the same publish pass, plus the digest: pushes it and opens (or updates) the digest issue.
 
 ## Guardrails
 

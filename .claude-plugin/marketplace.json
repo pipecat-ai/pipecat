@@ -22,6 +22,7 @@
         "./.claude/skills/pr-submit",
         "./.claude/skills/prose-review",
         "./.claude/skills/provider-research",
+        "./.claude/skills/provider-research-digest",
         "./.claude/skills/squash-commits",
         "./.claude/skills/update-docs"
       ]

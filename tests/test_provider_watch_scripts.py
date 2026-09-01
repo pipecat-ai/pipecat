@@ -568,6 +568,21 @@ class TestPublish:
         after = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
         assert before == 3 and after == 3
 
+    def test_ensure_digest_keeps_the_rendered_digest(self, reports_dir):
+        tmp_path, publish = reports_dir
+        digest_file = tmp_path / "digests" / "2026-08-20.md"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        assert publish.ensure_digest(tmp_path, "2026-08-20", "o/r") == digest_file
+        assert "authored highlight" in digest_file.read_text()
+
+    def test_ensure_digest_renders_plain_when_missing(self, reports_dir):
+        tmp_path, publish = reports_dir
+        out = publish.ensure_digest(tmp_path, "2026-08-20", "o/r")
+        text = out.read_text()
+        assert out == tmp_path / "digests" / "2026-08-20.md"
+        assert "3 units researched" in text and "fireworks/llm" in text
+
     def test_worth_an_issue(self, reports_dir, tmp_path):
         _, publish = reports_dir
         assert publish.worth_an_issue(publish.load_reports(tmp_path, "2026-08-20"))
