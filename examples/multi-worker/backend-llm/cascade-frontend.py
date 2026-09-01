@@ -202,13 +202,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm=AnthropicLLMService(
             api_key=os.environ["ANTHROPIC_API_KEY"],
             settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
                 thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
             ),
         ),
-        context=LLMContext(
-            [{"role": "system", "content": BACKEND_INSTRUCTIONS}],
-            [get_current_weather, get_restaurant_recommendation],
-        ),
+        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

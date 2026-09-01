@@ -134,8 +134,8 @@ class BackendLLMWorker(LLMContextWorker):
 
         Args:
             llm: The backend LLM service.
-            context: The backend's context, typically carrying its system
-                instructions and tools. A fresh empty context when omitted.
+            context: The backend's context, typically carrying its tools.
+                A fresh empty context when omitted.
             name: Worker name; auto-generated when omitted.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the

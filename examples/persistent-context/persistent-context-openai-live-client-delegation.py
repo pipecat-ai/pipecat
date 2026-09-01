@@ -96,9 +96,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
     )
 
-    backend_context = LLMContext(
-        [{"role": "system", "content": BACKEND_INSTRUCTIONS}],
-    )
+    backend_context = LLMContext()
 
     # The persistence tools run in the backend but act on the live model's
     # context, so they close over it.
@@ -145,8 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
         # Give the backend the restored turns too, as its own prior history.
         backend_context.set_messages(
-            [{"role": "system", "content": BACKEND_INSTRUCTIONS}]
-            + [m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
+            [m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
         )
         await params.result_callback({"success": True})
 
@@ -163,6 +160,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm=AnthropicLLMService(
             api_key=os.environ["ANTHROPIC_API_KEY"],
             settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
                 thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
             ),
         ),
