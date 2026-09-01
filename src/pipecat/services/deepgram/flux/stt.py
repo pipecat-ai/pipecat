@@ -341,7 +341,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             # Now wait for the connection established event
             logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._connection_established_event.wait()
+            await self._await_connection_established()
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
