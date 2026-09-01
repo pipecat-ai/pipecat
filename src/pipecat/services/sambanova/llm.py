@@ -107,8 +107,7 @@ class SambaNovaLLMService(OpenAILLMService):
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for SambaNova chat completion request.
 
-        SambaNova doesn't support some OpenAI parameters like frequency_penalty,
-        presence_penalty, and seed.
+        SambaNova doesn't support OpenAI's ``service_tier``.
 
         Args:
             params_from_context: Parameters, derived from the LLM context, to
@@ -122,6 +121,9 @@ class SambaNovaLLMService(OpenAILLMService):
             "model": self._settings.model,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "frequency_penalty": self._settings.frequency_penalty,
+            "presence_penalty": self._settings.presence_penalty,
+            "seed": self._settings.seed,
             "temperature": self._settings.temperature,
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
