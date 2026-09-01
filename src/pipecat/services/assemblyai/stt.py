@@ -215,6 +215,14 @@ class AssemblyAISTTSettings(STTSettings):
             model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
+        max_speakers: Hard cap on the number of speaker labels, an integer in
+            [1, 10]. Once the cap is reached, further speakers are merged into
+            the closest existing label rather than given a new one, so leave a
+            little headroom above the number of speakers expected; a cap set too
+            high can over-split a single speaker. Only used when
+            ``speaker_labels`` is enabled. Defaults to None (not sent).
+        filter_profanity: Replace profanity in transcribed text with asterisks.
+            Defaults to None (not sent; the server leaves text unfiltered).
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to u3-rt-pro.
         domain: Optional domain for specialized recognition modes. For example,
@@ -271,6 +279,8 @@ class AssemblyAISTTSettings(STTSettings):
     language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_profanity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -387,6 +397,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_codes=None,
             format_turns=True,
             speaker_labels=None,
+            max_speakers=None,
+            filter_profanity=None,
             vad_threshold=None,
             domain=None,
             continuous_partials=True,
@@ -839,6 +851,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             "language_code": s.language_code,
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
+            "max_speakers": s.max_speakers,
+            "filter_profanity": s.filter_profanity,
             "vad_threshold": s.vad_threshold,
             "domain": s.domain,
         }
