@@ -159,7 +159,7 @@ class XAISTTService(WebsocketSTTService):
                 16000, 22050, 24000, 44100, 48000. If None, uses the input
                 sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
-                ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
+                ``"mulaw"``, ``"alaw"``, or ``"opus"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
             ttfs_p99_latency: P99 latency from speech end to final transcript
                 in seconds. See https://github.com/pipecat-ai/stt-benchmark.
