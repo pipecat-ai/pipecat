@@ -34,7 +34,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # Together TTS streams 24 kHz signed 16-bit mono PCM for all models; the API does
 # not support requesting a different rate. The output transport resamples to the
@@ -101,7 +101,7 @@ class TogetherTTSService(WebsocketTTSService):
         default_settings = self.Settings(
             model="hexgrad/Kokoro-82M",
             voice="af_heart",
-            language=Language.EN,
+            language=self.language_to_service_language(Language.EN),
             max_partial_length=None,
         )
 
@@ -132,13 +132,15 @@ class TogetherTTSService(WebsocketTTSService):
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Together AI language format.
 
+        Together accepts ISO 639-1 codes and lowercase locale codes (``zh-hk``).
+
         Args:
             language: The language to convert.
 
         Returns:
             The language code string, or None if not supported.
         """
-        return str(language)
+        return str(language).lower()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
@@ -153,6 +155,8 @@ class TogetherTTSService(WebsocketTTSService):
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
         url = f"{self._url}?model={self._settings.model}&voice={self._settings.voice}"
+        if is_given(self._settings.language) and self._settings.language:
+            url += f"&language={self._settings.language}"
         if self._settings.max_partial_length is not None:
             url += f"&max_partial_length={self._settings.max_partial_length}"
         return url
