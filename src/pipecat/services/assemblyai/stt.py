@@ -15,7 +15,7 @@ import io
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
 import aiohttp
@@ -45,7 +45,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -1425,11 +1425,14 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         """
         return language_to_assemblyai_language(language)
 
-    def _request_headers(self) -> dict:
-        return {
-            "Authorization": self._api_key,
-            "X-AAI-Model": self._settings.model,
-        }
+    def _model_header(self) -> dict[str, str]:
+        """The routing header both endpoints send."""
+        model = assert_given(self._settings.model)
+        assert model is not None
+        return {"X-AAI-Model": model}
+
+    def _request_headers(self) -> dict[str, str]:
+        return {"Authorization": self._api_key, **self._model_header()}
 
     def _build_config(self) -> dict:
         """Assemble the optional ``config`` part from the current settings."""
@@ -1511,9 +1514,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         try:
             # Route the warm with the same model as the transcription so the
             # opened connection lands on the right backend.
-            async with self._session.get(
-                url, headers={"X-AAI-Model": self._settings.model}
-            ) as response:
+            async with self._session.get(url, headers=self._model_header()) as response:
                 await response.read()
         except Exception as e:
             logger.debug(f"{self}: connection pre-warm failed (ignored): {e}")
@@ -1616,7 +1617,9 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
 
             text = (result.get("text") or "").strip()
             if text:
-                language = self._settings.language if is_given(self._settings.language) else None
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
                 await self._handle_transcription(text, True, language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
