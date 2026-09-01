@@ -197,6 +197,9 @@ class PiperTTSService(TTSService):
 #  $ uv pip install "piper-tts[http]"
 #  $ uv run python -m piper.http_server -m en_US-ryan-high
 #
+# The server listens on port 5000 and synthesizes on POST /synthesize, so
+# `base_url` is "http://localhost:5000/synthesize".
+#
 @dataclass
 class PiperHttpTTSSettings(TTSSettings):
     """Settings for PiperHttpTTSService."""
@@ -210,6 +213,14 @@ class PiperHttpTTSService(TTSService):
     Provides integration with Piper's HTTP TTS server for text-to-speech
     synthesis. Supports streaming audio generation with configurable sample
     rates and automatic WAV header removal.
+
+    Example::
+
+        tts = PiperHttpTTSService(
+            base_url="http://localhost:5000/synthesize",
+            aiohttp_session=session,
+            settings=PiperHttpTTSService.Settings(voice="en_US-ryan-high"),
+        )
     """
 
     Settings = PiperHttpTTSSettings
@@ -227,7 +238,9 @@ class PiperHttpTTSService(TTSService):
         """Initialize the Piper TTS service.
 
         Args:
-            base_url: Base URL for the Piper TTS HTTP server.
+            base_url: URL of the Piper HTTP server's synthesis endpoint, which
+                requests are posted to as-is (e.g.
+                `http://localhost:5000/synthesize`).
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
