@@ -128,7 +128,8 @@ class OneShotInputParams(BaseModel):
         api_key: Ultravox API key for authentication.
         system_prompt: System prompt to guide the model's behavior. Defaults to None.
         temperature: Sampling temperature for response generation. Defaults to 0.
-        model: Model identifier to use. Defaults to "fixie-ai/ultravox".
+        model: Model identifier to use, e.g. "ultravox-v0.7". Defaults to None,
+            which lets Ultravox pick its current default model.
         voice: Voice identifier for speech generation. Defaults to None.
         metadata: Metadata to attach to the call. Default to an empty dict.
         output_medium: The initial output medium for the agent. Use "text" for text
