@@ -105,18 +105,16 @@ class TestKrispVivaSDKManager:
         assert KrispVivaSDKManager.get_reference_count() == initial_count + 1
         assert KrispVivaSDKManager.is_initialized()
 
-        # globalDestroy should NOT be called yet
-        mock_krisp_audio.globalDestroy.assert_not_called()
-
         # Release second reference
         KrispVivaSDKManager.release()
         assert KrispVivaSDKManager.get_reference_count() == initial_count
 
-        # globalDestroy should be called now
-        mock_krisp_audio.globalDestroy.assert_called_once()
+        # The SDK stays initialized until the process exits
+        assert KrispVivaSDKManager.is_initialized()
+        mock_krisp_audio.globalDestroy.assert_not_called()
 
     def test_multiple_acquire_release_cycles(self):
-        """Test multiple acquire/release cycles."""
+        """Test that the SDK is initialized once across acquire/release cycles."""
         initial_count = KrispVivaSDKManager.get_reference_count()
 
         for i in range(3):
@@ -126,9 +124,8 @@ class TestKrispVivaSDKManager:
             KrispVivaSDKManager.release()
             assert KrispVivaSDKManager.get_reference_count() == initial_count
 
-        # Verify globalInit/globalDestroy were called for each cycle
-        assert mock_krisp_audio.globalInit.call_count == 3
-        assert mock_krisp_audio.globalDestroy.call_count == 3
+        assert mock_krisp_audio.globalInit.call_count == 1
+        mock_krisp_audio.globalDestroy.assert_not_called()
 
     def test_sdk_initialization_failure(self):
         """Test that SDK initialization failures are handled properly."""
@@ -163,9 +160,9 @@ class TestKrispVivaSDKManager:
         KrispVivaSDKManager.acquire()
         assert KrispVivaSDKManager.is_initialized()
 
-        # After release, should not be initialized
+        # Releasing the last reference does not tear the SDK down
         KrispVivaSDKManager.release()
-        assert not KrispVivaSDKManager.is_initialized()
+        assert KrispVivaSDKManager.is_initialized()
 
 
 class TestSampleRateConversion:

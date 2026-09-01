@@ -54,6 +54,7 @@ from pipecat.utils.frame_queue import FrameQueue
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
+    from pipecat.workers.runner import WorkerRunner
 
 
 class FrameDirection(Enum):
@@ -82,12 +83,12 @@ class FrameProcessorSetup:
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
-        pipeline_worker: The :class:`PipelineWorker` running this pipeline. Stored
+        pipeline_worker: The :class:`~pipecat.pipeline.worker.PipelineWorker` running this pipeline. Stored
             on each processor as ``self.pipeline_worker`` so processors can
             reach task-scoped state (e.g. ``self.pipeline_worker.app_resources``).
         observer: Optional observer for monitoring frame processing events.
         task_manager: The task manager for handling async operations.
-        tool_resources: Deprecated. :class:`PipelineWorker` continues to populate
+        tool_resources: Deprecated. :class:`~pipecat.pipeline.worker.PipelineWorker` continues to populate
             this with ``app_resources`` so that custom :class:`FrameProcessor`
             subclasses whose ``setup()`` overrides read ``setup.tool_resources``
             keep working. New code should read
@@ -437,16 +438,28 @@ class FrameProcessor(BaseObject):
 
     @property
     def pipeline_worker(self) -> PipelineWorker:
-        """Get the :class:`PipelineWorker` this processor is running in.
+        """Get the :class:`~pipecat.pipeline.worker.PipelineWorker` this processor is running in.
 
         Provides access to worker-scoped state from inside a processor — most
         notably ``self.pipeline_worker.app_resources`` for the application's
         shared bag of resources (DB handles, clients, feature flags, etc.).
 
         Returns:
-            The :class:`PipelineWorker` instance that set up this processor.
+            The :class:`~pipecat.pipeline.worker.PipelineWorker` instance that set up this processor.
         """
         return self.processor_setup.pipeline_worker
+
+    @property
+    def worker_runner(self) -> WorkerRunner:
+        """Get the :class:`~pipecat.workers.runner.WorkerRunner` hosting this processor's worker.
+
+        Use it to reach another worker on the runner by name, e.g.
+        ``self.worker_runner.get_worker("ui-jobs")``.
+
+        Returns:
+            The runner this processor's :class:`~pipecat.pipeline.worker.PipelineWorker` is attached to.
+        """
+        return self.pipeline_worker.worker_runner
 
     @property
     @deprecated(
@@ -500,6 +513,11 @@ class FrameProcessor(BaseObject):
                 start_time=start_time, report_only_initial_ttfb=self.report_only_initial_ttfb
             )
 
+    async def cancel_ttfb_metrics(self):
+        """Abandon the current time-to-first-byte measurement without reporting it."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.cancel_ttfb_metrics()
+
     async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop time-to-first-byte metrics collection and push results.
 
@@ -529,6 +547,18 @@ class FrameProcessor(BaseObject):
             )
             if metrics_frame:
                 await self.push_frame(metrics_frame)
+
+    async def stop_ttfat_metrics(self, *, end_time: float | None = None):
+        """Stop time-to-first-answer-token metrics collection and push results.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+        """
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_ttfat_metrics(end_time=end_time)
+            if frame:
+                await self.push_frame(frame)
 
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start processing metrics collection.

@@ -361,7 +361,7 @@ class LLMMarkerFrame(DataFrame):
 
     The primary use today is the ``filter_incomplete_user_turns``
     protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    turn-completion markers ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -375,8 +375,8 @@ class LLMMarkerFrame(DataFrame):
             soon as it's received. If False, the marker is appended to
             the running assistant aggregation and flushed to the
             context together with the following text as a single
-            message (e.g. for the ✓ case the context message ends up
-            as "✓ <response>").
+            message (e.g. for the ● case the context message ends up
+            as "● <response>").
     """
 
     marker: str
@@ -1261,18 +1261,28 @@ class ProposedUserStartedSpeakingFrame(SystemFrame):
     proposal, not a decision: an
     :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` resolves it
     into a :class:`UserStartedSpeakingFrame` and broadcasts the interruption.
+
+    This is a system frame because resolving it broadcasts an interruption,
+    which must preempt queued frames rather than wait behind them. Its
+    end-of-turn counterpart has the opposite requirement and is a control
+    frame; see :class:`ProposedUserStoppedSpeakingFrame`.
     """
 
     pass
 
 
 @dataclass
-class ProposedUserStoppedSpeakingFrame(SystemFrame):
+class ProposedUserStoppedSpeakingFrame(ControlFrame):
     """Frame proposing that the user turn has ended.
 
     The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
     resolved into a :class:`UserStoppedSpeakingFrame` by an
     :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`.
+
+    This is a control frame so it stays ordered against the final
+    :class:`TranscriptionFrame`. A service with its own turn detection pushes
+    that transcript and then proposes the stop, and the turn strategy needs
+    that text in hand to close the turn on.
     """
 
     pass
@@ -1939,22 +1949,33 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
-    when it returns to the source the worker sets ``event``. Once that fires,
-    every frame queued ahead of the probe has completed the round-trip and been
-    processed. Useful to wait for the pipeline to drain (e.g. after an
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
+    source turns it around, and the worker sets ``event`` when it reaches the
+    sink a second time. Once that fires, every frame queued ahead of the probe
+    has been processed, along with anything a processor started by pushing
+    upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
     This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its round-trip.
+    InterruptionFrame and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
+        returning: Whether the probe is on its second pass downstream, after
+            having been back up to the source. Work a processor starts by
+            pushing upstream — an LLM run triggered by a function call result,
+            say — only reaches the sink after that turnaround, so the probe
+            makes the trip twice and settles on the second arrival.
+        origin: Name of the worker that started the flush. A probe that crosses
+            into another pipeline is answered there, out of sight of whoever is
+            waiting, so the answering worker reports progress back to this name.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
+    returning: bool = field(default=False, compare=False)
+    origin: str | None = field(default=None, compare=False)
 
 
 @dataclass

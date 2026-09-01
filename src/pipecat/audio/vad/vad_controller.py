@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     SpeechControlParamsFrame,
-    StartFrame,
     VADParamsUpdateFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -122,26 +121,39 @@ class VADController(BaseObject):
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
 
-        Handles `StartFrame` to initialize the sample rate and `InputAudioRawFrame`
-        to analyze audio for voice activity.
+        Handles `InputAudioRawFrame` to analyze audio for voice activity, and
+        `VADParamsUpdateFrame` to reconfigure the analyzer.
 
         Args:
             frame: The frame to process.
         """
-        if isinstance(frame, StartFrame):
-            await self._start(frame)
-        elif isinstance(frame, InputAudioRawFrame):
+        if isinstance(frame, InputAudioRawFrame):
             await self._handle_audio(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
             self._vad_analyzer.set_params(frame.params)
             await self.broadcast_frame(SpeechControlParamsFrame, vad_params=frame.params)
 
-    async def _start(self, frame: StartFrame):
+    async def start(self):
+        """Announce the analyzer's params and start the idle timer.
+
+        Paired with :meth:`stop`.
+        """
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
 
         if self._audio_idle_timeout > 0 and not self._audio_idle_task:
             self._audio_idle_task = self.create_task(self._audio_idle_handler())
+
+    async def stop(self):
+        """Stop the idle timer, leaving the analyzer alone.
+
+        Called at session end so the timer can't report silence that only
+        means the session is over. The analyzer may be shared, so releasing
+        it waits for :meth:`cleanup`.
+        """
+        if self._audio_idle_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_idle_task)
+            self._audio_idle_task = None
 
     async def cleanup(self):
         """Clean up resources.
@@ -151,9 +163,7 @@ class VADController(BaseObject):
         before returning.
         """
         await super().cleanup()
-        if self._audio_idle_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_idle_task)
-            self._audio_idle_task = None
+        await self.stop()
         if self._vad_analyzer:
             await self._vad_analyzer.cleanup()
 

@@ -424,6 +424,10 @@ class CartesiaSTTService(WebsocketSTTService):
             }
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
+            request_id = None
+            if self._websocket and self._websocket.response:
+                request_id = self._websocket.response.headers.get("X-Request-ID")
+            logger.info(f"{self}: Connected to Cartesia STT ({request_id=})")
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -433,7 +437,7 @@ class CartesiaSTTService(WebsocketSTTService):
         ws = self._websocket
         try:
             if ws and ws.state is State.OPEN:
-                logger.debug("Disconnecting from Cartesia STT")
+                logger.debug(f"{self}: Disconnecting from Cartesia STT")
                 await ws.send("done")
                 await ws.close()
         except Exception as e:

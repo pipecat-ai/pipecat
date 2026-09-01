@@ -87,7 +87,7 @@ class MoondreamService(VisionService):
         self,
         *,
         model: str | None = None,
-        revision="2025-01-09",
+        revision="2025-06-21",
         use_cpu=False,
         settings: Settings | None = None,
         **kwargs,

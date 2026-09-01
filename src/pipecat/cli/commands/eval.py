@@ -32,6 +32,7 @@ from rich.text import Text
 from pipecat.evals.harness import EvalSession, EvalTurnProgress
 from pipecat.evals.scenario import EvalScenario, describe_config
 from pipecat.evals.suite import (
+    SCENARIO_SUFFIXES,
     EvalManifest,
     EvalRun,
     EvalSuite,
@@ -135,6 +136,29 @@ def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     if not record_dir:
         return None
     return str(Path(record_dir) / f"{scenario_name}.wav")
+
+
+def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
+    """Expand directory arguments into sorted YAML scenario paths.
+
+    Both YAML suffixes are taken, matching the scenario names a manifest
+    resolves.
+    """
+    expanded: list[Path] = []
+    for path in paths:
+        if not path.is_dir():
+            expanded.append(path)
+            continue
+
+        scenario_paths = sorted(
+            scenario_path
+            for scenario_path in path.iterdir()
+            if scenario_path.suffix in SCENARIO_SUFFIXES and scenario_path.is_file()
+        )
+        if not scenario_paths:
+            raise typer.BadParameter(f"No .yaml or .yml scenario files found in {path}")
+        expanded.extend(scenario_paths)
+    return expanded
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
@@ -268,7 +292,9 @@ async def _run_scenarios_all(
 
 @eval_app.command("run")
 def run(
-    scenarios: list[Path] = typer.Argument(..., help="One or more scenario YAML files."),
+    scenarios: list[Path] = typer.Argument(
+        ..., help="One or more scenario YAML files, or directories of them."
+    ),
     bot_url: str = typer.Option(
         "ws://localhost:7860",
         "--bot-url",
@@ -344,7 +370,7 @@ def run(
     # way, silence the console sink so it can't corrupt the live display.
     logger.remove()
 
-    runs = _build_scenario_runs(scenarios, bot_url)
+    runs = _build_scenario_runs(_expand_scenario_paths(scenarios), bot_url)
     _print_scenario_configs(runs)
 
     started = time.monotonic()

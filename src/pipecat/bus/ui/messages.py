@@ -6,24 +6,26 @@
 
 """Bus carriers for the UI Worker protocol.
 
-These dataclasses are the on-the-bus shape that ``UIWorker`` (see
-``pipecat.workers.ui``) and ``PipelineWorker`` exchange. They are NOT
-the on-the-wire format the client sees; that lives in
-``pipecat.processors.frameworks.rtvi.models`` (``UIEventMessage``,
-``UICommandMessage``, ``UIJobGroupMessage``, ...). When RTVI is enabled,
-``PipelineWorker`` translates between the two: its ``on_ui_message``
-handler republishes inbound client messages onto the bus, and its
-``on_bus_message`` handler turns outbound carriers into RTVI frames.
+These dataclasses are the on-the-bus shape that a UI worker (see
+``pipecat.workers.ui``) and the client-facing worker exchange. They are NOT
+the on-the-wire format the client sees: the client-facing worker translates
+between the two, in whichever format its own client speaks.
 
-All carriers subclass ``BusUIDataMessage``, which ``PipelineWorker``
-dispatches on to translate outbound ones into RTVI frames.
+For example, ``PipelineWorker`` with RTVI enabled republishes inbound client
+messages onto the bus in ``on_ui_message`` and turns outbound carriers into
+RTVI frames in ``on_bus_message``; the wire types it produces live in
+``pipecat.processors.frameworks.rtvi.models`` (``UIEventMessage``,
+``UICommandMessage``, ``UIJobGroupMessage``, ...).
+
+All carriers subclass ``BusUIDataMessage``, which a client-facing worker
+dispatches on to pick the outbound ones out of its bus traffic.
 
 - ``BusUIEventMessage`` and ``BusUICommandMessage`` carry client
   events and server commands respectively.
 - ``BusUIJobGroupStartedMessage``, ``BusUIJobUpdateMessage``,
   ``BusUIJobCompletedMessage``, and ``BusUIJobGroupCompletedMessage``
   carry the four phases of a user-facing job group's lifecycle (see
-  ``UIWorker.ui_job_group``).
+  ``BaseUIWorker``).
 
 The carriers live in the ``bus`` layer (rather than alongside
 ``UIWorker``) because both ``PipelineWorker`` (in ``pipecat.pipeline``)
@@ -36,16 +38,16 @@ from typing import Any
 
 from pipecat.bus.messages import BusDataMessage
 
-#: Internal ``event_name`` used by ``PipelineWorker`` when republishing a
-#: ``ui-snapshot`` wire message onto the bus as a
+#: Internal ``event_name`` used by a client-facing worker when republishing
+#: a ``ui-snapshot`` wire message onto the bus as a
 #: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
 #: name to route the snapshot into ``_latest_snapshot`` storage. The
 #: leading double underscore marks the name as internal so app-defined
 #: ``@ui_event`` handlers can't collide with it.
 _UI_SNAPSHOT_BUS_EVENT_NAME = "__ui_snapshot"
 
-#: Internal ``event_name`` used by ``PipelineWorker`` when republishing a
-#: ``ui-cancel-job-group`` wire message onto the bus as a
+#: Internal ``event_name`` used by a client-facing worker when republishing
+#: a ``ui-cancel-job-group`` wire message onto the bus as a
 #: ``BusUIEventMessage``. ``UIWorker``'s bus dispatch matches on this
 #: name to route to ``cancel_job_group``. Internal; not part of the
 #: public wire format.
@@ -56,9 +58,9 @@ _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME = "__cancel_job_group"
 class BusUIDataMessage(BusDataMessage):
     """Base for all UI Worker protocol bus carriers.
 
-    ``PipelineWorker.on_bus_message`` dispatches on this type to translate a
-    worker's outbound UI carriers into RTVI frames, so every UI bus message
-    below subclasses it.
+    A client-facing worker dispatches on this type to translate a worker's
+    outbound UI carriers into its client's wire format, so every UI bus
+    message below subclasses it.
     """
 
     pass
@@ -68,9 +70,8 @@ class BusUIDataMessage(BusDataMessage):
 class BusUIEventMessage(BusUIDataMessage):
     """A UI event sent from the client to a server-side worker.
 
-    Emitted by ``PipelineWorker`` when the
-    client dispatches an event via
-    ``PipecatClient.sendUIEvent(event, payload)``. ``UIWorker``
+    Emitted by the client-facing worker when the client dispatches an event
+    via ``PipecatClient.sendUIEvent(event, payload)``. ``UIWorker``
     subclasses dispatch these to ``@ui_event(name)`` handlers.
 
     Parameters:
@@ -86,10 +87,10 @@ class BusUIEventMessage(BusUIDataMessage):
 class BusUICommandMessage(BusUIDataMessage):
     """A UI command sent from a server-side worker to the client.
 
-    Published by ``UIWorker.send_command(name, payload)``. ``PipelineWorker``
-    (in ``on_bus_message``) translates this to an
-    ``RTVIUICommandFrame(command=command_name, payload=payload)`` and
-    pushes it through the pipeline.
+    Published by ``UIWorker.send_command(name, payload)``. The client-facing
+    worker translates it into a command on its client's wire format; over
+    RTVI that is an ``RTVIUICommandFrame(command=command_name,
+    payload=payload)`` pushed through the pipeline.
 
     Parameters:
         command_name: App-defined command name.
@@ -110,8 +111,8 @@ class BusUICommandMessage(BusUIDataMessage):
 class BusUIJobGroupStartedMessage(BusUIDataMessage):
     """A user-facing job group has been dispatched.
 
-    Published by ``UIWorker.ui_job_group(...)`` on entry. ``PipelineWorker``
-    forwards it to the client as a ``ui-job-group`` envelope with
+    Published by a ``BaseUIWorker`` as it dispatches the group. The
+    client-facing worker forwards it as a ``ui-job-group`` envelope with
     ``kind = "group_started"``.
 
     Parameters:
@@ -133,10 +134,10 @@ class BusUIJobGroupStartedMessage(BusUIDataMessage):
 class BusUIJobUpdateMessage(BusUIDataMessage):
     """Per-worker progress for a user-facing job group.
 
-    Forwarded by the ``UIWorker`` whenever a worker emits a
-    ``BusJobUpdateMessage`` whose ``job_id`` matches a registered user
-    job group. ``PipelineWorker`` forwards to the client as a ``ui-job-group``
-    envelope with ``kind = "job_update"``.
+    Forwarded by a ``BaseUIWorker`` whenever a worker of one of its job
+    groups emits a ``BusJobUpdateMessage``. The client-facing worker
+    forwards it as a ``ui-job-group`` envelope with
+    ``kind = "job_update"``.
 
     Parameters:
         job_id: The shared job-group identifier.
@@ -155,10 +156,9 @@ class BusUIJobUpdateMessage(BusUIDataMessage):
 class BusUIJobCompletedMessage(BusUIDataMessage):
     """A worker in a user-facing job group has completed.
 
-    Forwarded by the ``UIWorker`` whenever a worker's
-    ``BusJobResponseMessage`` arrives for a registered user job group.
-    ``PipelineWorker`` forwards to the client as a ``ui-job-group`` envelope with
-    ``kind = "job_completed"``.
+    Forwarded by a ``BaseUIWorker`` when a worker of one of its job groups
+    reaches a terminal state. The client-facing worker forwards it as a
+    ``ui-job-group`` envelope with ``kind = "job_completed"``.
 
     Parameters:
         job_id: The shared job-group identifier.
@@ -179,10 +179,9 @@ class BusUIJobCompletedMessage(BusUIDataMessage):
 class BusUIJobGroupCompletedMessage(BusUIDataMessage):
     """A user-facing job group has completed.
 
-    Published when ``UIWorker.ui_job_group(...)`` exits, after every
-    worker has responded (or the group has been cancelled). ``PipelineWorker``
-    forwards to the client as a ``ui-job-group`` envelope with
-    ``kind = "group_completed"``.
+    Published by a ``BaseUIWorker`` once every worker in the group has
+    finished, or the group was cancelled. The client-facing worker forwards
+    it as a ``ui-job-group`` envelope with ``kind = "group_completed"``.
 
     Parameters:
         job_id: The shared job-group identifier.

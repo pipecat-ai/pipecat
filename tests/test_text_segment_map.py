@@ -6,75 +6,8 @@
 
 import unittest
 
-from pipecat.utils.context.text_segment_map import (
-    TextSegmentMap,
-    _HopKind,
-    _raw_len_for_clean_chars,
-    strip_complete_markup,
-    strip_markup,
-)
-from pipecat.utils.text.transforms._alnum_utils import fold_for_matching
-
-
-class TestStripMarkupHelpers(unittest.TestCase):
-    """The markup-stripping primitives behind _classify_hop's markup-stripped
-    matching (strategy 3)."""
-
-    def test_strip_markup_removes_tags(self):
-        self.assertEqual(strip_markup("<b>hi</b> there"), "hi there")
-
-    def test_strip_markup_preserves_non_markup(self):
-        self.assertEqual(strip_markup("1234-5678"), "1234-5678")
-
-    def test_strip_markup_unclosed_tag_swallows_rest(self):
-        # A '<' with no closing '>' consumes to the end (how a mid-tag fragment reads).
-        self.assertEqual(strip_markup("keep <phoneme attr"), "keep ")
-
-    def test_strip_markup_stray_gt_is_kept(self):
-        self.assertEqual(strip_markup("a > b"), "a > b")
-
-    def test_raw_len_maps_clean_prefix_to_raw_offset(self):
-        # "hello" (5 clean chars) ends just before "</speak>" at raw index 12.
-        self.assertEqual(_raw_len_for_clean_chars("<speak>hello</speak>", 5), 12)
-
-    def test_raw_len_identity_without_markup(self):
-        self.assertEqual(_raw_len_for_clean_chars("1234-5678", 9), 9)
-
-    def test_raw_len_zero_or_negative_is_zero(self):
-        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 0), 0)
-
-    def test_raw_len_beyond_available_returns_full_length(self):
-        self.assertEqual(_raw_len_for_clean_chars("<b>x</b>", 99), len("<b>x</b>"))
-
-    def test_raw_len_agrees_with_strip_markup(self):
-        # Consuming len(strip_markup(t)) clean chars must land exactly at the raw
-        # offset just past the last clean char: t[:pos] must strip down to the
-        # same clean text (nothing missing), and t[pos] must be either past the
-        # end of t or the start of trailing markup (nothing extra) -- the second
-        # check matters because an implementation that overshoots a few chars
-        # into a still-open trailing tag (short of reaching another clean char)
-        # would still pass the first check alone, since strip_markup() truncates
-        # an over-sliced, still-unclosed tag the same way either way.
-        for t in ["<speak>hello</speak>", "1234-5678", "<a>x</a><b>y</b>", "plain"]:
-            clean = strip_markup(t)
-            pos = _raw_len_for_clean_chars(t, len(clean))
-            self.assertEqual(strip_markup(t[:pos]), clean)
-            self.assertTrue(pos == len(t) or t[pos] == "<")
-
-
-class TestStripCompleteMarkupHelper(unittest.TestCase):
-    """strip_complete_markup() is used on complete texts (TextSegment.is_transformed,
-    WordCompletionTracker's default user_facing_text) where, unlike strip_markup(),
-    a lone unmatched '<' is real content rather than a truncated tag."""
-
-    def test_strip_complete_markup_removes_well_formed_tags(self):
-        self.assertEqual(strip_complete_markup("<b>hi</b> there"), "hi there")
-
-    def test_strip_complete_markup_keeps_unmatched_angle_bracket(self):
-        self.assertEqual(strip_complete_markup("5 < 10"), "5 < 10")
-
-    def test_strip_complete_markup_keeps_emoticon(self):
-        self.assertEqual(strip_complete_markup("I love you <3 always"), "I love you <3 always")
+from pipecat.utils.context.text_segment_map import TextSegmentMap, _HopKind
+from pipecat.utils.text.alnum_utils import fold_for_matching
 
 
 class TestTextSegmentMapBuild(unittest.TestCase):
@@ -377,10 +310,10 @@ class TestClassifyHopLiteralMatchHandlesStrayAngleBracket(unittest.TestCase):
     def test_literal_angle_bracket_word_placed_via_literal_strategy(self):
         hop = TextSegmentMap._classify_hop("<3 always", "<3")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        # seg_chars == len(word) (offset 0 + len("<3")) is literal strategy's
+        # segment_advance == len(word) (offset 0 + len("<3")) is literal strategy's
         # formula; the markup-stripped strategy would compute this differently
-        # (via _raw_len_for_clean_chars), so this pins down *which* strategy matched.
-        self.assertEqual(hop.seg_chars, len("<3"))
+        # (via raw_offset_after_clean_chars), so this pins down *which* strategy matched.
+        self.assertEqual(hop.segment_advance, len("<3"))
 
 
 class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
@@ -393,7 +326,7 @@ class TestClassifyHopSkipsLeadingPunctuation(unittest.TestCase):
     def test_word_after_comma_and_space_is_placed(self):
         hop = TextSegmentMap._classify_hop(", I can do that. ", "I")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(hop.seg_chars, len(", I"))
+        self.assertEqual(hop.segment_advance, len(", I"))
 
     def test_full_sentence_advances_word_by_word(self):
         smap = TextSegmentMap("Yeah, I can do that.", "Yeah, I can do that.")
@@ -490,6 +423,59 @@ class TestClassifyHopCaseFoldRequiresWordBoundary(unittest.TestCase):
         self.assertTrue(smap.word_belongs_current_segment("database"))
 
 
+class TestLeadingDuplicatePunctuation(unittest.TestCase):
+    """A provider that reports a mark with the *following* word rather than the one
+    it trails.
+
+    The raw cursor stops before punctuation so the next token can still match it,
+    while the LLM cursor sweeps it into the preceding word's span. A token that
+    then leads with that same mark carries it a second time, and the map reports
+    how much of its head to drop.
+    """
+
+    SENTENCE = "Yeah, I can do that."
+
+    def _map_after_first_word(self):
+        smap = TextSegmentMap(self.SENTENCE, self.SENTENCE, self.SENTENCE)
+        smap.advance_word("Yeah")
+        return smap
+
+    def test_cursors_disagree_about_the_trailing_mark(self):
+        smap = self._map_after_first_word()
+        self.assertEqual(smap.raw_pos, 4, "raw cursor stops before the comma")
+        self.assertEqual(smap.llm_pos, 5, "llm cursor swept the comma into 'Yeah'")
+
+    def test_repeated_mark_is_reported_as_a_leading_duplicate(self):
+        smap = self._map_after_first_word()
+        smap.advance_word(", I")
+        self.assertEqual(smap.last_leading_duplicate, 2, "drop the comma and its space")
+
+    def test_word_without_the_mark_reports_nothing(self):
+        smap = self._map_after_first_word()
+        smap.advance_word("I")
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+    def test_punctuation_only_token_is_left_alone(self):
+        """The mark arriving as its own event stands for this position itself."""
+        smap = self._map_after_first_word()
+        smap.advance_word(", ")
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+    def test_unconsumed_opening_punctuation_is_not_a_duplicate(self):
+        sentence = 'He said "hello" today'
+        smap = TextSegmentMap(sentence, sentence, sentence)
+        smap.advance_word("He")
+        smap.advance_word("said")
+        smap.advance_word('"hello')
+        self.assertEqual(smap.last_leading_duplicate, 0, "the quote is new content")
+
+    def test_reset_clears_it(self):
+        smap = self._map_after_first_word()
+        smap.advance_word(", I")
+        smap.reset()
+        self.assertEqual(smap.last_leading_duplicate, 0)
+
+
 class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
     """A provider may punctuate a tagged span more than the source text does."""
 
@@ -502,7 +488,7 @@ class TestWordCarriesItsOwnPunctuation(unittest.TestCase):
         remaining = "<spell>1234</spell>\n\nHow can I help you today?"
         hop = TextSegmentMap._classify_hop(remaining, "1234.")
         self.assertEqual(hop.kind, _HopKind.PLACED)
-        self.assertEqual(remaining[: hop.seg_chars], "<spell>1234")
+        self.assertEqual(remaining[: hop.segment_advance], "<spell>1234")
 
     def test_sentence_tracks_through_the_extra_punctuation(self):
         text = "I love to count <spell>1234</spell>\n\nHow can I help you today?"

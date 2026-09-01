@@ -437,24 +437,32 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
                 num_channels=frame.num_channels,
             )
 
-        await self._write_frame(frame)
+        if not await self._write_frame(frame):
+            return False
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
 
         return True
 
-    async def _write_frame(self, frame: Frame):
-        """Write a frame to the WebSocket after serialization."""
+    async def _write_frame(self, frame: Frame) -> bool:
+        """Write a frame to the WebSocket after serialization.
+
+        Returns:
+            Whether the frame was sent.
+        """
         if self._session.is_closing or not self._session.is_connected:
-            return
+            return False
 
         if not self._params.serializer:
-            return
+            return False
 
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
+            return True
+
+        return False
 
     async def _write_audio_sleep(self):
         """Simulate audio playback timing with sleep delays."""

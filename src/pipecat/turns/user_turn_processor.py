@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     Frame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -151,7 +152,10 @@ class UserTurnProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            await self._user_turn_controller.start()
+        elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
@@ -176,10 +180,16 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_idle_controller.process_frame(frame)
 
     async def _stop(self, frame: EndFrame):
-        await self._cleanup()
+        await self._stop_controllers()
 
     async def _cancel(self, frame: CancelFrame):
-        await self._cleanup()
+        await self._stop_controllers()
+
+    async def _stop_controllers(self):
+        # Session end stops the controllers' timers; what they hold may be
+        # shared, so releasing it waits for cleanup().
+        await self._user_turn_controller.stop()
+        await self._user_idle_controller.stop()
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()

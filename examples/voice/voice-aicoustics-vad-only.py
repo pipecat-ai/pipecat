@@ -57,7 +57,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -174,7 +174,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     logger.info("VAD-only test bot starting")
     vad_processor = VADProcessor(vad_analyzer=aic_vad_analyzer)
     pipeline = Pipeline([transport.input(), vad_processor, VADEventLogger()])
-    worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=False))
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(enable_metrics=False),
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)

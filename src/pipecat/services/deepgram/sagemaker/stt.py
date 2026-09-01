@@ -145,7 +145,7 @@ class DeepgramSageMakerSTTService(STTService):
             keyterm=None,
             keywords=None,
             numerals=False,
-            profanity_filter=True,
+            profanity_filter=None,
             punctuate=True,
             redact=None,
             replace=None,
@@ -381,7 +381,7 @@ class DeepgramSageMakerSTTService(STTService):
             self._connection_task = None
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram on SageMaker...")
 
             # Send CloseStream message to Deepgram
             try:

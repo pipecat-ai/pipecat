@@ -67,6 +67,7 @@ IMPORTS = {
         "from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService"
     ],
     "fal_stt": ["from pipecat.services.fal.stt import FalSTTService"],
+    "gemini_stt": ["from pipecat.services.google.gemini_live.stt import GeminiSTTService"],
     "gladia_stt": ["from pipecat.services.gladia.stt import GladiaSTTService"],
     "google_stt": ["from pipecat.services.google.stt import GoogleSTTService"],
     "gradium_stt": ["from pipecat.services.gradium.stt import GradiumSTTService"],
@@ -117,6 +118,7 @@ IMPORTS = {
     "aws_polly_tts": ["from pipecat.services.aws.tts import AWSPollyTTSService"],
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],
     "camb_tts": ["from pipecat.services.camb.tts import CambTTSService"],
+    "bland_tts": ["from pipecat.services.bland.tts import BlandTTSService"],
     "cartesia_tts": ["from pipecat.services.cartesia.tts import CartesiaTTSService"],
     "deepgram_tts": ["from pipecat.services.deepgram.tts import DeepgramTTSService"],
     "deepgram_flux_tts": ["from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService"],
@@ -127,6 +129,9 @@ IMPORTS = {
         "from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService"
     ],
     "elevenlabs_tts": ["from pipecat.services.elevenlabs.tts import ElevenLabsTTSService"],
+    "elevenlabs_dialogue_tts": [
+        "from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService"
+    ],
     "fish_tts": ["from pipecat.services.fish.tts import FishAudioTTSService"],
     "gemini_tts": ["from pipecat.services.google.tts import GeminiTTSService"],
     "google_tts": ["from pipecat.services.google.tts import GoogleTTSService"],

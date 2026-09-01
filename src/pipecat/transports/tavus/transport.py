@@ -281,7 +281,7 @@ class TavusTransportClient:
                 on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
             )
             self._client = DailyTransportClient(
-                room_url, None, "Pipecat", self._params, daily_callbacks, self._bot_name
+                room_url, None, self._bot_name, self._params, daily_callbacks, "TavusPipecat"
             )
             await self._client.setup(setup)
         except Exception as e:
@@ -936,7 +936,7 @@ class TavusTransport(BaseTransport):
             on_participant_left=self._on_participant_left,
         )
         self._client = TavusTransportClient(
-            bot_name="Pipecat",
+            bot_name=bot_name,
             callbacks=callbacks,
             api_key=api_key,
             replica_id=replica_id,

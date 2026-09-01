@@ -712,6 +712,10 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                     accumulated_text += part.text
                                     await self._push_llm_text(part.text)
                             elif part.function_call:
+                                # A turn that only calls tools produces no answer
+                                # text, so the call itself is what the caller gets
+                                # and TTFAT ends here rather than going unmeasured.
+                                await self.stop_ttfat_metrics()
                                 function_call = part.function_call
                                 function_call_id = function_call.id or str(uuid.uuid4())
                                 logger.debug(

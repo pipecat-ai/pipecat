@@ -603,7 +603,7 @@ class DailyTransportClient(EventHandler):
             frame: The message frame to send.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if not self._joined:
             self._join_message_queue.append(frame)
@@ -983,8 +983,7 @@ class DailyTransportClient(EventHandler):
             settings: Dial-out configuration settings.
 
         Returns:
-            session_id: Dail-out session ID.
-            error: An error description or None.
+            A ``(session_id, error)`` pair; ``error`` is None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.start_dialout(settings, completion=completion_callback(future))
@@ -997,7 +996,7 @@ class DailyTransportClient(EventHandler):
             participant_id: ID of the participant to stop dial-out for.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.stop_dialout(participant_id, completion=completion_callback(future))
@@ -1010,7 +1009,7 @@ class DailyTransportClient(EventHandler):
             settings: DTMF settings including tones and target session.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         session_id = settings.get("sessionId") or self._dial_out_session_id
         if not session_id:
@@ -1030,7 +1029,7 @@ class DailyTransportClient(EventHandler):
             settings: SIP call transfer settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         session_id = (
             settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
@@ -1052,7 +1051,7 @@ class DailyTransportClient(EventHandler):
             settings: SIP REFER settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
@@ -1069,8 +1068,7 @@ class DailyTransportClient(EventHandler):
             force_new: Whether to force a new recording session.
 
         Returns:
-            stream_id: Unique identifier for the recording stream.
-            error: An error description or None.
+            A ``(stream_id, error)`` pair; ``error`` is None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.start_recording(
@@ -1085,7 +1083,7 @@ class DailyTransportClient(EventHandler):
             stream_id: Unique identifier for the recording stream to stop.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.stop_recording(stream_id, completion=completion_callback(future))
@@ -1098,7 +1096,7 @@ class DailyTransportClient(EventHandler):
             settings: Transcription configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if not self._token:
             return "Transcription can't be started without a room token"
@@ -1111,7 +1109,7 @@ class DailyTransportClient(EventHandler):
         """Stop transcription for the call.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if not self._token:
             return "Transcription can't be stopped without a room token"
@@ -1130,7 +1128,7 @@ class DailyTransportClient(EventHandler):
             user_name: Optional user name that will appear as sender of the message.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if not self._joined:
             return "Can't send message if not joined"
@@ -1270,7 +1268,7 @@ class DailyTransportClient(EventHandler):
             track_name: Name of the custom audio track to remove.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if track_name == "screenAudio":
             return
@@ -1316,7 +1314,7 @@ class DailyTransportClient(EventHandler):
             track_name: Name of the custom video track to remove.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         if track_name == "screenVideo":
             return
@@ -1337,7 +1335,7 @@ class DailyTransportClient(EventHandler):
             instance_id: Optional transcription instance ID.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.update_transcription(
@@ -1355,7 +1353,7 @@ class DailyTransportClient(EventHandler):
             profile_settings: Global subscription profile settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.update_subscriptions(
@@ -1374,7 +1372,7 @@ class DailyTransportClient(EventHandler):
             publishing_settings: Publishing configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.update_publishing(
@@ -1392,7 +1390,7 @@ class DailyTransportClient(EventHandler):
             remote_participants: Remote participant configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         future = self._get_event_loop().create_future()
         self._client.update_remote_participants(
@@ -2538,7 +2536,7 @@ class DailyTransport(BaseTransport):
             settings: DTMF settings including tones and target session.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Sending DTMF: settings={settings}")
 
@@ -2554,8 +2552,7 @@ class DailyTransport(BaseTransport):
             settings: Dial-out configuration settings.
 
         Returns:
-            session_id: Dail-out session ID.
-            error: An error description or None.
+            A ``(session_id, error)`` pair; ``error`` is None on success.
         """
         logger.debug(f"Starting dialout: settings={settings}")
 
@@ -2571,7 +2568,7 @@ class DailyTransport(BaseTransport):
             participant_id: ID of the participant to stop dial-out for.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Stopping dialout: participant_id={participant_id}")
 
@@ -2587,7 +2584,7 @@ class DailyTransport(BaseTransport):
             settings: SIP call transfer settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Staring SIP call transfer: settings={settings}")
 
@@ -2603,7 +2600,7 @@ class DailyTransport(BaseTransport):
             settings: SIP REFER settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Staring SIP REFER: settings={settings}")
 
@@ -2623,8 +2620,7 @@ class DailyTransport(BaseTransport):
             force_new: Whether to force a new recording session.
 
         Returns:
-            stream_id: Unique identifier for the recording stream.
-            error: An error description or None.
+            A ``(stream_id, error)`` pair; ``error`` is None on success.
         """
         logger.debug(
             f"Starting recording: stream_id={stream_id} force_new={force_new} settings={streaming_settings}"
@@ -2642,7 +2638,7 @@ class DailyTransport(BaseTransport):
             stream_id: Unique identifier for the recording stream to stop.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Stopping recording: stream_id={stream_id}")
 
@@ -2658,7 +2654,7 @@ class DailyTransport(BaseTransport):
             settings: Transcription configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Starting transcription: settings={settings}")
 
@@ -2671,7 +2667,7 @@ class DailyTransport(BaseTransport):
         """Stop transcription for the call.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug("Stopping transcription")
 
@@ -2690,7 +2686,7 @@ class DailyTransport(BaseTransport):
             user_name: Optional user name that will appear as sender of the message.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         error = await self._client.send_prebuilt_chat_message(message, user_name)
         if error:
@@ -2750,7 +2746,7 @@ class DailyTransport(BaseTransport):
             publishing_settings: Publishing configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Updating publishing settings: settings={publishing_settings}")
 
@@ -2769,7 +2765,7 @@ class DailyTransport(BaseTransport):
             profile_settings: Global subscription profile settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(
             f"Updating subscriptions: participant_settings={participant_settings} profile_settings={profile_settings}"
@@ -2791,7 +2787,7 @@ class DailyTransport(BaseTransport):
             remote_participants: Remote participant configuration settings.
 
         Returns:
-            error: An error description or None.
+            An error description, or None on success.
         """
         logger.debug(f"Updating remote participants: remote_participants={remote_participants}")
 
@@ -2898,16 +2894,16 @@ class DailyTransport(BaseTransport):
                 ) as r:
                     if r.status != 200:
                         text = await r.text()
-                        logger.error(
+                        await self._on_error(
                             f"Unable to handle dialin-ready event (status: {r.status}, error: {text})"
                         )
                         return
 
                     logger.debug("Event dialin-ready was handled successfully")
             except TimeoutError:
-                logger.error(f"Timeout handling dialin-ready event ({url})")
+                await self._on_error(f"Timeout handling dialin-ready event ({url})")
             except Exception as e:
-                logger.error(f"Error handling dialin-ready event ({url}): {e}")
+                await self._on_error(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""

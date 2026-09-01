@@ -31,6 +31,7 @@ from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
+    FluxConnectionNotConfirmedError,
 )
 
 
@@ -202,18 +203,20 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         )
 
         try:
-            await self._client.start_session()
+            # A connection setting the endpoint rejects leaves start_session
+            # blocked indefinitely rather than raising, so it is bounded too.
+            await self._start_session_within_timeout()
 
             # Start response processor first so we can receive the Connected message
             self._response_task = self.create_task(self._process_responses())
 
             # Wait for Flux to confirm the connection is ready
             logger.debug("SageMaker session started, waiting for Flux connection confirmation...")
-            await self._connection_established_event.wait()
+            await self._await_connection_established()
 
-            # Note: Flux does not support KeepAlive messages (only CloseStream and
-            # Configure are valid). The watchdog task handles keeping the connection
-            # alive by sending silence when needed.
+            # Note: Flux does not support KeepAlive messages (only CloseStream,
+            # ForceEndTurn and Configure are valid). The watchdog task handles
+            # keeping the connection alive by sending silence when needed.
             self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
             logger.debug("Connected to Deepgram Flux on SageMaker")
@@ -223,6 +226,22 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             await self._call_event_handler("on_connection_error", str(e))
 
+    async def _start_session_within_timeout(self):
+        """Open the SageMaker session, failing if it does not open in time.
+
+        Raises:
+            FluxConnectionNotConfirmedError: If the session does not open within
+                ``_CONNECTION_TIMEOUT``.
+        """
+        assert self._client is not None
+        try:
+            await asyncio.wait_for(self._client.start_session(), timeout=self._CONNECTION_TIMEOUT)
+        except TimeoutError:
+            raise FluxConnectionNotConfirmedError(
+                f"SageMaker session did not open within {self._CONNECTION_TIMEOUT}s; "
+                "the endpoint may not accept the current connection settings"
+            ) from None
+
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
         self._connection_established_event.clear()
@@ -231,7 +250,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         self._reset_configure_state()
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram Flux on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram Flux on SageMaker...")
 
             await self._send_close_stream()
 

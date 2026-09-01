@@ -7,7 +7,7 @@
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
-from pipecat.utils.text.transforms._alnum_utils import normalize
+from pipecat.utils.text.alnum_utils import alnum_only
 
 
 class TestWordCompletionTrackerBasic(unittest.TestCase):
@@ -91,6 +91,32 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("that"))
         self.assertEqual(tracker.get_word_for_frame(), "that")
         self.assertTrue(tracker.is_complete)
+
+    def test_repeated_mark_is_kept_without_an_llm_text(self):
+        """The mark is this frame's text when no span is recorded to carry it.
+
+        A provider may report the comma of "Yeah," with the *following* word
+        instead. With an ``llm_text`` that repeat is trimmed, because the span
+        attributed to "Yeah" already ends in it. Without one nothing records
+        spans, and the frame word is the provider's own token -- which never
+        carried the comma -- so trimming here would delete it outright.
+        """
+        tracker = WordCompletionTracker("Yeah, I can")
+        words = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            words.append(tracker.get_word_for_frame())
+        self.assertEqual(words, ["Yeah", ", I", "can"])
+
+    def test_repeated_mark_is_trimmed_with_an_llm_text(self):
+        """The same stream, where the recorded span does carry the mark."""
+        text = "Yeah, I can"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        spans = []
+        for word in ("Yeah", ", I", " can"):
+            tracker.add_word_and_check_complete(word)
+            spans.append(tracker.get_llm_consumed())
+        self.assertEqual(spans, ["Yeah,", "I", "can"], "the comma is recorded once")
 
     def test_punctuation_ignored_in_words(self):
         """Punctuation attached to TTS word tokens is also stripped."""
@@ -1763,7 +1789,7 @@ class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
     """Guards against the regression where ElevenLabs maps Unicode symbols such
     as '→' to ASCII punctuation like '-' in word-timestamp events.
 
-    The literal-substring check in TextSegmentMap._symbol_word_belongs failed to find '-'
+    The literal-substring check in TextSegmentMap._symbol_belongs_here failed to find '-'
     inside '→ Santiago…', which caused premature force-completion of the whole
     frame after 'Paulo' was consumed.  The symbol-substitution fallback (check
     whether the next non-space char in the TTS text is itself a non-alnum symbol)
@@ -1857,7 +1883,7 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete(words[-1]))
 
     def test_korean_normalized_char_count_matches_raw_alnum(self):
-        """Each Hangul syllable must normalize to exactly one char.
+        """Each Hangul syllable must alnum_only to exactly one char.
 
         The NFKD decomposition would expand each syllable into 2-3 conjoining
         jamo, making the normalized length much larger than the raw alnum count
@@ -1867,11 +1893,11 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         samples = ["저는여러분의", "안녕하세요", "어시스턴트"]
         for text in samples:
             raw_count = sum(1 for c in text if c.isalnum())
-            norm_count = len(normalize(text))
+            norm_count = len(alnum_only(text))
             self.assertEqual(
                 norm_count,
                 raw_count,
-                f"normalize({text!r}): got {norm_count} chars, want {raw_count}",
+                f"alnum_only({text!r}): got {norm_count} chars, want {raw_count}",
             )
 
     def test_korean_force_complete_remaining_text_is_correct(self):
@@ -2327,7 +2353,7 @@ class TestWordCompletionTrackerTokenChangingReplacements(unittest.TestCase):
 
     def test_inline_ipa_tag_does_not_shift_next_word_boundary(self):
         """An inline IPA substitution ("leisure" -> "<<l|ɛ|ʒ|ə|r>>") normalizes
-        to no alnum content on the TTS side, since normalize()'s tag-stripping
+        to no alnum content on the TTS side, since alnum_only()'s tag-stripping
         regex treats the double angle brackets as a single (malformed) tag.
         That must not corrupt the word boundary of the following word."""
         sentence = "The leisure centre opens at six."
@@ -2580,6 +2606,37 @@ class TestWordCompletionTrackerAccentFolding(unittest.TestCase):
         for word in self.TTS_WORDS[:-1]:
             self.assertFalse(tracker.add_word_and_check_complete(word))
         self.assertTrue(tracker.add_word_and_check_complete(self.TTS_WORDS[-1]))
+
+    def test_accented_word_keeps_its_accent_in_the_attributed_span(self):
+        """The span carries the LLM's spelling, not the provider's folded one."""
+        tracker = WordCompletionTracker(
+            self.SENTENCE, llm_text=self.SENTENCE, user_facing_text=self.SENTENCE
+        )
+        for word in self.TTS_WORDS[:2]:
+            tracker.add_word_and_check_complete(word)
+        tracker.add_word_and_check_complete("cafe")
+        self.assertEqual(tracker.get_llm_consumed(), "café")
+
+
+class TestForceCompleteAttributesTaggedRemainder(unittest.TestCase):
+    """A force-completed slot keeps the LLM tags on its unspoken remainder.
+
+    The remaining TTS text carries synthesis tags (``<spell>``) and the remaining
+    LLM text carries pattern delimiters (``<card>``). They differ by construction,
+    so the remainder must be attributed on position alone.
+    """
+
+    TTS_TEXT = "<spell>4111 1111 1111 1111</spell>"
+    LLM_TEXT = "<card>4111 1111 1111 1111</card>"
+    USER_FACING = "4111 1111 1111 1111"
+
+    def test_remainder_carries_the_llm_delimiters(self):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT, llm_text=self.LLM_TEXT, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("4111")
+        self.assertTrue(tracker.add_word_and_check_complete("WRONG"))
+        self.assertEqual(tracker.get_llm_consumed(), "1111 1111 1111</card>")
 
 
 class TestTextNoWordArrivesFor(unittest.TestCase):

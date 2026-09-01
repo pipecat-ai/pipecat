@@ -341,7 +341,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             # Now wait for the connection established event
             logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._connection_established_event.wait()
+            await self._await_connection_established()
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -374,7 +374,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             if self._websocket:
                 await self._send_close_stream()
-                logger.debug("Disconnecting from Deepgram Flux Websocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)

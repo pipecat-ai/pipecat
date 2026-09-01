@@ -54,6 +54,7 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
         '        api_key=os.getenv("GLADIA_API_KEY"),\n'
@@ -365,11 +366,19 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "bland_tts": (
+        "BlandTTSService(\n"
+        '        api_key=os.getenv("BLAND_API_KEY"),\n'
+        "        settings=BlandTTSService.Settings(\n"
+        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "cartesia_tts": (
         "CartesiaTTSService(\n"
         '        api_key=os.getenv("CARTESIA_API_KEY"),\n'
         "        settings=CartesiaTTSService.Settings(\n"
-        '            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),\n'
+        '            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -411,6 +420,14 @@ SERVICE_CONFIGS = {
         "ElevenLabsTTSService(\n"
         '        api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
         "        settings=ElevenLabsTTSService.Settings(\n"
+        '            voice=os.getenv("ELEVENLABS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "elevenlabs_dialogue_tts": (
+        "ElevenLabsDialogueTTSService(\n"
+        '        api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
+        "        settings=ElevenLabsDialogueTTSService.Settings(\n"
         '            voice=os.getenv("ELEVENLABS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
