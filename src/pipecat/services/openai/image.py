@@ -10,6 +10,7 @@ This module provides integration with OpenAI's DALL-E image generation API
 for creating images from text prompts.
 """
 
+import base64
 import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -153,19 +154,24 @@ class OpenAIImageGenService(ImageGenService):
             yield ErrorFrame("Image generation failed: no data returned")
             return
 
+        # The GPT Image models always return the bytes inline; the response
+        # carries a URL only when the model supports hosted results.
         image_url = image.data[0].url
-        if not image_url:
+        b64_data = image.data[0].b64_json
+
+        if image_url:
+            async with self._aiohttp_session.get(image_url) as response:
+                image_bytes = await response.content.read()
+        elif b64_data:
+            image_bytes = base64.b64decode(b64_data)
+        else:
             yield ErrorFrame("Image generation failed")
             return
 
-        # Load the image from the url
-        async with self._aiohttp_session.get(image_url) as response:
-            image_stream = io.BytesIO(await response.content.read())
-            image = Image.open(image_stream)
-            frame = URLImageRawFrame(
-                image=image.tobytes(),
-                size=image.size,
-                format=image.mode,
-                url=image_url,
-            )
-            yield frame
+        generated = Image.open(io.BytesIO(image_bytes))
+        yield URLImageRawFrame(
+            image=generated.tobytes(),
+            size=generated.size,
+            format=generated.mode,
+            url=image_url,
+        )
