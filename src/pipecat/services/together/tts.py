@@ -121,6 +121,9 @@ class TogetherTTSService(WebsocketTTSService):
         self._url = url
         self._session_id = None
         self._receive_task = None
+        # Audio deltas do not always end on a 16-bit sample boundary, so a
+        # trailing byte is held here until its sample completes.
+        self._audio_buffer = bytearray()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -246,6 +249,7 @@ class TogetherTTSService(WebsocketTTSService):
         finally:
             self._websocket = None
             self._session_id = None
+            self._audio_buffer.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -354,7 +358,14 @@ class TogetherTTSService(WebsocketTTSService):
             try:
                 await self.stop_ttfb_metrics()
                 context_id = self.get_active_audio_context_id()
-                audio_chunk = base64.b64decode(delta)
+                self._audio_buffer.extend(base64.b64decode(delta))
+                # Emit whole samples only: a frame carrying half a sample
+                # breaks consumers that read the audio as 16-bit integers.
+                aligned_length = len(self._audio_buffer) & ~1
+                if not aligned_length:
+                    return
+                audio_chunk = bytes(self._audio_buffer[:aligned_length])
+                del self._audio_buffer[:aligned_length]
                 frame = TTSAudioRawFrame(
                     audio=audio_chunk,
                     sample_rate=self.sample_rate,
@@ -376,6 +387,9 @@ class TogetherTTSService(WebsocketTTSService):
         """
         item_id = evt.get("item_id")
         logger.debug(f"{self} audio generation complete for: {item_id}")
+        # A byte still held back belongs to a sample the server will never
+        # complete; dropping it keeps the next segment sample-aligned.
+        self._audio_buffer.clear()
         await self.stop_all_metrics()
         context_id = self.get_active_audio_context_id()
         if context_id:
@@ -421,6 +435,7 @@ class TogetherTTSService(WebsocketTTSService):
             context_id: The ID of the audio context that was interrupted.
         """
         await self.stop_all_metrics()
+        self._audio_buffer.clear()
         if context_id:
             await self._ws_send({"type": "input_text_buffer.clear"})
         await super().on_audio_context_interrupted(context_id)
