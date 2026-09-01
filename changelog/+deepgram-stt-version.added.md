@@ -1,0 +1,3 @@
+- Added a `version` field to `DeepgramSTTService.Settings` (and
+  `DeepgramSageMakerSTTService.Settings`), which pins transcription to a specific
+  Deepgram model version instead of whichever one `latest` currently resolves to.
