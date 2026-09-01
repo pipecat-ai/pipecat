@@ -802,7 +802,6 @@ class SpeechmaticsSTTService(STTService):
             "end_of_utterance_max_delay",
             "punctuation_overrides",
             "include_partials",
-            "split_sentences",
             "enable_diarization",
             "speaker_sensitivity",
             "max_speakers",
