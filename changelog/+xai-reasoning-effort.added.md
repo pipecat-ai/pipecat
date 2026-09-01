@@ -1,0 +1,1 @@
+- Added a `reasoning_effort` field to `GrokLLMService.Settings`, which passes xAI's reasoning effort control through to the completion request. Accepted values vary by model: `"low"`, `"medium"`, and `"high"` on the Grok 4 reasoning models, `"xhigh"` on `grok-4.6` and later, and `"none"` on the models that can turn reasoning off.
