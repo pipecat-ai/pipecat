@@ -85,15 +85,27 @@ class TurnDetection(BaseModel):
     Parameters:
         type: Detection type. "server_vad" for standard VAD, "semantic_vad"
             for semantic-based detection.
-        eagerness: How eagerly to detect end of turn. Options: "low", "medium", "high".
+        eagerness: How eagerly to detect end of turn, for "semantic_vad".
+            Options: "low", "medium", "high", "auto".
         create_response: Whether to automatically create a response on turn end.
         interrupt_response: Whether user speech interrupts the current response.
+        threshold: Speech detection cutoff (0.0-1.0), for "server_vad".
+        prefix_padding_ms: Pre-speech audio retained before an utterance, in
+            milliseconds, for "server_vad".
+        silence_duration_ms: Trailing silence required to finalize a turn, in
+            milliseconds, for "server_vad".
+        idle_timeout_ms: Milliseconds without detected speech after which the
+            server emits an idle timeout, for "server_vad". 0 disables it.
     """
 
     type: Literal["server_vad", "semantic_vad"] | None = "semantic_vad"
     eagerness: str | None = None
     create_response: bool | None = None
     interrupt_response: bool | None = None
+    threshold: float | None = None
+    prefix_padding_ms: int | None = None
+    silence_duration_ms: int | None = None
+    idle_timeout_ms: int | None = None
 
 
 class InputTranscription(BaseModel):
