@@ -1,0 +1,1 @@
+- `PocketTTSService` now loads pocket-tts's distilled models for German, Spanish, Italian and Portuguese instead of the 24-layer variants, which are too slow to synthesize in real time on a typical CPU.
