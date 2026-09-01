@@ -44,20 +44,20 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    from speechmatics.agent_stt import DEFAULT_MODEL, Model
-    from speechmatics.agent_stt import TurnDetectionMode as AgentTurnDetectionMode
-    from speechmatics.voice import (
+    from speechmatics.agent_stt import (
+        DEFAULT_MODEL,
         AdditionalVocabEntry,
-        AgentClientMessageType,
-        AgentServerMessageType,
         AudioEncoding,
-        SpeakerFocusConfig,
-        SpeakerFocusMode,
+        Model,
         SpeakerIdentifier,
-        SpeechSegmentConfig,
-        VoiceAgentClient,
-        VoiceAgentConfig,
     )
+    from speechmatics.agent_stt import ClientMessageType as AgentClientMessageType
+    from speechmatics.agent_stt import ServerMessageType as AgentServerMessageType
+    from speechmatics.agent_stt import TurnDetectionMode as AgentTurnDetectionMode
+
+    # TODO(agent-stt): speaker-focus feature (SpeakerFocusConfig / SpeakerFocusMode) has no
+    # Agent STT equivalent — the last remaining voice-SDK dependency. Remove with Gap 5.
+    from speechmatics.voice import SpeakerFocusConfig, SpeakerFocusMode
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
@@ -542,10 +542,12 @@ class SpeechmaticsSTTService(STTService):
             default_settings.model, default_settings.operating_point
         )
 
-        # Build SDK config from settings before calling super
-        self._client: VoiceAgentClient | None = None
+        # Build SDK config from settings before calling super.
+        # TODO(agent-stt): self._client / self._config are now the Agent STT client and
+        # TranscriptionConfig (typed Any until the client is wired — see _connect / _build_config).
+        self._client: Any = None
         self._audio_encoding = encoding
-        self._config: VoiceAgentConfig = self._build_config(default_settings)
+        self._config: Any = self._build_config(default_settings)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -676,48 +678,23 @@ class SpeechmaticsSTTService(STTService):
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
-        # Update the audio sample rate
-        self._config.sample_rate = self.sample_rate
-
-        # STT client
-        self._client: VoiceAgentClient = VoiceAgentClient(
-            api_key=self._api_key,
-            url=self._base_url,
-            app=f"pipecat/{pipecat_version()}",
-            config=self._config,
-        )
-
-        # Add message queue
-        def add_message(message: dict[str, Any]):
-            self._stt_msg_queue.put_nowait(message)
-
-        # Add listeners
-        self._client.on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
-        self._client.on(AgentServerMessageType.ADD_SEGMENT, add_message)
-
-        # Service-side turn events (only emitted when the service closes turns).
-        if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
-            self._client.on(AgentServerMessageType.START_OF_TURN, add_message)
-            self._client.on(AgentServerMessageType.END_OF_TURN, add_message)
-
-        # Speaker result listener
-        if self._config.enable_diarization:
-            self._client.on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
-
-        # Other messages for debugging
-        self._client.on(AgentServerMessageType.ERROR, add_message)
-        self._client.on(AgentServerMessageType.WARNING, add_message)
-        self._client.on(AgentServerMessageType.INFO, add_message)
-        self._client.on(AgentServerMessageType.END_OF_TURN_PREDICTION, add_message)
-        self._client.on(AgentServerMessageType.END_OF_UTTERANCE, add_message)
-
-        # Connect to the client
-        try:
-            await self._client.connect()
-            logger.debug(f"{self} connected")
-        except Exception as e:
-            self._client = None
-            await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
+        # TODO(agent-stt): INSERT CLIENT HERE. The voice-SDK VoiceAgentClient has been
+        # ripped out. Replace with speechmatics.agent_stt.AgentSttAsyncClient:
+        #   self._client = AgentSttAsyncClient(
+        #       api_key=self._api_key, url=self._base_url, app=f"pipecat/{pipecat_version()}",
+        #       config=self._config,                      # the TranscriptionConfig (see _build_config)
+        #       audio_format=AudioFormat(encoding=self._audio_encoding,
+        #                                sample_rate=self.sample_rate, chunk_size=DEFAULT_CHUNK_SIZE))
+        #   register listeners via self._client.on(evt, add_message) for ServerMessageType:
+        #       ADD_SEGMENT, ADD_PARTIAL_SEGMENT, RECOGNITION_STARTED, START_OF_TURN,
+        #       END_OF_TURN, INFO, WARNING, ERROR, and SPEAKERS_RESULT when diarization is on.
+        #       (START_OF_TURN/END_OF_TURN only when turn_detection_mode != EXTERNAL.)
+        #   await self._client.connect()
+        # Notes: turn detection now rides on the config (the SDK lifts it into the top-level
+        # turn_config); END_OF_TURN_PREDICTION / END_OF_UTTERANCE have no Agent STT equivalent.
+        # The message pump (add_message -> self._stt_msg_queue) plugs into those .on() handlers.
+        self._client = None
+        logger.warning(f"{self} Agent STT client not wired yet — see TODO(agent-stt) in _connect")
 
         # Start message processing task
         if not self._stt_msg_task:
@@ -765,80 +742,36 @@ class SpeechmaticsSTTService(STTService):
     # CONFIGURATION
     # ============================================================================
 
-    def _build_config(self, settings: Settings) -> VoiceAgentConfig:
-        """Build a ``VoiceAgentConfig`` from the given settings.
+    def _build_config(self, settings: Settings) -> Any:
+        """Build the Agent STT transcription config from settings.
 
-        Used both at init time (with explicit settings, before
-        ``super().__init__`` has run) and before reconnecting so the
-        connection always reflects the latest settings.
+        TODO(agent-stt): BUILD CONFIG HERE. The voice-SDK VoiceAgentConfig has been ripped
+        out. Replace with speechmatics.agent_stt.TranscriptionConfig, setting only the
+        wire-supported fields::
 
-        Args:
-            settings: Settings to build from.
+            language = self._language_to_speechmatics_language(assert_given(settings.language))
+            TranscriptionConfig(
+                language=language,
+                model=assert_given(settings.model),                    # resolved model
+                turn_detection_mode=<settings.turn_detection_mode -> agent_stt TurnDetectionMode>,
+                diarization="speaker" if settings.enable_diarization else None,
+                speaker_diarization_config=<SpeakerDiarizationConfig from max_speakers /
+                    speaker_sensitivity / prefer_current_speaker / known_speakers, else None>,
+                additional_vocab=settings.additional_vocab or None,
+                output_locale=self._locale_to_speechmatics_locale(language, settings.language),
+                domain=settings.domain or None,
+                enable_partials=settings.include_partials,
+            )
+
+        The mapper must hand the config the SDK's own TurnDetectionMode member (compared by
+        identity); the SDK then lifts it into the top-level turn_config on StartRecognition.
+
+        Dropped — no Agent STT equivalent: speaker focus (focus_speakers / ignore_speakers /
+        focus_mode / speaker_passive_format), split_sentences -> emit_sentences, and the
+        extra_params passthrough. Audio encoding / sample rate move to the client's AudioFormat.
         """
-        s = settings
-
-        # Turn detection is no longer wired through the voice-SDK presets: those inject
-        # fields Agent STT rejects (max_delay, max_delay_mode, enable_entities,
-        # audio_filtering_config). Build a bare config and set only supported fields.
-        # The `turn_detection_mode` param is kept but currently unwired.
-        # TODO(agent-stt): send turn detection via the top-level `turn_config`
-        # (`TurnConfig`/`TurnDetectionMode` in speechmatics.agent_stt) once on the Agent STT client.
-        config = VoiceAgentConfig()
-
-        # Audio encoding (init-only, stored as instance attribute)
-        config.audio_encoding = self._audio_encoding
-
-        # Language + domain
-        language = assert_given(s.language)
-        config.language = self._language_to_speechmatics_language(language)
-        config.domain = s.domain if s.domain is not None else None
-        config.output_locale = self._locale_to_speechmatics_locale(config.language, language)
-
-        # Speaker config
-        focus_speakers = assert_given(s.focus_speakers)
-        ignore_speakers = assert_given(s.ignore_speakers)
-        focus_mode = assert_given(s.focus_mode)
-        config.speaker_config = SpeakerFocusConfig(
-            focus_speakers=focus_speakers if focus_speakers is not None else [],
-            ignore_speakers=ignore_speakers if ignore_speakers is not None else [],
-            focus_mode=focus_mode if focus_mode is not None else SpeakerFocusMode.RETAIN,
-        )
-        config.known_speakers = s.known_speakers if s.known_speakers is not None else []
-
-        # Custom dictionary
-        config.additional_vocab = s.additional_vocab if s.additional_vocab is not None else []
-
-        # Operating point / model — the resolved model name (always set, defaults to
-        # DEFAULT_MODEL). `model` supersedes the deprecated `operating_point` alias.
-        config.operating_point = assert_given(s.model)
-
-        # Advanced parameters — only set if not None
-        for param in [
-            "max_delay",
-            "end_of_utterance_silence_trigger",
-            "end_of_utterance_max_delay",
-            "punctuation_overrides",
-            "include_partials",
-            "split_sentences",
-            "enable_diarization",
-            "speaker_sensitivity",
-            "max_speakers",
-            "prefer_current_speaker",
-        ]:
-            val = getattr(s, param)
-            if val is not None:
-                setattr(config, param, val)
-
-        # Extra parameters
-        if isinstance(s.extra_params, dict):
-            for key, value in s.extra_params.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-
-        # Enable sentences
-        split_sentences = assert_given(s.split_sentences)
-        split = split_sentences if split_sentences is not None else False
-        config.speech_segment_config = SpeechSegmentConfig(emit_sentences=split or False)
+        # TODO(agent-stt): return a TranscriptionConfig once the client is wired.
+        return None
 
         return config
 
