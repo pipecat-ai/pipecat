@@ -1264,17 +1264,14 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
 
 
-# Default host for the Sync speech-to-text API. Each speech segment is POSTed
-# here as ``multipart/form-data`` and the transcript is returned in the same
-# response — no WebSocket session, upload step, or polling.
+# Default host for the Sync speech-to-text API.
 ASSEMBLYAI_SYNC_BASE_URL = "https://sync.assemblyai.com"
 
-# Canonical (versioned) Sync API paths appended to the base URL.
+# Sync API paths appended to the base URL.
 ASSEMBLYAI_SYNC_TRANSCRIBE_PATH = "/v1/transcribe"
 ASSEMBLYAI_SYNC_WARM_PATH = "/v1/warm"
 
-# Default model for the Sync API, sent in the ``X-AAI-Model`` header the service
-# routes on.
+# Default model, sent in the ``X-AAI-Model`` header AssemblyAI routes on.
 ASSEMBLYAI_SYNC_DEFAULT_MODEL = "universal-3-5-pro"
 
 
@@ -1405,8 +1402,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         self._warm_task: asyncio.Task | None = None
 
         # Rolling buffer of prior turns (user + agent) carried as
-        # conversation_context. Both sides share one chronological buffer under a
-        # single turn/char cap, since the model draws no distinction between them.
+        # conversation_context (see _append_context_turn).
         self._max_context_turns = max_context_turns
         self._max_context_chars = max_context_chars
         self._context_turns: list[str] = []
@@ -1443,8 +1439,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
 
         language = self._settings.language
         if is_given(language) and language is not None:
-            # The Sync API's ``language_codes`` field takes a list; a
-            # single language is a one-element list.
+            # ``language_codes`` accepts a string or a list; a single
+            # language goes as a one-element list.
             config["language_codes"] = [language]
 
         prompt = self._settings.prompt
@@ -1455,8 +1451,6 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         if is_given(keyterms_prompt) and keyterms_prompt:
             config["keyterms_prompt"] = list(keyterms_prompt)
 
-        # A conversation_context set explicitly in settings is honored as-is and
-        # disables the automatic buffer; otherwise send the rolling buffer.
         if self._context_is_manual():
             config["conversation_context"] = self._settings.conversation_context
         elif self._context_turns:
@@ -1491,10 +1485,9 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
     async def _process_assistant_turn(self, text: str) -> None:
         """Feed the agent's completed reply into the conversation context.
 
-        Called automatically by the base class when an assistant turn ends
-        (an ``LLMContextAssistantTurnFrame`` reaches the service), so a standard
-        voice-agent pipeline needs no extra wiring. The reply is appended to the
-        same chronological buffer as user turns.
+        Called automatically by the base class when an assistant turn ends (an
+        ``LLMContextAssistantTurnFrame`` reaches the service). The reply is
+        appended to the same chronological buffer as user turns.
         """
         self._append_context_turn(text)
 
@@ -1563,8 +1556,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
     async def _error_detail(self, response: aiohttp.ClientResponse) -> str:
         """Build a readable message from a non-200 response.
 
-        The Sync API returns an RFC 9457 problem-details body
-        (``{"status", "title", "detail"}``); surface the title and detail when
+        Errors arrive either as a problem-details body (``title``/``detail``)
+        or as ``{"error_code", "message"}``; surface whichever fields are
         present, falling back to the raw body.
         """
         try:
@@ -1614,9 +1607,9 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
                     language,
                     result=result,
                 )
-                # Record this user turn so it contexts the next request. The
-                # config for this request was already built without it, so an
-                # utterance never appears in its own context.
+                # Record this user turn for the next request's context. This
+                # request's config was already built, so an utterance never
+                # appears in its own context.
                 self._append_context_turn(text)
         except Exception as e:
             logger.error(f"{self}: error transcribing audio: {e}")
