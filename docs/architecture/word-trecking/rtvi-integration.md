@@ -93,7 +93,7 @@ Transforms are registered per aggregation type, matching the types defined by th
 `PatternPairAggregator`:
 
 ```python
-rtvi_observer_params=RTVIObserverParams(
+rtvi_observer_params = RTVIObserverParams(
     bot_output_transforms=[("credit_card", obfuscate_credit_card)]
 )
 ```
@@ -138,19 +138,19 @@ four steps:
 
 ```python
 # 1. Aggregate the LLM's tagged segments into typed units
-llm_text_aggregator.add_pattern(type="credit_card",
-                                start_pattern="<card>", end_pattern="</card>",
-                                action=MatchAction.AGGREGATE)
+llm_text_aggregator.add_pattern(
+    type="credit_card", start_pattern="<card>", end_pattern="</card>", action=MatchAction.AGGREGATE
+)
 
 # 2. Never send code blocks to the TTS  →  sequencer holds them in order
 tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
 
 # 3. Rewrite what the TTS receives  →  TextSegmentMap tracks the divergence
-tts.add_text_transformer(spell_out_text, "credit_card")   # wraps in <spell> tags
-tts.add_text_transformer(strip_url_protocol, "link")      # drops "https://"
+tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags
+tts.add_text_transformer(strip_url_protocol, "link")  # drops "https://"
 
 # 4. Redact what the client renders  →  progress frames make it possible
-rtvi_observer_params=RTVIObserverParams(
+rtvi_observer_params = RTVIObserverParams(
     bot_output_transforms=[("credit_card", obfuscate_credit_card)]
 )
 ```

@@ -149,9 +149,9 @@ Each opcode becomes one `TextSegment`, carrying both sides plus the span it occu
 the original text:
 
 ```python
-TextSegment(original='$42.50',
-            tts='forty-two dollars and fifty cents',
-            original_start=16, original_end=22)
+TextSegment(
+    original="$42.50", tts="forty-two dollars and fifty cents", original_start=16, original_end=22
+)
 ```
 
 ### Transformed vs unchanged segments
@@ -226,9 +226,9 @@ the one thing the loop deliberately stops short of — it is swept up by
 
 ```python
 TextSegmentMap(
-    tts_text      = "Your balance is forty-two dollars and fifty cents",
-    original_text = "Your balance is $42.50",     # frame.text — the segment text
-    llm_text      = "Your balance is $42.50",     # frame.raw_text
+    tts_text="Your balance is forty-two dollars and fifty cents",
+    original_text="Your balance is $42.50",  # frame.text — the segment text
+    llm_text="Your balance is $42.50",  # frame.raw_text
 )
 ```
 
