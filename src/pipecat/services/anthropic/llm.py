@@ -100,6 +100,22 @@ class AnthropicThinkingConfig(BaseModel):
     display: Literal["summarized", "omitted"] | str | None = None
 
 
+class AnthropicOutputConfig(BaseModel):
+    """Configuration for how much of a response Claude produces.
+
+    Parameters:
+        effort: How many tokens Claude spends on the whole response — thinking,
+            answer text and tool calls alike. "low" is the fastest and cheapest,
+            "max" the most thorough; Anthropic's default is "high". Which levels
+            a model accepts varies, and Anthropic recommends setting effort
+            explicitly on Sonnet 4.6 to avoid unexpected latency.
+    """
+
+    # Why `| str` here? To not break compatibility in case Anthropic adds
+    # more levels in the future.
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | str | None = None
+
+
 @dataclass
 class AnthropicLLMSettings(LLMSettings):
     """Settings for AnthropicLLMService.
@@ -110,6 +126,8 @@ class AnthropicLLMSettings(LLMSettings):
             disables thinking on Sonnet 5 and later, which otherwise decide
             per request whether to think, to reduce latency; Opus and Fable
             are left at Anthropic's default.
+        output_config: Output configuration, carrying the effort level. Left
+            unset, Anthropic picks the model's default effort.
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -124,6 +142,9 @@ class AnthropicLLMSettings(LLMSettings):
     thinking: Union["AnthropicLLMService.ThinkingConfig", NotGiven, AnthropicNotGiven] = field(
         default_factory=lambda: NOT_GIVEN
     )
+    output_config: Union[
+        "AnthropicLLMService.OutputConfig", dict[str, Any], NotGiven, AnthropicNotGiven
+    ] = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings):
@@ -154,6 +175,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
     # Backward compatibility: ThinkingConfig used to be defined inline here.
     ThinkingConfig = AnthropicThinkingConfig
+
+    OutputConfig = AnthropicOutputConfig
 
     @deprecated(
         "`AnthropicLLMService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
@@ -250,6 +273,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             thinking=ANTHROPIC_NOT_GIVEN,
+            output_config=ANTHROPIC_NOT_GIVEN,
             extra={},
         )
 
@@ -318,6 +342,24 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         else:
             response = await api_call(**params)
             return response
+
+    def _apply_output_config(self, params: dict[str, Any]):
+        """Put the caller's output configuration — the effort level — in a request.
+
+        Takes either an :class:`AnthropicOutputConfig` or the plain dict form the
+        API documents.
+
+        Args:
+            params: The request params dict (modified in place).
+        """
+        output_config = assert_given(self._settings.output_config)
+        if not output_config:
+            return
+        params["output_config"] = (
+            output_config
+            if isinstance(output_config, dict)
+            else output_config.model_dump(exclude_unset=True)
+        )
 
     def _maybe_disable_thinking(self, params: dict[str, Any]):
         """Turn thinking off by default on Sonnet models where it is on unless told not to.
@@ -392,6 +434,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         thinking = assert_given(self._settings.thinking)
         if thinking:
             params["thinking"] = thinking.model_dump(exclude_unset=True)
+
+        self._apply_output_config(params)
 
         params.update(self._settings.extra)
 
@@ -479,6 +523,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             thinking = assert_given(self._settings.thinking)
             if thinking:
                 params["thinking"] = thinking.model_dump(exclude_unset=True)
+
+            self._apply_output_config(params)
 
             # Messages, system, tools
             params.update(params_from_context)
