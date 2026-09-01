@@ -1,0 +1,3 @@
+- `NvidiaLLMService` now defaults to `nvidia/nemotron-3-super-120b-a12b`. The
+  previous default, `nvidia/nemotron-3-nano-30b-a3b`, reached end of life on
+  NVIDIA's NIM cloud endpoint and now returns HTTP 410.
