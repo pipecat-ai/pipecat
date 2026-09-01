@@ -1922,12 +1922,19 @@ class TestWordCompletionTrackerCJK(unittest.TestCase):
         """word_belongs_here distinguishes Korean words based on remaining content."""
         tracker = WordCompletionTracker("저는 여러분의")
         self.assertTrue(tracker.word_belongs_here("저는"))
-        # "여러분의" starts with chars that follow "저는", so before consuming
-        # "저는" the next word doesn't belong here yet.
-        self.assertFalse(tracker.word_belongs_here("여러분의"))
+        # A word further into the frame belongs here too: its event arriving means
+        # the ones before it were dropped, not that the frame has moved on.
+        self.assertTrue(tracker.word_belongs_here("여러분의"))
+        self.assertFalse(tracker.word_belongs_here("안녕하세요"))
 
         tracker.add_word_and_check_complete("저는")
         self.assertTrue(tracker.word_belongs_here("여러분의"))
+
+    def test_korean_word_after_a_dropped_event_takes_the_text_before_it(self):
+        """The event for "저는" never arrives, so the next word carries it."""
+        tracker = WordCompletionTracker("저는 여러분의")
+        self.assertTrue(tracker.add_word_and_check_complete("여러분의"))
+        self.assertEqual(tracker.get_word_for_frame(), "저는 여러분의")
 
     # --- Japanese ---
 
@@ -2698,6 +2705,238 @@ class TestTextNoWordArrivesFor(unittest.TestCase):
         self.assertNotIn("?", tracker.get_accumulated_user_facing_text())
         self.assertTrue(tracker.add_word_and_check_complete("?"))
         self.assertEqual(tracker.get_accumulated_user_facing_text(), text)
+
+
+# ---------------------------------------------------------------------------
+# Resync: a provider garbles one token, then carries on correctly
+# ---------------------------------------------------------------------------
+
+
+class TestWordCompletionTrackerResync(unittest.TestCase):
+    """A token matching nothing at the cursor, followed by one that matches ahead.
+
+    A garbled token is not this frame's text and must not be attributed to it. The
+    frame recovers on a later token, found a short way past the cursor -- the text
+    skipped in between never gets an event of its own, so the word that resyncs
+    carries it.
+
+    Neither the caller nor the frame has to know which case it is in.
+    :meth:`word_belongs_here` accepts a word anywhere within reach of the cursor,
+    and consuming it takes everything up to it, so a garbled token costs the frame
+    nothing but its own event.
+    """
+
+    SENTENCE = "This is how it is supposed to work"
+
+    def _tracker(self, llm_text=None):
+        """A tracker three words in, with " it is supposed to work" left to speak."""
+        tracker = WordCompletionTracker(self.SENTENCE, llm_text=llm_text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_token_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("ity"))
+
+    def test_rejected_token_leaves_the_cursor_untouched(self):
+        tracker = self._tracker()
+        tracker.word_belongs_here("ity")
+        self.assertEqual(tracker.get_remaining_tts_text(), "it is supposed to work")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how")
+
+    def test_resyncing_word_belongs_here(self):
+        tracker = self._tracker()
+        self.assertTrue(tracker.word_belongs_here("ís"))
+
+    def test_resyncing_word_carries_the_text_it_skipped(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "it is")
+
+    def test_resync_attributes_the_skipped_llm_text(self):
+        tracker = self._tracker(llm_text=self.SENTENCE)
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_llm_consumed(), "it is")
+
+    def test_progress_covers_the_skipped_text(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how it is")
+        self.assertEqual(tracker.get_remaining_user_facing_text(), "supposed to work")
+
+    def test_frame_completes_normally_after_a_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        for word in ("supposed", "to"):
+            self.assertTrue(tracker.word_belongs_here(word), f"{word!r} should belong")
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("work"))
+        self.assertEqual(tracker.get_remaining_tts_text(), "")
+
+    def test_lookahead_places_only_whole_words(self):
+        """Resyncing is error recovery, so a partial prefix is not enough to
+        anchor on -- only a token covering a whole word may skip text.
+        """
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("supp"))
+        self.assertTrue(tracker.word_belongs_here("supposed"))
+
+    def test_word_further_ahead_sweeps_everything_before_it(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("supposed")
+        self.assertEqual(tracker.get_word_for_frame(), "it is supposed")
+
+    def test_foreign_word_is_never_placed(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("banana"))
+
+    def test_lookahead_reach_is_bounded(self):
+        """Recovery spans a garbled token or two, not an arbitrary jump: a word
+        matching far down the sentence is a coincidence, not a resync.
+        """
+        tracker = WordCompletionTracker(self.SENTENCE)
+        tracker.add_word_and_check_complete("This")
+        self.assertFalse(tracker.word_belongs_here("work"))
+
+    def test_a_word_at_the_cursor_is_placed_without_sweeping(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("it")
+        self.assertEqual(tracker.get_word_for_frame(), "it")
+
+
+class TestWordCompletionTrackerResyncWithSymbols(unittest.TestCase):
+    """Symbols inside the span a resync sweeps up.
+
+    Brackets and arrows never arrive as word events of their own here, so they
+    reach the frame only by riding along with the word that resyncs.
+    """
+
+    def test_brackets_around_the_skipped_word_are_swept_up(self):
+        text = "This is how (it) is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+
+        self.assertFalse(tracker.word_belongs_here("ity"))
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "(it) is")
+        self.assertEqual(tracker.get_llm_consumed(), "(it) is")
+
+    def test_arrow_between_the_skipped_word_and_the_match_is_swept_up(self):
+        text = "This is how it → is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how"):
+            tracker.add_word_and_check_complete(word)
+
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "it → is")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "This is how it → is")
+
+    def test_a_symbol_token_still_takes_the_symbol_path(self):
+        """A token with nothing to match on is judged by the symbol rule, which
+        lookahead must leave alone.
+        """
+        text = "This is how it → is supposed to work"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        for word in ("This", "is", "how", "it"):
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.word_belongs_here("-"))
+
+
+class TestWordCompletionTrackerResyncWithTags(unittest.TestCase):
+    """Resyncing in a frame that also carries synthesis and LLM markup.
+
+    The tags are their own segment, so a resync in the text after them has to keep
+    the LLM cursor -- still sitting before the closing ``</card>`` -- in step.
+    """
+
+    TTS = "Call <spell>4111</spell> when it is ready"
+    LLM = "Call <card>4111</card> when it is ready"
+    USER_FACING = "Call 4111 when it is ready"
+
+    def _tracker(self):
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.LLM, user_facing_text=self.USER_FACING
+        )
+        for word in ("Call", "4111"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_token_after_the_tag_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("whenx"))
+
+    def test_resync_after_the_tag_sweeps_the_skipped_words(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_word_for_frame(), "when it is")
+
+    def test_resync_after_the_tag_carries_the_closing_tag_into_context(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_llm_consumed(), "</card> when it is")
+
+    def test_progress_skips_the_tag_it_never_shows(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Call 4111 when it is")
+
+    def test_frame_completes_normally_after_the_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("ís")
+        self.assertTrue(tracker.add_word_and_check_complete("ready"))
+
+    def test_lookahead_does_not_reach_past_a_transformed_span(self):
+        """A rewritten span lands all at once, so there is no honest position on
+        its far side to resync to. Whatever follows it waits for force-complete.
+        """
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.LLM, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("Call")
+        self.assertFalse(tracker.word_belongs_here("ís"))
+
+
+class TestWordCompletionTrackerResyncInsideTransform(unittest.TestCase):
+    """Resyncing within a rewritten span, which lands all at once.
+
+    The span's spoken words are what the resync steps over, so the word that
+    finishes it still attributes the whole span to the text the LLM wrote.
+    """
+
+    TTS = "Your balance is five dollars, due on 3/15."
+    ORIGINAL = "Your balance is $5, due on 3/15."
+
+    def _tracker(self):
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.ORIGINAL, user_facing_text=self.ORIGINAL
+        )
+        for word in ("Your", "balance", "is"):
+            tracker.add_word_and_check_complete(word)
+        return tracker
+
+    def test_garbled_word_inside_the_span_belongs_nowhere(self):
+        tracker = self._tracker()
+        self.assertFalse(tracker.word_belongs_here("fivex"))
+
+    def test_resync_emits_the_spoken_form_it_stepped_over(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_word_for_frame(), "five dollars,")
+
+    def test_resync_completing_the_span_attributes_the_original(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        self.assertEqual(tracker.get_llm_consumed(), "$5,")
+        self.assertEqual(tracker.get_accumulated_user_facing_text(), "Your balance is $5,")
+
+    def test_frame_completes_normally_after_the_resync(self):
+        tracker = self._tracker()
+        tracker.add_word_and_check_complete("dollars,")
+        for word in ("due", "on"):
+            self.assertFalse(tracker.add_word_and_check_complete(word))
+        self.assertTrue(tracker.add_word_and_check_complete("3/15."))
 
 
 if __name__ == "__main__":

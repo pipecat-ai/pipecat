@@ -80,8 +80,8 @@ is covered in [RTVI integration](./rtvi-integration.md).
 
 A progress frame accompanies a word frame whenever the word was matched to a real slot and
 `suppress_in_context()` is False. Two cases produce a word frame alone: a word held
-mid-transform (no meaningful position to report yet), and a passthrough word that no slot
-recognised (no segment to report progress against).
+mid-transform (no meaningful position to report yet), and a word emitted beside the queue
+because no slot is active at all (no segment to report progress against).
 
 ---
 
@@ -189,14 +189,23 @@ context whether the word fits *there*:
 | --- | --- | --- |
 | yes | — | Normal advance |
 | no | **yes** | The provider dropped an event: the current slot is force-completed and the word carries over |
-| no | **no** | Buffered (streaming) or emitted as passthrough (non-streaming) — **the active tracker is left untouched** |
+| no | **no** | Buffered (streaming), else a resync into the current slot, else dropped |
 
 That third row is what keeps one unrecognisable token from destroying a healthy slot. A
 word matching nothing is far more likely to be a provider quirk than proof that the
 sentence in front of it was skipped, so the sequencer declines to draw that conclusion
 from a single token. In streaming mode it is not even necessarily foreign — the sentence
-it belongs to may simply not have been promoted yet, which is why it is parked rather
-than passed through (see [§4](#4-token-mode-streaming)).
+it belongs to may simply not have been promoted yet, which is why it is parked (see
+[§4](#4-token-mode-streaming)).
+
+`Fits current` is a wider question than "is this the very next word". `word_belongs_here()`
+also accepts a word a few words further into the slot, because a provider that garbles or
+drops an event never sends one for the text in between — so the next word that does arrive
+is matched past it, and consuming that word takes everything up to it. The slot recovers on
+its own, and the text nothing reported still reaches the conversation context.
+
+A word nothing can place is dropped. Emitting it would write words the LLM never wrote into
+the context, and the slot's own text still reaches it through `force_complete`.
 
 ### Example: a provider that drops events
 
