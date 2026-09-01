@@ -15,17 +15,19 @@ import pytest
 from pipecat.frames.frames import TranscriptionFrame
 from pipecat.transcriptions.language import Language
 
-# Architectures published per language, best first. Streaming architectures ship
-# for English only; the other languages have one or two models each.
+# Architectures published per language, best first. English has the widest range;
+# the other languages have one to four models each.
 FAKE_MODELS = {
-    "ar": ["base"],
-    "es": ["base"],
+    "ar": ["tiny-streaming", "base"],
+    "de": ["small-streaming", "tiny-streaming"],
+    "es": ["small-streaming", "tiny-streaming", "base"],
     "en": ["medium-streaming", "small-streaming", "base", "tiny-streaming", "tiny"],
-    "ja": ["base", "tiny"],
+    "ja": ["small-streaming", "tiny-streaming", "base", "tiny"],
     "ko": ["tiny"],
-    "vi": ["base"],
+    "tl": ["tiny-streaming"],
+    "vi": ["tiny-streaming", "base"],
     "uk": ["base"],
-    "zh": ["base"],
+    "zh": ["tiny-streaming", "base"],
 }
 
 
@@ -104,12 +106,12 @@ def test_unavailable_architecture_falls_back_to_the_language_default(moonshine_m
     stt, fake_transcriber = moonshine_module
 
     service = stt.MoonshineSTTService(
-        settings=stt.MoonshineSTTService.Settings(language=Language.ES_MX)
+        settings=stt.MoonshineSTTService.Settings(language=Language.UK_UA)
     )
 
-    assert service._settings.language == "es"
+    assert service._settings.language == "uk"
     assert service._settings.model == "base"
-    assert fake_transcriber.instances[-1].model_path == "/models/es-base"
+    assert fake_transcriber.instances[-1].model_path == "/models/uk-base"
 
 
 def test_requested_architecture_is_kept_when_available(moonshine_module):
@@ -146,6 +148,9 @@ def test_language_to_moonshine_language(moonshine_module):
     assert stt.language_to_moonshine_language(Language.EN_US) == "en"
     assert stt.language_to_moonshine_language(Language.ZH_TW) == "zh"
     assert stt.language_to_moonshine_language(Language.UK) == "uk"
+    assert stt.language_to_moonshine_language(Language.DE) == "de"
+    assert stt.language_to_moonshine_language(Language.TL) == "tl"
+    assert stt.language_to_moonshine_language(Language.FIL) == "tl"
 
 
 def test_moonshine_language_to_frame_language(moonshine_module):

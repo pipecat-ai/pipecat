@@ -1,0 +1,3 @@
+- `MoonshineSTTService` now maps `Language.DE` (German) and `Language.TL` /
+  `Language.FIL` (Tagalog/Filipino), the languages Moonshine added to its model
+  catalogue.

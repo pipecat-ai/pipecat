@@ -61,10 +61,14 @@ def language_to_moonshine_language(language: Language) -> str:
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
+        Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
+        Language.FIL: "tl",  # Filipino maps to Tagalog
+        Language.FIL_PH: "tl",
         Language.JA: "ja",
         Language.KO: "ko",
+        Language.TL: "tl",
         Language.UK: "uk",
         Language.VI: "vi",
         Language.ZH: "zh",
@@ -89,10 +93,10 @@ class Model(StrEnum):
     ``model``. The larger models (``SMALL_STREAMING``, ``MEDIUM_STREAMING``) ship
     only in streaming form, but transcribe a whole segment in batch just the same.
 
-    Which architectures exist depends on the language: the streaming ones are
-    published for English only, and most other languages ship a single model. An
-    architecture unavailable for the configured language falls back to the best
-    one published for it.
+    Which architectures exist depends on the language: English publishes the
+    widest range and is the only language with ``MEDIUM_STREAMING``, while most
+    others ship one or two models. An architecture unavailable for the configured
+    language falls back to the best one published for it.
 
     Parameters:
         TINY: Smallest and fastest, lowest accuracy.
@@ -120,8 +124,9 @@ class MoonshineSTTSettings(STTSettings):
             string (e.g. ``Model.SMALL_STREAMING`` or ``"small-streaming"``).
             Defaults to ``Model.SMALL_STREAMING``.
         language: Language for transcription. Moonshine publishes models for
-            Arabic, Chinese, English, Japanese, Korean, Spanish, Ukrainian, and
-            Vietnamese; regional variants resolve to their base code.
+            Arabic, Chinese, English, German, Japanese, Korean, Spanish, Tagalog,
+            Ukrainian, and Vietnamese; regional variants resolve to their base
+            code.
     """
 
 
