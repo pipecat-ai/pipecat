@@ -73,22 +73,44 @@ class InputAudioTranscription(BaseModel):
     model: str = OPENAI_REALTIME_WHISPER_MODEL
     language: str | None
     prompt: str | None
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+    keywords: list[str] | None = None
+    languages: list[str] | None = None
 
     def __init__(
         self,
         model: str | None = OPENAI_REALTIME_WHISPER_MODEL,
         language: str | None = None,
         prompt: str | None = None,
+        delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None,
+        keywords: list[str] | None = None,
+        languages: list[str] | None = None,
     ):
         """Initialize InputAudioTranscription.
 
         Args:
             model: Transcription model to use (e.g., "gpt-realtime-whisper",
-                "gpt-4o-transcribe", "whisper-1").
+                "gpt-transcribe", "gpt-live-transcribe").
             language: Optional language code for transcription.
             prompt: Optional transcription hint text.
+            delay: How long the model waits before emitting transcription text.
+                Higher values trade latency for accuracy. Supported by
+                ``"gpt-realtime-whisper"``.
+            keywords: Words or phrases that guide transcription of the input
+                audio. Supported by ``"gpt-transcribe"`` and
+                ``"gpt-live-transcribe"``.
+            languages: Possible languages of the input audio, as ISO-639-1
+                codes. Supported by ``"gpt-transcribe"`` and
+                ``"gpt-live-transcribe"``.
         """
-        super().__init__(model=model, language=language, prompt=prompt)
+        super().__init__(
+            model=model,
+            language=language,
+            prompt=prompt,
+            delay=delay,
+            keywords=keywords,
+            languages=languages,
+        )
 
 
 class TurnDetection(BaseModel):
