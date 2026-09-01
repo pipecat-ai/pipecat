@@ -55,6 +55,7 @@ try:
         SpeakerDiarizationConfig,
         SpeakerIdentifier,
         TranscriptionConfig,
+        TurnConfig,
     )
     from speechmatics.agent_stt import ClientMessageType as AgentClientMessageType
     from speechmatics.agent_stt import ServerMessageType as AgentServerMessageType
@@ -713,14 +714,18 @@ class SpeechmaticsSTTService(STTService):
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
-        # Agent STT client. Turn detection rides on the config (the SDK lifts
-        # TranscriptionConfig.turn_detection_mode into the top-level turn_config); audio
-        # encoding / sample rate are passed here via AudioFormat, not on the config.
+        # Agent STT client. Turn detection is a top-level turn_config (sibling of the
+        # transcription config); audio encoding / sample rate go via AudioFormat.
         self._client = AgentSttAsyncClient(
             api_key=self._api_key,
             url=self._base_url,
             app=f"pipecat/{pipecat_version()}",
             config=self._config,
+            turn_config=TurnConfig(
+                turn_detection_mode=_handle_turn_detection_mode(
+                    assert_given(self._settings.turn_detection_mode)
+                )
+            ),
             audio_format=AudioFormat(
                 encoding=self._audio_encoding,
                 sample_rate=self.sample_rate,
@@ -807,8 +812,8 @@ class SpeechmaticsSTTService(STTService):
         """Build an Agent STT ``TranscriptionConfig`` from the given settings.
 
         Only fields Agent STT accepts on the wire are set. Audio encoding / sample rate are
-        passed to the client via ``AudioFormat``, not here. ``turn_detection_mode`` is set on
-        the config; the SDK lifts it into the top-level ``turn_config`` on StartRecognition.
+        passed to the client via ``AudioFormat``; turn detection is passed to the client via
+        ``TurnConfig`` (a top-level ``turn_config`` sibling of ``transcription_config``).
 
         Dropped — no Agent STT equivalent: speaker focus (focus_speakers / ignore_speakers /
         focus_mode / speaker_passive_format), ``split_sentences`` (-> emit_sentences), and the
@@ -821,7 +826,6 @@ class SpeechmaticsSTTService(STTService):
         return TranscriptionConfig(
             language=sm_language,
             model=assert_given(s.model),
-            turn_detection_mode=_handle_turn_detection_mode(assert_given(s.turn_detection_mode)),
             diarization="speaker" if s.enable_diarization else None,
             speaker_diarization_config=_build_diarization_config(s),
             additional_vocab=s.additional_vocab or None,
