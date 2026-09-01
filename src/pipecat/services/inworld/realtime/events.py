@@ -113,9 +113,15 @@ class InputTranscription(BaseModel):
 
     Parameters:
         model: The STT model to use for transcription.
+        language: BCP-47 language code (e.g. "en", "es"). The model
+            auto-detects the language when omitted.
+        prompt: Transcription guidance: vocabulary hints, domain context,
+            formatting preferences.
     """
 
     model: str | None = None
+    language: str | None = None
+    prompt: str | None = None
 
 
 #
