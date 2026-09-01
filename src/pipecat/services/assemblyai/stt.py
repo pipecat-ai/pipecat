@@ -38,7 +38,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
+from pipecat.services.stt_latency import ASSEMBLYAI_SYNC_TTFS_P99, ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -1271,9 +1271,6 @@ ASSEMBLYAI_SYNC_BASE_URL = "https://sync.assemblyai.com"
 ASSEMBLYAI_SYNC_TRANSCRIBE_PATH = "/v1/transcribe"
 ASSEMBLYAI_SYNC_WARM_PATH = "/v1/warm"
 
-# Default model, sent in the ``X-AAI-Model`` header AssemblyAI routes on.
-ASSEMBLYAI_SYNC_DEFAULT_MODEL = "universal-3-5-pro"
-
 
 @dataclass
 class AssemblyAISyncSTTSettings(STTSettings):
@@ -1344,7 +1341,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         max_context_turns: int = 5,
         max_context_chars: int = 1500,
         settings: Settings | None = None,
-        ttfs_p99_latency: float | None = None,
+        ttfs_p99_latency: float | None = ASSEMBLYAI_SYNC_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AssemblyAI Sync STT service.
@@ -1379,8 +1376,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model=ASSEMBLYAI_SYNC_DEFAULT_MODEL,
-            language=None,
+            model="universal-3-5-pro",
+            language=Language.EN,
             prompt=None,
             keyterms_prompt=None,
             conversation_context=None,
