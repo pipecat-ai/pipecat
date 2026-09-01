@@ -103,6 +103,9 @@ class MiniMaxTTSSettings(TTSSettings):
         text_normalization: Enable text normalization (Chinese/English).
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
+        pronunciation_dict: Pronunciation replacements, each entry in MiniMax's
+            ``original/replacement`` form (e.g. ``"processing/(chu3)(li3)"``).
+            Sent as the API's ``pronunciation_dict.tone`` list.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -112,6 +115,7 @@ class MiniMaxTTSSettings(TTSSettings):
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latex_read: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -242,6 +246,7 @@ class MiniMaxHttpTTSService(TTSService):
             emotion=None,
             text_normalization=None,
             latex_read=None,
+            pronunciation_dict=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -392,6 +397,8 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.language_boost is not None:
             payload["language_boost"] = self._settings.language_boost
+        if self._settings.pronunciation_dict is not None:
+            payload["pronunciation_dict"] = {"tone": self._settings.pronunciation_dict}
 
         try:
             async with self._session.post(
