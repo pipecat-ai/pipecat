@@ -99,7 +99,8 @@ class MiniMaxTTSSettings(TTSSettings):
         volume: Speech volume (range: 0 to 10).
         pitch: Pitch adjustment (range: -12 to 12).
         emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
-            "disgusted", "surprised", "calm", "fluent").
+            "disgusted", "surprised", "calm", "fluent", "whisper"). "fluent" and
+            "whisper" require a speech-2.6-* model.
         text_normalization: Enable text normalization (Chinese/English).
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
@@ -170,7 +171,7 @@ class MiniMaxHttpTTSService(TTSService):
             volume: Speech volume (range: 0 to 10).
             pitch: Pitch adjustment (range: -12 to 12).
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
-                "disgusted", "surprised", "calm", "fluent").
+                "disgusted", "surprised", "calm", "fluent", "whisper").
             text_normalization: Enable text normalization (Chinese/English).
             latex_read: Enable LaTeX formula reading.
             exclude_aggregated_audio: Whether to exclude aggregated audio in final chunk.
@@ -282,7 +283,9 @@ class MiniMaxHttpTTSService(TTSService):
                         "disgusted",
                         "surprised",
                         "neutral",
+                        "calm",
                         "fluent",
+                        "whisper",
                     ]
                     if params.emotion in supported_emotions:
                         default_settings.emotion = params.emotion
