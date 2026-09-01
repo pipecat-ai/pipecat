@@ -129,6 +129,17 @@ class InputTranscription(BaseModel):
 #
 
 
+class NoiseReduction(BaseModel):
+    """Noise reduction applied to input audio.
+
+    Parameters:
+        type: Microphone profile to tune the filter for: "near_field" for
+            headsets and handsets, "far_field" for speakerphones and rooms.
+    """
+
+    type: Literal["near_field", "far_field"]
+
+
 class AudioInput(BaseModel):
     """Audio input configuration.
 
@@ -136,11 +147,14 @@ class AudioInput(BaseModel):
         format: The format configuration for input audio.
         transcription: Configuration for input audio transcription.
         turn_detection: Configuration for turn detection.
+        noise_reduction: Noise reduction applied to input audio. Disabled
+            when omitted.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
     transcription: InputTranscription | None = None
     turn_detection: TurnDetection | None = None
+    noise_reduction: NoiseReduction | None = None
 
 
 class AudioOutput(BaseModel):
