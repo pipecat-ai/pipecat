@@ -83,7 +83,7 @@ class XAISTTSettings(STTSettings):
         interim_results: When True, partial transcripts are emitted
             approximately every 500ms.
         endpointing: Silence duration in milliseconds that triggers a
-            speech-final event. Range 0-5000. Server default is 10ms.
+            speech-final event. Range 0-5000. Server default is 400ms.
         multichannel: When True, transcribes each interleaved channel
             independently. Requires ``channels`` >= 2.
         channels: Number of interleaved channels (2-8). Required when
@@ -152,7 +152,7 @@ class XAISTTService(WebsocketSTTService):
                 16000, 22050, 24000, 44100, 48000. If None, uses the input
                 sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
-                ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
+                ``"mulaw"``, ``"alaw"``, or ``"opus"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
             ttfs_p99_latency: P99 latency from speech end to final transcript
                 in seconds. See https://github.com/pipecat-ai/stt-benchmark.
