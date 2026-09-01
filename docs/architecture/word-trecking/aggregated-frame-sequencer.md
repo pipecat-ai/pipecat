@@ -189,7 +189,7 @@ context whether the word fits *there*:
 | --- | --- | --- |
 | yes | — | Normal advance |
 | no | **yes** | The provider dropped an event: the current slot is force-completed and the word carries over |
-| no | **no** | Buffered (streaming), else a resync into the current slot, else dropped |
+| no | **no** | Buffered (streaming), else dropped — a later word matching past the gap resyncs the slot on its own call |
 
 That third row is what keeps one unrecognisable token from destroying a healthy slot. A
 word matching nothing is far more likely to be a provider quirk than proof that the
