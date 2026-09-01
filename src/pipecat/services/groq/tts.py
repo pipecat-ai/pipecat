@@ -63,7 +63,7 @@ class GroqTTSService(TTSService):
     """Groq text-to-speech service implementation.
 
     Provides text-to-speech synthesis using Groq's TTS API. The service
-    operates at a fixed 48kHz sample rate and supports various voices
+    operates at a fixed 24kHz sample rate and supports various voices
     and output formats.
     """
 
@@ -89,7 +89,9 @@ class GroqTTSService(TTSService):
         language: Language | None = Language.EN
         speed: float | None = 1.0
 
-    GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
+    # Groq's Orpheus models synthesize at 24kHz. The API's `sample_rate` parameter only
+    # rewrites the WAV header, leaving the samples untouched, so it is never sent.
+    GROQ_SAMPLE_RATE = 24000
 
     def __init__(
         self,
@@ -126,13 +128,13 @@ class GroqTTSService(TTSService):
                     Use ``settings=GroqTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
+            sample_rate: Audio sample rate. Must be 24000 Hz for Groq TTS.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
         if sample_rate != self.GROQ_SAMPLE_RATE:
-            logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
+            logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate.")
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
