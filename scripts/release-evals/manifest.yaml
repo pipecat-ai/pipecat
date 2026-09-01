@@ -20,6 +20,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-assemblyai.py
     scenarios: [capital_question]
+  - bot: voice/voice-assemblyai-sync.py
+    scenarios: [capital_question]
   - bot: voice/voice-assemblyai-turn-detection.py
     scenarios: [capital_question]
   - bot: voice/voice-asyncai.py
