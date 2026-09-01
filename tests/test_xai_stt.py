@@ -49,3 +49,16 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
 
     assert service.sample_rate == 16000
     assert _query(service)["sample_rate"] == ["16000"]
+
+
+def test_keyterm_expands_into_one_parameter_per_term(monkeypatch):
+    service = XAISTTService(
+        api_key="test-key",
+        settings=XAISTTService.Settings(keyterm=["Pipecat", "xAI"], smart_turn=0.7),
+    )
+
+    _setup_service(service, monkeypatch, 16000)
+
+    query = _query(service)
+    assert query["keyterm"] == ["Pipecat", "xAI"]
+    assert query["smart_turn"] == ["0.7"]
