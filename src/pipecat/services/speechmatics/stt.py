@@ -11,7 +11,7 @@ import os
 import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any, ClassVar
 
 from dotenv import load_dotenv
@@ -45,19 +45,18 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from speechmatics.agent_stt import DEFAULT_MODEL, Model
+    from speechmatics.agent_stt import TurnDetectionMode as AgentTurnDetectionMode
     from speechmatics.voice import (
         AdditionalVocabEntry,
         AgentClientMessageType,
         AgentServerMessageType,
         AudioEncoding,
-        EndOfUtteranceMode,
         SpeakerFocusConfig,
         SpeakerFocusMode,
         SpeakerIdentifier,
         SpeechSegmentConfig,
         VoiceAgentClient,
         VoiceAgentConfig,
-        VoiceAgentConfigPreset,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -91,21 +90,21 @@ def _resolve_model(model: Model | str | None, operating_point: Model | str | Non
     return resolved.value if isinstance(resolved, Model) else resolved
 
 
-class TurnDetectionMode(StrEnum):
-    """Endpoint and turn detection handling mode.
+class TurnDetectionMode(str, Enum):
+    """How turn boundaries (end of speech) are detected.
 
-    How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
-    then use `TurnDetectionMode.EXTERNAL` (default).
+    `DEFAULT`: the STT service runs its own VAD and closes turns itself.
 
-    To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
-    voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
-    endpointing.
+    `EXTERNAL`: turn boundaries are controlled by the caller — the service does not
+    endpoint on its own, and the caller drives turns by calling `finalize()` (for
+    example from Pipecat's own VAD).
+
+    The values mirror the Agent STT SDK's own turn-detection modes so the two never
+    drift; only the member names differ (DEFAULT=VAD).
     """
 
-    FIXED = "fixed"
-    EXTERNAL = "external"
-    ADAPTIVE = "adaptive"
-    SMART_TURN = "smart_turn"
+    DEFAULT = AgentTurnDetectionMode.VAD.value
+    EXTERNAL = AgentTurnDetectionMode.EXTERNAL.value
 
 
 @dataclass
@@ -225,9 +224,10 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.FIXED`,
-                `TurnDetectionMode.EXTERNAL`, `TurnDetectionMode.ADAPTIVE` and
-                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.EXTERNAL`.
+            turn_detection_mode: How turns are closed. `TurnDetectionMode.DEFAULT` lets the
+                STT service run its own VAD and close turns itself; `TurnDetectionMode.EXTERNAL`
+                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD).
+                Defaults to `TurnDetectionMode.EXTERNAL`.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -557,12 +557,6 @@ class SpeechmaticsSTTService(STTService):
         # Outbound frame queue
         self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()
 
-        # Framework options
-        self._enable_vad: bool = self._config.end_of_utterance_mode not in [
-            EndOfUtteranceMode.FIXED,
-            EndOfUtteranceMode.EXTERNAL,
-        ]
-
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
@@ -701,8 +695,8 @@ class SpeechmaticsSTTService(STTService):
         self._client.on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
         self._client.on(AgentServerMessageType.ADD_SEGMENT, add_message)
 
-        # Add listeners for VAD
-        if self._enable_vad:
+        # Service-side turn events (only emitted when the service closes turns).
+        if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
             self._client.on(AgentServerMessageType.START_OF_TURN, add_message)
             self._client.on(AgentServerMessageType.END_OF_TURN, add_message)
 
@@ -783,9 +777,13 @@ class SpeechmaticsSTTService(STTService):
         """
         s = settings
 
-        # Preset from turn detection mode
-        turn_detection_mode = assert_given(s.turn_detection_mode)
-        config = VoiceAgentConfigPreset.load(turn_detection_mode.value)
+        # Turn detection is no longer wired through the voice-SDK presets: those inject
+        # fields Agent STT rejects (max_delay, max_delay_mode, enable_entities,
+        # audio_filtering_config). Build a bare config and set only supported fields.
+        # The `turn_detection_mode` param is kept but currently unwired.
+        # TODO(agent-stt): send turn detection via the top-level `turn_config`
+        # (`TurnConfig`/`TurnDetectionMode` in speechmatics.agent_stt) once on the Agent STT client.
+        config = VoiceAgentConfig()
 
         # Audio encoding (init-only, stored as instance attribute)
         config.audio_encoding = self._audio_encoding
@@ -1006,13 +1004,13 @@ class SpeechmaticsSTTService(STTService):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
 
-        # Force finalization
+        # Force finalization — only when the caller drives turns (EXTERNAL).
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if self._enable_vad:
+            if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
                 logger.warning(
-                    f"{self} VADUserStoppedSpeakingFrame received but internal VAD is being used"
+                    f"{self} VADUserStoppedSpeakingFrame received but the service VAD is in use"
                 )
-            elif not self._enable_vad and self._client is not None:
+            elif self._client is not None:
                 self.request_finalize()
                 self._client.finalize()
 
