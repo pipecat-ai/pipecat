@@ -24,12 +24,14 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
 
-Then commit and push ``_reports``. With ``--finalize`` it also renders the
-digest and opens (or updates) the digest issue on the reports repo when there
-is anything to show. Run::
+Then commit and push ``_reports``. With ``--finalize`` it also publishes the
+digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
+or a highlights-less render made here when none exists — and opens (or
+updates) the digest issue on the reports repo when there is anything to show.
+Run::
 
     uv run python scripts/provider-watch/publish.py --date 2026-08-20
-    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize h.md
+    uv run python scripts/provider-watch/publish.py --date 2026-08-20 --finalize
 """
 
 from __future__ import annotations
@@ -311,13 +313,17 @@ def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
     return True
 
 
-def render_digest(reports_dir: Path, date: str, highlights: Path | None, reports_repo: str) -> Path:
+def ensure_digest(reports_dir: Path, date: str, reports_repo: str) -> Path:
+    """The digest to publish: the one ``/provider-research-digest`` rendered, untouched,
+    else a highlights-less render so ``--finalize`` still has a digest to publish."""
     out = reports_dir / "digests" / f"{date}.md"
+    if out.exists():
+        return out
     out.parent.mkdir(parents=True, exist_ok=True)
     text = digest.render(
         digest.load_reports(reports_dir, date),
         date=date,
-        highlights=highlights.read_text() if highlights else None,
+        highlights=None,
         repo_url=f"https://github.com/{reports_repo}",
     )
     out.write_text(text)
@@ -395,12 +401,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reports-repo", default="pipecat-ai/provider-watch-reports")
     parser.add_argument(
         "--finalize",
-        nargs="?",
-        const="",
-        default=None,
-        metavar="HIGHLIGHTS",
-        help="also render the digest and open/update the issue, with an optional "
-        "highlights file inserted at the top",
+        action="store_true",
+        help="also publish the digest (digests/<date>.md, rendered by "
+        "/provider-research-digest; a highlights-less one is rendered here if "
+        "missing) and open/update the digest issue",
     )
     args = parser.parse_args(argv)
 
@@ -414,14 +418,11 @@ def main(argv: list[str] | None = None) -> int:
         reports_repo=args.reports_repo,
         date=args.date,
     )
-    if args.finalize is not None:
-        highlights = Path(args.finalize) if args.finalize else None
-        render_digest(args.reports, args.date, highlights, args.reports_repo)
+    if args.finalize:
+        digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
-    if args.finalize is not None and worth_an_issue(reports):
-        outcome.issue_url = open_or_update_issue(
-            sh, args.reports_repo, args.date, args.reports / "digests" / f"{args.date}.md"
-        )
+    if args.finalize and worth_an_issue(reports):
+        outcome.issue_url = open_or_update_issue(sh, args.reports_repo, args.date, digest_file)
 
     print(json.dumps(outcome.__dict__, indent=2))
     return 0

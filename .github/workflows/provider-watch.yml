@@ -7,7 +7,8 @@ name: Provider watch
 # pipecat-ai/provider-watch-reports — is scripts/provider-watch/publish.py's
 # job, run by dedicated steps: once after each group's research (with a fresh
 # GitHub App token, since installation tokens expire after one hour) and once
-# at the end for the digest.
+# at the end, after the /provider-research-digest skill renders the digest
+# with authored highlights from every report carrying the run's date.
 
 on:
   schedule:
@@ -270,16 +271,18 @@ jobs:
             _reports/reports
             _reports/digests
             .pw-scratch/run.jsonl
-            .pw-scratch/highlights.md
             .pw-scratch/summary.md
 
   digest:
     needs: [plan, research]
-    # Renders the digest even when some groups failed; whatever they pushed is
-    # in the reports repo and belongs in it.
+    # Digests even when some groups failed; whatever they pushed is in the
+    # reports repo and belongs in it.
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.skip != 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
+    # The digest skill authors highlights with the bot's Anthropic key, which
+    # lives in this environment.
+    environment: provider-watch
     permissions:
       contents: write
       issues: write
@@ -310,36 +313,50 @@ jobs:
         with:
           version: "latest"
 
-      - name: Install PyYAML
-        # publish.py needs only PyYAML here; the full project install is the
-        # research jobs' concern.
-        run: uv venv && uv pip install pyyaml
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # The extras excluded here need system libraries or Apple hardware; the
+        # same set is excluded by the Read the Docs build.
+        run: |
+          uv sync --group dev --all-extras \
+            --no-extra gstreamer \
+            --no-extra local \
+            --no-extra local-smart-turn \
+            --no-extra moondream \
+            --no-extra mlx-whisper
 
       - name: Configure git identity
         run: |
           git -C _reports config user.name "pipecat-provider-watch-bot[bot]"
           git -C _reports config user.email "321038859+pipecat-provider-watch-bot[bot]@users.noreply.github.com"
 
-      - name: Download group highlights
-        uses: actions/download-artifact@v4
+      - name: Author the digest
+        timeout-minutes: 20
+        uses: anthropics/claude-code-action@v1
         with:
-          pattern: provider-watch-${{ github.run_id }}-*
-          path: group-artifacts
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: |
+            Run the provider-research-digest skill unattended:
 
-      - name: Merge highlights
-        run: |
-          : > highlights.md
-          for f in group-artifacts/*/.pw-scratch/highlights.md; do
-            [ -f "$f" ] && { cat "$f"; echo; } >> highlights.md
-          done
-          cat highlights.md
+            /provider-research-digest --date ${{ needs.plan.outputs.run_date }}
 
-      - name: Render the digest and open the issue
+            Read `.claude/skills/provider-research-digest/SKILL.md` and follow
+            it exactly. `./_reports` is already checked out on `main` with
+            every report published for the date; write the digest there and
+            publish nothing — the next workflow step runs publish.py.
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 40
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash"
+
+      - name: Publish the digest
+        # Pushes the digest and opens (or updates) the digest issue. Runs even
+        # when authoring failed: publish.py then renders a highlights-less
+        # digest, so the issue still goes out.
+        if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          .venv/bin/python scripts/provider-watch/publish.py \
-            --date "${{ needs.plan.outputs.run_date }}" \
-            --reports _reports \
-            --repo-root . \
-            --finalize highlights.md
+        run: uv run python scripts/provider-watch/publish.py --date "${{ needs.plan.outputs.run_date }}" --finalize
