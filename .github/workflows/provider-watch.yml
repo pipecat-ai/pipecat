@@ -1,6 +1,6 @@
 name: Provider watch
 
-# Weekly provider research. Research jobs run the /provider-research skill,
+# Provider research, every other week. Research jobs run the /provider-research skill,
 # which only researches: one matrix job per group of units, each writing
 # reports and local provider-watch/* branches. Publishing — pushing reports,
 # opening draft PRs here, filing the digest issue on
@@ -11,6 +11,7 @@ name: Provider watch
 
 on:
   schedule:
+    # Mondays; the plan job's cadence gate skips every other one.
     - cron: "17 6 * * 1"
   workflow_dispatch:
     inputs:
@@ -50,7 +51,22 @@ jobs:
       # One date for the whole sweep, so groups that publish after UTC
       # midnight still write and publish under the date the run started.
       run_date: ${{ steps.groups.outputs.run_date }}
+      skip: ${{ steps.cadence.outputs.skip }}
     steps:
+      - name: Decide whether this scheduled Monday runs
+        id: cadence
+        # The sweep runs every other week. Cron can only say "every Monday",
+        # so the off Mondays are skipped here by epoch-week parity (stable
+        # across year boundaries, unlike ISO week numbers; even weeks run).
+        # Manual dispatches always run.
+        run: |
+          SKIP=false
+          if [ "${{ github.event_name }}" = "schedule" ] && [ $(( $(date -u +%s) / 604800 % 2 )) -eq 1 ]; then
+            SKIP=true
+          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP"
+
       - name: Checkout pipecat
         uses: actions/checkout@v4
 
@@ -76,6 +92,7 @@ jobs:
 
   research:
     needs: plan
+    if: needs.plan.outputs.skip != 'true'
     runs-on: ubuntu-latest
     # The publish step mints its own token, so research only has to leave it
     # room inside the job timeout; the step timeout does that.
@@ -260,7 +277,7 @@ jobs:
     needs: [plan, research]
     # Renders the digest even when some groups failed; whatever they pushed is
     # in the reports repo and belongs in it.
-    if: always() && needs.plan.result == 'success' && inputs.dry_run != true
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.skip != 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
