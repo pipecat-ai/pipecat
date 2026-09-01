@@ -239,7 +239,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
-            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+            service_tier: Service tier to use: "auto", "default", "flex",
+                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
+                tier, the name that replaced "priority"; both values are
+                accepted.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
