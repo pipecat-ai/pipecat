@@ -8,6 +8,7 @@
 
 import asyncio
 import os
+import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -43,13 +44,13 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
+    from speechmatics.agent_stt import DEFAULT_MODEL, Model
     from speechmatics.voice import (
         AdditionalVocabEntry,
         AgentClientMessageType,
         AgentServerMessageType,
         AudioEncoding,
         EndOfUtteranceMode,
-        OperatingPoint,
         SpeakerFocusConfig,
         SpeakerFocusMode,
         SpeakerIdentifier,
@@ -65,6 +66,29 @@ except ModuleNotFoundError as e:
 
 
 load_dotenv()
+
+
+def _resolve_model(model: Model | str | None, operating_point: Model | str | None) -> str:
+    """Resolve the transcription model, preferring `model` over the deprecated
+    `operating_point` alias.
+
+    Both accept a `Model` enum member or its wire string. If both are given they must
+    match; if only one is given it wins; if neither, the default model is used.
+    (`Model` is a `str` enum, so string/enum values compare equal.)
+    """
+    if model is not None and operating_point is not None and model != operating_point:
+        raise ValueError(
+            f"`model` ({model!r}) and `operating_point` ({operating_point!r}) differ. "
+            "Pass only `model` (`operating_point` is deprecated)."
+        )
+    if model is None and operating_point is not None:
+        warnings.warn(
+            "`operating_point` is deprecated; use `model` instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+    resolved = model or operating_point or DEFAULT_MODEL
+    return resolved.value if isinstance(resolved, Model) else resolved
 
 
 class TurnDetectionMode(StrEnum):
@@ -100,7 +124,8 @@ class SpeechmaticsSTTSettings(STTSettings):
         focus_mode: Speaker focus mode for diarization.
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
-        operating_point: Operating point for accuracy vs. latency.
+        model: Resolved transcription model (operating point). See ``_resolve_model``.
+        operating_point: Deprecated alias for ``model``.
         max_delay: Maximum delay in seconds for transcription.
         end_of_utterance_silence_trigger: Maximum delay for end of utterance trigger.
         end_of_utterance_max_delay: Maximum delay for end of utterance.
@@ -125,7 +150,7 @@ class SpeechmaticsSTTSettings(STTSettings):
     additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    operating_point: OperatingPoint | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    operating_point: Model | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     end_of_utterance_silence_trigger: float | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -186,7 +211,7 @@ class SpeechmaticsSTTService(STTService):
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
     AudioEncoding = AudioEncoding
-    OperatingPoint = OperatingPoint
+    Model = Model
     SpeakerFocusMode = SpeakerFocusMode
     SpeakerFocusConfig = SpeakerFocusConfig
     SpeakerIdentifier = SpeakerIdentifier
@@ -251,8 +276,11 @@ class SpeechmaticsSTTService(STTService):
 
             audio_encoding: Audio encoding format. Defaults to AudioEncoding.PCM_S16LE.
 
-            operating_point: Operating point for transcription accuracy vs. latency tradeoff. It is
-                recommended to use OperatingPoint.ENHANCED for most use cases. Default to enhanced.
+            model: The transcription model (operating point) to use, e.g. `"linden-1"`.
+                Defaults to the SDK's default model. Preferred over `operating_point`.
+
+            operating_point: Deprecated alias for `model`. If both are given they must name the
+                same value, otherwise a `ValueError` is raised. Optional.
 
             max_delay: Maximum delay in seconds for transcription. This forces the STT engine to
                 speed up the processing of transcribed words and reduces the interval between partial
@@ -327,7 +355,8 @@ class SpeechmaticsSTTService(STTService):
         # -------------------
 
         # Features
-        operating_point: OperatingPoint | None = None
+        model: Model | str | None = None
+        operating_point: Model | str | None = None
         max_delay: float | None = None
         end_of_utterance_silence_trigger: float | None = None
         end_of_utterance_max_delay: float | None = None
@@ -436,7 +465,7 @@ class SpeechmaticsSTTService(STTService):
 
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model=None,  # Will be resolved from operating_point after config is built
+            model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
             turn_detection_mode=TurnDetectionMode.EXTERNAL,
@@ -486,6 +515,7 @@ class SpeechmaticsSTTService(STTService):
                 default_settings.known_speakers = _params.known_speakers
                 default_settings.additional_vocab = _params.additional_vocab
                 encoding = _params.audio_encoding
+                default_settings.model = _params.model
                 default_settings.operating_point = _params.operating_point
                 default_settings.max_delay = _params.max_delay
                 default_settings.end_of_utterance_silence_trigger = (
@@ -505,11 +535,17 @@ class SpeechmaticsSTTService(STTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # Build SDK config from settings, set model name before calling super
+        # Reconcile the preferred `model` with the deprecated `operating_point` alias
+        # (model preferred, both-differ raises, default = DEFAULT_MODEL) before building
+        # the SDK config from settings.
+        default_settings.model = _resolve_model(
+            default_settings.model, default_settings.operating_point
+        )
+
+        # Build SDK config from settings before calling super
         self._client: VoiceAgentClient | None = None
         self._audio_encoding = encoding
         self._config: VoiceAgentConfig = self._build_config(default_settings)
-        default_settings.model = self._config.operating_point.value
 
         super().__init__(
             sample_rate=sample_rate,
@@ -774,9 +810,12 @@ class SpeechmaticsSTTService(STTService):
         # Custom dictionary
         config.additional_vocab = s.additional_vocab if s.additional_vocab is not None else []
 
+        # Operating point / model — the resolved model name (always set, defaults to
+        # DEFAULT_MODEL). `model` supersedes the deprecated `operating_point` alias.
+        config.operating_point = assert_given(s.model)
+
         # Advanced parameters — only set if not None
         for param in [
-            "operating_point",
             "max_delay",
             "end_of_utterance_silence_trigger",
             "end_of_utterance_max_delay",
