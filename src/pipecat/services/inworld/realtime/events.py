@@ -150,11 +150,13 @@ class AudioOutput(BaseModel):
         format: The format configuration for output audio.
         model: The TTS model to use (e.g. "inworld-tts-2").
         voice: The voice ID to use (e.g. "Sarah", "Clive").
+        speed: Speaking rate, from 0.25 to 1.5.
     """
 
     format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
     model: str | None = None
     voice: str | None = None
+    speed: float | None = None
 
 
 class AudioConfiguration(BaseModel):
