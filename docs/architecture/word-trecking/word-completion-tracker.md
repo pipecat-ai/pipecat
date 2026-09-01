@@ -101,8 +101,8 @@ than left hanging:
 
 ```python
 tracker = WordCompletionTracker("Hello there world")
-tracker.add_word_and_check_complete("Hello")     # normal
-tracker.add_word_and_check_complete("Goodbye")   # belongs to the *next* frame
+tracker.add_word_and_check_complete("Hello")  # normal
+tracker.add_word_and_check_complete("Goodbye")  # belongs to the *next* frame
 ```
 
 | word      | `word_belongs_here` | complete | `get_word_for_frame()` | `get_overflow_word()` |
@@ -181,8 +181,8 @@ The paired accessors are what drive RTVI progress. Mid-sentence:
 tracker = WordCompletionTracker("Hello there world")
 tracker.add_word_and_check_complete("Hello")
 
-tracker.get_accumulated_user_facing_text()   # 'Hello'
-tracker.get_remaining_user_facing_text()     # 'there world'
+tracker.get_accumulated_user_facing_text()  # 'Hello'
+tracker.get_remaining_user_facing_text()  # 'there world'
 ```
 
 `get_remaining_user_facing_text(strip=False)` preserves leading whitespace, so accumulated

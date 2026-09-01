@@ -318,19 +318,19 @@ prompts the LLM to tag its output, then routes each tag type differently:
 
 ```python
 # 1. Aggregate tagged segments separately
-llm_text_aggregator.add_pattern(type="credit_card",
-                                start_pattern="<card>", end_pattern="</card>",
-                                action=MatchAction.AGGREGATE)
+llm_text_aggregator.add_pattern(
+    type="credit_card", start_pattern="<card>", end_pattern="</card>", action=MatchAction.AGGREGATE
+)
 
 # 2. Never speak code blocks
 tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
 
 # 3. Rewrite what the TTS receives, per segment type
-tts.add_text_transformer(spell_out_text, "credit_card")   # wraps in <spell> tags
-tts.add_text_transformer(strip_url_protocol, "link")      # drops "https://"
+tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags
+tts.add_text_transformer(strip_url_protocol, "link")  # drops "https://"
 
 # 4. Redact what the client renders, per segment type
-rtvi_observer_params=RTVIObserverParams(
+rtvi_observer_params = RTVIObserverParams(
     bot_output_transforms=[("credit_card", obfuscate_credit_card)]
 )
 ```

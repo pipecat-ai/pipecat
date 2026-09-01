@@ -62,9 +62,9 @@ to the sentence it already rendered.
 
 ```python
 AggregatedTextProgressFrame(
-    segment_id=slot.frame.id,                              # ← the sentence's id
+    segment_id=slot.frame.id,  # ← the sentence's id
     context_id=slot.context_id,
-    text=slot.frame.text,                                  # full sentence
+    text=slot.frame.text,  # full sentence
     aggregated_by=slot.frame.aggregated_by,
     accumulated_text=tracker.get_accumulated_user_facing_text(),
     remaining_text=tracker.get_remaining_user_facing_text(strip=False),
@@ -149,7 +149,7 @@ after "this:"    ┌─ SPOKEN ✓ ─┐  ┌─ SKIPPED ─┐  ┌─ SPOKEN 
 ```python
 seq = AggregatedFrameSequencer(name="demo")
 await seq.register_spoken(spoken_frame, "ctx1", "Here is the code", append_to_context=True)
-await seq.register_skipped(code_frame, "ctx1", None)     # -> []  blocked
+await seq.register_skipped(code_frame, "ctx1", None)  # -> []  blocked
 ```
 
 | call | frames returned |
@@ -204,9 +204,9 @@ than passed through (see [§4](#4-token-mode-streaming)).
 emits the remaining unspoken text so the context keeps the full sentence:
 
 ```python
-seq.process_word("Hello", pts=1000, context_id="ctx1")   # -> TTSTextFrame + Progress
-seq.force_complete("ctx1", last_word_pts=2000)           # -> TTSTextFrame('there world')
-seq.process_word("there", pts=3000, context_id="ctx1")   # -> []  stale, dropped
+seq.process_word("Hello", pts=1000, context_id="ctx1")  # -> TTSTextFrame + Progress
+seq.force_complete("ctx1", last_word_pts=2000)  # -> TTSTextFrame('there world')
+seq.process_word("there", pts=3000, context_id="ctx1")  # -> []  stale, dropped
 ```
 
 ---
@@ -237,8 +237,8 @@ context is skipped over:
 await seq.register_spoken(a, "ctxA", "alpha one", append_to_context=True)
 await seq.register_spoken(b, "ctxB", "beta two", append_to_context=True)
 
-seq.process_word("beta",  pts=1000, context_id="ctxB")   # -> TTSTextFrame('beta')
-seq.process_word("alpha", pts=1000, context_id="ctxA")   # -> TTSTextFrame('alpha')
+seq.process_word("beta", pts=1000, context_id="ctxB")  # -> TTSTextFrame('beta')
+seq.process_word("alpha", pts=1000, context_id="ctxA")  # -> TTSTextFrame('alpha')
 ```
 
 `ctxB`'s word reaches `ctxB`'s slot even though `ctxA`'s slot sits earlier in the queue and
