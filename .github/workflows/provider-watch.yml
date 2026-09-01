@@ -33,6 +33,14 @@ concurrency:
   group: provider-watch
   cancel-in-progress: false
 
+# Each research job runs its whole group as a single concurrent wave of
+# researchers, so this one knob is both the plan group size and the skill's
+# --concurrency. It trades sweep wall-clock (fewer, larger groups mean fewer
+# matrix waves) against the burst of concurrent researchers (max-parallel
+# jobs × this many) that the Anthropic rate limits see.
+env:
+  PW_GROUP_SIZE: "8"
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -58,9 +66,7 @@ jobs:
         run: |
           ONLY="${{ inputs.only }}"
           LIMIT="${{ inputs.limit }}"
-          # Sized so a group's research (two researcher batches) clears the
-          # research step timeout with room to spare.
-          ARGS=(--json --group-size 10)
+          ARGS=(--json --group-size "$PW_GROUP_SIZE")
           [ -n "$ONLY" ] && ARGS+=(--only "$ONLY")
           [ -n "$LIMIT" ] && ARGS+=(--limit "$LIMIT")
           GROUPS_JSON=$(python3 scripts/provider-watch/plan.py "${ARGS[@]}")
@@ -83,7 +89,7 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
-      # Half the groups at a time bounds the burst of concurrent researchers.
+      # Five jobs at a time bounds the researcher burst to 5 × PW_GROUP_SIZE.
       max-parallel: 5
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.groups) }}
@@ -179,7 +185,7 @@ jobs:
           prompt: |
             Run the provider-research skill unattended:
 
-            /provider-research --only ${{ matrix.group.units }} --date ${{ needs.plan.outputs.run_date }}
+            /provider-research --only ${{ matrix.group.units }} --date ${{ needs.plan.outputs.run_date }} --concurrency ${{ env.PW_GROUP_SIZE }}
 
             Read `.claude/skills/provider-research/SKILL.md` and follow it
             exactly, including its "Unattended runs" section. This job
