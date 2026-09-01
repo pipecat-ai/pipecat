@@ -56,6 +56,10 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-deepgram-flux.py
     scenarios: [capital_question]
+  - bot: voice/voice-deepgram-flux-manual.py
+    scenarios:
+      - capital_question
+      - interruption_audio
   - bot: voice/voice-deepgram-http.py
     scenarios: [capital_question]
   - bot: voice/voice-elevenlabs.py
