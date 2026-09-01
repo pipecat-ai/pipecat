@@ -1,0 +1,2 @@
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now map `Language.OR` (Odia)
+  and `Language.UR` (Urdu), the two languages Sonic 3.6 added.
