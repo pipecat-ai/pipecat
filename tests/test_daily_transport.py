@@ -429,3 +429,25 @@ async def test_other_call_states_keep_messages_flowing():
     assert error is None
     client._callbacks.on_error.assert_not_awaited()
     client._client.send_app_message.assert_called_once()
+
+
+def test_transcription_started_leaves_unmanaged_session_alone():
+    transport = _make_transport(transcription_enabled=False)
+    client = transport._client
+    client._call_event_callback = MagicMock()
+
+    client.on_transcription_started({})
+
+    client._call_event_callback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transcription_started_scopes_to_captured_participants():
+    transport = _make_transport(transcription_enabled=True)
+    client = transport._client
+    await client.capture_participant_transcription("user-1")
+    client._call_event_callback = MagicMock()
+
+    client.on_transcription_started({})
+
+    client._call_event_callback.assert_called_once_with(client.update_transcription, ["user-1"])
