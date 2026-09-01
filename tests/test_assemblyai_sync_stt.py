@@ -14,12 +14,14 @@ from aiohttp import web
 
 from pipecat.frames.frames import (
     ErrorFrame,
+    StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.services.assemblyai.stt import AssemblyAISyncSTTService
 from pipecat.services.stt_latency import ASSEMBLYAI_SYNC_TTFS_P99
 from pipecat.transcriptions.language import Language
+from pipecat.utils.errors import ErrorCategory
 
 WAV = b"RIFF....WAVEfmt "
 
@@ -62,6 +64,23 @@ async def _service(aiohttp_client, app, session, **kwargs) -> AssemblyAISyncSTTS
 
 def _config(captured: dict) -> dict:
     return json.loads(captured["parts"]["config"])
+
+
+async def _run_and_report(service: AssemblyAISyncSTTService) -> ErrorFrame:
+    """Run a segment and return the reported error.
+
+    Errors are classified as the base class pushes them, not as ``run_stt``
+    yields them, so a test reading ``category`` or ``is_usable`` has to go
+    through ``process_generator`` the way the pipeline does.
+    """
+    pushed = []
+
+    async def capture(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = capture
+    await service.process_generator(service.run_stt(WAV))
+    return pushed[-1]
 
 
 #
@@ -199,7 +218,7 @@ async def test_run_stt_yields_an_error_frame_on_a_problem_details_body(aiohttp_c
 
 
 @pytest.mark.asyncio
-async def test_run_stt_surfaces_the_message_of_an_error_code_body(aiohttp_client):
+async def test_run_stt_names_the_error_code_and_message(aiohttp_client):
     captured = {}
     app = _transcribe_app(
         captured,
@@ -212,7 +231,48 @@ async def test_run_stt_surfaces_the_message_of_an_error_code_body(aiohttp_client
         frames = [frame async for frame in service.run_stt(WAV)]
 
     assert isinstance(frames[0], ErrorFrame)
+    assert "audio_too_large" in frames[0].error
     assert "audio exceeds 120 seconds" in frames[0].error
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_key_leaves_the_service_unusable(aiohttp_client):
+    captured = {}
+    app = _transcribe_app(captured, status=401, body={"status": 401, "detail": "Invalid API key"})
+    async with aiohttp.ClientSession() as session:
+        service = await _service(aiohttp_client, app, session)
+
+        error = await _run_and_report(service)
+
+    assert error.category is ErrorCategory.AUTHENTICATION
+    # A key stays rejected, so the base class stops handing the service work.
+    assert service.is_usable is False
+
+
+@pytest.mark.asyncio
+async def test_a_server_error_leaves_the_service_usable(aiohttp_client):
+    captured = {}
+    app = _transcribe_app(captured, status=503, body={"error_code": "service_unavailable"})
+    async with aiohttp.ClientSession() as session:
+        service = await _service(aiohttp_client, app, session)
+
+        error = await _run_and_report(service)
+
+    assert error.category is ErrorCategory.SERVER
+    assert service.is_usable is True
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_segment_leaves_the_service_usable(aiohttp_client):
+    captured = {}
+    app = _transcribe_app(captured, status=413, body={"error_code": "audio_too_large"})
+    async with aiohttp.ClientSession() as session:
+        service = await _service(aiohttp_client, app, session)
+
+        await _run_and_report(service)
+
+    # One segment too long says nothing about the next one.
+    assert service.is_usable is True
 
 
 #
@@ -414,3 +474,13 @@ async def test_cleanup_cancels_a_pending_warm():
 
     assert len(cancelled) == 1
     assert service._warm_task is None
+
+
+@pytest.mark.asyncio
+async def test_a_new_run_starts_on_an_empty_conversation_context():
+    service = AssemblyAISyncSTTService(api_key="k", aiohttp_session=object())
+    service._append_context_turn("Booking a flight to Lisbon.")
+
+    await service.start(StartFrame())
+
+    assert service._context_turns == []

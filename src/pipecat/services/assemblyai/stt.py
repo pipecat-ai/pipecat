@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
@@ -1479,6 +1480,15 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         ):
             self._context_turns.pop(0)
 
+    async def start(self, frame: StartFrame):
+        """Start the service on an empty conversation context.
+
+        The buffer holds one conversation, so an instance reused for another
+        run starts it fresh.
+        """
+        await super().start(frame)
+        self._context_turns.clear()
+
     async def _process_assistant_turn(self, text: str) -> None:
         """Feed the agent's completed reply into the conversation context.
 
@@ -1524,7 +1534,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             The decoded JSON transcription result.
 
         Raises:
-            Exception: If the API returns a non-200 status.
+            aiohttp.ClientResponseError: If the API returns a non-200 status.
         """
         url = f"{self._base_url}{ASSEMBLYAI_SYNC_TRANSCRIBE_PATH}"
 
@@ -1547,7 +1557,15 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
 
         async with self._session.post(url, data=data, headers=self._request_headers()) as response:
             if response.status != 200:
-                raise Exception(await self._error_detail(response))
+                # The status rides on the exception so the framework can
+                # classify the failure: a rejected key leaves the service
+                # unusable, a rate limit or a server error does not.
+                raise aiohttp.ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=await self._error_detail(response),
+                )
             return await response.json()
 
     async def _error_detail(self, response: aiohttp.ClientResponse) -> str:
@@ -1555,19 +1573,23 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
 
         Errors arrive either as a problem-details body (``title``/``detail``)
         or as ``{"error_code", "message"}``; surface whichever fields are
-        present, falling back to the raw body.
+        present, falling back to the raw body. The status is carried by the
+        exception this message goes on, so it isn't repeated here.
         """
         try:
             body = await response.json(content_type=None)
         except Exception:
             body = None
         if isinstance(body, dict):
-            title = body.get("title")
-            detail = body.get("detail") or body.get("message")
-            parts = [p for p in (title, detail) if p]
+            fields = (
+                body.get("error_code"),
+                body.get("title"),
+                body.get("detail") or body.get("message"),
+            )
+            parts = [field for field in fields if field]
             if parts:
-                return f"status {response.status}: {' - '.join(parts)}"
-        return f"status {response.status}: {await response.text()}"
+                return " - ".join(parts)
+        return await response.text()
 
     @traced_stt
     async def _handle_transcription(
@@ -1610,7 +1632,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
                 self._append_context_turn(text)
         except Exception as e:
             logger.error(f"{self}: error transcribing audio: {e}")
-            yield ErrorFrame(error=f"Sync transcription error: {e}")
+            yield ErrorFrame(error=f"Sync transcription error: {e}", exception=e)
 
     async def cleanup(self):
         """Cancel any in-flight pre-warm task and clean up."""
