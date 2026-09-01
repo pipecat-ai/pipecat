@@ -45,7 +45,7 @@ error: null                                # or one line: why the unit could not
   - `high` — users are affected now or imminently: a request the provider rejects or has scheduled to reject (a deprecated parameter with a removal date), a crash or hang path, a default that is retiring, something a released model needs in order to work at all.
   - `medium` — a capability users plausibly want that the service cannot express: a missing `Settings` field, a model an allowlist blocks, an SDK pin behind the provider's current major.
   - `low` — hygiene: naming, docs that live in another repo, preview-only models to re-check, enum cleanup.
-- `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. The `summary` covers everything on the branch; when the branch has more than one commit it becomes the PR title. `publish.py` turns `branch` into `open` and fills `url`; `capped: true` on a branch entry means the per-run PR cap stopped it from being opened this run.
+- `prs` entries are `{branch, state: branch, summary}` for a branch you left, or `{url, state: open|merged|closed, opened, summary}` for a PR you found during dedupe. The `summary` covers everything on the branch; when the branch has more than one commit it becomes the PR title. `publish.py` turns `branch` into `open` and fills `url`.
 - An item covered by a decision in force (see "The decisions file" below) is not a gap and does not appear in the report.
 - `error` is `null` unless the unit could not be researched (missing credential — name the variable, not the value —, provider outage, researcher failure). An errored report still lists what it could establish.
 
