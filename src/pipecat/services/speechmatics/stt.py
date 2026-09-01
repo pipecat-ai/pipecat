@@ -41,6 +41,7 @@ from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -52,6 +53,7 @@ try:
         AudioFormat,
         AudioEncoding,
         Model,
+        Segment,
         SpeakerDiarizationConfig,
         SpeakerIdentifier,
         TranscriptionConfig,
@@ -899,32 +901,30 @@ class SpeechmaticsSTTService(STTService):
     async def _handle_partial_segment(self, message: dict[str, Any]) -> None:
         """Handle AddPartialSegment events.
 
-        AddPartialSegment events are triggered by Speechmatics STT when it detects a
-        partial segment of speech. These events provide the partial transcript for
-        the current speaking turn.
+        Agent STT sends a single ``segment`` object (``transcript``/``speaker``) plus
+        message-level ``metadata``; ``Segment.from_message`` reads that singular shape.
 
         Args:
             message: the message payload.
         """
-        # Handle segments
-        segments: list[dict[str, Any]] = message.get("segments", [])
-        if segments:
-            await self._send_frames(segments)
+        segment = Segment.from_message(message)
+        if segment.transcript:
+            await self._send_frame(segment, finalized=False)
 
     async def _handle_segment(self, message: dict[str, Any]) -> None:
         """Handle AddSegment events.
 
-        AddSegment events are triggered by Speechmatics STT when it detects a
-        final segment of speech. These events provide the final transcript for
-        the current speaking turn.
+        Agent STT sends a single final ``segment`` object plus message-level ``metadata``.
 
         Args:
             message: the message payload.
         """
-        # Handle segments
-        segments: list[dict[str, Any]] = message.get("segments", [])
-        if segments:
-            await self._send_frames(segments, finalized=True)
+        # TODO(agent-stt / Gap 6): finalize-confirmation used to key off a per-segment
+        # `is_eou` flag here; Agent STT signals end-of-turn with the EndOfTurn message
+        # instead. Move `confirm_finalize()` onto `_handle_end_of_turn` (spot 5).
+        segment = Segment.from_message(message)
+        if segment.transcript:
+            await self._send_frame(segment, finalized=True)
 
     async def _handle_start_of_turn(self, message: dict[str, Any]) -> None:
         """Handle StartOfTurn events.
@@ -1008,81 +1008,53 @@ class SpeechmaticsSTTService(STTService):
                 self.request_finalize()
                 self._client.finalize()
 
-    async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
-        """Send frames to the pipeline.
+    def _segment_to_frame(
+        self, segment: Segment, *, finalized: bool
+    ) -> TranscriptionFrame | InterimTranscriptionFrame:
+        """Transform an Agent STT ``Segment`` into a Pipecat transcription frame.
+
+        Pure mapping (the Gap 1 seam) — no side effects. ``finalized`` picks the frame
+        type. ``language`` has no wire field, so it comes from the configured setting;
+        ``result`` has no wire field and is left unset.
+        """
+        language = assert_given(self._settings.language)
+        active_format = assert_given(self._settings.speaker_active_format)
+        text = active_format.format(
+            speaker_id=segment.speaker or "UU",
+            text=segment.transcript,
+            ts=segment.start_time,
+            lang=language,
+        )
+
+        frame_cls = TranscriptionFrame if finalized else InterimTranscriptionFrame
+        return frame_cls(
+            text=text,
+            user_id=segment.speaker or "",
+            timestamp=time_now_iso8601(),
+            language=language,
+        )
+
+    async def _send_frame(self, segment: Segment, *, finalized: bool) -> None:
+        """Emit one transcription frame for a segment, with final-only metrics.
 
         Args:
-            segments: The segments to send.
-            finalized: Whether the data is final or partial.
+            segment: The segment to emit.
+            finalized: Whether this is a final (True) or interim (False) transcript.
         """
-        # Skip if no frames
-        if not segments:
-            return
+        frame = self._segment_to_frame(segment, finalized=finalized)
 
-        # Frames to send
-        frames: list[Frame] = []
-
-        # Create frame from segment
-        def attr_from_segment(segment: dict[str, Any]) -> dict[str, Any]:
-            # Formats the output text based on the speaker and defined formats from the config.
-            active_format = assert_given(self._settings.speaker_active_format)
-            passive_format = assert_given(self._settings.speaker_passive_format)
-            text = (active_format if segment.get("is_active", True) else passive_format).format(
-                **{
-                    "speaker_id": segment.get("speaker_id", "UU"),
-                    "text": segment.get("text", ""),
-                    "ts": segment.get("timestamp"),
-                    "lang": segment.get("language"),
-                }
-            )
-
-            # Return the attributes for the frame
-            return {
-                "text": text,
-                "user_id": segment.get("speaker_id") or "",
-                "timestamp": segment.get("timestamp"),
-                "language": segment.get("language"),
-                "result": segment.get("results", []),
-            }
-
-        # If final, then re-parse into TranscriptionFrame
         if finalized:
-            # Do any segments have `is_eou` set to True?
-            if (
-                any(segment.get("is_eou", False) for segment in segments)
-                and self._finalize_requested
-            ):
-                self.confirm_finalize()
-
-            # Add the finalized frames
-            frames += [TranscriptionFrame(**attr_from_segment(segment)) for segment in segments]
-
-            # Handle the text (for metrics reporting)
-            finalized_text = "|".join([s["text"] for s in segments])
             await self._handle_transcription(
-                finalized_text, is_final=True, language=segments[0]["language"]
+                segment.transcript, is_final=True, language=assert_given(self._settings.language)
             )
-
-            # Log the frames
-            logger.debug(f"{self} finalized transcript: {[f.text for f in frames]}")
-
-        # Return as interim results (unformatted)
-        else:
-            # Add the interim frames
-            frames += [
-                InterimTranscriptionFrame(**attr_from_segment(segment)) for segment in segments
-            ]
-
-            # Log the frames
-            logger.debug(f"{self} interim transcript: {[f.text for f in frames]}")
-
-        # Send the frames
-        if finalized:
-            # Report usage before the transcription frames so tracing can
-            # attach it to the STT span they close.
+            # Report usage before the transcription frame so tracing can attach it to the
+            # STT span the frame closes.
             await self.emit_stt_usage_metrics()
-        for frame in frames:
-            await self.push_frame(frame)
+            logger.debug(f"{self} finalized transcript: {frame.text!r}")
+        else:
+            logger.debug(f"{self} interim transcript: {frame.text!r}")
+
+        await self.push_frame(frame)
 
     # ============================================================================
     # PUBLIC FUNCTIONS
