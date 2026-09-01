@@ -21,7 +21,7 @@ on:
         required: false
         type: string
       limit:
-        description: "Research only the first N selected units"
+        description: "Research only the first N selected units; 0 researches nothing and just re-renders and re-publishes today's digest and issue"
         required: false
         type: string
       dry_run:
@@ -93,7 +93,9 @@ jobs:
 
   research:
     needs: plan
-    if: needs.plan.outputs.skip != 'true'
+    # An empty plan is a digest-only run; skipping here keeps the empty
+    # matrix expression from ever being evaluated.
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.groups != '[]'
     runs-on: ubuntu-latest
     # The publish step mints its own token, so research only has to leave it
     # room inside the job timeout; the step timeout does that.
