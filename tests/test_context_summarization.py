@@ -60,6 +60,68 @@ class TestContextSummarizationMixin(unittest.TestCase):
         self.assertGreater(total, 30)  # At least overhead
         self.assertLess(total, 50)  # Not too much
 
+    def test_get_preserved_system_message(self):
+        """Test detection of the preserved initial system message."""
+        # Empty context
+        context = LLMContext()
+        self.assertIsNone(LLMContextSummarizationUtil.get_preserved_system_message(context))
+
+        # First message is not a system message
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        self.assertIsNone(LLMContextSummarizationUtil.get_preserved_system_message(context))
+
+        # First message is an LLMSpecificMessage
+        context = LLMContext(
+            messages=[LLMSpecificMessage(llm="test", message={"role": "system", "content": "x"})]
+        )
+        self.assertIsNone(LLMContextSummarizationUtil.get_preserved_system_message(context))
+
+        # First message is a system message; mid-conversation ones don't count
+        system_msg = {"role": "system", "content": "System prompt"}
+        context = LLMContext(
+            messages=[
+                system_msg,
+                {"role": "user", "content": "Hello"},
+                {"role": "system", "content": "Mid-conversation injection"},
+            ]
+        )
+        self.assertIs(LLMContextSummarizationUtil.get_preserved_system_message(context), system_msg)
+
+    def test_estimate_preserved_system_tokens(self):
+        """Test token estimation of the preserved initial system message."""
+        # No preserved system message
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        self.assertEqual(LLMContextSummarizationUtil.estimate_preserved_system_tokens(context), 0)
+
+        # System message: 100 chars -> 25 tokens + 10 overhead
+        context = LLMContext(
+            messages=[
+                {"role": "system", "content": "x" * 100},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
+        self.assertEqual(LLMContextSummarizationUtil.estimate_preserved_system_tokens(context), 35)
+
+    def test_estimate_messages_tokens_tool_calls(self):
+        """Test token estimation covers tool calls and tool results."""
+        messages = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city": "Taipei"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "Sunny"},
+        ]
+        total = LLMContextSummarizationUtil.estimate_messages_tokens(messages)
+        # Overhead: 10 per message + 10 for the tool_call_id
+        # Content: name+arguments ~28 chars -> 7 tokens, "Sunny" -> 1 token
+        self.assertEqual(total, 38)
+
     def test_get_messages_to_summarize_basic(self):
         """Test basic message extraction for summarization."""
         context = LLMContext()

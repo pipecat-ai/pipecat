@@ -343,9 +343,23 @@ class LLMContextSummarizationUtil:
             images), tool calls and their arguments, tool results, and
             ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
         """
+        return LLMContextSummarizationUtil.estimate_messages_tokens(context.messages)
+
+    @staticmethod
+    def estimate_messages_tokens(messages: list[LLMContextMessage]) -> int:
+        """Estimate total token count for a list of messages.
+
+        Args:
+            messages: The messages to estimate.
+
+        Returns:
+            The estimated total token count, covering message content (text and
+            images), tool calls and their arguments, tool results, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
+        """
         total = 0
 
-        for message in context.messages:
+        for message in messages:
             # LLMSpecificMessage holds service-specific data (e.g. thinking blocks,
             # thought signatures). Skipping them here for now.
             if isinstance(message, LLMSpecificMessage):

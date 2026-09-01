@@ -260,6 +260,79 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_no_retrigger_after_summary_applied(self):
+        """Test that applying a summary does not immediately re-trigger summarization.
+
+        When the kept messages still exceed the token limit after a summary is
+        applied, the only candidate is the previous summary, and re-summarizing
+        it makes no progress. New conversation re-enables the trigger.
+        """
+        from loguru import logger
+
+        context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
+        # Eight large messages: the first four are summarizable, the last four
+        # are kept and alone exceed the token limit.
+        for i in range(8):
+            context.add_message({"role": "user", "content": "x" * 1000})
+
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=500,
+            max_unsummarized_messages=100,  # High so it doesn't trigger by message count
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=4),
+        )
+
+        summarizer = LLMContextSummarizer(context=context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_count = 0
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_count, request_frame
+            request_count += 1
+            request_frame = frame
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertEqual(request_count, 1)
+
+        # Simulate the summary result: messages 1-4 were summarized
+        # (summary_end = 9 - 4 = 5, last index 4)
+        summary_result = LLMContextSummaryResultFrame(
+            request_id=request_frame.request_id,
+            summary="Earlier conversation.",
+            last_summarized_index=4,
+            error=None,
+        )
+        await summarizer.process_frame(summary_result)
+
+        # Context is now [system, summary, four kept messages]
+        self.assertEqual(len(context.messages), 6)
+
+        # Next turns: kept messages still exceed the limit, but re-summarizing
+        # the lone summary cannot help, so no new request and one warning
+        warnings = []
+        sink_id = logger.add(lambda m: warnings.append(m), level="WARNING")
+        try:
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+            await summarizer.process_frame(LLMFullResponseStartFrame())
+        finally:
+            logger.remove(sink_id)
+
+        self.assertEqual(request_count, 1)
+        no_progress_warnings = [w for w in warnings if "previous summary" in str(w)]
+        self.assertEqual(len(no_progress_warnings), 1)
+
+        # New conversation joins the summary in the candidate range, so
+        # summarization can make progress again
+        for i in range(2):
+            context.add_message({"role": "user", "content": "x" * 1000})
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertEqual(request_count, 2)
+
+        await summarizer.cleanup()
+
     async def test_summarization_in_progress_prevents_duplicate(self):
         """Test that a summarization in progress prevents triggering another."""
         config = LLMAutoContextSummarizationConfig(
