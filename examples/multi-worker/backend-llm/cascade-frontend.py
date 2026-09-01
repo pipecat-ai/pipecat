@@ -130,6 +130,7 @@ async def delegate(params: FunctionCallParams, task: str):
     logger.info(f"Delegating to the backend: {task!r}")
 
     async def on_update(kind: str, text: str):
+        logger.info(f"Backend update ({kind}): {text!r}")
         # Progress — what the backend says before calling tools, and its
         # reasoning summaries — is recorded as intermediate results of this
         # call: context the frontend can draw on if asked, without prompting a
@@ -146,6 +147,7 @@ async def delegate(params: FunctionCallParams, task: str):
         on_update=on_update,
         timeout_secs=120,
     )
+    logger.info(f"Backend result: {text!r}")
     await params.result_callback(text)
 
 
