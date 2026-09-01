@@ -107,6 +107,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         end_of_utterance_max_delay: Maximum delay for end of utterance.
         punctuation_overrides: Punctuation overrides.
         include_partials: Include partial segment fragments.
+        include_results: Include word-level results in transcript messages.
         split_sentences: Emit finalized sentences mid-turn.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
@@ -136,6 +137,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     include_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_results: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     split_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -461,6 +463,7 @@ class SpeechmaticsSTTService(STTService):
             end_of_utterance_max_delay=None,
             punctuation_overrides=None,
             include_partials=None,
+            include_results=None,
             split_sentences=None,
             enable_diarization=None,
             speaker_sensitivity=None,
@@ -802,6 +805,7 @@ class SpeechmaticsSTTService(STTService):
             "end_of_utterance_max_delay",
             "punctuation_overrides",
             "include_partials",
+            "include_results",
             "enable_diarization",
             "speaker_sensitivity",
             "max_speakers",
