@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
+from typing_extensions import override
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -30,9 +31,32 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+
+
+class FluxConnectionNotConfirmedError(Exception):
+    """Flux accepted the connection but never confirmed it was ready."""
+
+
+class FluxFatalError(Exception):
+    """Flux reported a fatal error and terminated the connection.
+
+    Attributes:
+        code: The error code Flux sent, e.g. ``UNPARSABLE_CLIENT_MESSAGE``.
+    """
+
+    def __init__(self, message: str, code: str):
+        """Initialize the error.
+
+        Args:
+            message: The formatted error message.
+            code: The error code Flux sent.
+        """
+        super().__init__(message)
+        self.code = code
 
 
 def language_to_deepgram_flux_language(language: Language) -> str:
@@ -125,8 +149,8 @@ class DeepgramFluxSTTSettings(STTSettings):
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
-            Connection-time only: Flux does not support toggling numerals
-            mid-stream, so updates via ``STTUpdateSettingsFrame`` are ignored.
+            Read only from the connection URL, so an update is applied by
+            reconnecting.
         language_hints: Languages to bias transcription toward. Only honored by the
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
@@ -160,7 +184,23 @@ class DeepgramFluxSTTBase(STTService):
         "eot_timeout_ms",
         "language_hints",
     }
+    # Fields Flux only accepts in the connection URL, so changing them reconnects.
+    _CONNECTION_FIELDS = {"model", "numerals"}
+    # Fields applied to results as they arrive, so no connection change is needed.
+    _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
+    # How long to wait for Flux to confirm a new connection. An endpoint that
+    # rejects a connection parameter sends neither a Connected message nor an
+    # error, so the wait needs a bound.
+    _CONNECTION_TIMEOUT = 10.0
+    # Flux error codes whose cause a retry cannot clear. Rejected credentials
+    # don't appear here: those fail the HTTP handshake and are classified from
+    # its status code, never reaching a Flux error message. Anything not listed
+    # falls back to the default classification, leaving recovery to the
+    # service's own reconnect handling.
+    _ERROR_CODE_CATEGORIES = {
+        "UNPARSABLE_CLIENT_MESSAGE": ErrorCategory.INVALID_REQUEST,
+    }
     # How long an in-flight Configure is trusted before a new update supersedes
     # it outright. Flux caps the number of un-acked Configure messages, so at
     # most one is ever in flight; this bounds how long a missing ack can block
@@ -284,6 +324,53 @@ class DeepgramFluxSTTBase(STTService):
     # ------------------------------------------------------------------
     # Connection helpers
     # ------------------------------------------------------------------
+
+    @override
+    async def _do_reconnect(self):
+        """Tear down the transport connection and re-establish it.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        """
+        await self._disconnect()
+        await self._connect()
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify the failures Flux signals in its own protocol.
+
+        Flux reports these over the connection rather than as an HTTP status,
+        so they carry nothing the default classification can read.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the default classification.
+        """
+        if isinstance(exception, FluxConnectionNotConfirmedError):
+            # Flux stays silent rather than refusing the connection when a
+            # setting is unsupported, so an unconfirmed connection means the
+            # request was rejected, not that the network was slow.
+            return ErrorCategory.INVALID_REQUEST
+        if isinstance(exception, FluxFatalError):
+            return self._ERROR_CODE_CATEGORIES.get(exception.code)
+        return None
+
+    async def _await_connection_established(self):
+        """Wait for Flux to confirm the connection is ready.
+
+        Raises:
+            FluxConnectionNotConfirmedError: If no confirmation arrives within
+                ``_CONNECTION_TIMEOUT``.
+        """
+        try:
+            await asyncio.wait_for(
+                self._connection_established_event.wait(), timeout=self._CONNECTION_TIMEOUT
+            )
+        except TimeoutError:
+            raise FluxConnectionNotConfirmedError(
+                f"Flux did not confirm the connection within {self._CONNECTION_TIMEOUT}s; "
+                "the endpoint may not accept the current connection settings"
+            ) from None
 
     def _build_query_string(self) -> str:
         """Build query string from current settings and init-only connection config."""
@@ -523,8 +610,8 @@ class DeepgramFluxSTTBase(STTService):
 
         Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
         eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
-        message. Other fields are stored but cannot be applied to the active
-        connection.
+        message. Fields Flux only reads from the connection URL trigger a
+        reconnect, which waits until the user stops speaking.
         """
         changed = await super()._update_settings(delta)
 
@@ -535,7 +622,12 @@ class DeepgramFluxSTTBase(STTService):
         if configure_fields and self._transport_is_active():
             await self._send_configure(configure_fields)
 
-        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
+        if changed.keys() & self._CONNECTION_FIELDS:
+            await self._request_reconnect()
+
+        self._warn_unhandled_updated_settings(
+            changed.keys() - self._CONFIGURE_FIELDS - self._CONNECTION_FIELDS - self._LOCAL_FIELDS
+        )
 
         return changed
 
@@ -624,13 +716,14 @@ class DeepgramFluxSTTBase(STTService):
             data: The error message data containing error details.
 
         Raises:
-            Exception: Always raises to trigger error handling in the transport layer.
+            FluxFatalError: Always raises to trigger error handling in the transport layer.
         """
-        error_msg = data.get("error", "Unknown error")
-        deepgram_error = f"Fatal error: {error_msg}"
+        error_code = data.get("code", "unknown")
+        description = data.get("description", "no description")
+        deepgram_error = f"{self}: Fatal error [{error_code}] {description}"
         logger.error(deepgram_error)
         # Error will be handled by the transport's receive loop error handler
-        raise Exception(deepgram_error)
+        raise FluxFatalError(deepgram_error, code=error_code)
 
     async def _handle_turn_info(self, data: dict[str, Any]):
         """Handle TurnInfo events from Deepgram Flux.
