@@ -117,11 +117,7 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
             lines.append(f"- {_link(report, repo_url)} — {pr.get('url')}{state}{_summary(pr)}")
         lines.append("")
     if branches:
-        capped = [b for b in branches if b[1].get("capped")]
-        title = "## Branches not opened as PRs" + (
-            " (per-run cap reached)" if capped else " (dry run)"
-        )
-        lines += [title, ""]
+        lines += ["## Branches not opened as PRs (dry run)", ""]
         for report, pr in branches:
             branch = pr.get("branch")
             lines.append(

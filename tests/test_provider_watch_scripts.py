@@ -415,7 +415,7 @@ class TestPublish:
         write("ollama/llm", "provider-watch/ollama-llm-default")
         return tmp_path, publish
 
-    def test_opens_adopts_and_caps(self, reports_dir):
+    def test_opens_and_adopts(self, reports_dir):
         tmp_path, publish = reports_dir
         sh = self.FakeShell(
             open_prs={
@@ -435,11 +435,12 @@ class TestPublish:
             pipecat_repo="pipecat-ai/pipecat",
             reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
-            cap=1,
         )
-        assert outcome.opened == ["https://github.com/pipecat-ai/pipecat/pull/101"]
+        assert outcome.opened == [
+            "https://github.com/pipecat-ai/pipecat/pull/101",
+            "https://github.com/pipecat-ai/pipecat/pull/102",
+        ]
         assert outcome.adopted == ["https://github.com/pipecat-ai/pipecat/pull/7"]
-        assert outcome.capped == ["provider-watch/ollama-llm-default"]
 
         fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text()
         assert (
@@ -449,10 +450,16 @@ class TestPublish:
         assert "- https://github.com/pipecat-ai/pipecat/pull/101 — s" in fireworks
         assert "git diff" not in fireworks
         ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text()
-        assert "capped: true" in ollama and "git show provider-watch/ollama-llm-default" in ollama
+        assert (
+            "state: open" in ollama
+            and "url: https://github.com/pipecat-ai/pipecat/pull/102" in ollama
+        )
 
         pushes = [c for c in sh.calls if c[:2] == ("git", "push")]
-        assert pushes == [("git", "push", "-u", "origin", "provider-watch/fireworks-llm-default")]
+        assert pushes == [
+            ("git", "push", "-u", "origin", "provider-watch/fireworks-llm-default"),
+            ("git", "push", "-u", "origin", "provider-watch/ollama-llm-default"),
+        ]
         create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
         assert "--draft" in create and "--label" in create
         assert create[create.index("--title") + 1] == "Default FireworksLLMService to gpt-oss-120b"
@@ -486,7 +493,6 @@ class TestPublish:
             pipecat_repo="pipecat-ai/pipecat",
             reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
-            cap=8,
         )
         assert len(outcome.opened) == 1
         create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
@@ -526,7 +532,6 @@ class TestPublish:
             pipecat_repo="pipecat-ai/pipecat",
             reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
-            cap=8,
         )
         assert len(outcome.opened) == 1 and not outcome.skipped
         moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
@@ -556,7 +561,6 @@ class TestPublish:
             pipecat_repo="p/p",
             reports_repo="p/r",
             date="2026-08-20",
-            cap=8,
         )
         publish.publish_prs(publish.load_reports(tmp_path, "2026-08-20"), **kwargs)
         before = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
@@ -586,7 +590,6 @@ class TestPublish:
             pipecat_repo="p/p",
             reports_repo="p/r",
             date="2026-08-20",
-            cap=8,
         )
         assert len(outcome.skipped) == 3 and not outcome.opened
 
