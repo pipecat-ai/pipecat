@@ -919,12 +919,16 @@ class SpeechmaticsSTTService(STTService):
         Args:
             message: the message payload.
         """
-        # TODO(agent-stt / Gap 6): finalize-confirmation used to key off a per-segment
-        # `is_eou` flag here; Agent STT signals end-of-turn with the EndOfTurn message
-        # instead. Move `confirm_finalize()` onto `_handle_end_of_turn` (spot 5).
         segment = Segment.from_message(message)
-        if segment.transcript:
-            await self._send_frame(segment, finalized=True)
+        if not segment.transcript:
+            return
+
+        # If a finalize() was requested, confirm it before pushing so this final frame is
+        # tagged as the one that was asked for.
+        if self._finalize_requested:
+            self.confirm_finalize()
+
+        await self._send_frame(segment, finalized=True)
 
     async def _handle_start_of_turn(self, message: dict[str, Any]) -> None:
         """Handle StartOfTurn events.
