@@ -85,7 +85,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         """Initialize OpenAI STT service.
 
         Args:
-            model: Model to use — either gpt-4o or Whisper.
+            model: Transcription model to use. Defaults to ``"gpt-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
@@ -120,7 +120,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         # --- 1. Hardcoded defaults ---
         _language = language or Language.EN
         default_settings = self.Settings(
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
             language=_language,
             prompt=None,
             temperature=None,
@@ -162,13 +162,13 @@ class OpenAISTTService(BaseWhisperSTTService):
         }
 
         if self._include_prob_metrics:
-            # GPT-4o-transcribe models only support logprobs (not verbose_json)
-            if self._settings.model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+            # GPT transcription models return logprobs alongside a "json" response;
+            # Whisper models carry per-segment logprobs in "verbose_json" instead.
+            if self._settings.model.startswith("whisper"):
+                kwargs["response_format"] = "verbose_json"
+            else:
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]
-            else:
-                # Whisper models support verbose_json
-                kwargs["response_format"] = "verbose_json"
 
         if self._settings.prompt is not None:
             kwargs["prompt"] = self._settings.prompt
@@ -217,7 +217,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     server detects them, and recommends the external user turn strategies that resolve
     those proposals into turn frames. Do **not** use a separate VAD processor in the
     pipeline in this mode. Requires a model that supports turn detection —
-    ``gpt-4o-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
+    ``gpt-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
 
     Audio is sent as 24 kHz 16-bit mono PCM as required by the OpenAI Realtime
     API. If the pipeline runs at a different sample rate (e.g. 16 kHz for Silero
@@ -258,8 +258,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             api_key: OpenAI API key for authentication.
             model: Transcription model. For low-latency streaming
                 transcription, use ``"gpt-realtime-whisper"``. Other
-                supported transcription models include
-                ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
+                supported transcription models include ``"gpt-transcribe"``
+                and ``"gpt-live-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
@@ -722,8 +722,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
 
-        For ``gpt-realtime-whisper``, ``gpt-4o-transcribe``, and
-        ``gpt-4o-mini-transcribe``, deltas contain low-latency streaming
+        For ``gpt-realtime-whisper``, ``gpt-live-transcribe``, and
+        ``gpt-transcribe``, deltas contain low-latency streaming
         partial text.
 
         Args:

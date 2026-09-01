@@ -60,7 +60,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = OpenAISTTService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAISTTService.Settings(
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
             prompt="Expect words related to dogs, such as breed names.",
         ),
     )
