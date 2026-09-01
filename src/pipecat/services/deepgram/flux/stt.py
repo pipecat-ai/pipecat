@@ -23,6 +23,7 @@ from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTSettings,
     FluxEventType,
     FluxMessageType,
+    FluxTurnDetection,
 )
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.utils.deprecation import deprecated
@@ -33,6 +34,7 @@ __all__ = [
     "DeepgramFluxSTTSettings",
     "FluxEventType",
     "FluxMessageType",
+    "FluxTurnDetection",
 ]
 
 
@@ -42,6 +44,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
     Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
+
+    By default Flux decides when user turns end. Pass
+    ``turn_detection=FluxTurnDetection.MANUAL`` to hand that decision to the
+    pipeline's own user turn strategies instead — a smart-turn analyzer, an LLM
+    completion gate, or anything else — while Flux keeps transcribing. In manual
+    mode local VAD asks Flux to finalize the audio sent so far, so a VAD analyzer
+    must be configured for transcripts to arrive promptly. Combine it with
+    ``eot_threshold=1.0`` to stop Flux finalizing on its own confidence as well.
 
     For multilingual use, set ``model="flux-general-multi"`` and pass
     ``language_hints`` to bias detection toward specific languages. Hints can
@@ -114,6 +124,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         tag: list | None = None,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        turn_detection: FluxTurnDetection = FluxTurnDetection.AUTOMATIC,
         watchdog_min_timeout: float = 0.5,
         settings: Settings | None = None,
         **kwargs,
@@ -145,7 +156,12 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 the user is speaking. Passed along to the user turn strategies
                 this service recommends, which own the interruption; a
                 user-supplied ``user_turn_strategies`` overrides the
-                recommendation and this setting with it.
+                recommendation and this setting with it. Ignored under
+                ``FluxTurnDetection.MANUAL``, where the turn start strategy owns
+                interruptions.
+            turn_detection: Who decides when a user turn ends. Defaults to
+                ``FluxTurnDetection.AUTOMATIC`` (Flux decides). See
+                :class:`~pipecat.services.deepgram.flux.stt_base.FluxTurnDetection`.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -233,6 +249,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            turn_detection=turn_detection,
             watchdog_min_timeout=watchdog_min_timeout,
             settings=default_settings,
             sample_rate=sample_rate,
@@ -244,11 +261,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         self._url = url
         self._websocket_url = None
         self._receive_task = None
-
-    @property
-    def supports_ttfs(self) -> bool:
-        """TTFS doesn't apply: Flux defines turn boundaries directly."""
-        return False
 
     # ------------------------------------------------------------------
     # Transport interface implementation

@@ -26,12 +26,13 @@ measured value to your STT service constructor:
 
     stt = DeepgramSTTService(api_key="...", ttfs_p99_latency=0.45)
 
-Turn-based STT services (e.g. ``CartesiaTurnsSTTService``,
-``DeepgramFluxSTTService``) have no meaningful TTFS metric — the server
-defines the turn boundary directly, so there is no separate "speech end →
-final transcript" interval to measure. Those services override the
-``STTService.supports_ttfs`` property to return False rather than supplying
-a constant here.
+Turn-based STT services (e.g. ``CartesiaTurnsSTTService``) have no meaningful
+TTFS metric — the server defines the turn boundary directly, so there is no
+separate "speech end → final transcript" interval to measure. Those services
+override the ``STTService.supports_ttfs`` property to return False rather than
+supplying a constant here. ``DeepgramFluxSTTService`` does this too, but only
+under ``FluxTurnDetection.AUTOMATIC``; its manual mode has local VAD mark the
+end of speech, so there is an interval to measure.
 """
 
 # Conservative fallback for services without measured values
@@ -44,6 +45,9 @@ AZURE_TTFS_P99: float = 1.80
 CARTESIA_TTFS_P99: float = 0.81
 DEEPGRAM_TTFS_P99: float = 0.35
 DEEPGRAM_SAGEMAKER_TTFS_P99: float = 0.35
+# Provisional until benchmarked. Only applies to Flux's manual turn detection,
+# where the interval covers the ForceEndTurn round trip.
+DEEPGRAM_FLUX_TTFS_P99: float = 0.35
 ELEVENLABS_TTFS_P99: float = 2.01
 ELEVENLABS_REALTIME_TTFS_P99: float = 0.41
 FAL_TTFS_P99: float = 2.07
