@@ -531,9 +531,10 @@ class EvalSuite(BaseObject):
             # takes only the run. It stays registered for this call alone, so the
             # parameter keeps its per-call scope: a suite can be run again without
             # the callback firing a second time, or firing at all.
-            def handler(_suite, run):
+            def forward_update(_suite: "EvalSuite", run: EvalRun) -> None:
                 on_update(run)
 
+            handler = forward_update
             self.add_event_handler("on_update", handler)
 
         sem = asyncio.Semaphore(self.manifest.concurrency)
