@@ -50,16 +50,22 @@ def language_to_rime_language(language: Language) -> str:
         language: The pipecat Language enum value.
 
     Returns:
-        Three-letter language code used by Rime (e.g., 'eng' for English).
+        Language code used by Rime (e.g., 'eng' for English). Rime accepts both
+        ISO 639-2/3 and ISO 639-1 codes, so a region-qualified language falls
+        back to its two-letter base code.
     """
     LANGUAGE_MAP = {
+        Language.AR: "ara",
         Language.DE: "ger",
-        Language.FR: "fra",
         Language.EN: "eng",
         Language.ES: "spa",
+        Language.FR: "fra",
         Language.HI: "hin",
+        Language.IT: "ita",
+        Language.JA: "jpn",
+        Language.PT: "por",
     }
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP)
 
 
 @dataclass
