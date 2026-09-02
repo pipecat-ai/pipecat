@@ -350,25 +350,33 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(self, open_prs=None, branches=None, commits=None, fragments=None):
+        def __init__(
+            self, open_prs=None, branches=None, commits=None, fragments=None, label_prs=None
+        ):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
-            self.fragments = fragments or {}  # branch -> [changelog paths added]
+            self.fragments = fragments or {}  # branch/ref -> [changelog paths added]
+            self.label_prs = label_prs or []  # rows for `gh pr list --label`
+            self.pr_files = {}  # number -> [changed paths]
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
             self.calls.append(args)
+            if args[:3] == ("gh", "pr", "list") and "--label" in args:
+                return json.dumps(self.label_prs)
             if args[:3] == ("gh", "pr", "list"):
                 head = args[args.index("--head") + 1]
                 url = self.open_prs.get(head)
                 return json.dumps([{"url": url}] if url else [])
+            if args[:3] == ("gh", "pr", "view") and "files" in args:
+                return json.dumps({"files": [{"path": p} for p in self.pr_files.get(args[3], [])]})
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
             if args[:2] == ("git", "diff") and "--name-only" in args:
-                branch = args[4].split("..")[-1]
+                branch = args[4].split("..")[-1].lstrip(".")
                 return "\n".join(self.fragments.get(branch, []))
             if args[:2] == ("git", "rev-list"):
                 branch = args[-1].split("..")[-1]
@@ -545,6 +553,47 @@ class TestPublish:
         assert ("git", "push", "origin", f"HEAD:refs/heads/{branch}") in [
             c[:4] for c in sh.calls if c[:2] == ("git", "push")
         ]
+
+    def test_heals_fragments_on_open_prs(self, tmp_path):
+        import publish
+
+        sh = self.FakeShell(
+            label_prs=[
+                {
+                    "number": 5528,
+                    "headRefName": "provider-watch/deepseek-thinking",
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                },
+                {
+                    "number": 5529,
+                    "headRefName": "provider-watch/anthropic-output-config",
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                },
+                {
+                    "number": 2849,
+                    "headRefName": "feature/aws-languages",
+                    "headRepositoryOwner": {"login": "someone"},
+                },
+            ],
+            fragments={"FETCH_HEAD": ["changelog/+deepseek-thinking.added.md"]},
+        )
+        sh.pr_files = {
+            "5528": ["changelog/+deepseek-thinking.added.md", "src/x.py"],
+            "5529": ["changelog/5529.added.md"],
+        }
+        skipped = publish.heal_fragment_names(sh, tmp_path, "pipecat-ai/pipecat")
+        assert skipped == []
+        assert (
+            "git",
+            "mv",
+            "changelog/+deepseek-thinking.added.md",
+            "changelog/5528.added.md",
+        ) in sh.calls
+        assert ("git", "push", "origin", "HEAD:refs/heads/provider-watch/deepseek-thinking") in [
+            c[:4] for c in sh.calls if c[:2] == ("git", "push")
+        ]
+        # The correctly named PR and the community PR are left alone.
+        assert len([c for c in sh.calls if c[:2] == ("git", "fetch")]) == 1
 
     def test_adopted_pr_still_renames_fragments(self, tmp_path):
         import publish

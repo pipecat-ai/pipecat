@@ -144,7 +144,9 @@ def _fragment_type(name: str) -> str:
     return next((part for part in name.split(".") if part in FRAGMENT_TYPES), "other")
 
 
-def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+def _rename_changelog_fragments(
+    sh: Shell, repo_root: Path, branch: str, pr_url: str, ref: str | None = None
+) -> None:
     """Give the branch's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
@@ -152,7 +154,9 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
     open its number is known: one follow-up commit renames every fragment the
     branch adds that does not already carry it — orphans and wrong guesses
     alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type.
+    branch adds several of one type. ``ref`` is the commit to rename at; it
+    defaults to the local branch, and healing an open PR passes its fetched
+    head instead.
     """
     number = pr_url.rstrip("/").split("/")[-1]
     if not number.isdigit():
@@ -162,7 +166,9 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
         "diff",
         "--name-only",
         "--diff-filter=A",
-        f"{_main_base(sh, repo_root)}..{branch}",
+        # Three-dot: only what the branch itself adds, however far main has
+        # moved since the branch was cut.
+        f"{_main_base(sh, repo_root)}...{ref or branch}",
         "--",
         "changelog/",
         cwd=repo_root,
@@ -180,7 +186,9 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
         # Detached: the branch may still be checked out in a researcher's
         # leftover worktree (a killed run never cleans them up), which would
         # make checking it out here fail.
-        sh.run("git", "worktree", "add", "--quiet", "--detach", workdir, branch, cwd=repo_root)
+        sh.run(
+            "git", "worktree", "add", "--quiet", "--detach", workdir, ref or branch, cwd=repo_root
+        )
         for path in rename:
             fragment_type = _fragment_type(Path(path).name)
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
@@ -207,6 +215,61 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
         sh.run("git", "branch", "-f", branch, "HEAD", cwd=Path(workdir), check=False)
     finally:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
+
+
+def heal_fragment_names(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
+    """Rename ``+slug`` fragments on any open provider-watch PR to its number.
+
+    The publish pass of a killed run can open a PR without managing to rename
+    its fragments, and the researcher that next meets the unit records the
+    open PR instead of recreating its branch — so misnamed fragments have to
+    be found on the PRs themselves. Every publish pass sweeps the open bot
+    PRs and renames from a fetched head; a correctly named PR costs one
+    lookup. Returns the failures, as skip messages.
+    """
+    skipped: list[str] = []
+    owner = pipecat_repo.split("/")[0]
+    prs = json.loads(
+        sh.run(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            pipecat_repo,
+            "--label",
+            PR_LABEL,
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName,headRepositoryOwner",
+        )
+        or "[]"
+    )
+    for pr in prs:
+        number = str(pr.get("number") or "")
+        head = pr.get("headRefName") or ""
+        head_owner = (pr.get("headRepositoryOwner") or {}).get("login", "")
+        # Only branches the bot owns; never push to a fork or a human's branch.
+        if not head.startswith("provider-watch/") or head_owner != owner:
+            continue
+        files = json.loads(
+            sh.run("gh", "pr", "view", number, "--repo", pipecat_repo, "--json", "files") or "{}"
+        ).get("files")
+        fragments = [f["path"] for f in files or [] if f["path"].startswith("changelog/")]
+        if all(Path(p).name.startswith(f"{number}.") for p in fragments):
+            continue
+        try:
+            sh.run("git", "fetch", "--quiet", "origin", head, cwd=repo_root)
+            _rename_changelog_fragments(
+                sh,
+                repo_root,
+                head,
+                f"https://github.com/{pipecat_repo}/pull/{number}",
+                ref="FETCH_HEAD",
+            )
+        except RuntimeError as exc:
+            skipped.append(f"{head}: fragments not healed: {exc}")
+    return skipped
 
 
 def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tuple[str, str]:
@@ -427,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         reports_repo=args.reports_repo,
         date=args.date,
     )
+    outcome.skipped += heal_fragment_names(sh, args.repo_root, args.pipecat_repo)
     if args.finalize:
         digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
