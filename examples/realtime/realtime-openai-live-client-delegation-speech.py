@@ -4,15 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Live (gpt-live-1) with Responses delegation.
+"""OpenAI Live (gpt-live-1) where the backend decides what the user hears.
 
-The live model handles the spoken conversation and hands work that needs tools
-or careful reasoning to an OpenAI-hosted Responses model. The backend's
-function calls run here, with the handlers registered for the tools in the
-``LLMContext``.
+A ``BackendLLMWorker`` marks the lines it wants spoken, and ``transform_output``
+turns that convention into the ``speakable`` flag the live model acts on: marked
+lines are relayed aloud, everything else — notes to self, reasoning summaries,
+the final wrap-up — stays silent context the model can draw on if asked.
+
+This suits a backend that works for a while and wants to narrate its own
+progress, rather than have every response it produces read out.
 """
 
 import os
+from dataclasses import replace
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -27,22 +31,23 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    UserTurnMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-# The live model only needs to know how to converse and when to delegate. Task
-# knowledge, tools and business rules belong to the backend prompt.
+#: Prefix the backend puts on anything it wants the user to hear.
+SPEAK_MARKER = ">>"
+
 FRONTEND_INSTRUCTIONS = """## Role and speaking style
 You are a friendly, concise voice assistant. Speak naturally, in one or two
 sentences at a time, and let the user finish before responding.
@@ -50,22 +55,37 @@ sentences at a time, and let the user finish before responding.
 ## Delegation
 Answer simple conversational questions directly. Delegate when the user asks
 for current information, such as the weather or a restaurant recommendation,
-or asks you to look something up. When delegating, include the user's goal,
-the exact details they gave (places, dates, names) and their latest
-correction, so the request is self-contained. While the delegated work runs,
-keep the conversation going and relay the result once it arrives; ignore
-results the conversation has already moved past.
+or asks you to look something up. The backend reads the conversation, so hand
+off as soon as you know the request is for it.
+
+The backend chooses what the user should hear and sends it to you as it
+works; relay those updates as they arrive. Everything else it does reaches
+you as context you know but need not repeat.
 
 ## Interruptions
-Stop speaking when the user interrupts and listen to the new request. If the
-user changes an earlier detail, use their latest correction."""
+Stop speaking when the user interrupts and listen to the new request."""
 
-BACKEND_INSTRUCTIONS = """You are helping an assistant during a live voice
-conversation. The request may contain transcription errors; use the most
-likely intent. Use the available tools to answer questions about the weather
-and restaurants. Return the verified result in concise, conversational plain
-text — no Markdown, no raw JSON — and never claim an action completed without
-a tool result confirming it."""
+BACKEND_INSTRUCTIONS = f"""You are the backend of a voice assistant. Each message you receive
+is the recent voice conversation between the user and the assistant, as a
+transcript. Work out what is being asked from it and answer that. The
+transcript may contain transcription errors; use the most likely intent.
+
+You decide what the user hears. Begin a line with {SPEAK_MARKER} and it is
+said to them; write anything else and it stays a note to yourself. Speak up
+when you have something worth hearing — the verified result, or a word about
+what is taking time — and keep those lines to one or two spoken sentences.
+Work out loud in unmarked lines as much as you like.
+
+Use the available tools to answer questions about the weather and
+restaurants. Never claim an action completed without a tool result confirming
+it."""
+
+
+async def transform_output(output: BackendOutput) -> BackendOutput:
+    """Let the backend's own marker decide what reaches the user."""
+    if output.text.startswith(SPEAK_MARKER):
+        return replace(output, text=output.text[len(SPEAK_MARKER) :].lstrip(), speakable=True)
+    return replace(output, speakable=False)
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -120,29 +140,28 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
+    backend = BackendLLMWorker(
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
+        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+        transform_output=transform_output,
+    )
+
     llm = OpenAILiveLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILiveLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
-        delegation=OpenAILiveLLMService.ResponsesDelegation(
-            settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.4-mini",
-                system_instruction=BACKEND_INSTRUCTIONS,
-                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
-            ),
-        ),
+        delegation=OpenAILiveLLMService.ClientDelegation(backend=backend),
     )
 
-    # The context's tools are the backend model's tools; their handlers run
-    # here. The trailing developer message seeds the session so the model
-    # speaks first.
     context = LLMContext(
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
-        [get_current_weather, get_restaurant_recommendation],
     )
 
-    # OpenAI Live is full-duplex: it detects the user's turns itself and
-    # handles being interrupted, so there is no local VAD and interruptions
-    # are never broadcast.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -181,13 +200,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    @llm.event_handler("on_delegation_created")
-    async def on_delegation_created(llm, delegation):
-        logger.info(f"Delegated to the backend: {delegation.id}")
-
-    @user_aggregator.event_handler("on_user_turn_message_added")
-    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
-        logger.info(f"Transcript: user: {message.content}")
+    @backend.assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        spoken = "spoken" if message.content.startswith(SPEAK_MARKER) else "silent"
+        logger.info(f"Backend ({spoken}): {message.content}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):

@@ -51,16 +51,16 @@ sentences at a time, and let the user finish before responding.
 ## Delegation
 Answer simple conversational questions directly. Delegate when the user asks
 for current information such as the weather, or asks you to save the
-conversation, list saved conversations, or load one. When delegating, include
-the user's goal and the exact details they gave, so the request is
-self-contained. Relay the result once it arrives.
+conversation, list saved conversations, or load one. The backend reads the
+conversation, so hand off as soon as you know the request is for it. Relay
+the result once it arrives.
 
 ## Interruptions
 Stop speaking when the user interrupts and listen to the new request."""
 
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Each message you receive
-contains the recent voice conversation between the user and the assistant,
-as a transcript, followed by a task the assistant delegated to you. The
+is the recent voice conversation between the user and the assistant, as a
+transcript. Work out what is being asked from it and answer that. The
 transcript may contain transcription errors; use the most likely intent.
 
 Use the available tools to answer questions about the weather and to save,
@@ -156,7 +156,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         asyncio.create_task(_reset())
 
     backend = BackendLLMWorker(
-        # Thinking summaries stream back to the frontend as "thought" updates.
+        # Reasoning summaries stream back to the frontend as silent context.
         llm=AnthropicLLMService(
             api_key=os.environ["ANTHROPIC_API_KEY"],
             settings=AnthropicLLMService.Settings(

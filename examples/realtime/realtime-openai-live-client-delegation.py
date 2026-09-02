@@ -51,22 +51,20 @@ sentences at a time, and let the user finish before responding.
 ## Delegation
 Answer simple conversational questions directly. Delegate when the user asks
 for current information, such as the weather or a restaurant recommendation,
-or asks you to look something up. When delegating, include the user's goal,
-the exact details they gave (places, dates, names) and their latest
-correction, so the request is self-contained. While the delegated work runs,
-keep the conversation going and relay the result once it arrives; ignore
-results the conversation has already moved past.
+or asks you to look something up. The backend reads the conversation, so
+hand off as soon as you know the request is for it. While the delegated work
+runs, keep the conversation going and relay the result once it arrives;
+ignore results the conversation has already moved past.
 
 ## Interruptions
 Stop speaking when the user interrupts and listen to the new request. If the
 user changes an earlier detail, use their latest correction."""
 
-# The backend sees the voice conversation as labelled transcript text inside
-# each task it receives; its own replies are the only assistant messages in
-# its context.
+# The backend sees the voice conversation as labelled transcript text; its
+# own replies are the only assistant messages in its context.
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Each message you receive
-contains the recent voice conversation between the user and the assistant,
-as a transcript, followed by a task the assistant delegated to you. The
+is the recent voice conversation between the user and the assistant, as a
+transcript. Work out what is being asked from it and answer that. The
 transcript may contain transcription errors; use the most likely intent.
 
 Use the available tools to answer questions about the weather and
@@ -130,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # The backend: any LLM service, with its own context and tools. The live
     # service registers it with the runner as a child of the pipeline worker.
     backend = BackendLLMWorker(
-        # Thinking summaries stream back to the frontend as "thought" updates.
+        # Reasoning summaries stream back to the frontend as silent context.
         llm=AnthropicLLMService(
             api_key=os.environ["ANTHROPIC_API_KEY"],
             settings=AnthropicLLMService.Settings(
@@ -148,8 +146,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # The live model's own context: no tools here, they belong to the backend.
-    # The trailing developer message seeds the session so the model speaks first.
     context = LLMContext(
+        # A trailing developer message asks the model to open the conversation.
+        # Comment it out to have the bot wait for the user to speak first.
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
     )
 
@@ -195,8 +194,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await runner.cancel()
 
     @llm.event_handler("on_delegation_created")
-    async def on_delegation_created(llm, item):
-        logger.info(f"Delegated to the backend: {item.text}")
+    async def on_delegation_created(llm, delegation):
+        logger.info(f"Delegated to the backend: {delegation.id}")
 
     @backend.assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_backend_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
