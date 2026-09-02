@@ -100,32 +100,32 @@ class WebsocketService(ABC):
     def __init__(
         self,
         *,
-        reconnect_on_error: bool = True,
-        ws_close_timeout: float = WS_CLOSE_TIMEOUT,
         reconnect_backoff_min_wait: float = 4.0,
         reconnect_backoff_max_wait: float = 10.0,
+        reconnect_on_error: bool = True,
+        ws_close_timeout: float = WS_CLOSE_TIMEOUT,
         **kwargs,
     ):
         """Initialize the websocket service.
 
         Args:
+            reconnect_backoff_min_wait: Minimum time, in seconds, to wait between
+                reconnection attempts.
+            reconnect_backoff_max_wait: Maximum time, in seconds, to wait between
+                reconnection attempts.
             reconnect_on_error: Whether to automatically reconnect on connection errors.
             ws_close_timeout: Maximum time, in seconds, to wait for the peer to
                 acknowledge the websocket closing handshake before dropping the
                 connection. Applied to connections opened through
                 :meth:`_websocket_connect`. Increase it for peers that need
                 longer to complete a graceful close.
-            reconnect_backoff_min_wait: Minimum time, in seconds, to wait between
-                reconnection attempts.
-            reconnect_backoff_max_wait: Maximum time, in seconds, to wait between
-                reconnection attempts.
             **kwargs: Additional arguments (unused, for compatibility).
         """
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
-        self._reconnect_on_error = reconnect_on_error
-        self._ws_close_timeout = ws_close_timeout
         self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
         self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
+        self._reconnect_on_error = reconnect_on_error
+        self._ws_close_timeout = ws_close_timeout
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
         # Rapid failure detection: when a server accepts the WebSocket handshake
