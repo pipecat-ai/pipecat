@@ -11,12 +11,14 @@ WebSocket API for streaming audio transcription.
 """
 
 import asyncio
+import io
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
+import aiohttp
 from loguru import logger
 from websockets.protocol import State
 
@@ -24,23 +26,26 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_latency import ASSEMBLYAI_SYNC_TTFS_P99, ASSEMBLYAI_TTFS_P99
+from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -1258,3 +1263,383 @@ class AssemblyAISTTService(WebsocketSTTService):
                         message,
                     )
                 )
+
+
+# Default host for the Sync speech-to-text API.
+ASSEMBLYAI_SYNC_BASE_URL = "https://sync.assemblyai.com"
+
+# Sync API paths appended to the base URL.
+ASSEMBLYAI_SYNC_TRANSCRIBE_PATH = "/v1/transcribe"
+ASSEMBLYAI_SYNC_WARM_PATH = "/v1/warm"
+
+
+@dataclass
+class AssemblyAISyncSTTSettings(STTSettings):
+    """Settings for :class:`AssemblyAISyncSTTService`.
+
+    Parameters:
+        prompt: Custom transcription instruction prepended to the model's system
+            prompt. When set, ``language`` is ignored — state the language in the
+            prompt instead.
+        keyterms_prompt: Key terms or phrases to bias the decoder toward.
+        conversation_context: Prior turns from the same conversation, oldest
+            first, giving the model the surrounding dialogue for better continuity
+            and proper-noun consistency across a multi-turn conversation. A single
+            string is treated as one turn. Setting this explicitly turns off the
+            service's automatic context buffer and sends exactly this value; leave
+            it unset to let the service manage context (see ``max_context_turns``).
+    """
+
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms_prompt: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    conversation_context: str | list[str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
+class AssemblyAISyncSTTService(SegmentedSTTService):
+    """AssemblyAI Sync speech-to-text service.
+
+    Transcribes a complete speech segment in a single request/response against
+    AssemblyAI's Sync API, rather than holding open a streaming WebSocket. It
+    inherits from :class:`SegmentedSTTService`, which uses VAD events to buffer
+    each utterance and calls :meth:`run_stt` once per segment with the audio as a
+    WAV container. Each segment is POSTed as ``multipart/form-data`` and the
+    transcript is returned directly — no upload step, no polling, no session to
+    manage.
+
+    Audio segments must be at most 120 seconds; the API rejects longer ones. This
+    suits dictation, scribe, and voice-agent turns where the client detects
+    speech locally and transcribes each turn on demand.
+
+    When pre-warming is enabled (the default), the service opens the connection
+    as soon as the user starts speaking, so the transcription request skips the
+    DNS, TCP, and TLS handshake once the utterance ends. Call :meth:`warm`
+    directly to warm the connection at any other time.
+
+    Because the Sync API is stateless, the service also carries recent
+    conversation context automatically: it keeps a rolling buffer of the most
+    recent turns — user transcripts and the agent's replies together, in the
+    order spoken — and sends them as ``conversation_context`` on each request, so
+    the model transcribes each turn with the surrounding dialogue. Agent replies
+    are captured from the pipeline's assistant-turn frame, so this needs no
+    wiring in a standard voice-agent pipeline. Set ``max_context_turns=0`` to
+    disable it, or set ``conversation_context`` explicitly in ``settings`` to
+    supply the context yourself (that value is honored as-is).
+    """
+
+    Settings = AssemblyAISyncSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        aiohttp_session: aiohttp.ClientSession,
+        base_url: str = ASSEMBLYAI_SYNC_BASE_URL,
+        sample_rate: int | None = None,
+        enable_prewarming: bool = True,
+        max_context_turns: int = 5,
+        max_context_chars: int = 1500,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = ASSEMBLYAI_SYNC_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the AssemblyAI Sync STT service.
+
+        Args:
+            api_key: AssemblyAI API key for authentication.
+            aiohttp_session: aiohttp ClientSession for HTTP requests. Pre-warming
+                only helps when the warm and transcribe requests share this
+                session's connection pool, so keep one session for the service.
+            base_url: Base URL for the Sync API. Override for a data-residency
+                endpoint (e.g. ``https://sync.us.assemblyai.com`` or
+                ``https://sync.eu.assemblyai.com``).
+            sample_rate: Audio sample rate in Hz. If not provided, uses the
+                pipeline's rate.
+            enable_prewarming: Whether to open the connection when the user starts
+                speaking so the transcription request avoids the connection
+                handshake. Defaults to True.
+            max_context_turns: Number of prior conversation turns — user
+                transcripts and agent replies together, in one chronological
+                buffer — automatically carried as ``conversation_context`` on each
+                request, so the model transcribes each turn with the surrounding
+                dialogue. Set to 0 to disable automatic context. Ignored when
+                ``conversation_context`` is set explicitly in ``settings`` (that
+                value is honored as-is). Defaults to 5.
+            max_context_chars: Character budget for the same buffer; the oldest
+                turns are dropped first once either cap is exceeded. Defaults to
+                1500.
+            settings: Runtime-updatable settings.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in
+                seconds. Broadcast at pipeline start for downstream turn timing;
+                set it to your measured value.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
+        default_settings = self.Settings(
+            model="universal-3-5-pro",
+            language=Language.EN,
+            prompt=None,
+            keyterms_prompt=None,
+            conversation_context=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._session = aiohttp_session
+        self._base_url = base_url.rstrip("/")
+        self._enable_prewarming = enable_prewarming
+        self._warm_task: asyncio.Task | None = None
+
+        # Rolling buffer of prior turns (user + agent) carried as
+        # conversation_context (see _append_context_turn).
+        self._max_context_turns = max_context_turns
+        self._max_context_chars = max_context_chars
+        self._context_turns: list[str] = []
+
+    def can_generate_metrics(self) -> bool:
+        """Whether this service generates processing metrics.
+
+        Returns:
+            True. The Sync API issues a discrete request per segment, so its
+            duration is measured and reported.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Pipecat Language to an AssemblyAI language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The AssemblyAI language code (base ISO code).
+        """
+        return language_to_assemblyai_language(language)
+
+    def _model_header(self) -> dict[str, str]:
+        """The routing header both endpoints send."""
+        model = assert_given(self._settings.model)
+        assert model is not None
+        return {"X-AAI-Model": model}
+
+    def _request_headers(self) -> dict[str, str]:
+        return {"Authorization": self._api_key, **self._model_header()}
+
+    def _build_config(self) -> dict:
+        """Assemble the optional ``config`` part from the current settings."""
+        config: dict[str, Any] = {}
+
+        language = self._settings.language
+        if is_given(language) and language is not None:
+            # ``language_codes`` accepts a string or a list; a single
+            # language goes as a one-element list.
+            config["language_codes"] = [language]
+
+        prompt = self._settings.prompt
+        if is_given(prompt) and prompt is not None:
+            config["prompt"] = prompt
+
+        keyterms_prompt = self._settings.keyterms_prompt
+        if is_given(keyterms_prompt) and keyterms_prompt:
+            config["keyterms_prompt"] = list(keyterms_prompt)
+
+        if self._context_is_manual():
+            config["conversation_context"] = self._settings.conversation_context
+        elif self._context_turns:
+            config["conversation_context"] = list(self._context_turns)
+
+        return config
+
+    def _context_is_manual(self) -> bool:
+        """Whether conversation_context was supplied explicitly in settings."""
+        ctx = self._settings.conversation_context
+        return is_given(ctx) and bool(ctx)
+
+    def _append_context_turn(self, text: str) -> None:
+        """Append a completed turn (user or agent) to the rolling context buffer.
+
+        Both sides share one chronological buffer under a single turn/char cap,
+        matching how the model consumes context (it draws no distinction between
+        user and agent text). The oldest turns are evicted first once a cap is
+        exceeded. No-op when automatic context is disabled or a manual
+        conversation_context is set.
+        """
+        text = (text or "").strip()
+        if not text or self._max_context_turns <= 0 or self._context_is_manual():
+            return
+        self._context_turns.append(text)
+        while len(self._context_turns) > 1 and (
+            len(self._context_turns) > self._max_context_turns
+            or sum(len(t) for t in self._context_turns) > self._max_context_chars
+        ):
+            self._context_turns.pop(0)
+
+    async def start(self, frame: StartFrame):
+        """Start the service on an empty conversation context.
+
+        The buffer holds one conversation, so an instance reused for another
+        run starts it fresh.
+        """
+        await super().start(frame)
+        self._context_turns.clear()
+
+    async def _process_assistant_turn(self, text: str) -> None:
+        """Feed the agent's completed reply into the conversation context.
+
+        Called automatically by the base class when an assistant turn ends (an
+        ``LLMContextAssistantTurnFrame`` reaches the service). The reply is
+        appended to the same chronological buffer as user turns.
+        """
+        self._append_context_turn(text)
+
+    async def warm(self):
+        """Pre-warm the connection to the Sync API.
+
+        Establishes the connection (DNS, TCP, TLS) ahead of a transcription
+        request so the next :meth:`run_stt` starts uploading audio immediately.
+        Best-effort: failures are logged and swallowed, since a failed warm-up
+        only forfeits the latency saving. The warmed connection is reused only by
+        requests that share this service's aiohttp session and base URL.
+        """
+        url = f"{self._base_url}{ASSEMBLYAI_SYNC_WARM_PATH}"
+        try:
+            # Route the warm with the same model as the transcription so the
+            # opened connection lands on the right backend.
+            async with self._session.get(url, headers=self._model_header()) as response:
+                await response.read()
+        except Exception as e:
+            logger.debug(f"{self}: connection pre-warm failed (ignored): {e}")
+
+    async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+        await super()._handle_user_started_speaking(frame)
+        if self._enable_prewarming and (self._warm_task is None or self._warm_task.done()):
+            self._warm_task = self.create_task(self.warm())
+
+    async def _transcribe(self, audio: bytes) -> dict:
+        """POST an audio segment to the Sync API and return the parsed result.
+
+        Args:
+            audio: Raw audio bytes in WAV format (already converted by the base
+                class).
+
+        Returns:
+            The decoded JSON transcription result.
+
+        Raises:
+            aiohttp.ClientResponseError: If the API returns a non-200 status.
+        """
+        url = f"{self._base_url}{ASSEMBLYAI_SYNC_TRANSCRIBE_PATH}"
+
+        # The base class always hands run_stt a WAV container, so the audio part
+        # is always sent as audio/wav.
+        data = aiohttp.FormData()
+        data.add_field(
+            "audio",
+            io.BytesIO(audio),
+            filename="audio.wav",
+            content_type="audio/wav",
+        )
+        config = self._build_config()
+        if config:
+            data.add_field(
+                "config",
+                json.dumps(config),
+                content_type="application/json",
+            )
+
+        async with self._session.post(url, data=data, headers=self._request_headers()) as response:
+            if response.status != 200:
+                # The status rides on the exception so the framework can
+                # classify the failure: a rejected key leaves the service
+                # unusable, a rate limit or a server error does not.
+                raise aiohttp.ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=await self._error_detail(response),
+                )
+            return await response.json()
+
+    async def _error_detail(self, response: aiohttp.ClientResponse) -> str:
+        """Build a readable message from a non-200 response.
+
+        Errors arrive either as a problem-details body (``title``/``detail``)
+        or as ``{"error_code", "message"}``; surface whichever fields are
+        present, falling back to the raw body. The status is carried by the
+        exception this message goes on, so it isn't repeated here.
+        """
+        try:
+            body = await response.json(content_type=None)
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            fields = (
+                body.get("error_code"),
+                body.get("title"),
+                body.get("detail") or body.get("message"),
+            )
+            parts = [field for field in fields if field]
+            if parts:
+                return " - ".join(parts)
+        return await response.text()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: str | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        await self.stop_processing_metrics()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Transcribe an audio segment using the AssemblyAI Sync API.
+
+        Args:
+            audio: Raw audio bytes in WAV format (already converted by the base
+                class).
+
+        Yields:
+            Frame: A TranscriptionFrame with the transcribed text, or an
+            ErrorFrame on failure. Only non-empty transcriptions are yielded.
+        """
+        try:
+            await self.start_processing_metrics()
+
+            result = await self._transcribe(audio)
+
+            text = (result.get("text") or "").strip()
+            if text:
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
+                await self._handle_transcription(text, True, language)
+                logger.debug(f"Transcription: [{text}]")
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    language,
+                    result=result,
+                )
+                # Record this user turn for the next request's context. This
+                # request's config was already built, so an utterance never
+                # appears in its own context.
+                self._append_context_turn(text)
+        except Exception as e:
+            logger.error(f"{self}: error transcribing audio: {e}")
+            yield ErrorFrame(error=f"Sync transcription error: {e}", exception=e)
+
+    async def cleanup(self):
+        """Cancel any in-flight pre-warm task and clean up."""
+        if self._warm_task is not None and not self._warm_task.done():
+            await self.cancel_task(self._warm_task)
+        self._warm_task = None
+        await super().cleanup()
