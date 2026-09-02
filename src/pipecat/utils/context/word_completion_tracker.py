@@ -160,18 +160,21 @@ class WordCompletionTracker:
 
         overflow = self._segment_map.last_overflow
         spoken = self._tts_text[raw_pos_before : self._segment_map.raw_pos]
-        if len(alnum_only(strip_markup(spoken))) > len(alnum_only(word)):
-            # The cursor moved over more than this word can account for, so the map
-            # matched it past an event the provider never sent. Nothing will ever be
-            # reported for the text in between, so it is emitted here, with the word
-            # that brought the frame back into step.
+
+        # If the spoken text is longer than the word reported by the provider, the
+        # provider skipped some text. Markup does not count because providers don't
+        # report tags, and we compare only letters and digits so differences in case,
+        # accents, punctuation, or spacing don't affect the check.
+        covers_skipped_text = len(alnum_only(strip_markup(spoken))) > len(alnum_only(word))
+
+        if covers_skipped_text:
+            # The skipped text will never be reported by the provider, so include it
+            # in this frame together with the word that brings the tracker back in sync.
             self._frame_word = spoken
         else:
-            # Neither end of the token is necessarily this frame's: the head can
-            # repeat punctuation the previous word already carried, and the tail can
-            # run into the next frame. The map measures both; keep what is between.
-            # Without an llm_text there is no recorded span that could already have
-            # carried the mark, so it is new text on this frame.
+            # Keep only the part of the word that belongs to this frame.
+            # The beginning may overlap with text already emitted by the previous
+            # frame, while the end may overlap with the next frame.
             head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
             tail = len(word) - len(overflow) if overflow else len(word)
             self._frame_word = word[head:tail]
