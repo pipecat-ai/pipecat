@@ -32,6 +32,46 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     instructions: str
 
 
+def _close_objects(schema: Any) -> Any:
+    """Return ``schema`` with ``additionalProperties: false`` on every object in it.
+
+    OpenAI's strict function calling requires the key on each object in
+    ``parameters``, nested ones included, and rejects the request without it.
+
+    Keys inside ``properties`` name the tool's parameters rather than schema
+    keywords, so that mapping is walked a level at a time: its values are
+    schemas, the mapping itself is not. Otherwise a parameter named
+    ``properties`` would be mistaken for a nested object and the mapping would
+    gain an ``additionalProperties`` parameter of its own.
+
+    The caller's schema is never mutated; new dicts are returned.
+
+    Args:
+        schema: A JSON schema, or any nested fragment of one.
+
+    Returns:
+        The schema with the key set wherever it declares an object.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    result: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "properties" and isinstance(value, dict):
+            result[key] = {name: _close_objects(prop) for name, prop in value.items()}
+        elif isinstance(value, dict):
+            result[key] = _close_objects(value)
+        elif isinstance(value, list):
+            result[key] = [_close_objects(item) for item in value]
+        else:
+            result[key] = value
+
+    if result.get("type") == "object" or "properties" in result:
+        result["additionalProperties"] = False
+
+    return result
+
+
 class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParams]):
     """OpenAI Responses API adapter for Pipecat.
 
@@ -126,11 +166,18 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         result = []
         for func in functions_schema:
             d = func.to_default_dict()
+            parameters = d.get("parameters", {})
+            if func.strict:
+                # Strict mode requires `additionalProperties: false` on every object in
+                # the schema, and the request is rejected without it. `to_default_dict`
+                # cannot carry it: that dict also goes to providers with no such field,
+                # and Gemini's adapter drops the key and warns.
+                parameters = _close_objects(parameters)
             tool: FunctionToolParam = {
                 "type": "function",
                 "name": d["name"],
-                "parameters": d.get("parameters", {}),
-                "strict": d.get("strict", None),
+                "parameters": parameters,
+                "strict": func.strict,
             }
             if "description" in d:
                 tool["description"] = d["description"]
