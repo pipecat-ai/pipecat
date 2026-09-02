@@ -518,6 +518,7 @@ class EvalSuite(BaseObject):
         if results_path is not None:
             results_path.parent.mkdir(parents=True, exist_ok=True)
 
+        handler = None
         if on_update is not None:
             warnings.warn(
                 "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
@@ -525,27 +526,37 @@ class EvalSuite(BaseObject):
                 DeprecationWarning,
                 stacklevel=2,
             )
+
             # Event handlers take the suite as their first argument; the callback
-            # takes only the run.
-            self.add_event_handler("on_update", lambda _suite, run: on_update(run))
+            # takes only the run. It stays registered for this call alone, so the
+            # parameter keeps its per-call scope: a suite can be run again without
+            # the callback firing a second time, or firing at all.
+            def handler(_suite, run):
+                on_update(run)
+
+            self.add_event_handler("on_update", handler)
 
         sem = asyncio.Semaphore(self.manifest.concurrency)
-        await asyncio.gather(
-            *(
-                self._run_one(
-                    run,
-                    self.manifest.base_port + i,
-                    logs_dir,
-                    record_dir,
-                    results_path,
-                    sem,
-                    debug,
-                    use_cache,
-                    default_timeout_ms,
+        try:
+            await asyncio.gather(
+                *(
+                    self._run_one(
+                        run,
+                        self.manifest.base_port + i,
+                        logs_dir,
+                        record_dir,
+                        results_path,
+                        sem,
+                        debug,
+                        use_cache,
+                        default_timeout_ms,
+                    )
+                    for i, run in enumerate(self.runs)
                 )
-                for i, run in enumerate(self.runs)
             )
-        )
+        finally:
+            if handler is not None:
+                self.remove_event_handler("on_update", handler)
 
     async def _run_one(
         self,

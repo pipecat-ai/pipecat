@@ -178,6 +178,24 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
         # The callback takes only the run, not the suite an event handler gets.
         self.assertEqual(seen, ["running", "done"])
 
+    async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
+        """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""
+        seen = []
+        callback = lambda run: seen.append(run.status)  # noqa: E731
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"])
+
+            # Passing it again reports each change once more, not twice.
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"] * 2)
+
+        # Omitting it stops the reporting.
+        await self.suite.run(self.logs_dir)
+        self.assertEqual(seen, ["running", "done"] * 2)
+
 
 if __name__ == "__main__":
     unittest.main()
