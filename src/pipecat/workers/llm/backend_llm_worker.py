@@ -40,21 +40,77 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
 
-#: Called with ``(kind, text)`` for each update a backend streams back while it works.
-BackendUpdateCallback = Callable[[str, str], Awaitable[None]]
+
+@dataclass
+class BackendOutput:
+    """One piece of output from a backend, on its way to the frontend.
+
+    Parameters:
+        text: The text the backend produced.
+        is_thought: Whether this is a reasoning summary rather than a response.
+        is_final: Whether this is the backend's answer to the task, as opposed
+            to progress on the way to it.
+        speakable: Whether the user may hear this. It is not a promise that
+            the frontend speaks it: a frontend decides what to do with the
+            flag, and a speech-to-speech model may paraphrase or skip it.
+    """
+
+    text: str
+    is_thought: bool = False
+    is_final: bool = False
+    speakable: bool = True
+
+    def to_payload(self) -> dict[str, Any]:
+        """Render the output as a job update payload.
+
+        Returns:
+            The payload.
+        """
+        return {
+            "text": self.text,
+            "is_thought": self.is_thought,
+            "is_final": self.is_final,
+            "speakable": self.speakable,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "BackendOutput":
+        """Rebuild an output from a job update payload.
+
+        Args:
+            payload: The update payload.
+
+        Returns:
+            The output.
+        """
+        return cls(
+            text=str(payload.get("text") or ""),
+            is_thought=bool(payload.get("is_thought")),
+            is_final=bool(payload.get("is_final")),
+            speakable=bool(payload.get("speakable")),
+        )
 
 
-def render_backend_request(task: str, messages: list[dict[str, Any]], *, first: bool) -> str:
-    """Render a delegated task, with the voice turns that led to it, as one user message.
+#: Called with each piece of output a backend produces, as it is produced.
+BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
 
-    The turns are labelled transcript text rather than context messages of
-    their own, so the backend's context holds only what the backend itself
+#: Adjusts a backend output — its text, or whether the user may hear it —
+#: before it leaves the worker.
+BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
+
+
+def render_backend_request(task: str | None, messages: list[dict[str, Any]], *, first: bool) -> str:
+    """Render a delegated task, with the conversation that led to it, as one user message.
+
+    The conversation is labelled transcript text rather than context messages
+    of their own, so the backend's context holds only what the backend itself
     said as assistant messages.
 
     Args:
-        task: The request the frontend delegated.
-        messages: User/assistant turns of the voice conversation not yet seen
-            by the backend, as ``{"role", "content"}`` dicts.
+        task: The request the frontend delegated, when it worded one. Without
+            it the backend is asked to act on the conversation.
+        messages: Fragments of the voice conversation not yet seen by the
+            backend, as ``{"role", "content"}`` dicts.
         first: Whether this is the backend's first task in the conversation.
 
     Returns:
@@ -70,7 +126,10 @@ def render_backend_request(task: str, messages: list[dict[str, Any]], *, first: 
             if content:
                 lines.append(f"{str(message.get('role', '')).upper()}: {content}")
         lines.append("")
-    lines.append(f"Task from the voice assistant: {task}")
+    if task:
+        lines.append(f"Task from the voice assistant: {task}")
+    else:
+        lines.append("Act on the user's most recent request in the conversation above.")
     return "\n".join(lines)
 
 
@@ -99,14 +158,21 @@ class BackendLLMWorker(LLMContextWorker):
 
     Job contract (``@job(name="run")``, one task at a time):
 
-    - request payload: ``{"task": str, "messages": [{"role": "user" | "assistant",
-      "content": str}, ...]}``
-    - updates: ``{"kind": "text" | "thought", "text": str}`` — ``text`` is an
-      intermediate response (what the backend said before calling tools) and
-      ``thought`` a reasoning summary from the LLM's thought frames: progress
-      the frontend can draw on while the backend works
-    - response: ``{"text": str}`` — the final assistant response, or ``""`` if
-      the task ended without one
+    - request payload: ``{"task": str | None, "messages": [{"role": "user" |
+      "assistant", "content": str}, ...]}``. A frontend that words the request
+      itself sends a ``task``; one whose model hands over without wording
+      anything sends only the conversation, and the backend works out what is
+      being asked.
+    - updates: a :class:`BackendOutput` payload for every piece of output —
+      reasoning summaries, what the backend says before calling tools, and its
+      final answer.
+    - response: ``{"text": str}`` — the final answer, or ``""`` if the task
+      ended without one.
+
+    The final answer arrives twice, as the last update and as the response, so
+    a caller uses one or the other: a frontend relaying output as it arrives
+    reads the updates, while one that needs a return value (a tool handler,
+    say) reads the response and skips updates marked ``is_final``.
 
     :func:`run_backend_job` wraps the caller side.
 
@@ -127,6 +193,7 @@ class BackendLLMWorker(LLMContextWorker):
         llm: LLMService[Any],
         context: LLMContext | None = None,
         name: str | None = None,
+        transform_output: BackendOutputTransform | None = None,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
@@ -137,6 +204,10 @@ class BackendLLMWorker(LLMContextWorker):
             context: The backend's context, typically carrying its tools.
                 A fresh empty context when omitted.
             name: Worker name; auto-generated when omitted.
+            transform_output: Called with each :class:`BackendOutput` before it
+                is sent, to adjust its text or whether the user may hear it.
+                Without one, responses are speakable and reasoning summaries
+                are not.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -155,6 +226,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._run: _BackendRun | None = None
         self._jobs_run = 0
+        self._transform_output = transform_output
 
         # A task takes one or more LLM runs: the first for the task itself,
         # then one per round of tool results (the assistant aggregator pushes
@@ -182,10 +254,12 @@ class BackendLLMWorker(LLMContextWorker):
             message: The job request; see the class docstring for the payload.
         """
         payload = message.payload or {}
-        task = str(payload.get("task") or "").strip()
+        task = str(payload.get("task") or "").strip() or None
         messages = payload.get("messages") or []
-        if not task:
-            logger.warning(f"Worker '{self.name}': job {message.job_id} has no task")
+        if not task and not messages:
+            logger.warning(
+                f"Worker '{self.name}': job {message.job_id} has neither a task nor conversation"
+            )
             await self.send_job_response(message.job_id, {"text": ""})
             return
 
@@ -215,24 +289,31 @@ class BackendLLMWorker(LLMContextWorker):
             and not self.llm.has_queued_frame(LLMContextFrame)
         )
         text = (message.content or "").strip()
+        if text:
+            await self._emit(run, BackendOutput(text=text, is_final=finished))
         if finished:
             run.final_text = text
             run.finished.set()
-        elif text:
-            await self.send_job_update(run.job_id, {"kind": "text", "text": text})
 
     async def _on_assistant_thought(self, message: AssistantThoughtMessage):
         run = self._run
         text = (message.content or "").strip()
         if run is not None and text:
-            await self.send_job_update(run.job_id, {"kind": "thought", "text": text})
+            await self._emit(run, BackendOutput(text=text, is_thought=True, speakable=False))
+
+    async def _emit(self, run: "_BackendRun", output: BackendOutput):
+        """Send one output as a job update, after any configured transform."""
+        if self._transform_output is not None:
+            output = await self._transform_output(output)
+        if output.text:
+            await self.send_job_update(run.job_id, output.to_payload())
 
 
 async def run_backend_job(
     worker: BaseWorker,
     backend_name: str,
     *,
-    task: str,
+    task: str | None = None,
     messages: list[dict[str, Any]] | None = None,
     on_update: BackendUpdateCallback | None = None,
     timeout_secs: float | None = None,
@@ -243,12 +324,15 @@ async def run_backend_job(
         worker: The worker making the request (for a pipeline processor,
             ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
-        task: The request to delegate.
-        messages: Voice conversation turns the backend hasn't seen yet.
-        on_update: Called with ``(kind, text)`` for each intermediate response
-            (``"text"``) or reasoning summary (``"thought"``) the backend
-            streams back while it works; the final response is returned, not
-            passed here.
+        task: The request to delegate, when the frontend words one. Omit it
+            when the frontend hands over without saying what it wants, and the
+            backend will work that out from ``messages``.
+        messages: Fragments of the voice conversation the backend hasn't seen
+            yet.
+        on_update: Called with each :class:`BackendOutput` the backend
+            produces, the final answer included. A caller using the return
+            value should skip outputs marked ``is_final`` to avoid handling
+            the answer twice.
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
 
@@ -267,7 +351,7 @@ async def run_backend_job(
         async for event in backend_job:
             if event.type != JobEvent.UPDATE or not event.data or not on_update:
                 continue
-            text = event.data.get("text")
-            if text:
-                await on_update(str(event.data.get("kind", "text")), str(text))
+            output = BackendOutput.from_payload(event.data)
+            if output.text:
+                await on_update(output)
     return str(backend_job.response.get("text", ""))

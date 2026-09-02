@@ -51,7 +51,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import BackendLLMWorker, run_backend_job
+from pipecat.workers.llm import BackendLLMWorker, BackendOutput, run_backend_job
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -129,14 +129,16 @@ async def delegate(params: FunctionCallParams, task: str):
     """
     logger.info(f"Delegating to the backend: {task!r}")
 
-    async def on_update(kind: str, text: str):
-        logger.info(f"Backend update ({kind}): {text!r}")
-        # Progress — what the backend says before calling tools, and its
-        # reasoning summaries — is recorded as intermediate results of this
-        # call: context the frontend can draw on if asked, without prompting a
-        # reply. The final answer is the tool result.
+    async def on_update(output: BackendOutput):
+        # The final answer comes back as this tool's result, below, so it is
+        # skipped here; progress — what the backend says before calling tools,
+        # and its reasoning summaries — is recorded as an intermediate result:
+        # context the frontend can draw on if asked, without prompting a reply.
+        if output.is_final:
+            return
+        logger.info(f"Backend update (speakable={output.speakable}): {output.text!r}")
         await params.result_callback(
-            {"kind": kind, "text": text},
+            {"text": output.text},
             properties=FunctionCallResultProperties(is_final=False, run_llm=False),
         )
 

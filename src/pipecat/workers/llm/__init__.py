@@ -6,7 +6,11 @@
 
 """LLM worker package -- `LLMWorker`, `LLMContextWorker`, `BackendLLMWorker`, and the `@tool` decorator."""
 
-from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker, run_backend_job
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendLLMWorker,
+    BackendOutput,
+    run_backend_job,
+)
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 from pipecat.workers.llm.llm_worker import LLMWorker, LLMWorkerActivationArgs
 from pipecat.workers.llm.tool_decorator import tool
@@ -16,6 +20,7 @@ __all__ = [
     "LLMWorker",
     "LLMWorkerActivationArgs",
     "LLMContextWorker",
+    "BackendOutput",
     "run_backend_job",
     "tool",
 ]

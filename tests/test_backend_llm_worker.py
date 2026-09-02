@@ -13,6 +13,7 @@ WorkerRunner.
 """
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -33,7 +34,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, run_backend_job
-from pipecat.workers.llm.backend_llm_worker import render_backend_request
+from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_backend_request
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -110,23 +111,28 @@ async def get_weather(params: FunctionCallParams, location: str):
 
 
 async def _run_backend(
-    llm: _ScriptedLLM, *, task: str, messages: list[dict[str, Any]] | None = None
-) -> tuple[str, list[tuple[str, str]], BackendLLMWorker]:
+    llm: _ScriptedLLM,
+    *,
+    task: str | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    transform_output=None,
+) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
     """Run one delegated task against ``llm`` under a WorkerRunner."""
     backend = BackendLLMWorker(
         llm=llm,
         name="backend",
         context=LLMContext([{"role": "system", "content": "You are the backend."}], [get_weather]),
+        transform_output=transform_output,
     )
     requester = BaseWorker("requester")
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
 
-    updates: list[tuple[str, str]] = []
+    updates: list[BackendOutput] = []
     result: dict[str, str] = {}
 
-    async def on_update(kind: str, text: str):
-        updates.append((kind, text))
+    async def on_update(output: BackendOutput):
+        updates.append(output)
 
     async def body():
         try:
@@ -164,7 +170,10 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     )
 
     assert text == "It's 62 and raining in Seattle."
-    assert updates == [("text", "Let me check.")]
+    assert updates == [
+        BackendOutput(text="Let me check.", is_final=False, speakable=True),
+        BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, speakable=True),
+    ]
 
     # The backend saw the rendered request first, then the tool result.
     first_request = llm.contexts_seen[0][-1]
@@ -194,7 +203,10 @@ async def test_fast_tool_result_before_response_end_does_not_finish_the_run_earl
     text, updates, _ = await _run_backend(llm, task="Weather in Seattle?")
 
     assert text == "Rain, 62 degrees."
-    assert updates == [("text", "Checking.")]
+    assert [(u.text, u.is_final) for u in updates] == [
+        ("Checking.", False),
+        ("Rain, 62 degrees.", True),
+    ]
 
 
 @pytest.mark.asyncio
@@ -209,7 +221,8 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
     text, updates, _ = await _run_backend(llm, task="Weather?")
 
     assert text == "It's raining."
-    assert updates == []
+    # The tool-only response produces no text; only the final answer is sent.
+    assert [(u.text, u.is_final) for u in updates] == [("It's raining.", True)]
 
 
 @pytest.mark.asyncio
@@ -227,9 +240,10 @@ async def test_thoughts_are_streamed_as_thought_updates():
     text, updates, _ = await _run_backend(llm, task="Weather?")
 
     assert text == "It's raining."
-    assert updates == [
-        ("thought", "I should check the weather."),
-        ("thought", "Rain; keep it short."),
+    assert [(u.text, u.is_thought, u.speakable) for u in updates] == [
+        ("I should check the weather.", True, False),
+        ("Rain; keep it short.", True, False),
+        ("It's raining.", False, True),
     ]
 
 
@@ -261,3 +275,55 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
 
 def test_render_backend_request_omits_the_transcript_when_there_are_no_turns():
     assert render_backend_request("Do it", [], first=True) == "Task from the voice assistant: Do it"
+
+
+def test_render_backend_request_without_a_task_points_at_the_conversation():
+    rendered = render_backend_request(
+        None, [{"role": "user", "content": "what's the weather"}], first=True
+    )
+    assert rendered == (
+        "Voice conversation so far:\n"
+        "USER: what's the weather\n"
+        "\n"
+        "Act on the user's most recent request in the conversation above."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_task_less_job_runs_from_the_conversation_alone():
+    llm = _ScriptedLLM([[("text", "It's raining.")]])
+
+    text, _, _ = await _run_backend(
+        llm, messages=[{"role": "user", "content": "what's the weather"}]
+    )
+
+    assert text == "It's raining."
+    request = llm.contexts_seen[0][-1]
+    assert request["content"].endswith(
+        "Act on the user's most recent request in the conversation above."
+    )
+
+
+@pytest.mark.asyncio
+async def test_transform_output_can_rewrite_text_and_speakability():
+    llm = _ScriptedLLM(
+        [
+            [
+                ("text", ">> Checking."),
+                ("call", "get_weather", "call_1", {"location": "Seattle"}),
+            ],
+            [("text", "Internal note.")],
+        ]
+    )
+
+    async def transform_output(output: BackendOutput) -> BackendOutput:
+        if output.text.startswith(">>"):
+            return replace(output, text=output.text[2:].lstrip(), speakable=True)
+        return replace(output, speakable=False)
+
+    _, updates, _ = await _run_backend(llm, task="Weather?", transform_output=transform_output)
+
+    assert [(u.text, u.speakable) for u in updates] == [
+        ("Checking.", True),
+        ("Internal note.", False),
+    ]
