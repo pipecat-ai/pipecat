@@ -89,14 +89,19 @@ class ProcessorStartupTiming(BaseModel):
             processor's start() began.
         duration_secs: What the processor cost to get ready, in seconds: its
             setup() and its start() together.
-        setup_duration_secs: How long the processor's setup() took, in seconds,
-            which is the part of ``duration_secs`` spent connecting.
+        setup_duration_secs: How long the processor's setup() took, in seconds.
+            Processors are set up concurrently, so this overlaps every other
+            processor's and only the longest of them holds up the pipeline.
+        start_duration_secs: How long the processor spent on the StartFrame, in
+            seconds. The frame reaches processors one after another, so this
+            adds to what every other processor spent rather than overlapping it.
     """
 
     processor_name: str
     start_offset_secs: float
     duration_secs: float
     setup_duration_secs: float
+    start_duration_secs: float = 0.0
 
 
 class StartupWarmupTiming(BaseModel):
@@ -120,9 +125,15 @@ class StartupTimingReport(BaseModel):
     Parameters:
         start_time: Unix timestamp when the pipeline began setting up.
         total_duration_secs: Wall-clock time from the pipeline starting to set
-            up until it had started. Processors are set up concurrently, so
-            this is the span rather than the sum of what each cost, and it
-            covers ``warmup`` as well, which belongs to no processor.
+            up until it had started, which is ``setup_phase_secs`` and
+            ``start_phase_secs`` back to back.
+        setup_phase_secs: How long getting every processor ready took, in
+            seconds. Setting up runs concurrently and warming runs alongside
+            it, so the longest single piece of work decides this rather than
+            their sum.
+        start_phase_secs: How long the StartFrame took to travel the pipeline,
+            in seconds. It reaches processors one after another, so what each
+            spends on it adds up.
         processor_timings: Per-processor timing data, in pipeline order.
         warmup: What warming the framework's deferred imports cost, or None
             when the pipeline started without warming them.
@@ -130,6 +141,8 @@ class StartupTimingReport(BaseModel):
 
     start_time: float
     total_duration_secs: float
+    setup_phase_secs: float = 0.0
+    start_phase_secs: float = 0.0
     processor_timings: list[ProcessorStartupTiming] = Field(default_factory=list)
     warmup: StartupWarmupTiming | None = None
 
@@ -235,6 +248,7 @@ class StartupTimingObserver(BaseObserver):
         self._setup_wall_clock: float = 0.0
         self._setup_finished_ns: int = 0
         self._warmup: StartupWarmupTiming | None = None
+        self._warmup_finished_ns: int = 0
         self._setup_durations: dict[int, float] = {}
 
         # Whether we've already emitted the startup timing report.
@@ -290,6 +304,7 @@ class StartupTimingObserver(BaseObserver):
         if self._startup_timing_reported:
             return
 
+        self._warmup_finished_ns = data.finished_at_ns
         self._warmup = StartupWarmupTiming(
             duration_secs=(data.finished_at_ns - data.started_at_ns) / 1e9,
             blocking_duration_secs=max(0, data.finished_at_ns - self._setup_finished_ns) / 1e9,
@@ -390,6 +405,7 @@ class StartupTimingObserver(BaseObserver):
                 # up, and start() is whatever is left to do once it has.
                 duration_secs=setup_duration_secs + duration_secs,
                 setup_duration_secs=setup_duration_secs,
+                start_duration_secs=duration_secs,
             )
         )
 
@@ -427,9 +443,18 @@ class StartupTimingObserver(BaseObserver):
         # up to wall-clock time. Report the span instead.
         total = (time.monotonic_ns() - self._setup_started_ns) / 1e9
 
+        # Getting ready ends with the last of the concurrent work, whether that
+        # is a processor still connecting or the imports still warming. What
+        # follows is the StartFrame travelling the pipeline.
+        setup_phase_end_ns = max(self._setup_finished_ns, self._warmup_finished_ns)
+        setup_phase_secs = max(0, setup_phase_end_ns - self._setup_started_ns) / 1e9
+        setup_phase_secs = min(setup_phase_secs, total)
+
         report = StartupTimingReport(
             start_time=self._setup_wall_clock,
             total_duration_secs=total,
+            setup_phase_secs=setup_phase_secs,
+            start_phase_secs=total - setup_phase_secs,
             processor_timings=self._timings,
             warmup=self._warmup,
         )
