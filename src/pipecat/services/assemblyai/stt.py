@@ -63,11 +63,12 @@ MAX_AGENT_CONTEXT_CHARS = 1500
 
 # Model-name prefixes shared by every Universal-3 Pro streaming variant. The
 # ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future
-# ``u3-rt-pro-*`` releases) and ``universal-3-5-pro`` (and any
-# ``universal-3-5-pro-*`` release) both expose the full U3 Pro feature set:
-# built-in turn detection, prompting, continuous partials, interruption_delay,
-# context carryover, and voice focus.
-U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro")
+# ``u3-rt-pro-*`` releases) and the ``universal-3-5-pro`` / ``universal-3-6-pro``
+# releases (and any ``universal-3-5-pro-*`` / ``universal-3-6-pro-*`` release)
+# all expose the full U3 Pro feature set: built-in turn detection, prompting,
+# continuous partials, interruption_delay, context carryover, and voice focus.
+# universal-3-6-pro is universal-3-5-pro upgraded — same model, same features.
+U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
@@ -82,8 +83,9 @@ def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
-    any ``u3-rt-pro-*`` variant) and ``universal-3-5-pro`` (and any
-    ``universal-3-5-pro-*`` variant) so U3 Pro-only features are gated on the
+    any ``u3-rt-pro-*`` variant) and the ``universal-3-5-pro`` /
+    ``universal-3-6-pro`` releases (and any ``universal-3-5-pro-*`` /
+    ``universal-3-6-pro-*`` variant) so U3 Pro-only features are gated on the
     whole family rather than a single exact string.
 
     Args:
