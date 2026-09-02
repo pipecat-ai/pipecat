@@ -59,6 +59,11 @@ class ErrorCategory(Enum):
         the credentials stay rejected, the request stays malformed, the
         account stays out of credit. Only new credentials, settings, or a
         topped-up account can clear it, so retrying is pointless.
+
+        Permanence is judged on the scale of a single run. An allowance that
+        resets on a daily or monthly window will not reset while this
+        pipeline is running, so QUOTA is permanent here even for providers
+        whose 402 eventually clears; the seconds-scale case is RATE_LIMIT.
         """
         return self in _PERMANENT_CATEGORIES
 
