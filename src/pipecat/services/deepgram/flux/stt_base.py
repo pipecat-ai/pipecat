@@ -151,6 +151,11 @@ class DeepgramFluxSTTSettings(STTSettings):
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
             Read only from the connection URL, so an update is applied by
             reconnecting.
+        profanity_filter: Mask recognized profanity in the transcript. Can be
+            updated mid-stream via ``STTUpdateSettingsFrame``.
+        redact: Remove sensitive numbers from the transcript: ``"numbers"`` or
+            ``"aggressive_numbers"``. Read only from the connection URL, so an
+            update is applied by reconnecting.
         language_hints: Languages to bias transcription toward. Only honored by the
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
@@ -163,6 +168,8 @@ class DeepgramFluxSTTSettings(STTSettings):
     keyterm: list | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_confidence: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -183,9 +190,10 @@ class DeepgramFluxSTTBase(STTService):
         "eager_eot_threshold",
         "eot_timeout_ms",
         "language_hints",
+        "profanity_filter",
     }
     # Fields Flux only accepts in the connection URL, so changing them reconnects.
-    _CONNECTION_FIELDS = {"model", "numerals"}
+    _CONNECTION_FIELDS = {"model", "numerals", "redact"}
     # Fields applied to results as they arrive, so no connection change is needed.
     _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
@@ -392,6 +400,12 @@ class DeepgramFluxSTTBase(STTService):
         if self._settings.numerals is not None:
             params.append(f"numerals={str(self._settings.numerals).lower()}")
 
+        if self._settings.profanity_filter is not None:
+            params.append(f"profanity_filter={str(self._settings.profanity_filter).lower()}")
+
+        if self._settings.redact is not None:
+            params.append(urlencode({"redact": self._settings.redact}))
+
         if self._mip_opt_out is not None:
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
@@ -543,6 +557,9 @@ class DeepgramFluxSTTBase(STTService):
 
         if "keyterm" in fields:
             message["keyterms"] = self._settings.keyterm
+
+        if "profanity_filter" in fields:
+            message["profanity_filter"] = self._settings.profanity_filter
 
         thresholds: dict[str, Any] = {}
         if "eot_threshold" in fields:
