@@ -156,11 +156,12 @@ _TURN_COMPLETION = "config: filter_incomplete_user_turns"
 # that governs the time owns it; otherwise the owner is the processor at one
 # end. The flag marks a core stage, which stays listed however brief so the
 # timeline keeps its shape from one turn to the next.
-_SPANS: dict[tuple[_MomentKind, _MomentKind], tuple[str, str | _Owner, bool]] = {
+_SPANS: dict[tuple[_MomentKind, _MomentKind], tuple[str, str, str | _Owner, bool]] = {
     # Silence the VAD had to hear before it would call the turn over. It is a
     # setting rather than a service, and shortening it trades latency for
     # transcription accuracy.
     (_MomentKind.SILENCE, _MomentKind.VAD_STOP): (
+        "endpointing_wait",
         "endpointing wait",
         "config: VAD stop_secs",
         True,
@@ -168,56 +169,118 @@ _SPANS: dict[tuple[_MomentKind, _MomentKind], tuple[str, str | _Owner, bool]] = 
     # From a pipeline that is ready with a client on it, to the bot asking for
     # something to say: the application's connected handler, and the frame it
     # queues reaching the LLM.
-    (_MomentKind.READY, _MomentKind.LLM_REQUEST): ("first request", "bot", True),
-    (_MomentKind.VAD_STOP, _MomentKind.TRANSCRIPT): ("transcription", _Owner.CLOSER, True),
+    (_MomentKind.READY, _MomentKind.LLM_REQUEST): ("first_request", "first request", "bot", True),
+    (_MomentKind.VAD_STOP, _MomentKind.TRANSCRIPT): (
+        "transcription",
+        "transcription",
+        _Owner.CLOSER,
+        True,
+    ),
     # Whatever decides the user is done: a fixed speech timeout, a smart-turn
     # model's inference, or an external signal.
     (_MomentKind.TRANSCRIPT, _MomentKind.LLM_REQUEST): (
+        "turn_detection",
         "turn detection",
         "config: user turn strategies",
         True,
     ),
-    (_MomentKind.LLM_REQUEST, _MomentKind.LLM_CHUNK): ("LLM inference", _Owner.OPENER, True),
+    (_MomentKind.LLM_REQUEST, _MomentKind.LLM_CHUNK): (
+        "llm_inference",
+        "LLM inference",
+        _Owner.OPENER,
+        True,
+    ),
     # The gate reading the verdict, whichever way it went.
     (_MomentKind.LLM_CHUNK, _MomentKind.MARKER_COMPLETE): (
+        "turn_completion",
         "turn completion",
         _TURN_COMPLETION,
         False,
     ),
     (_MomentKind.LLM_CHUNK, _MomentKind.MARKER_INCOMPLETE): (
+        "turn_completion",
         "turn completion",
         _TURN_COMPLETION,
         False,
     ),
     # The token the marker occupies before anything can be spoken.
     (_MomentKind.MARKER_COMPLETE, _MomentKind.FIRST_TEXT): (
+        "turn_completion",
         "turn completion",
         _TURN_COMPLETION,
         False,
     ),
     (_MomentKind.MARKER_INCOMPLETE, _MomentKind.LLM_REQUEST): (
+        "waiting_for_user",
         "waiting for user",
         _TURN_COMPLETION,
         False,
     ),
     # Between the LLM's first chunk and the call being dispatched, the LLM is
     # still writing the call.
-    (_MomentKind.LLM_CHUNK, _MomentKind.HANDLERS_START): ("LLM tool call", _Owner.OPENER, False),
+    (_MomentKind.LLM_CHUNK, _MomentKind.HANDLERS_START): (
+        "llm_tool_call",
+        "LLM tool call",
+        _Owner.OPENER,
+        False,
+    ),
     (_MomentKind.HANDLERS_START, _MomentKind.HANDLERS_END): (
+        "function_handler",
         "function handler",
         _Owner.CLOSER,
         False,
     ),
     # Waiting for a full sentence before speaking any of it.
     (_MomentKind.FIRST_TEXT, _MomentKind.SENTENCE): (
+        "sentence_aggregation",
         "sentence aggregation",
         "config: text_aggregation_mode",
         False,
     ),
-    (_MomentKind.SENTENCE, _MomentKind.FIRST_AUDIO): ("speech synthesis", _Owner.CLOSER, True),
-    (_MomentKind.FIRST_TEXT, _MomentKind.FIRST_AUDIO): ("speech synthesis", _Owner.CLOSER, True),
-    (_MomentKind.FIRST_AUDIO, _MomentKind.BOT_SPEAKING): ("output transport", _Owner.CLOSER, False),
+    (_MomentKind.SENTENCE, _MomentKind.FIRST_AUDIO): (
+        "speech_synthesis",
+        "speech synthesis",
+        _Owner.CLOSER,
+        True,
+    ),
+    (_MomentKind.FIRST_TEXT, _MomentKind.FIRST_AUDIO): (
+        "speech_synthesis",
+        "speech synthesis",
+        _Owner.CLOSER,
+        True,
+    ),
+    (_MomentKind.FIRST_AUDIO, _MomentKind.BOT_SPEAKING): (
+        "output_transport",
+        "output transport",
+        _Owner.CLOSER,
+        False,
+    ),
 }
+
+
+class MeasuredFrom(StrEnum):
+    """Where a measured interval was anchored.
+
+    A greeting is timed from the client connecting, a turn from the user
+    falling silent, so a partial interval is never mistaken for a whole one.
+    """
+
+    USER_SILENCE = "user_silence"
+    CLIENT_CONNECTED = "client_connected"
+
+
+class LatencyOwnerKind(StrEnum):
+    """What kind of thing a contribution's owner is.
+
+    Grouping on this answers where a turn's time went without matching on the
+    owner's name: a service that could be swapped, a setting the bot chose, the
+    bot's own code, or the pipeline between them.
+    """
+
+    SERVICE = "service"
+    SETTING = "setting"
+    BOT = "bot"
+    PIPELINE = "pipeline"
 
 
 class LatencyContribution(BaseModel):
@@ -231,15 +294,20 @@ class LatencyContribution(BaseModel):
     finish a sentence.
 
     Parameters:
+        key: Stable identifier for this part of a turn. Unlike ``label``, it
+            is safe to group on: it survives the label being reworded.
         label: What the time was spent on.
         owner: What spent it — a processor name, or a ``config:`` tag naming
             the setting that governs it.
+        owner_kind: What kind of thing the owner is.
         start_time: Unix timestamp when it started.
         duration_secs: How long it took, in seconds.
     """
 
+    key: str
     label: str
     owner: str
+    owner_kind: LatencyOwnerKind
     start_time: float
     duration_secs: float
 
@@ -270,10 +338,15 @@ class LatencyBreakdown(BaseModel):
             summing to the measured latency. A part is listed only if it
             happened, so a bot without turn completion has no marker or wait
             entries.
+        measured_from: Where the interval was anchored, so a greeting is not
+            compared with a turn.
+        total_secs: The measured interval, which the contributions sum to.
     """
 
     ttfb: list[TTFBBreakdownMetrics] = Field(default_factory=list)
     contributions: list[LatencyContribution] = Field(default_factory=list)
+    measured_from: MeasuredFrom | None = None
+    total_secs: float = 0.0
     text_aggregation: TextAggregationBreakdownMetrics | None = None
     user_turn_start_time: float | None = None
     user_turn_secs: float | None = None
@@ -338,7 +411,13 @@ class LatencyBreakdown(BaseModel):
             else self.contributions
         )
         lines = [f"{c.duration_secs:6.3f}s  {c.label:20} [{c.owner}]" for c in ordered]
-        lines.append(f"{sum(c.duration_secs for c in self.contributions):6.3f}s  TOTAL")
+        total = sum(c.duration_secs for c in self.contributions)
+        anchor = (
+            " (from client connected)"
+            if self.measured_from is MeasuredFrom.CLIENT_CONNECTED
+            else ""
+        )
+        lines.append(f"{total:6.3f}s  TOTAL{anchor}")
         return lines
 
 
@@ -708,25 +787,36 @@ class UserBotLatencyObserver(BaseObserver):
                 # it is not, the same wait is the LLM still streaming, so its
                 # inference covers it.
                 entry = (
-                    ("awaiting speakable text", _Owner.CLOSER, False)
+                    ("awaiting_speakable_text", "awaiting speakable text", _Owner.CLOSER, False)
                     if self._markers_seen
-                    else ("LLM inference", _Owner.OPENER, True)
+                    else ("llm_inference", "LLM inference", _Owner.OPENER, True)
                 )
             else:
                 entry = _SPANS.get((opener.kind, closer.kind))
             if entry is None:
                 continue
-            label, owner, is_core = entry
+            key, label, owner, is_core = entry
+            owner_kind = LatencyOwnerKind.SERVICE
             if owner is _Owner.OPENER:
                 owner = opener.source
             elif owner is _Owner.CLOSER:
                 owner = closer.source
+            else:
+                # A literal owner is not a processor: either the setting that
+                # governs the time, or the bot's own code.
+                owner_kind = (
+                    LatencyOwnerKind.SETTING
+                    if owner.startswith("config: ")
+                    else LatencyOwnerKind.BOT
+                )
             if is_core:
                 core.add(label)
             spans.append(
                 LatencyContribution(
+                    key=key,
                     label=label,
                     owner=owner,
+                    owner_kind=owner_kind,
                     start_time=opener.at,
                     duration_secs=closer.at - opener.at,
                 )
@@ -753,8 +843,10 @@ class UserBotLatencyObserver(BaseObserver):
         if pipeline_secs >= PRINTS_AS_ZERO_SECS:
             named.append(
                 LatencyContribution(
+                    key="pipeline",
                     label="pipeline",
                     owner="pipecat",
+                    owner_kind=LatencyOwnerKind.PIPELINE,
                     start_time=start,
                     duration_secs=pipeline_secs,
                 )
@@ -817,9 +909,18 @@ class UserBotLatencyObserver(BaseObserver):
             emit_breakdown = True
 
         if emit_breakdown:
+            contributions = self._build_contributions()
             breakdown = LatencyBreakdown(
                 ttfb=list(self._ttfb),
-                contributions=self._build_contributions(),
+                contributions=contributions,
+                measured_from=(
+                    MeasuredFrom.USER_SILENCE
+                    if self._user_turn_start_time is not None
+                    else MeasuredFrom.CLIENT_CONNECTED
+                )
+                if contributions
+                else None,
+                total_secs=sum(c.duration_secs for c in contributions),
                 text_aggregation=self._text_aggregation,
                 user_turn_start_time=self._user_turn_start_time,
                 user_turn_secs=self._user_turn,

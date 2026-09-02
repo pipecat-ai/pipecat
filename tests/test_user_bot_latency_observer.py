@@ -28,6 +28,8 @@ from pipecat.observers.user_bot_latency_observer import (
     FunctionCallMetrics,
     LatencyBreakdown,
     LatencyContribution,
+    LatencyOwnerKind,
+    MeasuredFrom,
     TextAggregationBreakdownMetrics,
     TTFBBreakdownMetrics,
     UserBotLatencyObserver,
@@ -801,10 +803,20 @@ class TestLatencyContributions(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         breakdown = LatencyBreakdown(
             contributions=[
                 LatencyContribution(
-                    label="endpointing wait", owner="config", start_time=0.0, duration_secs=0.2
+                    key="endpointing_wait",
+                    label="endpointing wait",
+                    owner="config: VAD stop_secs",
+                    owner_kind=LatencyOwnerKind.SETTING,
+                    start_time=0.0,
+                    duration_secs=0.2,
                 ),
                 LatencyContribution(
-                    label="speech synthesis", owner="TTS#0", start_time=0.2, duration_secs=0.4
+                    key="speech_synthesis",
+                    label="speech synthesis",
+                    owner="TTS#0",
+                    owner_kind=LatencyOwnerKind.SERVICE,
+                    start_time=0.2,
+                    duration_secs=0.4,
                 ),
             ]
         )
@@ -1025,6 +1037,69 @@ class TestLatencyContributions(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(total, self.spoke_at - self.silence_at, places=6)
         hidden = next(c for c in breakdown.contributions if c.label == "pipeline")
         self.assertGreater(hidden.duration_secs, 0.06)
+
+    async def test_a_turn_says_what_it_was_measured_from(self):
+        """And carries the interval it measured."""
+        breakdown = await self._complete_turn()
+        self.assertEqual(breakdown.measured_from, MeasuredFrom.USER_SILENCE)
+        self.assertAlmostEqual(breakdown.total_secs, self.spoke_at - self.silence_at, places=6)
+
+    async def test_a_greeting_says_it_was_measured_from_the_connection(self):
+        """A partial interval is never read as a whole one."""
+        await self._push(ClientConnectedFrame())
+        self._wait(0.4)
+        await self.observer.on_pipeline_started()
+        self._wait(0.2)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.3)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.3)]))
+        await self._push(LLMTextFrame("Hi!"), source="LLM#0")
+        self._wait(0.1)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        await self._settle()
+
+        breakdown = self.breakdowns[-1]
+        self.assertEqual(breakdown.measured_from, MeasuredFrom.CLIENT_CONNECTED)
+        self.assertIn("TOTAL (from client connected)", breakdown.contribution_lines()[-1])
+
+    async def test_every_part_carries_a_key_and_an_owner_kind(self):
+        """Which is what a dashboard groups on, rather than the wording."""
+        breakdown = await self._complete_turn(detect=0.05, aggregation=0.05)
+        by_key = {c.key: c for c in breakdown.contributions}
+
+        self.assertEqual(by_key["endpointing_wait"].owner_kind, LatencyOwnerKind.SETTING)
+        self.assertEqual(by_key["turn_detection"].owner_kind, LatencyOwnerKind.SETTING)
+        self.assertEqual(by_key["sentence_aggregation"].owner_kind, LatencyOwnerKind.SETTING)
+        self.assertEqual(by_key["llm_inference"].owner_kind, LatencyOwnerKind.SERVICE)
+        self.assertEqual(by_key["transcription"].owner_kind, LatencyOwnerKind.SERVICE)
+        self.assertEqual(by_key["speech_synthesis"].owner_kind, LatencyOwnerKind.SERVICE)
+
+        # A key never carries the wording of its label.
+        for contribution in breakdown.contributions:
+            self.assertNotIn(" ", contribution.key)
+
+    async def test_the_greeting_names_the_bot_as_an_owner(self):
+        """The wait before the LLM is asked is the bot's own code."""
+        await self._push(ClientConnectedFrame())
+        await self.observer.on_pipeline_started()
+        self._wait(0.5)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.3)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.3)]))
+        await self._push(LLMTextFrame("Hi!"), source="LLM#0")
+        self._wait(0.1)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        await self._settle()
+
+        first = self.breakdowns[-1].contributions[0]
+        self.assertEqual(first.key, "first_request")
+        self.assertEqual(first.owner_kind, LatencyOwnerKind.BOT)
 
 
 # Every label and setting the timeline is allowed to name, so a typo or a
