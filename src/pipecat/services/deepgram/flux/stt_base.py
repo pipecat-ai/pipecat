@@ -151,8 +151,8 @@ class DeepgramFluxSTTSettings(STTSettings):
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
             Read only from the connection URL, so an update is applied by
             reconnecting.
-        profanity_filter: Mask recognized profanity in the transcript. Read only
-            from the connection URL, so an update is applied by reconnecting.
+        profanity_filter: Mask recognized profanity in the transcript. Can be
+            updated mid-stream via ``STTUpdateSettingsFrame``.
         redact: Remove sensitive numbers from the transcript: ``"numbers"`` or
             ``"aggressive_numbers"``. Read only from the connection URL, so an
             update is applied by reconnecting.
@@ -190,9 +190,10 @@ class DeepgramFluxSTTBase(STTService):
         "eager_eot_threshold",
         "eot_timeout_ms",
         "language_hints",
+        "profanity_filter",
     }
     # Fields Flux only accepts in the connection URL, so changing them reconnects.
-    _CONNECTION_FIELDS = {"model", "numerals", "profanity_filter", "redact"}
+    _CONNECTION_FIELDS = {"model", "numerals", "redact"}
     # Fields applied to results as they arrive, so no connection change is needed.
     _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
@@ -556,6 +557,9 @@ class DeepgramFluxSTTBase(STTService):
 
         if "keyterm" in fields:
             message["keyterms"] = self._settings.keyterm
+
+        if "profanity_filter" in fields:
+            message["profanity_filter"] = self._settings.profanity_filter
 
         thresholds: dict[str, Any] = {}
         if "eot_threshold" in fields:
