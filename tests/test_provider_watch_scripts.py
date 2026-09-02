@@ -514,34 +514,24 @@ class TestPublish:
         import publish
 
         branch = "provider-watch/cartesia-tts-updates"
-        path = tmp_path / "reports/cartesia/tts/2026-08-20.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(
-            f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
-            f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-            f"- `{branch}` — review: `git show {branch}` — s\n"
-        )
+        frags = [
+            "changelog/+cartesia-normalization.added.md",
+            "changelog/+cartesia-locale.added.md",
+            "changelog/+cartesia-sonic.fixed.md",
+            "changelog/999.changed.md",
+        ]
         sh = self.FakeShell(
-            branches=[branch],
-            fragments={
-                branch: [
-                    "changelog/+cartesia-normalization.added.md",
-                    "changelog/+cartesia-locale.added.md",
-                    "changelog/+cartesia-sonic.fixed.md",
-                    "changelog/999.changed.md",
-                ]
-            },
+            label_prs=[
+                {
+                    "number": 101,
+                    "headRefName": branch,
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                }
+            ],
+            fragments={"FETCH_HEAD": frags},
         )
-        reports = publish.load_reports(tmp_path, "2026-08-20")
-        outcome = publish.publish_prs(
-            reports,
-            sh=sh,
-            repo_root=tmp_path,
-            pipecat_repo="pipecat-ai/pipecat",
-            reports_repo="pipecat-ai/provider-watch-reports",
-            date="2026-08-20",
-        )
-        assert len(outcome.opened) == 1 and not outcome.skipped
+        sh.pr_files = {"101": frags}
+        assert publish.heal_fragment_names(sh, tmp_path, "pipecat-ai/pipecat") == []
         moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
         assert moves == [
             ("git", "mv", "changelog/+cartesia-locale.added.md", "changelog/101.added.md"),
@@ -594,41 +584,6 @@ class TestPublish:
         ]
         # The correctly named PR and the community PR are left alone.
         assert len([c for c in sh.calls if c[:2] == ("git", "fetch")]) == 1
-
-    def test_adopted_pr_still_renames_fragments(self, tmp_path):
-        import publish
-
-        branch = "provider-watch/deepseek-thinking"
-        path = tmp_path / "reports/deepseek/llm/2026-08-20.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(
-            f"---\nservice: deepseek/llm\nprs:\n  - branch: {branch}\n"
-            f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-            f"- `{branch}` — review: `git show {branch}` — s\n"
-        )
-        sh = self.FakeShell(
-            open_prs={branch: "https://github.com/pipecat-ai/pipecat/pull/7"},
-            branches=[branch],
-            fragments={branch: ["changelog/+deepseek-thinking.added.md"]},
-        )
-        outcome = publish.publish_prs(
-            publish.load_reports(tmp_path, "2026-08-20"),
-            sh=sh,
-            repo_root=tmp_path,
-            pipecat_repo="p/p",
-            reports_repo="p/r",
-            date="2026-08-20",
-        )
-        assert outcome.adopted and not outcome.opened and not outcome.skipped
-        assert (
-            "git",
-            "mv",
-            "changelog/+deepseek-thinking.added.md",
-            "changelog/7.added.md",
-        ) in sh.calls
-        assert ("git", "push", "origin", f"HEAD:refs/heads/{branch}") in [
-            c[:4] for c in sh.calls if c[:2] == ("git", "push")
-        ]
 
     def test_second_pass_is_a_no_op(self, reports_dir):
         tmp_path, publish = reports_dir

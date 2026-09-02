@@ -19,10 +19,13 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 
 1. push the branch and open a draft PR (title and body from the branch's
    commit messages — a single commit verbatim, several stitched with the
-   report's summary as the title — plus a link to the report), then rename
-   the branch's ``+slug`` changelog fragments to the PR's number;
+   report's summary as the title — plus a link to the report);
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
+
+A sweep over the open provider-watch PRs then renames every ``+slug``
+changelog fragment to its PR's number — the PRs this pass opened and any
+that a killed run left misnamed alike.
 
 Then commit and push ``_reports``. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
@@ -144,23 +147,22 @@ def _fragment_type(name: str) -> str:
     return next((part for part in name.split(".") if part in FRAGMENT_TYPES), "other")
 
 
-def _rename_changelog_fragments(
-    sh: Shell, repo_root: Path, branch: str, pr_url: str, ref: str | None = None
-) -> None:
-    """Give the branch's changelog fragments the PR's number.
+def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+    """Give a PR's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
     when a branch is committed, and must not guess a number. Once the PR is
     open its number is known: one follow-up commit renames every fragment the
     branch adds that does not already carry it — orphans and wrong guesses
     alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type. ``ref`` is the commit to rename at; it
-    defaults to the local branch, and healing an open PR passes its fetched
-    head instead.
+    branch adds several of one type. Works from the branch as pushed, in a
+    detached worktree, so it needs no local branch and cannot collide with a
+    leftover researcher worktree still holding one.
     """
     number = pr_url.rstrip("/").split("/")[-1]
     if not number.isdigit():
         return
+    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
     added = sh.run(
         "git",
         "diff",
@@ -168,7 +170,7 @@ def _rename_changelog_fragments(
         "--diff-filter=A",
         # Three-dot: only what the branch itself adds, however far main has
         # moved since the branch was cut.
-        f"{_main_base(sh, repo_root)}...{ref or branch}",
+        f"{_main_base(sh, repo_root)}...FETCH_HEAD",
         "--",
         "changelog/",
         cwd=repo_root,
@@ -183,11 +185,8 @@ def _rename_changelog_fragments(
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
     workdir = tempfile.mkdtemp(prefix="pw-fragments-")
     try:
-        # Detached: the branch may still be checked out in a researcher's
-        # leftover worktree (a killed run never cleans them up), which would
-        # make checking it out here fail.
         sh.run(
-            "git", "worktree", "add", "--quiet", "--detach", workdir, ref or branch, cwd=repo_root
+            "git", "worktree", "add", "--quiet", "--detach", workdir, "FETCH_HEAD", cwd=repo_root
         )
         for path in rename:
             fragment_type = _fragment_type(Path(path).name)
@@ -210,22 +209,18 @@ def _rename_changelog_fragments(
             cwd=Path(workdir),
         )
         sh.run("git", "push", "origin", f"HEAD:refs/heads/{branch}", cwd=Path(workdir))
-        # Move the local branch along too (best-effort: it may be checked out
-        # elsewhere), so a later publish pass diffs against the renamed state.
-        sh.run("git", "branch", "-f", branch, "HEAD", cwd=Path(workdir), check=False)
     finally:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
 
 
 def heal_fragment_names(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
-    """Rename ``+slug`` fragments on any open provider-watch PR to its number.
+    """Rename the ``+slug`` fragments on every open provider-watch PR to its number.
 
-    The publish pass of a killed run can open a PR without managing to rename
-    its fragments, and the researcher that next meets the unit records the
-    open PR instead of recreating its branch — so misnamed fragments have to
-    be found on the PRs themselves. Every publish pass sweeps the open bot
-    PRs and renames from a fetched head; a correctly named PR costs one
-    lookup. Returns the failures, as skip messages.
+    This sweep is the only place fragments are named: freshly opened PRs still
+    carry their researchers' ``+slug`` fragments, and a killed run's publish
+    can leave PRs misnamed with no local branch surviving — so naming works
+    from the PRs themselves, whatever run opened them. A correctly named PR
+    costs one lookup. Returns the failures, as skip messages.
     """
     skipped: list[str] = []
     owner = pipecat_repo.split("/")[0]
@@ -259,16 +254,11 @@ def heal_fragment_names(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[s
         if all(Path(p).name.startswith(f"{number}.") for p in fragments):
             continue
         try:
-            sh.run("git", "fetch", "--quiet", "origin", head, cwd=repo_root)
             _rename_changelog_fragments(
-                sh,
-                repo_root,
-                head,
-                f"https://github.com/{pipecat_repo}/pull/{number}",
-                ref="FETCH_HEAD",
+                sh, repo_root, head, f"https://github.com/{pipecat_repo}/pull/{number}"
             )
         except RuntimeError as exc:
-            skipped.append(f"{head}: fragments not healed: {exc}")
+            skipped.append(f"{head}: fragments not renamed: {exc}")
     return skipped
 
 
@@ -348,13 +338,6 @@ def publish_prs(
                     .splitlines()[-1]
                 )
                 outcome.opened.append(url)
-
-            # Adopted PRs get the rename pass too: a rename an earlier,
-            # interrupted publish could not complete heals on the next pass.
-            try:
-                _rename_changelog_fragments(sh, repo_root, branch, url)
-            except RuntimeError as exc:
-                outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
 
             pr.update({"state": "open", "url": url, "opened": date})
             report.body = BRANCH_LINE.sub(
