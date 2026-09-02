@@ -50,6 +50,38 @@ class SlowSetupProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class ConcurrentSetupProcessor(FrameProcessor):
+    """A processor that records whether its setup overlapped with its peers'.
+
+    The barrier releases only once every processor sharing it is inside
+    ``setup()``, so setting up one at a time leaves each waiting for peers that
+    never arrive.
+    """
+
+    OVERLAP_TIMEOUT_SECS = 0.5
+
+    def __init__(self, barrier: asyncio.Barrier, timeout: float = OVERLAP_TIMEOUT_SECS, **kwargs):
+        super().__init__(**kwargs)
+        self._barrier = barrier
+        self._timeout = timeout
+        self.overlapped = False
+
+    async def setup(self, setup):
+        await super().setup(setup)
+        try:
+            await asyncio.wait_for(self._barrier.wait(), timeout=self._timeout)
+            self.overlapped = True
+        except (TimeoutError, asyncio.BrokenBarrierError):
+            # A setup that raises is reported as a processor error and the
+            # pipeline carries on, so a missed overlap has to reach the test
+            # as a value to be asserted on.
+            self.overlapped = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
 class FastProcessor(FrameProcessor):
     """A processor with no start delay."""
 
@@ -129,13 +161,14 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
     async def test_total_is_the_span_rather_than_the_sum(self):
         """Processors are set up concurrently, so their cost does not add up.
 
-        Summing what each cost would report three concurrent 0.1s connections
-        as 0.3s, so a pipeline reads as slower the more it overlaps.
+        Summing what each cost would report three concurrent connections as
+        their total, so a pipeline reads as slower the more it overlaps. The
+        barrier holds all three inside setup() at once, establishing the
+        overlap the report depends on.
         """
         observer = StartupTimingObserver()
-        pipeline = Pipeline(
-            [SlowSetupProcessor(delay=0.1) for _ in range(3)],
-        )
+        barrier = asyncio.Barrier(3)
+        processors = [ConcurrentSetupProcessor(barrier) for _ in range(3)]
 
         reports = []
 
@@ -144,21 +177,29 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             reports.append(report)
 
         await run_test(
-            pipeline,
+            Pipeline(processors),
             frames_to_send=[TextFrame(text="hello")],
             expected_down_frames=[TextFrame],
             observers=[observer],
+            # A setup that does not overlap spends a timeout per processor
+            # before reaching the assertion below, which the default start
+            # timeout would cut short and report as a failure to start.
+            start_timeout=5.0,
+        )
+
+        self.assertTrue(
+            all(p.overlapped for p in processors),
+            "the three processors were not all inside setup() at once",
         )
 
         report = reports[0]
-        summed = sum(t.duration_secs for t in report.processor_timings)
-
-        self.assertGreaterEqual(summed, 0.25, "each processor should be measured")
-        self.assertLess(
-            report.total_duration_secs,
-            summed,
-            "the three setups overlapped, so the span is shorter than the sum",
-        )
+        measured = [
+            t for t in report.processor_timings if "ConcurrentSetupProcessor" in t.processor_name
+        ]
+        self.assertEqual(len(measured), 3, "each processor should be measured")
+        # Each waited for all three, so each cost the whole overlap and the
+        # span covers one of them rather than all three added together.
+        self.assertGreaterEqual(report.total_duration_secs, max(t.duration_secs for t in measured))
 
     async def test_processor_types_filter(self):
         """Test that processor_types filter limits which processors appear."""
