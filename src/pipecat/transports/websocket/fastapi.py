@@ -548,13 +548,13 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 num_channels=frame.num_channels,
             )
 
-        if not await self._write_frame(frame):
-            return False
+        sent = await self._write_frame(frame)
 
-        # Simulate audio playback with a sleep.
+        # Pace the output even when the serializer emitted nothing: a stream resampler
+        # accumulates across calls, so an accepted frame often has no payload of its own.
         await self._write_audio_sleep()
 
-        return True
+        return sent
 
     async def _write_frame(self, frame: Frame) -> bool:
         """Serialize and send a frame through the WebSocket.
