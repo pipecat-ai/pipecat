@@ -511,6 +511,16 @@ class TextSegmentMap:
         :attr:`LOOKAHEAD_WORDS` of them are tried, so a word repeated later in a
         long segment cannot swallow everything before it.
 
+        Word separators are what those anchors are found by, so a script written
+        without them -- Japanese, Chinese -- offers a single word start for the
+        whole run and never matches here; frames in one recover through
+        force-complete instead. Spaced scripts, Korean among them, recover normally.
+
+        :meth:`_folded_hop` alone does the matching, since it already demands the
+        whole word this needs and folding only ever widens what matches -- the fold
+        is one character for one, so anything matching literally matches folded
+        too.
+
         A segment holding markup is left alone: tag names are made of letters, so a
         word start inside one would read as something spoken. That also keeps the
         match from anchoring inside a rewritten span whose words carry tags.
@@ -526,9 +536,7 @@ class TextSegmentMap:
         # The first word start is where the strategies above already looked.
         for offset in word_starts[1 : 1 + TextSegmentMap.LOOKAHEAD_WORDS]:
             candidates = [(segment_remaining[offset:], offset)]
-            hop = TextSegmentMap._literal_hop(
-                candidates, remaining_word, require_word_boundary=True
-            ) or TextSegmentMap._folded_hop(candidates, remaining_word)
+            hop = TextSegmentMap._folded_hop(candidates, remaining_word)
             if hop is not None and hop.kind is _HopKind.PLACED:
                 return hop
         return None
