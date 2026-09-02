@@ -19,10 +19,13 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
 
 1. push the branch and open a draft PR (title and body from the branch's
    commit messages — a single commit verbatim, several stitched with the
-   report's summary as the title — plus a link to the report), then rename
-   the branch's ``+slug`` changelog fragments to the PR's number;
+   report's summary as the title — plus a link to the report);
 2. rewrite the report — frontmatter entry to ``state: open`` with the URL,
    and the body's branch/review line to the URL.
+
+A sweep over the open provider-watch PRs then renames every ``+slug``
+changelog fragment to its PR's number — the PRs this pass opened, plus any
+left misnamed from a previous killed run.
 
 Then commit and push ``_reports``. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
@@ -145,24 +148,29 @@ def _fragment_type(name: str) -> str:
 
 
 def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
-    """Give the branch's changelog fragments the PR's number.
+    """Give a PR's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
     when a branch is committed, and must not guess a number. Once the PR is
     open its number is known: one follow-up commit renames every fragment the
     branch adds that does not already carry it — orphans and wrong guesses
     alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type.
+    branch adds several of one type. Works from the branch as pushed, in a
+    detached worktree, so it needs no local branch and cannot collide with a
+    leftover researcher worktree still holding one.
     """
     number = pr_url.rstrip("/").split("/")[-1]
     if not number.isdigit():
         return
+    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
     added = sh.run(
         "git",
         "diff",
         "--name-only",
         "--diff-filter=A",
-        f"{_main_base(sh, repo_root)}..{branch}",
+        # Three-dot: only what the branch itself adds, however far main has
+        # moved since the branch was cut.
+        f"{_main_base(sh, repo_root)}...FETCH_HEAD",
         "--",
         "changelog/",
         cwd=repo_root,
@@ -177,7 +185,9 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
     workdir = tempfile.mkdtemp(prefix="pw-fragments-")
     try:
-        sh.run("git", "worktree", "add", "--quiet", workdir, branch, cwd=repo_root)
+        sh.run(
+            "git", "worktree", "add", "--quiet", "--detach", workdir, "FETCH_HEAD", cwd=repo_root
+        )
         for path in rename:
             fragment_type = _fragment_type(Path(path).name)
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
@@ -198,9 +208,58 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             f"Name the changelog fragments after PR #{number}",
             cwd=Path(workdir),
         )
-        sh.run("git", "push", "origin", branch, cwd=Path(workdir))
+        sh.run("git", "push", "origin", f"HEAD:refs/heads/{branch}", cwd=Path(workdir))
     finally:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
+
+
+def rename_open_pr_fragments(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
+    """Rename the ``+slug`` fragments on every open provider-watch PR to its number.
+
+    This sweep is the only place fragments are named: freshly opened PRs still
+    carry their researchers' ``+slug`` fragments, and a killed run's publish
+    can leave PRs misnamed with no local branch surviving — so naming works
+    from the PRs themselves, whatever run opened them. A correctly named PR
+    costs one lookup. Returns the failures, as skip messages.
+    """
+    skipped: list[str] = []
+    owner = pipecat_repo.split("/")[0]
+    prs = json.loads(
+        sh.run(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            pipecat_repo,
+            "--label",
+            PR_LABEL,
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName,headRepositoryOwner",
+        )
+        or "[]"
+    )
+    for pr in prs:
+        number = str(pr.get("number") or "")
+        head = pr.get("headRefName") or ""
+        head_owner = (pr.get("headRepositoryOwner") or {}).get("login", "")
+        # Only branches the bot owns; never push to a fork or a human's branch.
+        if not head.startswith("provider-watch/") or head_owner != owner:
+            continue
+        files = json.loads(
+            sh.run("gh", "pr", "view", number, "--repo", pipecat_repo, "--json", "files") or "{}"
+        ).get("files")
+        fragments = [f["path"] for f in files or [] if f["path"].startswith("changelog/")]
+        if all(Path(p).name.startswith(f"{number}.") for p in fragments):
+            continue
+        try:
+            _rename_changelog_fragments(
+                sh, repo_root, head, f"https://github.com/{pipecat_repo}/pull/{number}"
+            )
+        except RuntimeError as exc:
+            skipped.append(f"{head}: fragments not renamed: {exc}")
+    return skipped
 
 
 def _pr_title_body(sh: Shell, repo_root: Path, branch: str, summary: str) -> tuple[str, str]:
@@ -279,10 +338,6 @@ def publish_prs(
                     .splitlines()[-1]
                 )
                 outcome.opened.append(url)
-                try:
-                    _rename_changelog_fragments(sh, repo_root, branch, url)
-                except RuntimeError as exc:
-                    outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
 
             pr.update({"state": "open", "url": url, "opened": date})
             report.body = BRANCH_LINE.sub(
@@ -418,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         reports_repo=args.reports_repo,
         date=args.date,
     )
+    outcome.skipped += rename_open_pr_fragments(sh, args.repo_root, args.pipecat_repo)
     if args.finalize:
         digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
