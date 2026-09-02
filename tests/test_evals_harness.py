@@ -531,6 +531,23 @@ class _FakeRTVIServer:
         return f"ws://localhost:{self.port}"
 
 
+def _capture_deadlines(session: EvalSession) -> list[float]:
+    """Record the deadline every expectation in a run is matched against.
+
+    A deadline is ``anchor + within_ms``, so expectations anchored together
+    produce one identical float rather than a float per expectation.
+    """
+    deadlines: list[float] = []
+    match_and_verify = session._match_and_verify
+
+    async def capture(expectation, anchor, budget_ms, turn_idx, exp_idx):
+        deadlines.append(anchor + budget_ms / 1000.0)
+        return await match_and_verify(expectation, anchor, budget_ms, turn_idx, exp_idx)
+
+    session._match_and_verify = capture
+    return deadlines
+
+
 class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.server = _FakeRTVIServer(_free_port())
@@ -916,7 +933,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # A turn that expects a function call AND a response but gets neither must
         # fail within a single within_ms budget. The function_call timeout returns a
         # failure (not a raise) so the loop continues to the response; both share the
-        # anchor, so the run takes ~one budget, not budget-per-expectation.
+        # anchor, so the turn spends one budget, not budget-per-expectation.
         scenario = EvalScenario(
             name="shared_deadline",
             turns=[
@@ -933,10 +950,13 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        session = EvalSession.from_scenario(scenario, self.server.url)
+        deadlines = _capture_deadlines(session)
+        result = await session.run()
         self.assertFalse(result.passed)
-        # One shared 400ms budget, not 400ms + 400ms.
-        self.assertLess(result.duration_ms, 700)
+        # Both expectations wait against one 400ms deadline, not 400ms each.
+        self.assertEqual(len(deadlines), 2)
+        self.assertEqual(len(set(deadlines)), 1)
 
     async def test_send_after_delays_run(self):
         self.server.on_text("first", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
