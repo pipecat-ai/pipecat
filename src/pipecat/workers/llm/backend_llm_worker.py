@@ -6,11 +6,12 @@
 
 """Backend LLM worker for two-tier voice agents.
 
-A frontend conversational model — a speech-to-speech model such as OpenAI Live,
-or a fast cascade LLM — hands off requests that need tools or careful
-reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its
-own context and multi-step tool calling, to do that work: over the worker job
-API it streams back what it says along the way and returns its final answer.
+A frontend holds the conversation and hands off requests that need tools or
+careful reasoning. What the frontend is does not matter to this contract: a
+speech-to-speech model delegating on its own, or a pipeline calling a tool.
+A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
+and multi-step tool calling, to do that work: over the worker job API it
+streams back everything it produces and returns its final answer.
 :func:`run_backend_job` is the caller side of that contract.
 """
 
@@ -150,11 +151,8 @@ class BackendLLMWorker(LLMContextWorker):
     The worker owns the backend's conversation: an ``LLMContext`` plus the
     aggregator pair, so multi-step tool calling works as it does in any
     pipeline. Each delegated task arrives as a ``run`` job, is appended to the
-    context as one user message (the voice turns since the previous task, then
-    the task), and runs the LLM until it produces a final answer. Responses
-    along the way — what the backend says before calling tools — and its
-    reasoning summaries are streamed back as job updates; the final answer is
-    the job response.
+    context as one user message (the conversation since the previous task,
+    then the task), and runs the LLM until it produces a final answer.
 
     Job contract (``@job(name="run")``, one task at a time):
 

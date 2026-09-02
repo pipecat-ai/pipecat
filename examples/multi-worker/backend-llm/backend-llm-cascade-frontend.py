@@ -4,13 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A two-tier voice agent: a fast cascade frontend delegating to a backend LLM.
+"""A two-tier voice agent: a cascade frontend delegating to a backend LLM.
 
 The frontend keeps the conversation moving with a small, fast model and no
 tools of its own. Anything that needs tools or careful reasoning it hands to
 a ``BackendLLMWorker`` running Claude, through the ``delegate`` tool, and
 relays its answer. This is the same backend worker and job contract
 ``OpenAILiveLLMService`` uses for client delegation.
+
+The frontend here is a cascade pipeline; ``backend-llm-realtime-frontend.py``
+puts a speech-to-speech model in the same role, against the same backend.
 
 Architecture::
 
