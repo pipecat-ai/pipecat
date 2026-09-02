@@ -141,6 +141,7 @@ def test_interruption_delay_out_of_range_raises(value):
         ("u3-rt-pro", True),
         ("u3-rt-pro-beta-1", True),
         ("universal-3-5-pro", True),
+        ("universal-3-6-pro", True),
         ("universal-streaming-english", False),
         ("universal-streaming-multilingual", False),
         (None, False),
@@ -231,6 +232,54 @@ def test_update_agent_context_works_for_universal_3_5_pro():
     service = AssemblyAISTTService(
         api_key="test-key",
         settings=AssemblyAISTTService.Settings(model="universal-3-5-pro"),
+    )
+    sent = []
+
+    async def fake_send(**fields):
+        sent.append(fields)
+
+    service._send_update_configuration = fake_send
+    asyncio.run(service.update_agent_context("hello"))
+
+    assert sent == [{"agent_context": "hello"}]
+
+
+# --- universal-3-6-pro (U3 Pro family; universal-3-5-pro upgraded) ---
+
+
+def test_u3_pro_features_sent_for_universal_3_6_pro():
+    # universal-3-6-pro is universal-3-5-pro upgraded and supports every u3-rt-pro param.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-3-6-pro",
+            agent_context="May I take your order?",
+            previous_context_n_turns=5,
+            interruption_delay=300,
+        ),
+    )
+    q = _query(service)
+    assert q["speech_model"] == ["universal-3-6-pro"]
+    assert q["agent_context"] == ["May I take your order?"]
+    assert q["previous_context_n_turns"] == ["5"]
+    assert q["interruption_delay"] == ["300"]
+    assert q["continuous_partials"] == ["true"]
+
+
+def test_universal_3_6_pro_allows_assemblyai_turn_detection_mode():
+    # vad_force_turn_endpoint=False requires a U3 Pro family model; u3.6 qualifies.
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-6-pro"),
+        vad_force_turn_endpoint=False,
+    )
+    assert is_u3_pro_model(service._settings.model)
+
+
+def test_update_agent_context_works_for_universal_3_6_pro():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="universal-3-6-pro"),
     )
     sent = []
 
