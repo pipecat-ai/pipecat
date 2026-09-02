@@ -129,12 +129,21 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
     async def test_total_is_the_span_rather_than_the_sum(self):
         """Processors are set up concurrently, so their cost does not add up.
 
-        Summing what each cost would report three concurrent 0.1s connections
-        as 0.3s, so a pipeline reads as slower the more it overlaps.
+        Summing what each cost would report ten concurrent 0.1s connections as
+        1.0s, so a pipeline reads as slower the more it overlaps.
+
+        The gap between the sum and the span is what the span has to spend on
+        the rest of startup before the assertion stops holding, and it is
+        ``(count - 1) * delay``. The count buys that headroom for free, since
+        the setups overlap and the span stays at one delay however many there
+        are; the delay buys it at the cost of the same time again in every run.
         """
+        delay = 0.1
+        count = 10
+
         observer = StartupTimingObserver()
         pipeline = Pipeline(
-            [SlowSetupProcessor(delay=0.1) for _ in range(3)],
+            [SlowSetupProcessor(delay=delay) for _ in range(count)],
         )
 
         reports = []
@@ -153,11 +162,11 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         report = reports[0]
         summed = sum(t.duration_secs for t in report.processor_timings)
 
-        self.assertGreaterEqual(summed, 0.25, "each processor should be measured")
+        self.assertGreaterEqual(summed, count * delay * 0.8, "each processor should be measured")
         self.assertLess(
             report.total_duration_secs,
             summed,
-            "the three setups overlapped, so the span is shorter than the sum",
+            "the setups overlapped, so the span is shorter than the sum",
         )
 
     async def test_processor_types_filter(self):
