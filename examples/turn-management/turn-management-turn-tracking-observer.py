@@ -145,9 +145,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @startup_observer.event_handler("on_startup_timing_report")
     async def on_startup_timing_report(observer, report):
+        # Getting ready runs concurrently, so the longest piece of work is what
+        # the phase cost. The StartFrame then reaches processors one at a time,
+        # so what each spends on it adds up.
         logger.info(f"Total startup: {report.total_duration_secs:.3f}s")
+
+        # Every processor is set up, so listing them all gives the pipeline it
+        # ran against, which is what the phase totals below are spread over.
+        logger.info(f"  Setup (concurrent): {report.setup_phase_secs:.3f}s")
+        if report.warmup:
+            logger.info(f"    warming deferred imports: {report.warmup.duration_secs:.3f}s")
         for timing in report.processor_timings:
-            logger.info(f"  {timing.processor_name}: {timing.duration_secs:.3f}s")
+            logger.info(f"    {timing.processor_name}: {timing.setup_duration_secs:.3f}s")
+
+        logger.info(f"  Start (sequential): {report.start_phase_secs:.3f}s")
+        for timing in report.processor_timings:
+            if timing.start_duration_secs >= 0.001:
+                logger.info(f"    {timing.processor_name}: {timing.start_duration_secs:.3f}s")
 
     @startup_observer.event_handler("on_transport_timing_report")
     async def on_transport_timing_report(observer, report):
