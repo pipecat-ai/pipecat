@@ -18,11 +18,11 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     STTMetadataFrame,
@@ -191,7 +191,7 @@ class STTService(AIService):
         # Whether a reconnect cycle is currently in progress.
         self._reconnecting: bool = False
         # Audio frames received while _reconnecting is True, replayed after reconnect.
-        self._reconnect_audio_buffer: list[tuple[AudioRawFrame, FrameDirection]] = []
+        self._reconnect_audio_buffer: list[tuple[InputAudioRawFrame, FrameDirection]] = []
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -418,7 +418,7 @@ class STTService(AIService):
         changed = await super()._update_settings(delta)
         return changed
 
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
 
         If a reconnect is in progress, the frame is buffered and replayed
@@ -447,7 +447,7 @@ class STTService(AIService):
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
-        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        # InputAudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
             self._user_id = ""
 
@@ -471,7 +471,7 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, InputAudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
@@ -898,7 +898,7 @@ class SegmentedSTTService(STTService):
 
         await self.process_generator(self.run_stt(audio))
 
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
 
         Continuously buffers audio, growing the buffer while user is speaking and
@@ -913,7 +913,7 @@ class SegmentedSTTService(STTService):
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
-        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        # InputAudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
             self._user_id = ""
 
