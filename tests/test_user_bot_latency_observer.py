@@ -1232,13 +1232,75 @@ class TestObserverEdges(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         await self._settle()
         self.assertEqual(self.breakdowns, [])
 
-    async def test_a_greeting_has_no_timeline(self):
-        """The bot speaking first is not a user-to-bot cycle."""
+    async def test_a_greeting_is_measured_from_where_startup_ends(self):
+        """The first thing the bot says has a timeline of its own."""
         await self._push(ClientConnectedFrame())
-        self._wait(1.0)
+        self._wait(0.4)
+        # StartupTimingObserver stops here, so this timeline starts here.
+        await self.observer.on_pipeline_started()
+        ready_at = self.clock
+        self._wait(1.1)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.3)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.3)]))
+        await self._push(LLMTextFrame("Hi there!"), source="LLM#0")
+        self._wait(0.1)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        self._wait(0.02)
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        spoke_at = self.clock
+        await self._settle()
+
+        contributions = self.breakdowns[-1].contributions
+        self.assertEqual(
+            [c.label for c in contributions],
+            ["first request", "LLM inference", "speech synthesis", "output transport"],
+        )
+        # Waiting to be asked is most of a greeting, and no service reports it.
+        first_request = contributions[0]
+        self.assertEqual(first_request.owner, "bot")
+        self.assertAlmostEqual(first_request.duration_secs, 1.1, places=6)
+        # The startup report owns everything before the pipeline was ready.
+        self.assertAlmostEqual(
+            sum(c.duration_secs for c in contributions), spoke_at - ready_at, places=6
+        )
+
+    async def test_a_greeting_waits_for_whichever_came_second(self):
+        """A client that joins after the pipeline started sets the start."""
+        await self.observer.on_pipeline_started()
+        self._wait(2.0)  # nobody on the call yet
+        await self._push(ClientConnectedFrame())
+        connected_at = self.clock
+        self._wait(0.2)
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.3)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.3)]))
+        await self._push(LLMTextFrame("Hi!"), source="LLM#0")
+        self._wait(0.1)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        spoke_at = self.clock
+        await self._settle()
+
+        contributions = self.breakdowns[-1].contributions
+        # The two seconds spent waiting for someone to join are nobody's cost.
+        self.assertAlmostEqual(
+            sum(c.duration_secs for c in contributions), spoke_at - connected_at, places=6
+        )
+        self.assertAlmostEqual(contributions[0].duration_secs, 0.2, places=6)
+
+    async def test_a_greeting_carries_no_user_turn(self):
+        """Which is how a consumer tells the two kinds of cycle apart."""
+        await self._push(ClientConnectedFrame())
+        self._wait(0.5)
         await self._push(BotStartedSpeakingFrame(), source="Transport#0")
         await self._settle()
-        self.assertEqual(self.breakdowns[-1].contributions, [])
+        self.assertIsNone(self.breakdowns[-1].user_turn_start_time)
+        self.assertIsNone(self.breakdowns[-1].user_turn_secs)
 
     async def test_an_interruption_discards_the_cycle(self):
         """Frames from a cancelled cycle do not reach the next one."""

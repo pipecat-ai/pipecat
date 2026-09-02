@@ -107,6 +107,7 @@ class _MomentKind(StrEnum):
     """
 
     SILENCE = "silence"
+    READY = "ready"
     VAD_STOP = "vad stop"
     TRANSCRIPT = "transcript"
     LLM_REQUEST = "llm request"
@@ -164,6 +165,10 @@ _SPANS: dict[tuple[_MomentKind, _MomentKind], tuple[str, str | _Owner, bool]] = 
         "config: VAD stop_secs",
         True,
     ),
+    # From a pipeline that is ready with a client on it, to the bot asking for
+    # something to say: the application's connected handler, and the frame it
+    # queues reaching the LLM.
+    (_MomentKind.READY, _MomentKind.LLM_REQUEST): ("first request", "bot", True),
     (_MomentKind.VAD_STOP, _MomentKind.TRANSCRIPT): ("transcription", _Owner.CLOSER, True),
     # Whatever decides the user is done: a fixed speech timeout, a smart-turn
     # model's inference, or an external signal.
@@ -409,6 +414,7 @@ class UserBotLatencyObserver(BaseObserver):
 
         # First bot speech tracking
         self._client_connected_time: float | None = None
+        self._pipeline_started_time: float | None = None
         self._first_bot_speech_measured: bool = False
 
         # Frame deduplication (bounded deque + set pattern)
@@ -431,6 +437,17 @@ class UserBotLatencyObserver(BaseObserver):
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
         self._register_event_handler("on_first_bot_speech_latency")
+
+    async def on_pipeline_started(self):
+        """Record that the pipeline finished starting.
+
+        The ``StartFrame`` has reached every processor by now, which is where
+        :class:`~pipecat.observers.startup_timing_observer.StartupTimingObserver`
+        stops measuring. A greeting is timed from here so the two reports meet
+        rather than overlap.
+        """
+        if self._pipeline_started_time is None:
+            self._pipeline_started_time = self._now()
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames to track speech timing and calculate latency.
@@ -558,7 +575,7 @@ class UserBotLatencyObserver(BaseObserver):
         Returns:
             The recorded moment, or None if it was not recorded.
         """
-        if self._user_stopped_time is None:
+        if not self._measuring:
             return None
         if once and self._seen(kind):
             return None
@@ -571,6 +588,13 @@ class UserBotLatencyObserver(BaseObserver):
     def _seen(self, kind: _MomentKind) -> bool:
         """Whether a moment of this kind has been recorded this cycle."""
         return any(m.kind is kind for m in self._moments)
+
+    @property
+    def _measuring(self) -> bool:
+        """Whether a cycle is open: a user turn, or the wait for the greeting."""
+        if self._user_stopped_time is not None:
+            return True
+        return self._client_connected_time is not None and not self._first_bot_speech_measured
 
     def _derived_moments(self) -> list[_Moment]:
         """Moments that come from metrics rather than from frames.
@@ -645,11 +669,31 @@ class UserBotLatencyObserver(BaseObserver):
             never measured.
         """
         start = self._user_turn_start_time
+        if start is None:
+            # A greeting begins once the pipeline is ready and someone is there
+            # to hear it, whichever came second: before the pipeline started,
+            # the startup report has the time; before a client connected, the
+            # bot was waiting on a person rather than working.
+            ready = [
+                moment
+                for moment in (self._client_connected_time, self._pipeline_started_time)
+                if moment is not None
+            ]
+            start = max(ready) if ready else None
         if start is None or not self._seen(_MomentKind.BOT_SPEAKING):
             return []
 
         moments = sorted(
-            [_Moment(at=start, kind=_MomentKind.SILENCE), *self._moments, *self._derived_moments()],
+            [
+                _Moment(
+                    at=start,
+                    kind=_MomentKind.SILENCE
+                    if self._user_turn_start_time is not None
+                    else _MomentKind.READY,
+                ),
+                *(m for m in self._moments if m.at >= start),
+                *self._derived_moments(),
+            ],
             key=lambda m: (m.at, not m.derived),
         )
 
