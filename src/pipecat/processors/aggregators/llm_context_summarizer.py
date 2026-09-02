@@ -275,31 +275,9 @@ class LLMContextSummarizer(BaseObject):
             f"(message threshold: {message_threshold if message_threshold is not None else 'disabled'})"
         )
 
-        no_candidates_reason = (
-            "no messages can be summarized right now: the initial system message, "
-            "the last min_messages_after_summary messages, and unresolved function "
-            "call sequences are preserved"
-        )
-
-        if not token_limit_exceeded and not message_threshold_exceeded:
-            # Nothing to do. Still warn once if the kept messages alone are over
-            # the token limit, since the user probably expects summarization to
-            # kick in and it never can until those messages age out.
-            if not candidates.messages and token_limit is not None and kept_tokens >= token_limit:
-                self._warn_no_progress(
-                    f"Context is over max_context_tokens (~{kept_tokens} tokens in the "
-                    f"preserved recent messages, limit {token_limit}) but {no_candidates_reason}."
-                )
-            else:
-                logger.trace(
-                    f"{self}: Neither token limit nor message threshold exceeded, "
-                    f"skipping summarization"
-                )
-            return False
-
-        # A threshold is exceeded, but only summarize if summarization can make
-        # progress. Two ways it cannot, and would otherwise fire a useless
-        # request on every turn:
+        # Summarization can only make progress if there is something to
+        # compress. Two ways there is not, and each would otherwise fire a
+        # useless request on every turn:
         #
         # 1. Nothing to summarize: the candidate range is empty. Only the
         #    message count trigger can get here, since an empty range has zero
@@ -310,20 +288,41 @@ class LLMContextSummarizer(BaseObject):
         #    count; it only degrades the summary.
         no_progress_reason = None
         if not candidates.messages:
-            no_progress_reason = no_candidates_reason
+            no_progress_reason = (
+                "no messages can be summarized right now: the initial system message, "
+                "the last min_messages_after_summary messages, and unresolved function "
+                "call sequences are preserved"
+            )
         elif len(candidates.messages) == 1 and candidates.messages[0] is self._summary_message:
             no_progress_reason = (
                 "the only summarizable message is the previous summary, and "
                 "re-summarizing it cannot shrink the context"
             )
 
+        if not token_limit_exceeded and not message_threshold_exceeded:
+            # Nothing to do. Still warn once if the kept messages alone are over
+            # the token limit and nothing can be summarized, since the user
+            # probably expects summarization to kick in and it never can until
+            # those messages age out.
+            if no_progress_reason and token_limit is not None and kept_tokens >= token_limit:
+                self._warn_no_progress(
+                    f"Context is over max_context_tokens (~{kept_tokens} tokens in the "
+                    f"preserved recent messages, limit {token_limit}) but {no_progress_reason}."
+                )
+            else:
+                logger.trace(
+                    f"{self}: Neither token limit nor message threshold exceeded, "
+                    f"skipping summarization"
+                )
+            return False
+
+        # A threshold is exceeded, but only summarize if it can make progress.
         if no_progress_reason:
             self._warn_no_progress(
                 f"Summarization was triggered (~{summarizable_tokens} summarizable "
                 f"tokens, {messages_since_summary} messages) but {no_progress_reason}."
             )
             return False
-        self._warned_summarization_no_progress = False
 
         reason = []
         if token_limit_exceeded:
@@ -338,8 +337,9 @@ class LLMContextSummarizer(BaseObject):
         """Log a warning that summarization cannot make progress, once per stretch.
 
         The warning is logged the first time summarization is blocked and then
-        stays quiet until a summarization request is actually sent, so a long
-        conversation does not log the same warning on every turn.
+        stays quiet until a summarization request is actually sent (automatic
+        or manual, see ``_request_summarization()``), so a long conversation
+        does not log the same warning on every turn.
 
         Args:
             message: What was blocked and why.
@@ -347,8 +347,14 @@ class LLMContextSummarizer(BaseObject):
         if self._warned_summarization_no_progress:
             return
         self._warned_summarization_no_progress = True
+        # Point at the threshold that is actually in use, so the advice is
+        # actionable for token-only and message-only configurations alike.
+        if self._auto_config.max_context_tokens is not None:
+            advice = "raising max_context_tokens"
+        else:
+            advice = "raising max_unsummarized_messages"
         logger.warning(
-            f"{self}: {message} If this persists, consider raising max_context_tokens "
+            f"{self}: {message} If this persists, consider {advice} "
             f"or lowering min_messages_after_summary."
         )
 
@@ -365,6 +371,10 @@ class LLMContextSummarizer(BaseObject):
                 overrides the default summary generation settings from
                 ``self._auto_config.summary_config``.
         """
+        # A request is going out, so re-arm the no-progress warning. This covers
+        # both automatic and manual (LLMSummarizeContextFrame) requests.
+        self._warned_summarization_no_progress = False
+
         # Generate unique request ID
         request_id = str(uuid.uuid4())
         summary_config = config_override or self._auto_config.summary_config

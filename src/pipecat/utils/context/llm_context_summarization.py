@@ -199,7 +199,9 @@ class LLMContextSummarizationConfig:
 
     Parameters:
         max_context_tokens: Maximum allowed size, in tokens, of the summarizable
-            context (the preserved initial system message is excluded).
+            context. Only the messages a summary would actually compress count:
+            the initial system message, the last ``min_messages_after_summary``
+            messages, and unresolved function call sequences are excluded.
             Set to ``None`` to disable token-based triggering.
         target_context_tokens: Maximum token size for the generated summary.
         max_unsummarized_messages: Maximum new messages before triggering summarization.
