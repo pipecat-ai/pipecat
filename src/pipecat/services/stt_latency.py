@@ -52,8 +52,7 @@ GLADIA_TTFS_P99: float = 1.49
 GOOGLE_TTFS_P99: float = 1.57
 GRADIUM_TTFS_P99: float = 0.62
 GROQ_TTFS_P99: float = 1.54
-# Provisional until benchmarked.
-META_TTFS_P99: float = DEFAULT_TTFS_P99
+META_TTFS_P99: float = 1.92
 MISTRAL_TTFS_P99: float = 1.89
 OPENAI_TTFS_P99: float = 2.01
 OPENAI_REALTIME_TTFS_P99: float = 1.66
