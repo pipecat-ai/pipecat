@@ -1,0 +1,1 @@
+- `NeuphonicTTSService` and `NeuphonicHttpTTSService` now accept `temperature` in their settings, passing Neuphonic's synthesis randomness control (0.0–1.0) through to the API. Left unset, Neuphonic's own default applies.

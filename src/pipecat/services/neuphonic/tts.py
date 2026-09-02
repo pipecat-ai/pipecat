@@ -71,9 +71,12 @@ class NeuphonicTTSSettings(TTSSettings):
 
     Parameters:
         speed: Speech speed multiplier. Defaults to 1.0.
+        temperature: Randomness introduced into the synthesis, from 0.0 to 1.0.
+            Left to Neuphonic's own default when unset.
     """
 
     speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -156,6 +159,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             voice=None,
             language=Language.EN,
             speed=1.0,
+            temperature=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -274,6 +278,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             tts_config = {
                 "lang_code": self._settings.language,
                 "speed": self._settings.speed,
+                "temperature": self._settings.temperature,
                 "encoding": self._encoding,
                 "sampling_rate": self._sampling_rate,
                 "voice_id": self._settings.voice,
@@ -456,6 +461,7 @@ class NeuphonicHttpTTSService(TTSService):
             voice=None,
             language=Language.EN,
             speed=1.0,
+            temperature=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -578,6 +584,9 @@ class NeuphonicHttpTTSService(TTSService):
 
         if self._settings.voice:
             payload["voice_id"] = self._settings.voice
+
+        if self._settings.temperature is not None:
+            payload["temperature"] = self._settings.temperature
 
         try:
             async with self._session.post(url, json=payload, headers=headers) as response:
