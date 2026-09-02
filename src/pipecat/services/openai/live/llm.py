@@ -60,12 +60,16 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm.backend_llm_worker import run_backend_job
+from pipecat.workers.llm.backend_llm_worker import BackendOutput, run_backend_job
 
 from . import events
 
-DEFAULT_MODEL = "gpt-live-1-marble-alpha"
+DEFAULT_MODEL = "gpt-live-1-diamond-alpha"
 DEFAULT_VOICE = "marin"
+
+# Quiet time that ends a speaker's turn. The API emits transcript fragments on
+# 200 ms frame boundaries, so this has to clear ordinary gaps within speech.
+DEFAULT_TURN_GAP_SECS = 0.8
 
 # The server drains delegation and output work for at most 10 seconds after
 # `session.close` before emitting `session.closed`.
@@ -83,9 +87,31 @@ class OpenAILiveLLMSettings(LLMSettings):
     Parameters:
         voice: Output voice name (for example ``marin`` or ``cedar``). Cannot
             be changed once the session has started.
+        transcript_turn_gap_secs: How long a speaker's transcript must stay
+            quiet before their turn is treated as over. The API emits timed
+            fragments and no turn boundaries, so turns are grouped here; tune
+            this against recordings for the languages and pacing you expect.
     """
 
     voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    transcript_turn_gap_secs: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class _TurnGrouper:
+    """One speaker's in-progress turn, assembled from timed transcript fragments.
+
+    Parameters:
+        gap_secs: Quiet time that ends the turn.
+        text: Fragments accumulated so far.
+        open: Whether a turn is currently open.
+        timer: The task that closes the turn once ``gap_secs`` elapses.
+    """
+
+    gap_secs: float
+    text: str = ""
+    open: bool = False
+    timer: asyncio.Task | None = None
 
 
 @dataclass
@@ -120,12 +146,15 @@ class ResponsesDelegation:
 class ClientDelegation:
     """Client delegation: a Pipecat worker is the backend the live model delegates to.
 
-    Each delegated request is sent to the backend as a ``run`` job together
-    with the conversation turns since the previous request. Progress the
-    backend reports while it works — what it says before calling tools, and
-    its reasoning summaries — comes back as ``commentary``, silent context the
-    model can draw on; its final answer comes back as ``speakable`` for the
-    model to relay.
+    A delegation names no task: the live model signals only that it is handing
+    work over. Each one is sent to the backend as a ``run`` job carrying the
+    transcript fragments since the previous delegation, and the backend works
+    out the request from them.
+
+    What comes back is appended to the live session according to each output's
+    ``speakable`` flag: speakable output as commentary, for the model to relay
+    in its own words, and the rest as thinking — silent context it can draw on
+    if the conversation turns that way.
 
     Parameters:
         backend: The worker that runs delegated tasks — normally a
@@ -219,7 +248,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self,
         *,
         api_key: str,
-        base_url: str = "wss://api.openai.com/v1/live",
+        base_url: str = "wss://api.openai.com/v1/live/sessions",
         settings: Settings | None = None,
         delegation: ResponsesDelegation | ClientDelegation | None = None,
         **kwargs,
@@ -248,19 +277,27 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             voice=DEFAULT_VOICE,
+            transcript_turn_gap_secs=DEFAULT_TURN_GAP_SECS,
         )
         if settings is not None:
             default_settings.apply_update(settings)
 
         if isinstance(delegation, ResponsesDelegation):
-            model = delegation.settings.model
-            if not is_given(model) or not model:
+            backend_model = delegation.settings.model
+            if not is_given(backend_model) or not backend_model:
                 raise ValueError("ResponsesDelegation.settings.model is required")
+
+        # The live model is fixed for the session's lifetime, so it is resolved
+        # once here rather than read back out of the settings at start time.
+        session_model = assert_given(default_settings.model)
+        if not session_model:
+            raise ValueError("settings.model is required")
 
         super().__init__(settings=default_settings, **kwargs)
 
         self.api_key = api_key
-        self.base_url = f"{base_url}?model={default_settings.model}"
+        self.base_url = base_url
+        self._session_model = session_model
         self._delegation = delegation
 
         self._websocket = None
@@ -276,20 +313,24 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._resampler = create_stream_resampler()
         self._warned_audio_dropped = False
 
-        # Projected transcript turns currently in progress, by turn id.
-        self._turn_roles: dict[str, str] = {}
-        self._user_turn_transcripts: dict[str, str] = {}
-        self._assistant_turn_id: str | None = None
+        # Turns assembled from transcript fragments, one per direction: in
+        # full duplex the user and the model can be speaking at once.
+        gap = assert_given(default_settings.transcript_turn_gap_secs)
+        self._user_turn = _TurnGrouper(gap_secs=gap)
+        self._assistant_turn = _TurnGrouper(gap_secs=gap)
 
-        # Responses delegation function calls awaiting an output.
-        self._open_function_calls: set[str] = set()
+        # A trailing developer message asking the model to open the conversation.
+        self._opening_instruction: str | None = None
 
-        # Client delegation: finished turns not yet sent to the backend, and
-        # the delegations in flight, by delegation item id.
-        self._delegated_turns: list[dict[str, str]] = []
+        # Responses delegation: calls awaiting an output, by call id, and the
+        # responses they belong to, by response id.
+        self._open_function_calls: dict[str, str] = {}
+        self._pending_responses: dict[str, _PendingResponse] = {}
+
+        # Client delegation: transcript fragments not yet sent to the backend,
+        # and the delegations in flight, by delegation id.
+        self._transcript_fragments: list[dict[str, str]] = []
         self._delegation_tasks: dict[str, asyncio.Task] = {}
-
-        self._usage: events.Usage | None = None
 
         self._register_event_handler("on_session_started")
         self._register_event_handler("on_delegation_created")
@@ -343,6 +384,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             frame: The end frame triggering service shutdown.
         """
         await super().stop(frame)
+        await self._close_open_turns()
         await self._close_session()
         await self._disconnect()
 
@@ -377,10 +419,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         Must not be called from the receive task.
         """
         logger.debug(f"{self}: resetting conversation")
-        # Close out an assistant turn the old session was in the middle of, so
-        # the aggregator records what was said and the response frames stay
+        # Close out turns the old session was in the middle of, so the
+        # aggregator records what was said and the response frames stay
         # balanced for the new session's turns.
-        await self._end_assistant_turn()
+        await self._close_open_turns()
         await self._disconnect()
         self._needs_session_config = True
         await self._connect()
@@ -462,23 +504,33 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
 
     async def _send_session_config(self):
-        """Send the first ``session.update``, which configures the session."""
+        """Send ``session.start``, the first message on the socket."""
         params = self._invocation_params()
+        history = params["input"]
+        # A trailing developer message is the app asking the bot to open the
+        # conversation. The startup history is not the place for it: it is
+        # delivered as speakable context once the session starts, which is how
+        # the API asks the model to speak first.
+        self._opening_instruction = _trailing_developer_text(history)
+        if self._opening_instruction:
+            history = history[:-1]
+
         session = events.SessionConfig(
+            model=self._session_model,
             instructions=params["instructions"],
             audio=events.AudioConfig(
                 output=events.AudioOutputConfig(voice=assert_given(self._settings.voice))
             ),
             delegation=self._delegation_config(params["tools"], params["tool_choice"]),
-            initial_items=params["initial_items"] or None,
+            input=history or None,
         )
         self._sent_tools_snapshot = self._tools_snapshot(params)
         self._needs_session_config = False
         logger.debug(
-            f"{self}: configuring session with {len(params['initial_items'])} initial items "
+            f"{self}: starting session with {len(history)} prior messages "
             f"and {session.delegation.type if session.delegation else 'client'} delegation"
         )
-        await self.send_client_event(events.SessionUpdateEvent(session=session))
+        await self.send_client_event(events.SessionStartEvent(session=session))
 
     def _delegation_config(
         self, tools: list[dict[str, Any]], tool_choice: Any | None
@@ -510,7 +562,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             responses["tool_choice"] = params["tool_choice"]
         await self.send_client_event(
             events.SessionUpdateEvent(
-                session=events.SessionConfig(
+                session=events.SessionUpdateConfig(
                     delegation=events.ResponsesDelegationConfig(responses=responses)
                 )
             )
@@ -534,7 +586,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         Args:
             event: The client event to send.
         """
-        await self._ws_send(event.model_dump(exclude_none=True))
+        await self._ws_send(event.to_payload())
 
     async def _connect(self):
         try:
@@ -568,12 +620,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             for task in list(self._delegation_tasks.values()):
                 await self.cancel_task(task)
             self._delegation_tasks.clear()
-            self._delegated_turns.clear()
+            self._transcript_fragments.clear()
             self._sent_tools_snapshot = None
-            self._turn_roles.clear()
-            self._user_turn_transcripts.clear()
-            self._assistant_turn_id = None
             self._open_function_calls.clear()
+            self._pending_responses.clear()
             self._disconnecting = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
@@ -631,17 +681,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._handle_evt_session_started(evt)
         elif isinstance(evt, events.OutputAudioDeltaEvent):
             await self._handle_evt_audio_delta(evt)
-        elif isinstance(evt, events.TurnCreatedEvent):
-            await self._handle_evt_turn_created(evt)
-        elif isinstance(evt, events.TurnDeltaEvent):
-            await self._handle_evt_turn_delta(evt)
-        elif isinstance(evt, events.TurnDoneEvent):
-            await self._handle_evt_turn_done(evt)
-        elif isinstance(evt, events.DelegationCreatedEvent):
+        elif isinstance(evt, events.TranscriptDeltaEvent):
+            await self._handle_evt_transcript_delta(evt)
+        elif isinstance(evt, events.SessionDelegationCreatedEvent):
             await self._handle_evt_delegation_created(evt)
-        elif isinstance(evt, events.ResponseOutputItemDoneEvent):
-            await self._handle_evt_response_output_item_done(evt)
-        elif isinstance(evt, events.ResponseEvent):
+        elif isinstance(evt, events.ResponseEventEnvelope):
             await self._handle_evt_response(evt)
         elif isinstance(evt, events.SessionUsageUpdatedEvent):
             await self._report_usage(evt.usage)
@@ -651,8 +695,6 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._handle_evt_error(evt)
         elif isinstance(evt, events.SessionUpdatedEvent):
             logger.debug(f"{self}: session updated")
-        elif isinstance(evt, events.TranscriptAddedEvent):
-            logger.trace(f"{self}: {evt.type}: {evt.item.text!r}")
         elif isinstance(evt, events.UnknownServerEvent):
             logger.debug(f"{self}: ignoring unknown server event {evt.type}")
         else:
@@ -666,6 +708,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             "completion regardless of cancel_on_interruption."
         )
         await self._call_event_handler("on_session_started", evt.session)
+        if self._opening_instruction:
+            # Speakable context is how the API asks the model to open the
+            # conversation; the model paraphrases rather than reads it out.
+            instruction, self._opening_instruction = self._opening_instruction, None
+            await self._send_context_append(None, instruction, speakable=True)
 
     async def _handle_evt_session_closed(self, evt: events.SessionClosedEvent):
         logger.debug(f"{self}: session closed ({evt.reason})")
@@ -712,78 +759,88 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         # audio itself instead of from TTSStarted/StoppedFrame.
         await self.push_frame(
             SpeechOutputAudioRawFrame(
-                audio=base64.b64decode(evt.audio),
+                audio=base64.b64decode(evt.delta),
                 sample_rate=OPENAI_SAMPLE_RATE,
                 num_channels=1,
             )
         )
 
     #
-    # projected transcript turns
+    # transcript turns
     #
 
-    async def _handle_evt_turn_created(self, evt: events.TurnCreatedEvent):
-        turn = evt.turn
-        self._turn_roles[turn.id] = turn.role
-        if turn.role == "assistant":
-            await self._start_assistant_turn(turn.id)
-            await self._push_assistant_text(turn.transcript)
-        elif turn.role == "user":
-            self._user_turn_transcripts[turn.id] = turn.transcript
-            await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
-            await self._push_interim_transcription(turn.transcript, evt)
-        else:
-            logger.debug(f"{self}: ignoring turn with role {turn.role!r}")
+    async def _handle_evt_transcript_delta(self, evt: events.TranscriptDeltaEvent):
+        if not evt.delta:
+            return
+        role = evt.role
+        # The delegation ledger keeps fragments as they arrive: the backend is
+        # better served by the recent role-labelled sequence than by waiting
+        # for a turn that may never be declared final.
+        self._remember_fragment(role, evt.delta)
 
-    async def _handle_evt_turn_delta(self, evt: events.TurnDeltaEvent):
-        role = self._turn_roles.get(evt.turn_id)
-        if role == "assistant":
-            if self._assistant_turn_id != evt.turn_id:
-                await self._start_assistant_turn(evt.turn_id)
-            await self._push_assistant_text(evt.delta)
-        elif role == "user":
-            transcript = self._user_turn_transcripts.get(evt.turn_id, "") + evt.delta
-            self._user_turn_transcripts[evt.turn_id] = transcript
-            await self._push_interim_transcription(transcript, evt)
-        else:
-            logger.debug(f"{self}: ignoring delta for unknown turn {evt.turn_id}")
+        turn = self._user_turn if role == "user" else self._assistant_turn
+        if not turn.open:
+            turn.open = True
+            turn.text = ""
+            await self._open_turn(role)
+        turn.text += evt.delta
+        await self._append_turn(role, evt.delta, turn.text, evt)
+        await self._restart_turn_timer(role, turn)
 
-    async def _handle_evt_turn_done(self, evt: events.TurnDoneEvent):
-        turn = evt.turn
-        self._turn_roles.pop(turn.id, None)
-        if turn.role == "assistant":
-            if self._assistant_turn_id == turn.id:
-                await self._end_assistant_turn()
-            self._remember_turn("assistant", turn.transcript)
-        elif turn.role == "user":
-            transcript = turn.transcript or self._user_turn_transcripts.get(turn.id, "")
-            self._user_turn_transcripts.pop(turn.id, None)
-            if transcript.strip():
+    async def _restart_turn_timer(self, role: str, turn: "_TurnGrouper"):
+        if turn.timer is not None:
+            await self.cancel_task(turn.timer)
+        turn.timer = self.create_task(self._close_turn_after_gap(role, turn), f"turn-gap:{role}")
+
+    async def _close_turn_after_gap(self, role: str, turn: "_TurnGrouper"):
+        await asyncio.sleep(turn.gap_secs)
+        # Running inside the turn's own timer, so the timer must not cancel itself.
+        turn.timer = None
+        await self._close_turn(role)
+
+    async def _close_turn(self, role: str):
+        """Close an open turn, if any, emitting its end frames."""
+        turn = self._user_turn if role == "user" else self._assistant_turn
+        if turn.timer is not None:
+            await self.cancel_task(turn.timer)
+            turn.timer = None
+        if not turn.open:
+            return
+        turn.open = False
+        text, turn.text = turn.text, ""
+        if role == "user":
+            if text.strip():
                 await self.push_frame(
-                    TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
+                    TranscriptionFrame(text, "", time_now_iso8601()),
                     FrameDirection.UPSTREAM,
                 )
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
-            self._remember_turn("user", transcript)
+        else:
+            await self.push_frame(TTSStoppedFrame())
+            await self.push_frame(LLMFullResponseEndFrame())
 
-    def _remember_turn(self, role: str, transcript: str):
-        """Keep a finished turn for the next client delegation."""
-        if isinstance(self._delegation, ClientDelegation) and transcript.strip():
-            self._delegated_turns.append({"role": role, "content": transcript.strip()})
+    async def _close_open_turns(self):
+        """Close both directions, so response frames stay balanced across sessions."""
+        await self._close_turn("user")
+        await self._close_turn("assistant")
 
-    async def _start_assistant_turn(self, turn_id: str):
-        if self._assistant_turn_id is not None:
-            await self._end_assistant_turn()
-        self._assistant_turn_id = turn_id
-        await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(TTSStartedFrame())
+    async def _open_turn(self, role: str):
+        if role == "user":
+            await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        else:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(TTSStartedFrame())
 
-    async def _end_assistant_turn(self):
-        if self._assistant_turn_id is None:
-            return
-        self._assistant_turn_id = None
-        await self.push_frame(TTSStoppedFrame())
-        await self.push_frame(LLMFullResponseEndFrame())
+    async def _append_turn(self, role: str, delta: str, accumulated: str, evt: events.ServerEvent):
+        if role == "user":
+            await self._push_interim_transcription(accumulated, evt)
+        else:
+            await self._push_assistant_text(delta)
+
+    def _remember_fragment(self, role: str, text: str):
+        """Keep a transcript fragment for the next client delegation."""
+        if isinstance(self._delegation, ClientDelegation) and text.strip():
+            self._transcript_fragments.append({"role": role, "content": text.strip()})
 
     async def _push_assistant_text(self, text: str):
         if not text:
@@ -811,92 +868,109 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     # delegation
     #
 
-    async def _handle_evt_delegation_created(self, evt: events.DelegationCreatedEvent):
-        item = evt.item
-        logger.debug(f"{self}: delegation {item.id} created (target={item.target}): {item.text!r}")
-        await self._call_event_handler("on_delegation_created", item)
-        if item.target == "client":
-            await self._handle_client_delegation(item)
+    async def _handle_evt_delegation_created(self, evt: events.SessionDelegationCreatedEvent):
+        delegation = evt.delegation
+        logger.debug(f"{self}: delegation {delegation.id} created (target={delegation.target})")
+        await self._call_event_handler("on_delegation_created", delegation)
+        if delegation.target == "client":
+            await self._handle_client_delegation(delegation)
 
-    async def _handle_client_delegation(self, item: events.DelegationItem):
+    async def _handle_client_delegation(self, delegation: events.DelegationMetadata):
         if not isinstance(self._delegation, ClientDelegation):
             logger.warning(
-                f"{self}: the model delegated {item.text!r} but no backend is configured to "
-                "handle client delegations; declining"
+                f"{self}: the model delegated work but no backend is configured to handle "
+                "client delegations; declining"
             )
-            await self._send_delegation_context(
-                item.id,
+            await self._send_context_append(
+                delegation.id,
                 "No backend is available to handle delegated work in this session.",
-                channel="commentary",
+                speakable=True,
             )
             return
-        task = self.create_task(self._run_client_delegation(item), f"delegation:{item.id}")
-        self._delegation_tasks[item.id] = task
-        task.add_done_callback(lambda _: self._delegation_tasks.pop(item.id, None))
+        task = self.create_task(
+            self._run_client_delegation(delegation), f"delegation:{delegation.id}"
+        )
+        self._delegation_tasks[delegation.id] = task
+        task.add_done_callback(lambda _: self._delegation_tasks.pop(delegation.id, None))
 
-    async def _run_client_delegation(self, item: events.DelegationItem):
-        delegation = self._delegation
-        assert isinstance(delegation, ClientDelegation)
-        turns, self._delegated_turns = self._delegated_turns, []
+    async def _run_client_delegation(self, delegation: events.DelegationMetadata):
+        config = self._delegation
+        assert isinstance(config, ClientDelegation)
+        # The delegation carries no task text: the backend is handed the
+        # conversation since the last one and works out the request itself.
+        fragments, self._transcript_fragments = self._transcript_fragments, []
 
-        async def on_update(kind: str, text: str):
-            # Progress of either kind is silent context; only the answer is speakable.
-            await self._send_delegation_context(item.id, text, channel="commentary")
+        async def on_update(output: BackendOutput):
+            await self._send_context_append(delegation.id, output.text, speakable=output.speakable)
 
         try:
-            text = await run_backend_job(
+            # Every output, the final answer included, arrives through
+            # on_update, so the job's return value is not needed here.
+            await run_backend_job(
                 self.pipeline_worker,
-                delegation.backend.name,
-                task=item.text,
-                messages=turns,
+                config.backend.name,
+                messages=fragments,
                 on_update=on_update,
-                timeout_secs=delegation.timeout_secs,
+                timeout_secs=config.timeout_secs,
             )
         except Exception as e:
-            logger.warning(f"{self}: delegation {item.id} failed: {e}")
-            await self._send_delegation_context(
-                item.id,
+            logger.warning(f"{self}: delegation {delegation.id} failed: {e}")
+            await self._send_context_append(
+                delegation.id,
                 f"The delegated task could not be completed: {e}",
-                channel="commentary",
+                speakable=True,
             )
-            await self.push_error(error_msg=f"Delegation {item.id} failed: {e}", exception=e)
-            return
-        if text:
-            await self._send_delegation_context(item.id, text, channel="speakable")
+            await self.push_error(error_msg=f"Delegation {delegation.id} failed: {e}", exception=e)
 
-    async def _send_delegation_context(
-        self, delegation_id: str, text: str, *, channel: events.DelegationChannel
-    ):
+    async def _send_context_append(self, delegation_id: str | None, text: str, *, speakable: bool):
+        """Append text to the live session, for it to speak or to keep to itself.
+
+        The API's two channels are named for what the live model does with the
+        text: commentary is paraphrased aloud, thinking joins its private
+        reasoning. That vantage is the model's own, which is why what arrives
+        from a backend is flagged ``speakable`` instead — ordinary prose can be
+        unspeakable without being anything like a thought.
+        """
+        channel = "commentary" if speakable else "thinking"
         for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_CHARS):
             logger.debug(f"{self}: delegation {delegation_id} {channel} context: {chunk!r}")
-            await self.send_client_event(
-                events.DelegationContextAppendEvent(
-                    delegation_item_id=delegation_id,
-                    channel=channel,
-                    content=[events.InputTextContent(text=chunk)],
-                )
+            event_class = (
+                events.SessionCommentaryAppendEvent
+                if speakable
+                else events.SessionThinkingAppendEvent
             )
+            await self.send_client_event(event_class(delegation_id=delegation_id, content=chunk))
 
-    async def _handle_evt_response(self, evt: events.ResponseEvent):
-        if evt.type in ("response.failed", "response.incomplete"):
-            response = evt.response or {}
-            error = response.get("error") or response.get("incomplete_details") or {}
-            message = (
-                error.get("message") or error.get("reason") if isinstance(error, dict) else None
-            )
-            await self.push_error(
-                error_msg=f"Delegated response {evt.type.removeprefix('response.')}: "
-                f"{message or response.get('status', 'unknown')}"
-            )
+    #
+    # Responses delegation
+    #
+
+    async def _handle_evt_response(self, evt: events.ResponseEventEnvelope):
+        """Dispatch a wrapped Responses lifecycle event by its own type."""
+        inner_type = evt.inner_type
+        if inner_type == "response.created":
+            self._track_response(evt)
+        elif inner_type == "response.output_item.done":
+            await self._handle_response_output_item_done(evt)
+        elif inner_type in ("response.completed", "response.incomplete", "response.failed"):
+            await self._handle_response_finished(evt)
         else:
-            logger.trace(f"{self}: {evt.type}")
+            logger.trace(f"{self}: {inner_type or evt.type}")
 
-    #
-    # Responses delegation function calls
-    #
+    def _track_response(self, evt: events.ResponseEventEnvelope) -> str:
+        """Remember a delegated response so its function calls can be collected.
 
-    async def _handle_evt_response_output_item_done(self, evt: events.ResponseOutputItemDoneEvent):
-        item = evt.item
+        Correlation runs on the envelope's delegation, which every wrapped
+        event carries; the individual Responses events do not all name their
+        response.
+        """
+        key = _correlation_key(evt)
+        if key and key not in self._pending_responses:
+            self._pending_responses[key] = _PendingResponse(delegation_id=evt.delegation_id)
+        return key
+
+    async def _handle_response_output_item_done(self, evt: events.ResponseEventEnvelope):
+        item = events.ResponseOutputItem.model_validate(evt.event.get("item") or {})
         if item.type != "function_call":
             return
         if item.status != "completed":
@@ -917,7 +991,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             )
             return
 
-        self._open_function_calls.add(item.call_id)
+        key = self._track_response(evt)
+        pending = self._pending_responses.get(key)
+        if pending is not None:
+            pending.call_ids.add(item.call_id)
+            pending.had_calls = True
+        self._open_function_calls[item.call_id] = key
         await self.run_function_calls(
             [
                 FunctionCallFromLLM(
@@ -928,6 +1007,40 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 )
             ]
         )
+
+    async def _handle_response_finished(self, evt: events.ResponseEventEnvelope):
+        """Note that a response emitted all of its output items.
+
+        The lifecycle snapshot's ``output`` is empty even here, so the calls
+        collected from the individual item events are what has to be answered.
+        """
+        if evt.inner_type == "response.completed":
+            await self._report_backend_usage(evt.event.get("response") or {})
+        elif evt.inner_type in ("response.failed", "response.incomplete"):
+            response = evt.event.get("response") or {}
+            error = response.get("error") or response.get("incomplete_details") or {}
+            message = (
+                error.get("message") or error.get("reason") if isinstance(error, dict) else None
+            )
+            await self.push_error(
+                error_msg=f"Delegated response {evt.inner_type.removeprefix('response.')}: "
+                f"{message or response.get('status', 'unknown')}"
+            )
+        key = _correlation_key(evt)
+        pending = self._pending_responses.get(key)
+        if pending is None:
+            return
+        pending.finished = True
+        await self._maybe_continue_response(key)
+
+    async def _maybe_continue_response(self, key: str):
+        """Continue a response once every function call it made has been answered."""
+        pending = self._pending_responses.get(key)
+        if pending is None or not pending.finished or not pending.had_calls or pending.call_ids:
+            return
+        del self._pending_responses[key]
+        logger.debug(f"{self}: continuing delegated work for {key}")
+        await self.send_client_event(events.ResponseCreateEvent())
 
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         if frame.tool_call_id not in self._open_function_calls:
@@ -952,94 +1065,88 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
 
     async def _send_function_call_output(self, call_id: str, output: str):
-        self._open_function_calls.discard(call_id)
+        """Queue one function result, and continue the response once all are in."""
+        key = self._open_function_calls.pop(call_id, "")
         logger.debug(f"{self}: sending function call output for {call_id}")
         await self.send_client_event(
-            events.DelegationFunctionCallOutputCreateEvent(
+            events.ResponseItemCreateEvent(
                 item=events.FunctionCallOutputItem(call_id=call_id, output=output)
             )
         )
+        pending = self._pending_responses.get(key)
+        if pending is not None:
+            pending.call_ids.discard(call_id)
+        await self._maybe_continue_response(key)
 
     #
     # usage metrics
     #
 
     async def _report_usage(self, usage: events.Usage):
-        """Report the tokens used since the previous cumulative usage report.
+        """Log the session's cumulative live audio duration.
 
-        Usage comes in one of two shapes: token counts for the whole session,
-        or the frontend's audio duration plus per-backend-model token counts.
-        Both are cumulative, so the difference from the previous report is
-        what gets reported.
+        The live model's usage is reported as seconds rather than tokens.
+        Token metrics come from the backend model instead, on the nested
+        Responses completion events.
         """
-        previous = self._usage
-        self._usage = usage
+        if usage.seconds is not None:
+            logger.debug(f"{self}: live audio usage: {usage.seconds:.1f}s (cumulative)")
 
-        def delta(current: int | None, before: int | None) -> int:
-            return (current or 0) - (before or 0)
-
-        if usage.total_tokens is None:
-            logger.debug(f"{self}: usage: {usage.model_dump(exclude_none=True)}")
-            current = _backend_model_tokens(usage)
-            before = _backend_model_tokens(previous) if previous else {}
-            tokens = LLMTokenUsage(
-                prompt_tokens=delta(current.get("input_tokens"), before.get("input_tokens")),
-                completion_tokens=delta(current.get("output_tokens"), before.get("output_tokens")),
-                total_tokens=delta(current.get("total_tokens"), before.get("total_tokens")),
-                cache_read_input_tokens=delta(
-                    current.get("cached_tokens"), before.get("cached_tokens")
-                ),
-                reasoning_tokens=delta(
-                    current.get("reasoning_tokens"), before.get("reasoning_tokens")
-                ),
-            )
-            if tokens.total_tokens > 0:
-                await self.start_llm_usage_metrics(tokens)
+    async def _report_backend_usage(self, response: dict[str, Any]):
+        """Report the backend model's token usage from a completed delegated response."""
+        usage = response.get("usage")
+        if not isinstance(usage, dict):
             return
-
-        def detail(details: events.UsageTokenDetails | None, name: str) -> int | None:
-            return getattr(details, name, None) if details else None
-
-        prev_input = previous.input_token_details if previous else None
-        prev_output = previous.output_token_details if previous else None
+        details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
         tokens = LLMTokenUsage(
-            prompt_tokens=delta(usage.input_tokens, previous.input_tokens if previous else None),
-            completion_tokens=delta(
-                usage.output_tokens, previous.output_tokens if previous else None
-            ),
-            total_tokens=delta(usage.total_tokens, previous.total_tokens if previous else None),
-            cache_read_input_tokens=delta(
-                detail(usage.input_token_details, "cached_tokens"),
-                detail(prev_input, "cached_tokens"),
-            ),
-            input_audio_tokens=delta(
-                detail(usage.input_token_details, "audio_tokens"),
-                detail(prev_input, "audio_tokens"),
-            ),
-            output_audio_tokens=delta(
-                detail(usage.output_token_details, "audio_tokens"),
-                detail(prev_output, "audio_tokens"),
-            ),
+            prompt_tokens=usage.get("input_tokens") or 0,
+            completion_tokens=usage.get("output_tokens") or 0,
+            total_tokens=usage.get("total_tokens") or 0,
+            cache_read_input_tokens=details.get("cached_tokens") or 0,
+            reasoning_tokens=output_details.get("reasoning_tokens") or 0,
         )
         if tokens.total_tokens > 0:
             await self.start_llm_usage_metrics(tokens)
 
 
-def _backend_model_tokens(usage: events.Usage) -> dict[str, int]:
-    """Sum the per-backend-model token counts of a duration-shaped usage report."""
-    totals: dict[str, int] = {}
-    for entry in usage.backend_model_usage or []:
-        for name in ("input_tokens", "output_tokens", "total_tokens"):
-            totals[name] = totals.get(name, 0) + int(entry.get(name) or 0)
-        input_details = entry.get("input_tokens_details") or {}
-        output_details = entry.get("output_tokens_details") or {}
-        totals["cached_tokens"] = totals.get("cached_tokens", 0) + int(
-            input_details.get("cached_tokens") or 0
-        )
-        totals["reasoning_tokens"] = totals.get("reasoning_tokens", 0) + int(
-            output_details.get("reasoning_tokens") or 0
-        )
-    return totals
+@dataclass
+class _PendingResponse:
+    """A delegated Responses run whose function calls we are collecting.
+
+    Parameters:
+        delegation_id: The delegation the response belongs to.
+        call_ids: Calls still awaiting an output.
+        had_calls: Whether the response asked for any function call at all.
+        finished: Whether the response emitted all of its output items.
+    """
+
+    delegation_id: str | None = None
+    call_ids: set[str] = field(default_factory=set)
+    had_calls: bool = False
+    finished: bool = False
+
+
+def _correlation_key(evt: events.ResponseEventEnvelope) -> str:
+    """Identify the delegated work a wrapped Responses event belongs to.
+
+    The envelope's ``delegation_id`` is the correlator the API guarantees; the
+    response id is a fallback for an envelope that arrives without one.
+    """
+    if evt.delegation_id:
+        return evt.delegation_id
+    response = evt.event.get("response")
+    if isinstance(response, dict) and isinstance(response.get("id"), str):
+        return response["id"]
+    response_id = evt.event.get("response_id")
+    return response_id if isinstance(response_id, str) else ""
+
+
+def _trailing_developer_text(items: list[events.InputItem]) -> str | None:
+    """Return the text of a trailing developer message, if the history ends with one."""
+    if not items or items[-1].role != "developer":
+        return None
+    return "\n".join(part.text for part in items[-1].content if part.text).strip() or None
 
 
 def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, Any]:

@@ -23,13 +23,13 @@ class OpenAILiveLLMInvocationParams(TypedDict):
 
     Parameters:
         instructions: System instructions for the live model, or ``None``.
-        initial_items: Prior text-only messages to seed the session with.
+        input: Prior text-only messages to seed the session with.
         tools: Function tools in Responses API format, for the backend model.
         tool_choice: Tool choice in Responses API format, or ``None``.
     """
 
     instructions: str | None
-    initial_items: list[events.InitialItem]
+    input: list[events.InputItem]
     tools: list[dict[str, Any]]
     tool_choice: Any | None
 
@@ -46,7 +46,7 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
         """Initialize the adapter."""
         super().__init__()
         self._responses_adapter = OpenAIResponsesLLMAdapter()
-        self._warned_initial_items_truncated = False
+        self._warned_input_truncated = False
 
     @property
     def id_for_llm_specific_messages(self) -> str:
@@ -60,7 +60,7 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
 
         A leading ``system`` message becomes the live model's instructions
         (``system_instruction`` from the service settings wins if both are
-        set). The remaining messages become ``initial_items``.
+        set). The remaining messages become the startup ``input`` history.
 
         Args:
             context: The LLM context containing messages, tools, etc.
@@ -84,7 +84,7 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
 
         return {
             "instructions": instructions,
-            "initial_items": self._to_initial_items(messages),
+            "input": self._to_input_items(messages),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
             "tool_choice": self._to_tool_choice(context.tool_choice),
@@ -123,46 +123,45 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
             tools.append(tool)
         return tools
 
-    def _to_initial_items(self, messages: list[dict[str, Any]]) -> list[events.InitialItem]:
-        """Convert standard messages to text-only ``initial_items``.
+    def _to_input_items(self, messages: list[dict[str, Any]]) -> list[events.InputItem]:
+        """Convert standard messages to the text-only startup ``input`` history.
 
-        Tool calls, tool results and non-text content have no ``initial_items``
-        representation and are skipped. At most :data:`events.MAX_INITIAL_ITEMS`
-        items are kept, dropping the oldest.
+        Tool calls, tool results and non-text content have no representation
+        there and are skipped. System messages become developer messages, the
+        role the startup history accepts. At most
+        :data:`events.MAX_INPUT_ITEMS` items are kept, dropping the oldest.
         """
-        items: list[events.InitialItem] = []
+        items: list[events.InputItem] = []
         for message in messages:
             role = message.get("role")
             text = self._text_content(message)
             if role in ("system", "developer") and text:
                 items.append(
-                    events.InitialItem(
-                        role="developer", content=[events.InputTextContent(text=text)]
-                    )
+                    events.InputItem(role="developer", content=[events.InputTextContent(text=text)])
                 )
             elif role == "user" and text:
                 items.append(
-                    events.InitialItem(role="user", content=[events.InputTextContent(text=text)])
+                    events.InputItem(role="user", content=[events.InputTextContent(text=text)])
                 )
             elif role == "assistant" and text and not message.get("tool_calls"):
                 items.append(
-                    events.InitialItem(
+                    events.InputItem(
                         role="assistant", content=[events.OutputTextContent(text=text)]
                     )
                 )
             else:
                 logger.debug(
-                    f"Skipping context message with no initial_items representation: role={role!r}"
+                    f"Skipping context message with no startup-history representation: role={role!r}"
                 )
 
-        if len(items) > events.MAX_INITIAL_ITEMS:
-            if not self._warned_initial_items_truncated:
-                self._warned_initial_items_truncated = True
+        if len(items) > events.MAX_INPUT_ITEMS:
+            if not self._warned_input_truncated:
+                self._warned_input_truncated = True
                 logger.warning(
                     f"Context has {len(items)} text messages but the OpenAI Live API accepts "
-                    f"at most {events.MAX_INITIAL_ITEMS} initial_items; keeping the most recent."
+                    f"at most {events.MAX_INPUT_ITEMS} startup messages; keeping the most recent."
                 )
-            items = items[-events.MAX_INITIAL_ITEMS :]
+            items = items[-events.MAX_INPUT_ITEMS :]
         return items
 
     @staticmethod

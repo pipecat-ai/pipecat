@@ -45,6 +45,9 @@ from pipecat.services.openai.live import events
 from pipecat.services.openai.live import llm as live_llm
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.base_object import BaseObject
+from pipecat.workers.llm import BackendOutput
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -68,6 +71,24 @@ def _responses_delegation(**settings) -> live_llm.ResponsesDelegation:
 
 def _make_service(*, delegation=None, settings=None) -> OpenAILiveLLMService:
     return OpenAILiveLLMService(api_key="test-key", settings=settings, delegation=delegation)
+
+
+#: Turn gap short enough to keep tests quick, long enough to survive scheduling.
+TEST_TURN_GAP_SECS = 0.05
+
+
+async def _make_service_with_tasks(*, delegation=None, settings=None) -> OpenAILiveLLMService:
+    """A service wired to a task manager, for the paths that run turn timers."""
+    settings = settings or OpenAILiveLLMService.Settings()
+    settings.transcript_turn_gap_secs = TEST_TURN_GAP_SECS
+    service = _make_service(delegation=delegation, settings=settings)
+    await BaseObject.setup(service, TaskManager())
+    return service
+
+
+async def _let_turns_close(service: OpenAILiveLLMService) -> None:
+    """Wait out the turn gap, so any open turn is closed by its timer."""
+    await asyncio.sleep(TEST_TURN_GAP_SECS * 3)
 
 
 class _FakeWebSocket:
@@ -117,46 +138,31 @@ async def _drive(service: OpenAILiveLLMService, scripted: list[dict[str, Any]]) 
     await service._receive_task_handler()
 
 
-def _turn_created(turn_id: str, role: str, transcript: str = "") -> dict[str, Any]:
+def _transcript_delta(role: str, delta: str, *, start_ms: int = 0) -> dict[str, Any]:
+    kind = "input" if role == "user" else "output"
     return {
-        "type": "turn.created",
-        "turn": {
-            "id": turn_id,
-            "role": role,
-            "start_ms": 0,
-            "end_ms": 100,
-            "transcript": transcript,
-        },
-    }
-
-
-def _turn_delta(turn_id: str, delta: str) -> dict[str, Any]:
-    return {
-        "type": "turn.delta",
-        "turn_id": turn_id,
+        "type": f"session.{kind}_transcript.delta",
         "delta": delta,
-        "start_ms": 100,
-        "end_ms": 200,
+        "start_ms": start_ms,
+        "end_ms": start_ms + 200,
     }
 
 
-def _turn_done(turn_id: str, role: str, transcript: str) -> dict[str, Any]:
-    return {
-        "type": "turn.done",
-        "turn": {
-            "id": turn_id,
-            "role": role,
-            "start_ms": 0,
-            "end_ms": 200,
-            "transcript": transcript,
-        },
-    }
+def _delegation_created(delegation_id: str, target: str = "client") -> dict[str, Any]:
+    delegation: dict[str, Any] = {"id": delegation_id, "type": "delegation", "target": target}
+    if target == "responses":
+        delegation["response_id"] = "resp_1"
+    return {"type": "session.delegation.created", "offset_ms": 1000, "delegation": delegation}
+
+
+def _response_event(inner: dict[str, Any], delegation_id: str = "item_d1") -> dict[str, Any]:
+    return {"type": "response.event", "delegation_id": delegation_id, "event": inner}
 
 
 def _session_started() -> dict[str, Any]:
     return {
         "type": "session.started",
-        "session": {"id": "rtc_123", "model": "gpt-live-1-marble-alpha"},
+        "session": {"id": "live_123", "model": "gpt-live-1-diamond-alpha"},
     }
 
 
@@ -193,12 +199,13 @@ async def test_initial_session_update_client_mode():
     )
     await service._handle_context(context)
 
-    (update,) = recorder.of_type("session.update")
-    session = update["session"]
+    (start,) = recorder.of_type("session.start")
+    session = start["session"]
+    assert session["model"] == live_llm.DEFAULT_MODEL
     assert session["instructions"] == "Be brief."
     assert session["audio"] == {"output": {"voice": "cedar"}}
     assert session["delegation"] == {"type": "client"}
-    assert session["initial_items"] == [
+    assert session["input"] == [
         {
             "type": "message",
             "role": "developer",
@@ -242,9 +249,9 @@ async def test_initial_session_update_responses_mode():
     )
     await service._handle_context(context)
 
-    (update,) = recorder.of_type("session.update")
-    session = update["session"]
-    assert "initial_items" not in session
+    (start,) = recorder.of_type("session.start")
+    session = start["session"]
+    assert "input" not in session
     responses = session["delegation"]["responses"]
     assert session["delegation"]["type"] == "responses"
     assert responses["model"] == "gpt-5.4-mini"
@@ -280,12 +287,12 @@ async def test_system_instruction_setting_wins_over_context_system_message():
 
     await service._handle_context(LLMContext([{"role": "system", "content": "From context."}]))
 
-    (update,) = recorder.of_type("session.update")
-    assert update["session"]["instructions"] == "From settings."
+    (start,) = recorder.of_type("session.start")
+    assert start["session"]["instructions"] == "From settings."
 
 
 @pytest.mark.asyncio
-async def test_initial_items_keep_the_most_recent_128():
+async def test_startup_history_keeps_the_most_recent_128():
     service = _make_service()
     recorder = _EventRecorder()
     service.send_client_event = recorder
@@ -293,9 +300,9 @@ async def test_initial_items_keep_the_most_recent_128():
     messages = [{"role": "user", "content": f"message {i}"} for i in range(200)]
     await service._handle_context(LLMContext(messages))
 
-    (update,) = recorder.of_type("session.update")
-    items = update["session"]["initial_items"]
-    assert len(items) == events.MAX_INITIAL_ITEMS
+    (start,) = recorder.of_type("session.start")
+    items = start["session"]["input"]
+    assert len(items) == events.MAX_INPUT_ITEMS
     assert items[0]["content"][0]["text"] == "message 72"
     assert items[-1]["content"][0]["text"] == "message 199"
 
@@ -327,16 +334,13 @@ async def test_tools_change_sends_sparse_update_in_responses_mode():
 
     # Same tools: nothing to send.
     await service._handle_context(context)
-    assert len(recorder.of_type("session.update")) == 1
+    assert recorder.of_type("session.update") == []
 
     # New tool set: sparse delegation update carrying only the tools.
     context.set_tools(ToolsSchema(standard_tools=[]))
     await service._handle_context(context)
-    updates = recorder.of_type("session.update")
-    assert len(updates) == 2
-    assert updates[1]["session"] == {
-        "delegation": {"type": "responses", "responses": {"tools": []}}
-    }
+    (update,) = recorder.of_type("session.update")
+    assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}
 
 
 # ---------------------------------------------------------------------------
@@ -355,10 +359,8 @@ async def test_output_audio_delta_pushes_24khz_speech_audio_frame():
         service,
         [
             {
-                "type": "output_audio.delta",
-                "audio": base64.b64encode(audio).decode("ascii"),
-                "start_ms": 0,
-                "end_ms": 10,
+                "type": "session.output_audio.delta",
+                "delta": base64.b64encode(audio).decode("ascii"),
             }
         ],
     )
@@ -381,7 +383,7 @@ async def test_input_audio_is_dropped_until_session_started_and_resampled_to_24k
 
     service._session_started = True
     await service._send_user_audio(InputAudioRawFrame(audio_24k, 24000, 1))
-    (append,) = recorder.of_type("input_audio.append")
+    (append,) = recorder.of_type("session.input_audio.append")
     assert base64.b64decode(append["audio"]) == audio_24k
 
     # 16 kHz input is resampled to 24 kHz. The stream resampler emits in its
@@ -389,31 +391,31 @@ async def test_input_audio_is_dropped_until_session_started_and_resampled_to_24k
     for _ in range(10):
         await service._send_user_audio(InputAudioRawFrame(b"\x00\x01" * 320, 16000, 1))
     resampled = b"".join(
-        base64.b64decode(e["audio"]) for e in recorder.of_type("input_audio.append")[1:]
+        base64.b64decode(e["audio"]) for e in recorder.of_type("session.input_audio.append")[1:]
     )
     assert 0 < len(resampled) <= 1.5 * 6400
     assert len(resampled) % 2 == 0
 
 
 # ---------------------------------------------------------------------------
-# Projected turns → frames
+# Transcript fragments → turn frames
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_assistant_turn_brackets_text_with_one_response_and_tts_pair():
-    service = _make_service()
+    service = await _make_service_with_tasks()
     recorder = _FrameRecorder()
     service.push_frame = recorder
 
     await _drive(
         service,
         [
-            _turn_created("turn_a", "assistant", "Hi"),
-            _turn_delta("turn_a", " there"),
-            _turn_done("turn_a", "assistant", "Hi there"),
+            _transcript_delta("assistant", "Hi"),
+            _transcript_delta("assistant", " there", start_ms=200),
         ],
     )
+    await _let_turns_close(service)
 
     frames = [f for f, _ in recorder.frames]
     assert [type(f) for f in frames] == [
@@ -436,18 +438,18 @@ async def test_assistant_turn_brackets_text_with_one_response_and_tts_pair():
 
 @pytest.mark.asyncio
 async def test_user_turn_emits_proposed_speaking_frames_and_transcriptions():
-    service = _make_service()
+    service = await _make_service_with_tasks()
     recorder = _FrameRecorder()
     service.push_frame = recorder
 
     await _drive(
         service,
         [
-            _turn_created("turn_u", "user", "what's"),
-            _turn_delta("turn_u", " the weather"),
-            _turn_done("turn_u", "user", "what's the weather"),
+            _transcript_delta("user", "what's"),
+            _transcript_delta("user", " the weather", start_ms=200),
         ],
     )
+    await _let_turns_close(service)
 
     started = recorder.of_types(ProposedUserStartedSpeakingFrame)
     stopped = recorder.of_types(ProposedUserStoppedSpeakingFrame)
@@ -468,6 +470,43 @@ async def test_user_turn_emits_proposed_speaking_frames_and_transcriptions():
     assert types.index(TranscriptionFrame) < types.index(ProposedUserStoppedSpeakingFrame)
 
 
+@pytest.mark.asyncio
+async def test_a_gap_ends_a_turn_and_the_next_fragment_starts_another():
+    service = await _make_service_with_tasks()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    await _drive(service, [_transcript_delta("assistant", "First.")])
+    await _let_turns_close(service)
+    await _drive(service, [_transcript_delta("assistant", "Second.", start_ms=5000)])
+    await _let_turns_close(service)
+
+    assert len(recorder.of_types(LLMFullResponseStartFrame)) == 2
+    assert len(recorder.of_types(LLMFullResponseEndFrame)) == 2
+    assert [f.text for f in recorder.of_types(TTSTextFrame)] == ["First.", "Second."]
+
+
+@pytest.mark.asyncio
+async def test_both_speakers_can_hold_a_turn_at_once():
+    """Full duplex: the two directions are grouped independently."""
+    service = await _make_service_with_tasks()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    await _drive(
+        service,
+        [
+            _transcript_delta("assistant", "Let me check"),
+            _transcript_delta("user", "actually wait"),
+        ],
+    )
+    await _let_turns_close(service)
+
+    assert [f.text for f in recorder.of_types(TTSTextFrame)] == ["Let me check"]
+    ((final, _),) = [(f, d) for f, d in recorder.frames if isinstance(f, TranscriptionFrame)]
+    assert final.text == "actually wait"
+
+
 def test_metadata_frame_recommends_external_turns_without_interruptions():
     service = _make_service()
     frame = service.service_metadata_frame()
@@ -481,6 +520,32 @@ def test_metadata_frame_recommends_external_turns_without_interruptions():
 # ---------------------------------------------------------------------------
 
 
+def _function_call_item(call_id: str, status: str = "completed") -> dict[str, Any]:
+    return {
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {
+            "id": f"fc_{call_id}",
+            "type": "function_call",
+            "status": status,
+            "call_id": call_id,
+            "name": "get_weather",
+            "arguments": '{"location": "Seattle"}',
+        },
+    }
+
+
+def _response_created(response_id: str = "resp_1") -> dict[str, Any]:
+    return {"type": "response.created", "response": {"id": response_id}}
+
+
+def _response_completed(response_id: str = "resp_1", **response) -> dict[str, Any]:
+    return {
+        "type": "response.completed",
+        "response": {"id": response_id, "output": [], **response},
+    }
+
+
 @pytest.mark.asyncio
 async def test_completed_function_call_item_runs_the_function():
     service = _make_service(delegation=_responses_delegation())
@@ -490,30 +555,9 @@ async def test_completed_function_call_item_runs_the_function():
     await _drive(
         service,
         [
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": {
-                    "id": "fc_1",
-                    "type": "function_call",
-                    "status": "in_progress",
-                    "call_id": "call_1",
-                    "name": "get_weather",
-                    "arguments": "{}",
-                },
-            },
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": {
-                    "id": "fc_1",
-                    "type": "function_call",
-                    "status": "completed",
-                    "call_id": "call_1",
-                    "name": "get_weather",
-                    "arguments": '{"location": "Seattle"}',
-                },
-            },
+            _response_event(_response_created()),
+            _response_event(_function_call_item("call_1", status="in_progress")),
+            _response_event(_function_call_item("call_1")),
         ],
     )
 
@@ -524,15 +568,26 @@ async def test_completed_function_call_item_runs_the_function():
     assert call.function_name == "get_weather"
     assert call.arguments == {"location": "Seattle"}
     assert call.context is service._context
-    assert "call_1" in service._open_function_calls
+    assert service._open_function_calls["call_1"] == "item_d1"
 
 
 @pytest.mark.asyncio
-async def test_function_call_result_is_sent_as_output_immediately():
+async def test_function_result_is_queued_and_the_response_continued_once_all_are_in():
     service = _make_service(delegation=_responses_delegation())
+    service._context = LLMContext([], tools=[_weather_tool()])
+    service.run_function_calls = AsyncMock()
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    service._open_function_calls.add("call_1")
+
+    await _drive(
+        service,
+        [
+            _response_event(_response_created()),
+            _response_event(_function_call_item("call_1")),
+            _response_event(_function_call_item("call_2")),
+            _response_event(_response_completed()),
+        ],
+    )
 
     frame = FunctionCallResultFrame(
         function_name="get_weather",
@@ -542,15 +597,73 @@ async def test_function_call_result_is_sent_as_output_immediately():
     )
     await service.push_frame(frame, FrameDirection.UPSTREAM)
     assert recorder.events == []  # only the downstream broadcast copy is answered
-    await service.push_frame(frame)
 
-    (output,) = recorder.of_type("delegation.function_call_output.create")
-    assert output["item"] == {
+    await service.push_frame(frame)
+    (item,) = recorder.of_type("response.item.create")
+    assert item["item"] == {
         "type": "function_call_output",
         "call_id": "call_1",
         "output": '{"temp": 62}',
     }
-    assert "call_1" not in service._open_function_calls
+    # The other call is still outstanding, so the response is not continued yet.
+    assert recorder.of_type("response.create") == []
+
+    await service.push_frame(
+        FunctionCallResultFrame(
+            function_name="get_weather",
+            tool_call_id="call_2",
+            arguments={"location": "Boston"},
+            result={"temp": 51},
+        )
+    )
+    assert len(recorder.of_type("response.item.create")) == 2
+    assert len(recorder.of_type("response.create")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_response_that_asked_for_nothing_is_not_continued():
+    """An empty terminal output list is not a reason to continue a response."""
+    service = _make_service(delegation=_responses_delegation())
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+
+    await _drive(
+        service,
+        [_response_event(_response_created()), _response_event(_response_completed())],
+    )
+
+    assert recorder.of_type("response.create") == []
+
+
+@pytest.mark.asyncio
+async def test_backend_token_usage_is_reported_from_the_completed_response():
+    service = _make_service(delegation=_responses_delegation())
+    service.start_llm_usage_metrics = AsyncMock()
+
+    await _drive(
+        service,
+        [
+            _response_event(_response_created()),
+            _response_event(
+                _response_completed(
+                    usage={
+                        "input_tokens": 120,
+                        "output_tokens": 30,
+                        "total_tokens": 150,
+                        "input_tokens_details": {"cached_tokens": 100},
+                        "output_tokens_details": {"reasoning_tokens": 12},
+                    }
+                )
+            ),
+        ],
+    )
+
+    (tokens,) = service.start_llm_usage_metrics.call_args.args
+    assert tokens.prompt_tokens == 120
+    assert tokens.completion_tokens == 30
+    assert tokens.total_tokens == 150
+    assert tokens.cache_read_input_tokens == 100
+    assert tokens.reasoning_tokens == 12
 
 
 @pytest.mark.asyncio
@@ -558,7 +671,7 @@ async def test_intermediate_function_call_result_is_dropped():
     service = _make_service(delegation=_responses_delegation())
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    service._open_function_calls.add("call_1")
+    service._open_function_calls["call_1"] = "item_d1"
 
     await service.push_frame(
         FunctionCallResultFrame(
@@ -579,15 +692,15 @@ async def test_cancelled_function_call_reports_cancellation_to_the_backend():
     service = _make_service(delegation=_responses_delegation())
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    service._open_function_calls.add("call_1")
+    service._open_function_calls["call_1"] = "item_d1"
 
     await service.push_frame(
         FunctionCallCancelFrame(function_name="get_weather", tool_call_id="call_1")
     )
 
-    (output,) = recorder.of_type("delegation.function_call_output.create")
-    assert output["item"]["call_id"] == "call_1"
-    assert "cancelled" in json.loads(output["item"]["output"])["error"]
+    (item,) = recorder.of_type("response.item.create")
+    assert item["item"]["call_id"] == "call_1"
+    assert "cancelled" in json.loads(item["item"]["output"])["error"]
 
 
 @pytest.mark.asyncio
@@ -619,22 +732,13 @@ async def test_client_delegation_without_backend_is_declined():
     await _drive(
         service,
         [
-            {
-                "type": "delegation.created",
-                "offset_ms": 1000,
-                "item": {
-                    "id": "item_d1",
-                    "type": "delegation",
-                    "target": "client",
-                    "content": [{"type": "input_text", "text": "What is the weather?"}],
-                },
-            }
+            _delegation_created("item_d1"),
         ],
     )
 
-    (append,) = recorder.of_type("delegation.context.append")
-    assert append["delegation_item_id"] == "item_d1"
-    assert append["channel"] == "commentary"
+    (append,) = recorder.of_type("session.commentary.append")
+    assert append["delegation_id"] == "item_d1"
+    assert "No backend" in append["content"]
 
 
 @pytest.mark.asyncio
@@ -663,7 +767,7 @@ async def test_unknown_and_response_events_do_not_break_the_receive_loop():
         service,
         [
             {"type": "some.future.event", "payload": 1},
-            {"type": "response.created", "response": {"id": "resp_1", "status": "in_progress"}},
+            _response_event({"type": "response.output_text.delta", "delta": "hi"}),
             "not json",
             _session_started(),
         ],
@@ -672,41 +776,58 @@ async def test_unknown_and_response_events_do_not_break_the_receive_loop():
     assert service._session_started is True
 
 
-def test_parse_server_event_routes_response_events_and_unknown_types():
-    response = events.parse_server_event(json.dumps({"type": "response.completed", "response": {}}))
-    assert isinstance(response, events.ResponseEvent)
+def test_parse_server_event_unwraps_response_envelopes_and_tolerates_unknown_types():
+    envelope = events.parse_server_event(
+        json.dumps(_response_event({"type": "response.completed", "response": {"id": "resp_1"}}))
+    )
+    assert isinstance(envelope, events.ResponseEventEnvelope)
+    assert envelope.delegation_id == "item_d1"
+    assert envelope.inner_type == "response.completed"
+
     unknown = events.parse_server_event(json.dumps({"type": "brand.new", "x": 1}))
     assert isinstance(unknown, events.UnknownServerEvent)
     with pytest.raises(ValueError):
         events.parse_server_event("[]")
 
 
+def test_errors_correlate_to_the_command_that_caused_them():
+    error = events.parse_server_event(
+        json.dumps(
+            {
+                "type": "error",
+                "event_id": "event_error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "immutable_field_update",
+                    "message": "nope",
+                    "client_event_id": "event_update",
+                },
+            }
+        )
+    )
+    assert isinstance(error, events.ErrorEvent)
+    assert error.error.client_event_id == "event_update"
+
+
 @pytest.mark.asyncio
-async def test_usage_reports_deltas_between_cumulative_updates():
+async def test_live_usage_is_reported_as_cumulative_seconds():
+    """The live model bills duration, not tokens; backend tokens arrive separately."""
     service = _make_service()
     service.start_llm_usage_metrics = AsyncMock()
 
-    def usage(total, inp, out, in_audio, out_audio, cached):
-        return {
-            "type": "session.usage.updated",
-            "usage": {
-                "total_tokens": total,
-                "input_tokens": inp,
-                "output_tokens": out,
-                "input_token_details": {"audio_tokens": in_audio, "cached_tokens": cached},
-                "output_token_details": {"audio_tokens": out_audio},
+    await _drive(
+        service,
+        [
+            {"type": "session.usage.updated", "usage": {"seconds": 12.4}},
+            {
+                "type": "session.usage.updated",
+                "usage": {"seconds": 30.1},
+                "context_window": {"usage_ratio": 0.42},
             },
-        }
+        ],
+    )
 
-    await _drive(service, [usage(100, 60, 40, 50, 30, 10), usage(150, 90, 60, 70, 45, 25)])
-
-    first, second = [c.args[0] for c in service.start_llm_usage_metrics.call_args_list]
-    assert (first.total_tokens, first.prompt_tokens, first.completion_tokens) == (100, 60, 40)
-    assert (first.input_audio_tokens, first.output_audio_tokens) == (50, 30)
-    assert first.cache_read_input_tokens == 10
-    assert (second.total_tokens, second.prompt_tokens, second.completion_tokens) == (50, 30, 20)
-    assert (second.input_audio_tokens, second.output_audio_tokens) == (20, 15)
-    assert second.cache_read_input_tokens == 15
+    service.start_llm_usage_metrics.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -739,7 +860,7 @@ async def test_close_session_waits_for_session_closed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reset_conversation_starts_a_new_session_from_the_current_context():
-    service = _make_service()
+    service = await _make_service_with_tasks()
     recorder = _EventRecorder()
     service.send_client_event = recorder
     service._close_session = AsyncMock()
@@ -753,7 +874,7 @@ async def test_reset_conversation_starts_a_new_session_from_the_current_context(
     context.set_messages([{"role": "assistant", "content": "Restored history."}])
     frames = _FrameRecorder()
     service.push_frame = frames
-    service._assistant_turn_id = "turn_open"
+    service._assistant_turn.open = True
     await service.reset_conversation()
 
     # The old session is dropped, not drained, and its open assistant turn is closed.
@@ -761,9 +882,9 @@ async def test_reset_conversation_starts_a_new_session_from_the_current_context(
     service._disconnect.assert_awaited_once()
     assert [type(f) for f, _ in frames.frames] == [TTSStoppedFrame, LLMFullResponseEndFrame]
     service._connect.assert_awaited_once()
-    updates = recorder.of_type("session.update")
-    assert len(updates) == 2
-    assert updates[1]["session"]["initial_items"] == [
+    starts = recorder.of_type("session.start")
+    assert len(starts) == 2
+    assert starts[1]["session"]["input"] == [
         {
             "type": "message",
             "role": "assistant",
@@ -782,8 +903,8 @@ class _FakeBackend:
     name = "backend"
 
 
-def _client_delegation_service(monkeypatch, run_backend_job):
-    service = _make_service(
+async def _client_delegation_service(monkeypatch, run_backend_job):
+    service = await _make_service_with_tasks(
         delegation=OpenAILiveLLMService.ClientDelegation(backend=_FakeBackend(), timeout_secs=5)
     )
     recorder = _EventRecorder()
@@ -793,42 +914,40 @@ def _client_delegation_service(monkeypatch, run_backend_job):
     return service, recorder
 
 
-def _delegation_item(item_id: str, text: str) -> events.DelegationItem:
-    return events.DelegationItem(
-        id=item_id, target="client", content=[events.InputTextContent(text=text)]
-    )
+def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
+    return events.DelegationMetadata(id=delegation_id, target="client")
 
 
 @pytest.mark.asyncio
-async def test_client_delegation_runs_the_backend_with_the_turns_since_the_last_one(monkeypatch):
+async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
     calls = []
 
-    async def fake_run_backend_job(
-        worker, backend_name, *, task, messages, on_update, timeout_secs
-    ):
-        calls.append((worker, backend_name, task, messages, timeout_secs))
-        await on_update("text", "Checking the weather.")
-        await on_update("thought", "Still looking.")
+    async def fake_run_backend_job(worker, backend_name, *, messages, on_update, timeout_secs):
+        calls.append((worker, backend_name, messages, timeout_secs))
+        await on_update(BackendOutput(text="Checking the weather.", speakable=True))
+        await on_update(BackendOutput(text="Still looking.", is_thought=True, speakable=False))
+        await on_update(
+            BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, speakable=True)
+        )
         return "It's 62 and raining in Seattle."
 
-    service, recorder = _client_delegation_service(monkeypatch, fake_run_backend_job)
+    service, recorder = await _client_delegation_service(monkeypatch, fake_run_backend_job)
 
     await _drive(
         service,
         [
-            _turn_created("t1", "user"),
-            _turn_done("t1", "user", "what's the weather in seattle"),
-            _turn_created("t2", "assistant"),
-            _turn_done("t2", "assistant", "Let me check."),
+            _transcript_delta("user", "what's the weather in seattle"),
+            _transcript_delta("assistant", "Let me check.", start_ms=200),
         ],
     )
-    await service._run_client_delegation(_delegation_item("item_d1", "Weather in Seattle?"))
+    await service._run_client_delegation(_client_delegation("item_d1"))
 
+    # No task text: the delegation names none, so the backend gets the
+    # conversation and works out the request from it.
     assert calls == [
         (
             "worker",
             "backend",
-            "Weather in Seattle?",
             [
                 {"role": "user", "content": "what's the weather in seattle"},
                 {"role": "assistant", "content": "Let me check."},
@@ -836,47 +955,51 @@ async def test_client_delegation_runs_the_backend_with_the_turns_since_the_last_
             5,
         )
     ]
-    assert service._delegated_turns == []
-    appends = recorder.of_type("delegation.context.append")
-    assert [(a["delegation_item_id"], a["channel"], a["content"][0]["text"]) for a in appends] == [
-        ("item_d1", "commentary", "Checking the weather."),
-        ("item_d1", "commentary", "Still looking."),
-        ("item_d1", "speakable", "It's 62 and raining in Seattle."),
+    assert service._transcript_fragments == []
+    thinking = [
+        (e["delegation_id"], e["content"]) for e in recorder.of_type("session.thinking.append")
+    ]
+    commentary = [
+        (e["delegation_id"], e["content"]) for e in recorder.of_type("session.commentary.append")
+    ]
+    assert thinking == [("item_d1", "Still looking.")]
+    assert commentary == [
+        ("item_d1", "Checking the weather."),
+        ("item_d1", "It's 62 and raining in Seattle."),
     ]
 
 
 @pytest.mark.asyncio
-async def test_client_delegation_failure_is_reported_as_commentary(monkeypatch):
+async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
     async def failing_run_backend_job(*args, **kwargs):
         raise JobError("timed out")
 
-    service, recorder = _client_delegation_service(monkeypatch, failing_run_backend_job)
+    service, recorder = await _client_delegation_service(monkeypatch, failing_run_backend_job)
     service.push_error = AsyncMock()
 
-    await service._run_client_delegation(_delegation_item("item_d1", "Weather?"))
+    await service._run_client_delegation(_client_delegation("item_d1"))
 
-    (append,) = recorder.of_type("delegation.context.append")
-    assert append["channel"] == "commentary"
-    assert "timed out" in append["content"][0]["text"]
+    (append,) = recorder.of_type("session.commentary.append")
+    assert "timed out" in append["content"]
     service.push_error.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
     async def run_backend_job(*args, on_update, **kwargs):
-        await on_update("text", " ".join(f"Sentence number {i} is here." for i in range(120)))
+        text = " ".join(f"Sentence number {i} is here." for i in range(120))
+        await on_update(BackendOutput(text=text, speakable=True))
         return ""
 
-    service, recorder = _client_delegation_service(monkeypatch, run_backend_job)
-    await service._run_client_delegation(_delegation_item("item_d1", "Tell me everything"))
+    service, recorder = await _client_delegation_service(monkeypatch, run_backend_job)
+    await service._run_client_delegation(_client_delegation("item_d1"))
 
-    appends = recorder.of_type("delegation.context.append")
+    appends = recorder.of_type("session.commentary.append")
     assert len(appends) > 1
     for append in appends:
-        text = append["content"][0]["text"]
-        assert len(text) <= live_llm.MAX_CONTEXT_APPEND_CHARS
-        assert text.endswith(".")
-    assert " ".join(a["content"][0]["text"] for a in appends).count("Sentence number") == 120
+        assert len(append["content"]) <= live_llm.MAX_CONTEXT_APPEND_CHARS
+        assert append["content"].endswith(".")
+    assert " ".join(a["content"] for a in appends).count("Sentence number") == 120
 
 
 def test_chunk_text_splits_overlong_sentences_on_whitespace():
@@ -885,54 +1008,3 @@ def test_chunk_text_splits_overlong_sentences_on_whitespace():
     assert all(len(c) <= 100 for c in chunks)
     assert " ".join(chunks) == words
     assert live_llm._chunk_text("   ", 100) == []
-
-
-@pytest.mark.asyncio
-async def test_usage_reports_backend_model_token_deltas_for_the_duration_shape():
-    service = _make_service()
-    service.start_llm_usage_metrics = AsyncMock()
-
-    def usage(audio_ms, backends):
-        return {
-            "type": "session.usage.updated",
-            "usage": {"audio_duration_ms": audio_ms, "backend_model_usage": backends},
-        }
-
-    await _drive(
-        service,
-        [
-            usage(1000, []),
-            usage(
-                2000,
-                [
-                    {
-                        "model": "gpt-5.4-mini",
-                        "input_tokens": 420,
-                        "input_tokens_details": {"cached_tokens": 128},
-                        "output_tokens": 96,
-                        "output_tokens_details": {"reasoning_tokens": 48},
-                        "total_tokens": 516,
-                    }
-                ],
-            ),
-            usage(
-                3000,
-                [
-                    {
-                        "model": "gpt-5.4-mini",
-                        "input_tokens": 520,
-                        "input_tokens_details": {"cached_tokens": 128},
-                        "output_tokens": 126,
-                        "output_tokens_details": {"reasoning_tokens": 58},
-                        "total_tokens": 646,
-                    }
-                ],
-            ),
-        ],
-    )
-
-    first, second = [c.args[0] for c in service.start_llm_usage_metrics.call_args_list]
-    assert (first.prompt_tokens, first.completion_tokens, first.total_tokens) == (420, 96, 516)
-    assert (first.cache_read_input_tokens, first.reasoning_tokens) == (128, 48)
-    assert (second.prompt_tokens, second.completion_tokens, second.total_tokens) == (100, 30, 130)
-    assert (second.cache_read_input_tokens, second.reasoning_tokens) == (0, 10)
