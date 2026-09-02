@@ -175,6 +175,13 @@ class SambaNovaLLMService(OpenAILLMService):
                         cached_tokens = (
                             prompt_tokens_details.cached_tokens if prompt_tokens_details else None
                         )
+                        # Tokens written into the prompt cache, billed above the
+                        # input rate. getattr: older SDKs have no such field.
+                        cache_write_tokens = (
+                            getattr(prompt_tokens_details, "cache_write_tokens", None)
+                            if prompt_tokens_details
+                            else None
+                        )
                         completion_tokens_details = getattr(
                             chunk.usage, "completion_tokens_details", None
                         )
@@ -188,6 +195,7 @@ class SambaNovaLLMService(OpenAILLMService):
                             completion_tokens=chunk.usage.completion_tokens,
                             total_tokens=chunk.usage.total_tokens,
                             cache_read_input_tokens=cached_tokens,
+                            cache_creation_input_tokens=cache_write_tokens,
                             reasoning_tokens=reasoning_tokens,
                         )
 

@@ -1157,6 +1157,7 @@ class OpenAIResponsesLLMService(
                         completion_tokens=usage.get("output_tokens", 0),
                         total_tokens=usage.get("total_tokens", 0),
                         cache_read_input_tokens=input_details.get("cached_tokens", 0),
+                        cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
                         reasoning_tokens=output_details.get("reasoning_tokens", 0),
                     )
                     await self.start_llm_usage_metrics(tokens)
@@ -1399,6 +1400,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             completion_tokens=usage.output_tokens or 0,
                             total_tokens=usage.total_tokens or 0,
                             cache_read_input_tokens=(input_details.cached_tokens or 0)
+                            if input_details
+                            else 0,
+                            cache_creation_input_tokens=(
+                                getattr(input_details, "cache_write_tokens", None) or 0
+                            )
                             if input_details
                             else 0,
                             reasoning_tokens=(output_details.reasoning_tokens or 0)
