@@ -13,9 +13,6 @@ repos:
         entry: uv run ruff format
         language: system
         types: [python]
-      # Type check the changed files with the same pinned pyright CI runs on
-      # the whole tree (format.yaml); file-scoped here so a commit costs
-      # seconds.
       - id: pyright
         name: pyright
         entry: uv run pyright
