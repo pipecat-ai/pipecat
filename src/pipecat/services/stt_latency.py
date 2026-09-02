@@ -39,6 +39,7 @@ DEFAULT_TTFS_P99: float = 1.0
 
 # Measured P99 TTFS latency values (in seconds)
 ASSEMBLYAI_TTFS_P99: float = 0.42
+ASSEMBLYAI_SYNC_TTFS_P99: float = 0.65
 AWS_TRANSCRIBE_TTFS_P99: float = 1.90
 AZURE_TTFS_P99: float = 1.80
 CARTESIA_TTFS_P99: float = 0.81
@@ -67,6 +68,3 @@ TOGETHER_TTFS_P99: float = 1.00
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99
 WHISPER_TTFS_P99: float = DEFAULT_TTFS_P99
-
-# TODO: Add measured values for AssemblyAI Sync
-ASSEMBLYAI_SYNC_TTFS_P99: float = 0.50
