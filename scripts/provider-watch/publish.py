@@ -177,7 +177,10 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
     workdir = tempfile.mkdtemp(prefix="pw-fragments-")
     try:
-        sh.run("git", "worktree", "add", "--quiet", workdir, branch, cwd=repo_root)
+        # Detached: the branch may still be checked out in a researcher's
+        # leftover worktree (a killed run never cleans them up), which would
+        # make checking it out here fail.
+        sh.run("git", "worktree", "add", "--quiet", "--detach", workdir, branch, cwd=repo_root)
         for path in rename:
             fragment_type = _fragment_type(Path(path).name)
             counters[fragment_type] = counters.get(fragment_type, 0) + 1
@@ -198,7 +201,10 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
             f"Name the changelog fragments after PR #{number}",
             cwd=Path(workdir),
         )
-        sh.run("git", "push", "origin", branch, cwd=Path(workdir))
+        sh.run("git", "push", "origin", f"HEAD:refs/heads/{branch}", cwd=Path(workdir))
+        # Move the local branch along too (best-effort: it may be checked out
+        # elsewhere), so a later publish pass diffs against the renamed state.
+        sh.run("git", "branch", "-f", branch, "HEAD", cwd=Path(workdir), check=False)
     finally:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
 
@@ -279,10 +285,13 @@ def publish_prs(
                     .splitlines()[-1]
                 )
                 outcome.opened.append(url)
-                try:
-                    _rename_changelog_fragments(sh, repo_root, branch, url)
-                except RuntimeError as exc:
-                    outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
+
+            # Adopted PRs get the rename pass too: a rename an earlier,
+            # interrupted publish could not complete heals on the next pass.
+            try:
+                _rename_changelog_fragments(sh, repo_root, branch, url)
+            except RuntimeError as exc:
+                outcome.skipped.append(f"{branch}: changelog fragments not renamed: {exc}")
 
             pr.update({"state": "open", "url": url, "opened": date})
             report.body = BRANCH_LINE.sub(
