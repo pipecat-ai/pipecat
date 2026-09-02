@@ -190,9 +190,12 @@ class WhisperSTTSettings(STTSettings):
 
     Parameters:
         no_speech_prob: Probability threshold for filtering non-speech segments.
+        hotwords: Words or phrases to bias the transcription towards, as a single
+            space-separated string (e.g. product names or jargon).
     """
 
     no_speech_prob: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    hotwords: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -270,6 +273,7 @@ class WhisperSTTService(SegmentedSTTService):
             model=Model.DISTIL_MEDIUM_EN.value,
             language=Language.EN,
             no_speech_prob=0.4,
+            hotwords=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -416,7 +420,10 @@ class WhisperSTTService(SegmentedSTTService):
         # Language is a StrEnum so downstream handles either.
         language = cast("Language | None", assert_given(self._settings.language))
         segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=language
+            self._model.transcribe,
+            audio_float,
+            language=language,
+            hotwords=assert_given(self._settings.hotwords),
         )
         text: str = ""
         no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
