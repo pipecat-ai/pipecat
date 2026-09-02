@@ -53,7 +53,7 @@ Supported expectation fields (per event):
     omitted)
 
 ``text_contains: <str>``
-    substring check on the event's text content
+    substring check on the event's text content, ignoring whitespace differences
 
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by

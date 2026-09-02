@@ -426,6 +426,11 @@ class TestTextContainsResolution(unittest.TestCase):
         self.assertIsNone(self._check({"type": "llm_response", "text": "It's Paris."}, exp))
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "London."}, exp))
 
+    def test_on_user_transcription_ignores_spacing(self):
+        exp = EvalExpectation(event="user_transcription", text_contains="the capital of")
+        ok = {"type": "user_transcription", "transcript": " What  is the  capital  of Germany?"}
+        self.assertIsNone(self._check(ok, exp))
+
     def test_on_user_transcription_transcript(self):
         exp = EvalExpectation(event="user_transcription", text_contains="hello")
         ok = {"type": "user_transcription", "transcript": "hello world"}
@@ -692,6 +697,42 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                     user="weather?",
                     expect=[
                         EvalExpectation(event="llm_response", within_ms=2000, text_contains="Paris")
+                    ],
+                )
+            ],
+        )
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_user_transcription_aggregates_pieces(self):
+        # An STT that finalizes an utterance in pieces emits one user-transcription
+        # per piece; text_contains accumulates the finals (skipping interims), so a
+        # phrase spanning pieces matches however each piece is spaced.
+        self.server.on_text(
+            "what is the capital of Germany?",
+            _rtvi("user-transcription", {"text": " What is", "final": False}),
+            _rtvi("user-transcription", {"text": " What", "final": True}),
+            _rtvi("user-transcription", {"text": " is the capital", "final": True}),
+            _rtvi("user-transcription", {"text": " of", "final": True}),
+            _rtvi("user-transcription", {"text": " Germany?", "final": True}),
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Berlin."}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScenario(
+            name="pieces",
+            turns=[
+                EvalTurn(
+                    user="what is the capital of Germany?",
+                    expect=[
+                        EvalExpectation(
+                            event="user_transcription",
+                            within_ms=2000,
+                            text_contains="capital of Germany",
+                        ),
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="Berlin"
+                        ),
                     ],
                 )
             ],

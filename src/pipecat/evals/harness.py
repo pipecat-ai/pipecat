@@ -56,7 +56,11 @@ on that.") or the on-connect greeting is rolled past rather than mistaken for
 the turn's answer. Responses that began before the turn's input are skipped, so
 an interrupted prior turn doesn't bleed in. The judge returns yes / no /
 continue; ``text_contains`` treats a missing substring as continue. The
-``within_ms`` budget bounds the wait.
+``within_ms`` budget bounds the wait. A ``user_transcription`` with
+``text_contains`` aggregates the same way: an STT may finalize one utterance in
+several pieces, and the check runs on the pieces accumulated so far. Substring
+checks ignore differences in whitespace, so pieces that carry their own spacing
+still match a phrase.
 
 Example::
 
@@ -1039,7 +1043,7 @@ class EvalSession(BaseObject):
             args = event.get("args") or {}
             sig = ", ".join(f"{k}={v}" for k, v in args.items())
             return f"{event.get('name') or '?'}({sig})"
-        return event.get("text") or event.get("transcript") or ""
+        return _event_text(event)
 
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
@@ -1325,7 +1329,9 @@ class EvalSession(BaseObject):
         carrying a content check (``text_contains`` / ``eval:``) instead
         *aggregates*: it accumulates the text of successive response segments and
         re-checks on each new segment until the check passes, the judge
-        affirmatively rejects, or the ``within_ms`` budget expires.
+        affirmatively rejects, or the ``within_ms`` budget expires. A
+        ``user_transcription`` with ``text_contains`` aggregates the same way,
+        since an STT may finalize one utterance in several pieces.
 
         Output that predates this turn (the greeting, or a turn that was
         interrupted) isn't specially filtered: in audio mode the reader already
@@ -1344,8 +1350,13 @@ class EvalSession(BaseObject):
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
 
-        aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
-            expectation.text_contains is not None or expectation.eval is not None
+        aggregates = (
+            expectation.event in ("response", "llm_response", "tts_response")
+            and (expectation.text_contains is not None or expectation.eval is not None)
+        ) or (
+            expectation.event == "user_transcription"
+            and expectation.text_contains is not None
+            and expectation.eval is None
         )
         if not aggregates:
             if expectation.event in FUNCTION_CALL_EVENTS:
@@ -1397,7 +1408,7 @@ class EvalSession(BaseObject):
                 )
 
             seen_any = True
-            delta = event.get("text", "")
+            delta = _event_text(event)
             aggregate += delta
             # Feed each segment to the judge as its own assistant message, so it
             # judges the bot's reply in the conversation's context (the cumulative
@@ -1582,7 +1593,9 @@ class EvalSession(BaseObject):
         is monotonic, so a missing substring is ``"continue"`` (more text may
         arrive); only the judge can affirmatively ``"fail"``.
         """
-        if expectation.text_contains is not None and expectation.text_contains not in aggregate:
+        if expectation.text_contains is not None and not _text_contains(
+            aggregate, expectation.text_contains
+        ):
             return ("continue", f"does not contain {expectation.text_contains!r}")
 
         if expectation.eval is not None:
@@ -1621,10 +1634,8 @@ class EvalSession(BaseObject):
             )
 
         if expectation.text_contains is not None:
-            # Resolve the event's text content: llm_response carries "text",
-            # user_transcription carries "transcript".
-            content = event.get("text") or event.get("transcript") or ""
-            if expectation.text_contains not in content:
+            content = _event_text(event)
+            if not _text_contains(content, expectation.text_contains):
                 return fail(f"text {content!r} does not contain {expectation.text_contains!r}")
 
         return None
@@ -1671,6 +1682,20 @@ class EvalSession(BaseObject):
             )
 
         return None
+
+
+def _event_text(event: dict) -> str:
+    """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
+    return event.get("text") or event.get("transcript") or ""
+
+
+def _text_contains(content: str, needle: str) -> bool:
+    """Whether ``needle`` occurs in ``content``, ignoring how either is spaced.
+
+    Aggregated text joins segments with spaces and an STT's pieces may carry
+    their own, so a phrase is matched on collapsed whitespace.
+    """
+    return " ".join(needle.split()) in " ".join(content.split())
 
 
 def _audio_chunks(pcm: bytes, sample_rate: int):
