@@ -93,13 +93,15 @@ class TestErrorClassification(unittest.TestCase):
             ErrorCategory.AUTHENTICATION,
             ErrorCategory.AUTHORIZATION,
             ErrorCategory.INVALID_REQUEST,
+            # exhausted credit gives the same 402 on every retry; only a
+            # topped-up account clears it (429 is the transient sibling)
+            ErrorCategory.QUOTA,
         ):
             self.assertTrue(category.is_permanent)
 
         for category in (
             ErrorCategory.UNKNOWN,
             ErrorCategory.RATE_LIMIT,
-            ErrorCategory.QUOTA,
             ErrorCategory.CONNECTIVITY,
             ErrorCategory.SERVER,
         ):
@@ -155,6 +157,32 @@ class TestProcessorUsable(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(up[0].category, ErrorCategory.AUTHENTICATION)
         self.assertFalse(service.is_usable)
+
+    async def test_exhausted_credit_makes_the_service_unusable(self):
+        service = ReportingService(exception=websocket_rejection(402))
+
+        _, up = await run_test(
+            service,
+            frames_to_send=[TextFrame("hello")],
+            expected_down_frames=[],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].category, ErrorCategory.QUOTA)
+        self.assertFalse(service.is_usable)
+
+    async def test_rate_limits_leave_the_service_usable(self):
+        service = ReportingService(exception=websocket_rejection(429))
+
+        _, up = await run_test(
+            service,
+            frames_to_send=[TextFrame("hello")],
+            expected_down_frames=[],
+            expected_up_frames=[ErrorFrame],
+        )
+
+        self.assertEqual(up[0].category, ErrorCategory.RATE_LIMIT)
+        self.assertTrue(service.is_usable)
 
     async def test_server_errors_leave_the_service_usable(self):
         service = ReportingService(exception=websocket_rejection(503))

@@ -32,7 +32,8 @@ class ErrorCategory(Enum):
         INVALID_REQUEST: The request itself is malformed or names something that
             doesn't exist, such as an unknown model or voice.
         RATE_LIMIT: Too many requests were sent in too short a window.
-        QUOTA: The account's credit or usage allowance is exhausted.
+        QUOTA: The account's credit or usage allowance is exhausted. Unlike
+            RATE_LIMIT, waiting does not clear it.
         CONNECTIVITY: The service could not be reached.
         SERVER: The provider reported an internal failure.
         APPLICATION: Application code failed, not the provider. Reported by a
@@ -55,8 +56,9 @@ class ErrorCategory(Enum):
         """Whether the failure will keep recurring until something changes.
 
         A permanent failure gives the same result every time it is retried:
-        the credentials stay rejected, the request stays malformed. Only new
-        credentials or settings can clear it, so retrying is pointless.
+        the credentials stay rejected, the request stays malformed, the
+        account stays out of credit. Only new credentials, settings, or a
+        topped-up account can clear it, so retrying is pointless.
         """
         return self in _PERMANENT_CATEGORIES
 
@@ -66,6 +68,7 @@ _PERMANENT_CATEGORIES = frozenset(
         ErrorCategory.AUTHENTICATION,
         ErrorCategory.AUTHORIZATION,
         ErrorCategory.INVALID_REQUEST,
+        ErrorCategory.QUOTA,
     }
 )
 
