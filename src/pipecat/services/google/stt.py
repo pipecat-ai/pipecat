@@ -770,8 +770,15 @@ class GoogleSTTService(STTService):
         """Reconnect the stream if it's currently active."""
         if self._streaming_task:
             logger.debug("Reconnecting stream due to configuration changes")
-            await self._disconnect()
-            await self._connect()
+            await self._request_reconnect()
+
+    async def _do_reconnect(self):
+        """Tear down the recognition stream and re-establish it.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        """
+        await self._disconnect()
+        await self._connect()
 
     @deprecated(
         "`GoogleSTTService.set_languages` is deprecated since 0.0.104 and will be removed in "
