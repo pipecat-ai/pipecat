@@ -166,16 +166,18 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             self.get_messages(context), convert_developer_to_user=convert_developer_to_user
         )
 
+        # Detect initial system message for warning purposes (don't extract).
+        # ChatCompletionMessageParam.content is `str | Iterable[...]`; we
+        # only forward it for warning purposes, so coerce non-strings to
+        # None — the resolver handles None.
+        initial_content: str | None = None
+        if messages and messages[0].get("role") == "system":
+            self._warn_context_system_message()
+            raw_content = messages[0].get("content", "")
+            if isinstance(raw_content, str):
+                initial_content = raw_content
+
         if system_instruction:
-            # Detect initial system message for warning purposes (don't extract).
-            # ChatCompletionMessageParam.content is `str | Iterable[...]`; we
-            # only forward it for warning purposes, so coerce non-strings to
-            # None — the resolver handles None.
-            initial_content: str | None = None
-            if messages and messages[0].get("role") == "system":
-                raw_content = messages[0].get("content", "")
-                if isinstance(raw_content, str):
-                    initial_content = raw_content
             self._resolve_system_instruction(
                 initial_content,
                 system_instruction,

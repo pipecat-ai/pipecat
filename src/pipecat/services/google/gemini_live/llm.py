@@ -950,7 +950,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     )
                     self._context.add_message(
                         {
-                            "role": "system",
+                            "role": "developer",
                             "content": assert_given(self._system_instruction_from_init),
                         }
                     )
