@@ -67,7 +67,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
-            model="nvidia/nemotron-3-super-120b-a12b",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
