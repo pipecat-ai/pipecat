@@ -21,6 +21,7 @@ from pipecat.observers.base_observer import (
     FrameProcessed,
     FramePushed,
     ProcessorSetUp,
+    StartupWarmup,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -170,6 +171,14 @@ class WorkerObserver(BaseObserver):
         """
         await self._send_to_proxy(data)
 
+    async def on_startup_warmup(self, data: StartupWarmup):
+        """Queue deferred-import warming timing for all managed observers.
+
+        Args:
+            data: The startup warmup event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
         queue = asyncio.Queue()
@@ -204,5 +213,7 @@ class WorkerObserver(BaseObserver):
                 await observer.on_process_frame(data)
             elif isinstance(data, ProcessorSetUp):
                 await observer.on_processor_setup(data)
+            elif isinstance(data, StartupWarmup):
+                await observer.on_startup_warmup(data)
 
             queue.task_done()

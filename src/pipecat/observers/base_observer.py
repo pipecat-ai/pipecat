@@ -87,6 +87,24 @@ class ProcessorSetUp:
     finished_at_ns: int
 
 
+@dataclass
+class StartupWarmup:
+    """Event data for the framework having warmed its deferred imports.
+
+    Warming runs alongside processor setup and the pipeline waits for it before
+    starting, so it accounts for startup time that belongs to no processor. The
+    times come from :func:`time.monotonic_ns`, since the pipeline clock only
+    starts once the pipeline does.
+
+    Parameters:
+        started_at_ns: When warming began.
+        finished_at_ns: When warming finished.
+    """
+
+    started_at_ns: int
+    finished_at_ns: int
+
+
 class BaseObserver(BaseObject):
     """Base class for pipeline frame observers.
 
@@ -130,6 +148,17 @@ class BaseObserver(BaseObject):
 
         Args:
             data: The event data containing details about the processor setup.
+        """
+        pass
+
+    async def on_startup_warmup(self, data: StartupWarmup):
+        """Handle the event when the framework has warmed its deferred imports.
+
+        Warming overlaps the processors being set up, so what it costs a
+        pipeline is the part of it that outlasts them.
+
+        Args:
+            data: The event data containing details about the warming.
         """
         pass
 
