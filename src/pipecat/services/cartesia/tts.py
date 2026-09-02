@@ -115,6 +115,7 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.MS: "ms",
         Language.NL: "nl",
         Language.NO: "no",
+        Language.OR: "or",
         Language.PA: "pa",
         Language.PL: "pl",
         Language.PT: "pt",
@@ -128,6 +129,7 @@ def language_to_cartesia_language(language: Language) -> str:
         Language.TL: "tl",
         Language.TR: "tr",
         Language.UK: "uk",
+        Language.UR: "ur",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
