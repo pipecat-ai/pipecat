@@ -1,2 +1,0 @@
-- Added a `reduce_silence` setting to `SonioxTTSService`, which shortens the
-  pauses between words on models that support silence reduction.
