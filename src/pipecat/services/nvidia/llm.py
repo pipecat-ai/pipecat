@@ -160,6 +160,7 @@ class NvidiaLLMService(OpenAILLMService):
             return text
 
         self._think_tag_buffer += text
+
         if self._think_tag_state == _ThinkTagState.DETECTING:
             if len(self._think_tag_buffer) < len(_THINK_OPEN):
                 if _THINK_OPEN.startswith(self._think_tag_buffer):
