@@ -1,0 +1,3 @@
+- Fixed the NVIDIA examples `update-settings/llm/llm-nvidia.py` and
+  `voice/voice-nvidia-sagemaker.py`, which requested Llama models that NVIDIA's
+  NIM cloud endpoint no longer serves.
