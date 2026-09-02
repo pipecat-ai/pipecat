@@ -9,7 +9,8 @@
 from loguru import logger
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap
-from pipecat.utils.text.markup_utils import strip_complete_markup
+from pipecat.utils.text.alnum_utils import alnum_only
+from pipecat.utils.text.markup_utils import strip_complete_markup, strip_markup
 
 
 class WordCompletionTracker:
@@ -41,11 +42,12 @@ class WordCompletionTracker:
     class owns one of and defers to for every question of *where*. What the
     tracker adds is the handful of decisions a position alone cannot express:
 
-    - **Providers drop events.** When a word does not match what is left to
-      speak, waiting for it would stall this frame and everything queued behind
-      it. The frame is force-completed instead: the unspoken remainder is emitted
-      so the context still gets it, and the stray word is handed back for the
-      next frame to try.
+    - **Providers drop events.** A word the provider never reported has no event
+      coming, so the next word that does arrive is matched a little further on and
+      the text passed over is emitted with it. When nothing matches at all, waiting
+      would stall this frame and everything queued behind it, so the frame is
+      force-completed instead: the unspoken remainder is emitted so the context
+      still gets it, and the stray word is handed back for the next frame to try.
     - **Some text is never spoken.** A closing ``</card>``, or a tag sitting
       between the last word and its punctuation, never arrives as its own event.
       Whatever is left once everything speakable is done belongs to this frame,
@@ -153,17 +155,29 @@ class WordCompletionTracker:
             return self._force_complete(word)
 
         llm_pos_before = self._llm_pos
+        raw_pos_before = self._segment_map.raw_pos
         self._segment_map.advance_word(word)
 
-        # Neither end of the token is necessarily this frame's: the head can
-        # repeat punctuation the previous word already carried, and the tail can
-        # run into the next frame. The map measures both; keep what is between.
-        # Without an llm_text there is no recorded span that could already have
-        # carried the mark, so it is new text on this frame.
-        head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
         overflow = self._segment_map.last_overflow
-        tail = len(word) - len(overflow) if overflow else len(word)
-        self._frame_word = word[head:tail]
+        spoken = self._tts_text[raw_pos_before : self._segment_map.raw_pos]
+
+        # If the spoken text is longer than the word reported by the provider, the
+        # provider skipped some text. Markup does not count because providers don't
+        # report tags, and we compare only letters and digits so differences in case,
+        # accents, punctuation, or spacing don't affect the check.
+        covers_skipped_text = len(alnum_only(strip_markup(spoken))) > len(alnum_only(word))
+
+        if covers_skipped_text:
+            # The skipped text will never be reported by the provider, so include it
+            # in this frame together with the word that brings the tracker back in sync.
+            self._frame_word = spoken
+        else:
+            # Keep only the part of the word that belongs to this frame.
+            # The beginning may overlap with text already emitted by the previous
+            # frame, while the end may overlap with the next frame.
+            head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
+            tail = len(word) - len(overflow) if overflow else len(word)
+            self._frame_word = word[head:tail]
         self._overflow_word = overflow
 
         self._user_facing_pos = self._segment_map.user_facing_pos
@@ -265,8 +279,10 @@ class WordCompletionTracker:
 
         Usually the whole word. A word straddling the boundary gives up its tail
         (``"1111"`` out of ``"1111And"``), and a word that repeats the previous
-        word's punctuation gives up that mark. After a force-complete this is the
-        frame's unspoken remainder instead, so nothing is missing from the turn.
+        word's punctuation gives up that mark. A word matched past an event the
+        provider never sent brings along the text it passed over, and after a
+        force-complete this is the frame's unspoken remainder instead -- either
+        way, nothing is missing from the turn.
         """
         return self._frame_word.strip() if self._frame_word else self._frame_word
 

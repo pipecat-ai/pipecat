@@ -186,6 +186,12 @@ class TextSegmentMap:
     changed case or diacritics, a fragment of a half-open SSML tag) without the
     caller knowing anything about it; :meth:`_classify_hop` holds that logic.
 
+    A word need not sit at the cursor to be placed. When the provider garbles or
+    drops an event, the next good word still matches a few words on, and the text
+    stepped over -- which no event will ever name -- is consumed with it. So the
+    two questions above stay simple: a token either has a home somewhere in what is
+    left to speak, or it belongs to another utterance entirely.
+
     Example::
 
         # "$42.50" was sent to the TTS as "forty two dollars and fifty cents"
@@ -201,6 +207,9 @@ class TextSegmentMap:
         assert smap.last_completed_segment.original == "$42.50"
         assert not smap.in_transformed_segment
     """
+
+    LOOKAHEAD_WORDS = 3
+    """How many words a word may be placed past -- see :meth:`_lookahead_hop`."""
 
     def __init__(
         self,
@@ -488,16 +497,63 @@ class TextSegmentMap:
         return None
 
     @staticmethod
+    def _lookahead_hop(segment_remaining: str, remaining_word: str) -> "_Hop | None":
+        """Look for *remaining_word* a few words further into this segment.
+
+        Reached only once the three strategies above have all declined, which means
+        the provider garbled or dropped an event and the text at the cursor will
+        never be reported on its own. Matching a word a little further on puts the
+        segment back in step, and the text stepped over is consumed with the word
+        that found it rather than being lost.
+
+        Two limits keep a coincidence from being read as a recovery. Only whole
+        words anchor the match, so a partial prefix is not enough, and only the next
+        :attr:`LOOKAHEAD_WORDS` of them are tried, so a word repeated later in a
+        long segment cannot swallow everything before it.
+
+        Word separators are what those anchors are found by, so a script written
+        without them -- Japanese, Chinese -- offers a single word start for the
+        whole run and never matches here; frames in one recover through
+        force-complete instead. Spaced scripts, Korean among them, recover normally.
+
+        :meth:`_folded_hop` alone does the matching, since it already demands the
+        whole word this needs and folding only ever widens what matches -- the fold
+        is one character for one, so anything matching literally matches folded
+        too.
+
+        A segment holding markup is left alone: tag names are made of letters, so a
+        word start inside one would read as something spoken. That also keeps the
+        match from anchoring inside a rewritten span whose words carry tags.
+        """
+        if "<" in segment_remaining:
+            return None
+
+        word_starts = [
+            i
+            for i, ch in enumerate(segment_remaining)
+            if ch.isalnum() and (i == 0 or not segment_remaining[i - 1].isalnum())
+        ]
+        # The first word start is where the strategies above already looked.
+        for offset in word_starts[1 : 1 + TextSegmentMap.LOOKAHEAD_WORDS]:
+            candidates = [(segment_remaining[offset:], offset)]
+            hop = TextSegmentMap._folded_hop(candidates, remaining_word)
+            if hop is not None and hop.kind is _HopKind.PLACED:
+                return hop
+        return None
+
+    @staticmethod
     def _classify_hop(segment_remaining: str, remaining_word: str) -> _Hop:
         """Decide what *remaining_word* does to the text left in this segment.
 
         Everything here is plain string comparison. No tag names are understood,
         and nothing is remembered between calls.
 
-        Three ways of matching are tried, each more forgiving than the one
-        before: :meth:`_literal_hop`, then :meth:`_folded_hop`, then
-        :meth:`_markup_hop`. Any of them can report that the word fits here
-        (``PLACED``) or that it runs past the end of the segment (``CROSSES``).
+        Four ways of matching are tried, each more forgiving than the one before:
+        :meth:`_literal_hop`, then :meth:`_folded_hop`, then :meth:`_markup_hop`.
+        Any of them can report that the word fits here (``PLACED``) or that it runs
+        past the end of the segment (``CROSSES``). Last comes
+        :meth:`_lookahead_hop`, which places the word a few words further in,
+        stepping over text a garbled or dropped event left unaccounted for.
 
         If none of them match, the answer depends on what is left in the segment:
 
@@ -517,6 +573,8 @@ class TextSegmentMap:
             hop = TextSegmentMap._folded_hop(candidates, remaining_word)
         if hop is None:
             hop = TextSegmentMap._markup_hop(segment_remaining, remaining_word)
+        if hop is None:
+            hop = TextSegmentMap._lookahead_hop(segment_remaining, remaining_word)
         if hop is not None:
             return hop
 
