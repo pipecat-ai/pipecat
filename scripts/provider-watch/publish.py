@@ -24,8 +24,8 @@ For each report whose ``prs`` list has an entry in ``state: branch``:
    and the body's branch/review line to the URL.
 
 A sweep over the open provider-watch PRs then renames every ``+slug``
-changelog fragment to its PR's number — the PRs this pass opened and any
-that a killed run left misnamed alike.
+changelog fragment to its PR's number — the PRs this pass opened, plus any
+left misnamed from a previous killed run.
 
 Then commit and push ``_reports``. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
@@ -213,7 +213,7 @@ def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url:
         sh.run("git", "worktree", "remove", "--force", workdir, cwd=repo_root, check=False)
 
 
-def heal_fragment_names(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
+def rename_open_pr_fragments(sh: Shell, repo_root: Path, pipecat_repo: str) -> list[str]:
     """Rename the ``+slug`` fragments on every open provider-watch PR to its number.
 
     This sweep is the only place fragments are named: freshly opened PRs still
@@ -473,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         reports_repo=args.reports_repo,
         date=args.date,
     )
-    outcome.skipped += heal_fragment_names(sh, args.repo_root, args.pipecat_repo)
+    outcome.skipped += rename_open_pr_fragments(sh, args.repo_root, args.pipecat_repo)
     if args.finalize:
         digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)

@@ -531,7 +531,7 @@ class TestPublish:
             fragments={"FETCH_HEAD": frags},
         )
         sh.pr_files = {"101": frags}
-        assert publish.heal_fragment_names(sh, tmp_path, "pipecat-ai/pipecat") == []
+        assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
         moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
         assert moves == [
             ("git", "mv", "changelog/+cartesia-locale.added.md", "changelog/101.added.md"),
@@ -544,7 +544,7 @@ class TestPublish:
             c[:4] for c in sh.calls if c[:2] == ("git", "push")
         ]
 
-    def test_heals_fragments_on_open_prs(self, tmp_path):
+    def test_sweep_leaves_correct_and_non_bot_prs_alone(self, tmp_path):
         import publish
 
         sh = self.FakeShell(
@@ -571,7 +571,7 @@ class TestPublish:
             "5528": ["changelog/+deepseek-thinking.added.md", "src/x.py"],
             "5529": ["changelog/5529.added.md"],
         }
-        skipped = publish.heal_fragment_names(sh, tmp_path, "pipecat-ai/pipecat")
+        skipped = publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat")
         assert skipped == []
         assert (
             "git",
