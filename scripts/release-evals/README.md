@@ -183,6 +183,10 @@ Two things worth knowing when authoring:
   the user's turns are synthesized (exercising the bot's STT for real) and the
   judge evaluates a local transcription of the bot's actual audio; text mode
   sends/judges text directly and is faster and silent.
+- **Recordings.** In audio mode a turn can play a file instead of being
+  synthesized: `audio: ../assets/<clip>.wav` streams that recording to the bot
+  at its own sample rate, and `user:` gives what it says (the judge and
+  `text_contains` read that). Recordings live in `assets/` next to the scenarios.
 - **Greet first.** A bot that greets on connect (most do) needs that greeting to
   finish before the first user turn — otherwise the question barges into it. So
   user-first scenarios lead with a bot-first turn that expects the greeting.

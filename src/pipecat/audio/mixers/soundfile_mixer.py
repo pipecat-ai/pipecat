@@ -16,19 +16,11 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+import soundfile as sf
 from loguru import logger
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.frames.frames import MixerControlFrame, MixerEnableFrame, MixerUpdateSettingsFrame
-
-try:
-    import soundfile as sf
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        'In order to use the soundfile mixer, you need to `uv add "pipecat-ai[soundfile]"`.'
-    )
-    raise ImportError(f"Missing module: {e}") from e
 
 
 class SoundfileMixer(BaseAudioMixer):

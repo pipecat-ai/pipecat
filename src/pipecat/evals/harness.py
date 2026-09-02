@@ -56,7 +56,11 @@ on that.") or the on-connect greeting is rolled past rather than mistaken for
 the turn's answer. Responses that began before the turn's input are skipped, so
 an interrupted prior turn doesn't bleed in. The judge returns yes / no /
 continue; ``text_contains`` treats a missing substring as continue. The
-``within_ms`` budget bounds the wait.
+``within_ms`` budget bounds the wait. A ``user_transcription`` with
+``text_contains`` aggregates the same way: an STT may finalize one utterance in
+several pieces, and the check runs on the pieces accumulated so far. Substring
+checks ignore differences in whitespace, so pieces that carry their own spacing
+still match a phrase.
 
 Example::
 
@@ -89,6 +93,7 @@ from loguru import logger
 from websockets.asyncio.client import ClientConnection
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.evals.audio import load_user_audio
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.scenario import (
     FUNCTION_CALL_EVENTS,
@@ -448,7 +453,7 @@ class EvalSession(BaseObject):
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
             speech: Override the user-audio generator (default: built from
-                ``scenario.user_audio`` in audio mode).
+                ``scenario.user_speech`` in audio mode).
             transcriber: Override the bot-audio transcriber (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
 
@@ -460,10 +465,10 @@ class EvalSession(BaseObject):
             with logger.contextualize(eval_pipeline="judge"):
                 judge = EvalJudge.from_config(scenario.judge)
 
-        if speech is None and scenario.user_audio is not None:
+        if speech is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
                 speech = EvalSpeech.from_config(
-                    scenario.user_audio, cache_dir=cache_dir, use_cache=use_cache
+                    scenario.user_speech, cache_dir=cache_dir, use_cache=use_cache
                 )
 
         wants_response = any(exp.event == "response" for turn in turns for exp in turn.expect)
@@ -681,7 +686,8 @@ class EvalSession(BaseObject):
         transport must read it at connect time because frames are ordered and a
         later message can't precede an on-connect greeting (see
         :mod:`pipecat.evals.transport`). ``user_audio`` turns on the transport's
-        virtual mic for audio-mode scenarios; without it the transport plays no
+        virtual mic whenever the harness sends audio, whether synthesized or
+        played from a turn's ``audio:`` file; without it the transport plays no
         mic at all, so a text-mode scenario never feeds silence into the bot's
         STT. ``capture_bot_audio`` makes the bot forward its synthesized audio for
         ``tts_response`` transcription. ``record`` asks the eval transport to
@@ -694,7 +700,7 @@ class EvalSession(BaseObject):
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
-        if self._speech is not None:
+        if self._speech is not None or any(t.audio for t in self._scenario.turns):
             flags.append("user_audio=true")
         if self._wants_response:
             flags.append("capture_bot_audio=true")
@@ -1037,7 +1043,7 @@ class EvalSession(BaseObject):
             args = event.get("args") or {}
             sig = ", ".join(f"{k}={v}" for k, v in args.items())
             return f"{event.get('name') or '?'}({sig})"
-        return event.get("text") or event.get("transcript") or ""
+        return _event_text(event)
 
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
@@ -1062,9 +1068,10 @@ class EvalSession(BaseObject):
     async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: optionally honor send_after, send user input, match expectations.
 
-        The user turn is sent as ``send-text`` (text mode) or, when the scenario
-        provides a ``user_audio`` block, as chunked ``raw-audio`` messages that
-        the bot's STT transcribes for real.
+        The user turn is sent as ``send-text`` (text mode) or, in audio mode, as
+        chunked ``raw-audio`` messages that the bot's STT transcribes for real --
+        the turn's ``audio:`` recording when it names one, otherwise its text
+        synthesized by the user TTS.
         """
         failures: list[EvalAssertionFailure] = []
         # The turn's function calls match by name in any order; start each turn
@@ -1114,8 +1121,11 @@ class EvalSession(BaseObject):
             self._drop_pending_bot_output("before send")
 
         if turn.user is not None:
-            self._debug(f"send: {turn.user!r} ({'audio' if self._speech is not None else 'text'})")
-            if self._speech is not None:
+            how = turn.audio or ("audio" if self._speech is not None else "text")
+            self._debug(f"send: {turn.user!r} ({how})")
+            if turn.audio is not None:
+                await self._send_audio_file(turn.audio)
+            elif self._speech is not None:
                 await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
@@ -1239,6 +1249,16 @@ class EvalSession(BaseObject):
         for chunk in _audio_chunks(pcm, sample_rate):
             await self._send_raw_audio(chunk, sample_rate)
 
+    async def _send_audio_file(self, path: str) -> None:
+        """Play a turn's ``audio:`` recording to the bot in place of synthesizing it.
+
+        The file's own sample rate travels with the audio, so a recording does
+        not have to match the bot's input rate.
+        """
+        pcm, sample_rate = await load_user_audio(path)
+        for chunk in _audio_chunks(pcm, sample_rate):
+            await self._send_raw_audio(chunk, sample_rate)
+
     async def _send_raw_audio(self, chunk: bytes, sample_rate: int) -> None:
         """Send one PCM chunk to the bot as an RTVI ``raw-audio`` message."""
         message = RTVI.Message(
@@ -1309,7 +1329,9 @@ class EvalSession(BaseObject):
         carrying a content check (``text_contains`` / ``eval:``) instead
         *aggregates*: it accumulates the text of successive response segments and
         re-checks on each new segment until the check passes, the judge
-        affirmatively rejects, or the ``within_ms`` budget expires.
+        affirmatively rejects, or the ``within_ms`` budget expires. A
+        ``user_transcription`` with ``text_contains`` aggregates the same way,
+        since an STT may finalize one utterance in several pieces.
 
         Output that predates this turn (the greeting, or a turn that was
         interrupted) isn't specially filtered: in audio mode the reader already
@@ -1328,8 +1350,13 @@ class EvalSession(BaseObject):
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
 
-        aggregates = expectation.event in ("response", "llm_response", "tts_response") and (
-            expectation.text_contains is not None or expectation.eval is not None
+        aggregates = (
+            expectation.event in ("response", "llm_response", "tts_response")
+            and (expectation.text_contains is not None or expectation.eval is not None)
+        ) or (
+            expectation.event == "user_transcription"
+            and expectation.text_contains is not None
+            and expectation.eval is None
         )
         if not aggregates:
             if expectation.event in FUNCTION_CALL_EVENTS:
@@ -1381,7 +1408,7 @@ class EvalSession(BaseObject):
                 )
 
             seen_any = True
-            delta = event.get("text", "")
+            delta = _event_text(event)
             aggregate += delta
             # Feed each segment to the judge as its own assistant message, so it
             # judges the bot's reply in the conversation's context (the cumulative
@@ -1566,7 +1593,9 @@ class EvalSession(BaseObject):
         is monotonic, so a missing substring is ``"continue"`` (more text may
         arrive); only the judge can affirmatively ``"fail"``.
         """
-        if expectation.text_contains is not None and expectation.text_contains not in aggregate:
+        if expectation.text_contains is not None and not _text_contains(
+            aggregate, expectation.text_contains
+        ):
             return ("continue", f"does not contain {expectation.text_contains!r}")
 
         if expectation.eval is not None:
@@ -1605,10 +1634,8 @@ class EvalSession(BaseObject):
             )
 
         if expectation.text_contains is not None:
-            # Resolve the event's text content: llm_response carries "text",
-            # user_transcription carries "transcript".
-            content = event.get("text") or event.get("transcript") or ""
-            if expectation.text_contains not in content:
+            content = _event_text(event)
+            if not _text_contains(content, expectation.text_contains):
                 return fail(f"text {content!r} does not contain {expectation.text_contains!r}")
 
         return None
@@ -1655,6 +1682,20 @@ class EvalSession(BaseObject):
             )
 
         return None
+
+
+def _event_text(event: dict) -> str:
+    """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
+    return event.get("text") or event.get("transcript") or ""
+
+
+def _text_contains(content: str, needle: str) -> bool:
+    """Whether ``needle`` occurs in ``content``, ignoring how either is spaced.
+
+    Aggregated text joins segments with spaces and an STT's pieces may carry
+    their own, so a phrase is matched on collapsed whitespace.
+    """
+    return " ".join(needle.split()) in " ".join(content.split())
 
 
 def _audio_chunks(pcm: bytes, sample_rate: int):
