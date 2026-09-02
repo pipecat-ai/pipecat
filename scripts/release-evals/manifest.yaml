@@ -45,6 +45,7 @@ suite:
   - bot: voice/voice-cartesia.py
     scenarios:
       - capital_question
+      - capital_question_recording
       - multi_turn
       - interruption_audio
       - interruption_text

@@ -115,6 +115,20 @@ transport serves it. ``send_after`` with only ``delay_ms`` (no ``event``) is a
 pure time delay relative to the previous send — handy for pacing keypresses
 across ``dtmf`` turns to exercise the aggregator's idle-timeout flush.
 
+In audio modality a turn may name a recording with ``audio:`` (a path, relative
+to the scenario file) that is played to the bot in place of synthesizing its
+``user`` text: a real caller's voice, or a clip that reproduces a bug. The file
+is sent at its own sample rate, so it need not match the bot's input rate, and
+``user`` still gives what the recording says, since that is what the judge and
+``text_contains`` see as the turn's input::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        audio: ../assets/capital_question.wav
+        expect:
+          - event: response
+            eval: "the response says the capital of Germany is Berlin"
+
 ``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
 Top-level optional fields:
@@ -141,14 +155,15 @@ Top-level optional fields:
 
         user:
           modality: audio          # audio | text (default text)
-          speech:                  # required when modality is audio
+          speech:                  # needed unless every spoken turn has audio:
             service: kokoro        # local TTS that synthesizes the user turns
             voice: af_heart        # voices are language-specific
             language: en           # optional; must match the voice
             sample_rate: 16000     # optional
 
     ``audio`` streams synthesized user audio to the bot (exercising its STT for
-    real); ``text`` (the default) sends RTVI ``send-text``.
+    real); ``text`` (the default) sends RTVI ``send-text``. A scenario whose
+    spoken turns all name an ``audio:`` recording needs no ``speech:`` block.
 
 ``judge:``
     what the judge evaluates, and with which LLM::
