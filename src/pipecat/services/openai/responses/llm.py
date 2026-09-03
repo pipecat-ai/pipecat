@@ -1061,6 +1061,7 @@ class OpenAIResponsesLLMService(
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
+        stream_errored = False
 
         deadline = time.monotonic() + output_timeout_secs if output_timeout_secs else None
 
@@ -1179,6 +1180,7 @@ class OpenAIResponsesLLMService(
                 error_info = status_details.get("error") or {}
                 error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
                 await self.push_error(error_msg=f"LLM response error: {error_msg}")
+                stream_errored = True
                 break
 
             elif event_type == "error":
@@ -1192,7 +1194,19 @@ class OpenAIResponsesLLMService(
                     raise _ConnectionLimitReachedError(message)
                 else:
                     await self.push_error(error_msg=f"WebSocket API error: {message}")
+                    stream_errored = True
                     break
+
+        # A response that ended in a terminal error may have announced a function
+        # call whose arguments never finished streaming. Those are dropped rather
+        # than run with fabricated empty arguments. `arguments` is only written
+        # by the Done events, so a non-empty string means the call completed
+        # (e.g. parallel tool calls finished before a later item was truncated)
+        # and it still runs.
+        if stream_errored:
+            function_calls = {
+                item_id: call for item_id, call in function_calls.items() if call["arguments"]
+            }
 
         # Process any function calls
         if function_calls:
