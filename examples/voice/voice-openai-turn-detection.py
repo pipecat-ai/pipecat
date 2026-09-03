@@ -82,7 +82,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         turn_detection={"type": "server_vad"},  # Use OpenAI's server-side VAD
         settings=OpenAIRealtimeSTTService.Settings(
             # gpt-realtime-whisper (the default) rejects turn detection.
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
         ),
     )
 
