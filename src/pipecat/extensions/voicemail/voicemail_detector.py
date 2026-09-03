@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    WorkerFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
@@ -102,7 +103,7 @@ class NotifierGate(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(
             frame,
-            (SystemFrame, EndFrame, StopFrame),
+            (SystemFrame, WorkerFrame, EndFrame, StopFrame),
         ):
             await self.push_frame(frame, direction)
 
@@ -178,7 +179,7 @@ class ClassifierGate(NotifierGate):
             # to push.
             if not self._conversation_detected:
                 await self.push_frame(frame, direction)
-        elif isinstance(frame, (SystemFrame, EndFrame, StopFrame)):
+        elif isinstance(frame, (SystemFrame, WorkerFrame, EndFrame, StopFrame)):
             # Always allow system frames through
             # This includes the UserStartedSpeakingFrame and UserStoppedSpeakingFrame
             # which are used to detect voicemail timing.
