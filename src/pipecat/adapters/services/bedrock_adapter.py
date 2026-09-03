@@ -397,6 +397,17 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     mime_type = f_data["mime_type"]
                     file_data_url = f_data["file_data"]
                     raw_bytes = base64.b64decode(file_data_url.split(",")[1])
+                    image_format = _MIME_TO_BEDROCK_IMAGE_FORMAT.get(mime_type)
+                    if image_format is not None:
+                        new_content.append(
+                            {
+                                "image": {
+                                    "format": image_format,
+                                    "source": {"bytes": raw_bytes},
+                                }
+                            }
+                        )
+                        continue
                     video_format = _bedrock_video_format(mime_type, f_data["filename"])
                     if video_format is not None:
                         new_content.append(

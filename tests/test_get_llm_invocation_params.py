@@ -70,6 +70,7 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import base64
 import subprocess
 import sys
 import unittest
@@ -1819,6 +1820,34 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
 
         document = params["messages"][0]["content"][0]["document"]
         self.assertEqual(document["name"], "notes pdf")
+
+    def test_file_base64_image_mime_type_converted_to_image_block(self):
+        """An image sent as file_base64 becomes a Bedrock image block, not a document.
+
+        Bedrock's Converse API distinguishes image blocks from document
+        blocks, so a base64 image shouldn't be rejected as an unsupported
+        file just because it arrived via the generic file path.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:image/png;base64,aGVsbG8=",
+                        "filename": "photo.png",
+                        "mime_type": "image/png",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        image = params["messages"][0]["content"][0]["image"]
+        self.assertEqual(image["format"], "png")
+        self.assertEqual(image["source"]["bytes"], base64.b64decode("aGVsbG8="))
 
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
