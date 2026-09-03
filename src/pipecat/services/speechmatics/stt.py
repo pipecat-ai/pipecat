@@ -396,7 +396,7 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
 
         # Deprecation check (mutates params in-place for legacy kwargs migration)
         _params = params or SpeechmaticsSTTService.InputParams()
-        self._check_deprecated_args(kwargs, _params)
+        _legacy_kwargs = self._check_deprecated_args(kwargs, _params)
 
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
@@ -425,34 +425,36 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         # --- 3. Deprecated params overrides ---
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
-            if not settings:
-                default_settings.language = _params.language
-                default_settings.domain = _params.domain
-                default_settings.turn_detection_mode = _params.turn_detection_mode
-                # Output formatting default — prefix the speaker when diarizing.
-                speaker_active_format = _params.speaker_active_format
-                if speaker_active_format is None:
-                    speaker_active_format = (
-                        "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
-                    )
-                default_settings.speaker_active_format = speaker_active_format
-                default_settings.known_speakers = _params.known_speakers
-                default_settings.additional_vocab = _params.additional_vocab
-                encoding = _params.audio_encoding
-                default_settings.model = _params.model
-                default_settings.operating_point = _params.operating_point
-                default_settings.max_delay = _params.max_delay
-                default_settings.end_of_utterance_silence_trigger = (
-                    _params.end_of_utterance_silence_trigger
+        # Apply the migrated params whenever the legacy path was used — either an
+        # explicit `params=` or deprecated kwargs migrated into `_params`.
+        if (params is not None or _legacy_kwargs) and not settings:
+            default_settings.language = _params.language
+            default_settings.domain = _params.domain
+            default_settings.turn_detection_mode = _params.turn_detection_mode
+            # Output formatting default — prefix the speaker when diarizing.
+            speaker_active_format = _params.speaker_active_format
+            if speaker_active_format is None:
+                speaker_active_format = (
+                    "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
                 )
-                default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
-                default_settings.punctuation_overrides = _params.punctuation_overrides
-                default_settings.include_partials = _params.include_partials
-                default_settings.enable_diarization = _params.enable_diarization
-                default_settings.speaker_sensitivity = _params.speaker_sensitivity
-                default_settings.max_speakers = _params.max_speakers
-                default_settings.prefer_current_speaker = _params.prefer_current_speaker
-                default_settings.extra_params = _params.extra_params
+            default_settings.speaker_active_format = speaker_active_format
+            default_settings.known_speakers = _params.known_speakers
+            default_settings.additional_vocab = _params.additional_vocab
+            encoding = _params.audio_encoding
+            default_settings.model = _params.model
+            default_settings.operating_point = _params.operating_point
+            default_settings.max_delay = _params.max_delay
+            default_settings.end_of_utterance_silence_trigger = (
+                _params.end_of_utterance_silence_trigger
+            )
+            default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
+            default_settings.punctuation_overrides = _params.punctuation_overrides
+            default_settings.include_partials = _params.include_partials
+            default_settings.enable_diarization = _params.enable_diarization
+            default_settings.speaker_sensitivity = _params.speaker_sensitivity
+            default_settings.max_speakers = _params.max_speakers
+            default_settings.prefer_current_speaker = _params.prefer_current_speaker
+            default_settings.extra_params = _params.extra_params
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
@@ -1046,16 +1048,21 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         # Return the locale code
         return result
 
-    def _check_deprecated_args(self, kwargs: dict, params: InputParams) -> None:
+    def _check_deprecated_args(self, kwargs: dict, params: InputParams) -> bool:
         """Check arguments for deprecation and update params if necessary.
 
         This function will show deprecation warnings for deprecated arguments and
         migrate them to the new location in the params object. If the new location
-        is None, the argument is not used.
+        is None, the argument is not used. Recognized deprecated arguments are
+        popped from ``kwargs`` so they are not forwarded to the parent constructor.
 
         Args:
             kwargs: Keyword arguments passed to the constructor.
             params: Input parameters for the service.
+
+        Returns:
+            True if any deprecated argument was present, so the caller knows to
+            apply the migrated ``params`` to its settings.
         """
 
         # Show deprecation warnings
@@ -1090,9 +1097,14 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
             ("end_of_utterance_mode", None),
         ]
 
-        # Show warnings + migrate the arguments
+        # Show warnings + migrate the arguments. Recognized deprecated kwargs are
+        # popped so they are not forwarded to the parent constructor.
+        found = False
         for old, new in deprecated_args:
             if old in kwargs:
+                found = True
+                value = kwargs.pop(old)
                 _deprecation_warning(old, new)
-                if new is not None and kwargs.get(old, None) is not None:
-                    setattr(params, new, kwargs[old])
+                if new is not None and value is not None:
+                    setattr(params, new, value)
+        return found
