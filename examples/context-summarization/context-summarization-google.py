@@ -113,7 +113,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Optional: customize context summarization behavior
             # Using low limits to demonstrate the feature quickly
             auto_context_summarization_config=LLMAutoContextSummarizationConfig(
-                max_context_tokens=1000,  # Trigger summarization at 1000 tokens
+                # Trigger at 1000 summarizable tokens. The system prompt and the
+                # kept recent messages do not count.
+                max_context_tokens=1000,
                 max_unsummarized_messages=10,  # Or when 10 new messages accumulate
                 summary_config=LLMContextSummaryConfig(
                     target_context_tokens=800,  # Target context size for the summarization

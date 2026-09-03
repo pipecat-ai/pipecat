@@ -23,6 +23,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
+    LLMStandardMessage,
 )
 from pipecat.utils.deprecation import deprecated
 
@@ -128,11 +129,16 @@ class LLMAutoContextSummarizationConfig:
     must be set. Set the other to ``None`` to disable that threshold.
 
     Parameters:
-        max_context_tokens: Maximum allowed context size in tokens. When this
-            limit is reached, summarization is triggered to compress the context.
-            The tokens are calculated using the industry-standard approximation
-            of 1 token ≈ 4 characters. Set to ``None`` to disable token-based
-            triggering.
+        max_context_tokens: Maximum allowed size, in tokens, of the summarizable
+            context. When this limit is reached, summarization is triggered to
+            compress the context. Only the messages a summary would actually
+            compress count toward this limit. The initial system message
+            (``messages[0]`` with role ``system``), the last
+            ``min_messages_after_summary`` messages, and unresolved function
+            call sequences are always preserved, so they are excluded from the
+            count. The tokens are calculated using the industry-standard
+            approximation of 1 token ≈ 4 characters. Set to ``None`` to
+            disable token-based triggering.
         max_unsummarized_messages: Maximum number of new messages that can
             accumulate since the last summary before triggering a new
             summarization. This ensures regular compression even if token
@@ -192,7 +198,10 @@ class LLMContextSummarizationConfig:
             )
 
     Parameters:
-        max_context_tokens: Maximum allowed context size in tokens.
+        max_context_tokens: Maximum allowed size, in tokens, of the summarizable
+            context. Only the messages a summary would actually compress count:
+            the initial system message, the last ``min_messages_after_summary``
+            messages, and unresolved function call sequences are excluded.
             Set to ``None`` to disable token-based triggering.
         target_context_tokens: Maximum token size for the generated summary.
         max_unsummarized_messages: Maximum new messages before triggering summarization.
@@ -338,52 +347,124 @@ class LLMContextSummarizationUtil:
             images), tool calls and their arguments, tool results, and
             ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
         """
+        return LLMContextSummarizationUtil.estimate_messages_tokens(context.messages)
+
+    @staticmethod
+    def estimate_messages_tokens(messages: list[LLMContextMessage]) -> int:
+        """Estimate total token count for a list of messages.
+
+        Args:
+            messages: The messages to estimate.
+
+        Returns:
+            The estimated total token count, covering message content (text and
+            images), tool calls and their arguments, tool results, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
+        """
         total = 0
 
-        for message in context.messages:
+        for message in messages:
             # LLMSpecificMessage holds service-specific data (e.g. thinking blocks,
             # thought signatures). Skipping them here for now.
             if isinstance(message, LLMSpecificMessage):
                 continue
 
-            # Role and structure overhead
-            total += TOKEN_OVERHEAD_PER_MESSAGE
-
-            # Message content
-            content = message.get("content", "")
-            if isinstance(content, str):
-                total += LLMContextSummarizationUtil.estimate_tokens(content)
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        item_type = item.get("type", "")
-                        # Text content
-                        if item_type == "text":
-                            total += LLMContextSummarizationUtil.estimate_tokens(
-                                item.get("text", "")
-                            )
-                        # Image content
-                        elif item_type in ("image_url", "image"):
-                            # Images are expensive, rough estimate
-                            total += IMAGE_TOKEN_ESTIMATE
-
-            # Tool calls
-            if "tool_calls" in message:
-                tool_calls = message["tool_calls"]
-                if isinstance(tool_calls, list):
-                    for tool_call in tool_calls:
-                        if isinstance(tool_call, dict):
-                            func = tool_call.get("function", {})
-                            if isinstance(func, dict):
-                                total += LLMContextSummarizationUtil.estimate_tokens(
-                                    func.get("name", "") + func.get("arguments", "")
-                                )
-
-            # Tool call ID
-            if "tool_call_id" in message:
-                total += TOKEN_OVERHEAD_PER_MESSAGE
+            total += LLMContextSummarizationUtil._estimate_message_tokens(message)
 
         return total
+
+    @staticmethod
+    def _estimate_message_tokens(message: LLMStandardMessage) -> int:
+        """Estimate token count for a single standard context message.
+
+        Args:
+            message: The standard context message to estimate.
+
+        Returns:
+            The estimated token count for the message, covering content (text
+            and images), tool calls and their arguments, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead.
+        """
+        # Role and structure overhead
+        total = TOKEN_OVERHEAD_PER_MESSAGE
+
+        # Message content
+        content = message.get("content", "")
+        if isinstance(content, str):
+            total += LLMContextSummarizationUtil.estimate_tokens(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    item_type = item.get("type", "")
+                    # Text content
+                    if item_type == "text":
+                        total += LLMContextSummarizationUtil.estimate_tokens(item.get("text", ""))
+                    # Image content
+                    elif item_type in ("image_url", "image"):
+                        # Images are expensive, rough estimate
+                        total += IMAGE_TOKEN_ESTIMATE
+
+        # Tool calls
+        if "tool_calls" in message:
+            tool_calls = message["tool_calls"]
+            if isinstance(tool_calls, list):
+                for tool_call in tool_calls:
+                    if isinstance(tool_call, dict):
+                        func = tool_call.get("function", {})
+                        if isinstance(func, dict):
+                            total += LLMContextSummarizationUtil.estimate_tokens(
+                                func.get("name", "") + func.get("arguments", "")
+                            )
+
+        # Tool call ID
+        if "tool_call_id" in message:
+            total += TOKEN_OVERHEAD_PER_MESSAGE
+
+        return total
+
+    @staticmethod
+    def get_preserved_system_message(context: LLMContext) -> LLMStandardMessage | None:
+        """Return the system message that summarization always preserves, if any.
+
+        Only ``messages[0]`` with role ``system`` counts as the preserved
+        system preamble. System messages at other positions are
+        mid-conversation injections and are summarized normally.
+
+        Args:
+            context: LLM context to inspect.
+
+        Returns:
+            ``messages[0]`` when it is a system message, otherwise None.
+        """
+        messages = context.messages
+        first_msg = messages[0] if messages else None
+        if (
+            first_msg is None
+            or isinstance(first_msg, LLMSpecificMessage)
+            or first_msg.get("role") != "system"
+        ):
+            return None
+        return first_msg
+
+    @staticmethod
+    def estimate_preserved_system_tokens(context: LLMContext) -> int:
+        """Estimate the token count of the preserved system message, if any.
+
+        Summarization never compresses the preserved system message (see
+        ``get_preserved_system_message()``), so its tokens should not count
+        toward summarization trigger thresholds.
+
+        Args:
+            context: LLM context to inspect.
+
+        Returns:
+            The estimated token count of the preserved system message, or 0
+            when there is none.
+        """
+        first_msg = LLMContextSummarizationUtil.get_preserved_system_message(context)
+        if first_msg is None:
+            return 0
+        return LLMContextSummarizationUtil._estimate_message_tokens(first_msg)
 
     @staticmethod
     def _is_tool_message_pending(content: str) -> bool:
@@ -527,18 +608,10 @@ class LLMContextSummarizationUtil:
         if len(messages) <= min_messages_to_keep:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Check if the first message is a system message (initial system prompt).
-        # Only messages[0] is treated as the system message to preserve — system
-        # messages at other positions are mid-conversation injections and should be
-        # included in the summarization range.
-        first_msg = messages[0] if messages else None
+        # Start summarization after the preserved initial system message if present
         first_is_system = (
-            first_msg is not None
-            and not isinstance(first_msg, LLMSpecificMessage)
-            and first_msg.get("role") == "system"
+            LLMContextSummarizationUtil.get_preserved_system_message(context) is not None
         )
-
-        # Start summarization after the initial system message if present
         summary_start = 1 if first_is_system else 0
 
         # Get messages to keep (last N messages)
