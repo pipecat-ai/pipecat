@@ -12,6 +12,10 @@ during pipeline startup (i.e. setup() and ``StartFrame``). It works by tracking
 (``on_process_frame``) versus when it leaves (``on_push_frame``), giving the
 exact ``start()`` duration for each processor in the pipeline.
 
+Startup also loads the framework's deferred imports, which no processor
+accounts for, so the report carries what that cost alongside the per-processor
+timings and the whole span is attributable.
+
 It also measures transport timing — the time from before ``setup()`` to the
 first ``BotConnectedFrame`` (SFU transports only) and ``ClientConnectedFrame`` —
 via a separate ``on_transport_timing_report`` event.
@@ -24,6 +28,8 @@ Example::
     async def on_report(observer, report):
         for t in report.processor_timings:
             print(f"{t.processor_name}: {t.duration_secs:.3f}s")
+        if report.warmup:
+            print(f"warmup: {report.warmup.blocking_duration_secs:.3f}s")
 
     @observer.event_handler("on_transport_timing_report")
     async def on_transport(observer, report):
@@ -46,6 +52,7 @@ from pipecat.observers.base_observer import (
     FrameProcessed,
     FramePushed,
     ProcessorSetUp,
+    StartupWarmup,
 )
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import PipelineSource
@@ -82,14 +89,34 @@ class ProcessorStartupTiming(BaseModel):
             processor's start() began.
         duration_secs: What the processor cost to get ready, in seconds: its
             setup() and its start() together.
-        setup_duration_secs: How long the processor's setup() took, in seconds,
-            which is the part of ``duration_secs`` spent connecting.
+        setup_duration_secs: How long the processor's setup() took, in seconds.
+            Processors are set up concurrently, so this overlaps every other
+            processor's and only the longest of them holds up the pipeline.
+        start_duration_secs: How long the processor spent on the StartFrame, in
+            seconds. The frame reaches processors one after another, so this
+            adds to what every other processor spent rather than overlapping it.
     """
 
     processor_name: str
     start_offset_secs: float
     duration_secs: float
     setup_duration_secs: float
+    start_duration_secs: float = 0.0
+
+
+class StartupWarmupTiming(BaseModel):
+    """What warming the framework's deferred imports cost startup.
+
+    Parameters:
+        duration_secs: How long warming took, in seconds.
+        blocking_duration_secs: The part of warming the pipeline waited on
+            once every processor had finished setting up, in seconds. Warming
+            runs alongside setup, so a pipeline whose processors take longer to
+            connect than warming takes to load pays nothing for it.
+    """
+
+    duration_secs: float
+    blocking_duration_secs: float
 
 
 class StartupTimingReport(BaseModel):
@@ -98,14 +125,26 @@ class StartupTimingReport(BaseModel):
     Parameters:
         start_time: Unix timestamp when the pipeline began setting up.
         total_duration_secs: Wall-clock time from the pipeline starting to set
-            up until it had started. Processors are set up concurrently, so
-            this is the span rather than the sum of what each cost.
+            up until it had started, which is ``setup_phase_secs`` and
+            ``start_phase_secs`` back to back.
+        setup_phase_secs: How long getting every processor ready took, in
+            seconds. Setting up runs concurrently and warming runs alongside
+            it, so the longest single piece of work decides this rather than
+            their sum.
+        start_phase_secs: How long the StartFrame took to travel the pipeline,
+            in seconds. It reaches processors one after another, so what each
+            spends on it adds up.
         processor_timings: Per-processor timing data, in pipeline order.
+        warmup: What warming the framework's deferred imports cost, or None
+            when the pipeline started without warming them.
     """
 
     start_time: float
     total_duration_secs: float
+    setup_phase_secs: float = 0.0
+    start_phase_secs: float = 0.0
     processor_timings: list[ProcessorStartupTiming] = Field(default_factory=list)
+    warmup: StartupWarmupTiming | None = None
 
 
 class TransportTimingReport(BaseModel):
@@ -207,6 +246,9 @@ class StartupTimingObserver(BaseObserver):
         # connected, and how long each processor's setup() took.
         self._setup_started_ns: int = 0
         self._setup_wall_clock: float = 0.0
+        self._setup_finished_ns: int = 0
+        self._warmup: StartupWarmupTiming | None = None
+        self._warmup_finished_ns: int = 0
         self._setup_durations: dict[int, float] = {}
 
         # Whether we've already emitted the startup timing report.
@@ -240,10 +282,33 @@ class StartupTimingObserver(BaseObserver):
         Args:
             data: The processor setup event data.
         """
-        if self._startup_timing_reported or not self._should_track(data.processor):
+        if self._startup_timing_reported:
+            return
+
+        # Warming overlaps every processor, so the last one to finish is what
+        # decides how much of it the pipeline ended up waiting on. Filtered-out
+        # processors still hold setup open, so they count here.
+        self._setup_finished_ns = max(self._setup_finished_ns, data.finished_at_ns)
+
+        if not self._should_track(data.processor):
             return
 
         self._setup_durations[data.processor.id] = (data.finished_at_ns - data.started_at_ns) / 1e9
+
+    async def on_startup_warmup(self, data: StartupWarmup):
+        """Record what warming the framework's deferred imports cost.
+
+        Args:
+            data: The startup warmup event data.
+        """
+        if self._startup_timing_reported:
+            return
+
+        self._warmup_finished_ns = data.finished_at_ns
+        self._warmup = StartupWarmupTiming(
+            duration_secs=(data.finished_at_ns - data.started_at_ns) / 1e9,
+            blocking_duration_secs=max(0, data.finished_at_ns - self._setup_finished_ns) / 1e9,
+        )
 
     def _should_track(self, processor: FrameProcessor) -> bool:
         """Check if a processor should be tracked for timing.
@@ -340,6 +405,7 @@ class StartupTimingObserver(BaseObserver):
                 # up, and start() is whatever is left to do once it has.
                 duration_secs=setup_duration_secs + duration_secs,
                 setup_duration_secs=setup_duration_secs,
+                start_duration_secs=duration_secs,
             )
         )
 
@@ -377,10 +443,20 @@ class StartupTimingObserver(BaseObserver):
         # up to wall-clock time. Report the span instead.
         total = (time.monotonic_ns() - self._setup_started_ns) / 1e9
 
+        # Getting ready ends with the last of the concurrent work, whether that
+        # is a processor still connecting or the imports still warming. What
+        # follows is the StartFrame travelling the pipeline.
+        setup_phase_end_ns = max(self._setup_finished_ns, self._warmup_finished_ns)
+        setup_phase_secs = max(0, setup_phase_end_ns - self._setup_started_ns) / 1e9
+        setup_phase_secs = min(setup_phase_secs, total)
+
         report = StartupTimingReport(
             start_time=self._setup_wall_clock,
             total_duration_secs=total,
+            setup_phase_secs=setup_phase_secs,
+            start_phase_secs=total - setup_phase_secs,
             processor_timings=self._timings,
+            warmup=self._warmup,
         )
 
         await self._call_event_handler("on_startup_timing_report", report)
