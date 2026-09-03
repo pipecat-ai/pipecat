@@ -7,10 +7,12 @@
 import argparse
 import io
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -135,7 +137,9 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_skips_when_aiortc_is_missing(self):
         """WebRTC routes should be optional when the webrtc extra is not installed."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=False),
@@ -150,7 +154,9 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_registers_routes_when_webrtc_is_available(self):
         """WebRTC routes should be registered when dependencies are available."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
@@ -162,10 +168,52 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("/api/offer", paths)
         self.assertIn("/files/{filename:path}", paths)
 
+    def test_download_file_404s_when_downloads_folder_unconfigured(self):
+        """GET /files/<name> 404s cleanly, rather than 500ing on a stale attribute name."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        client = TestClient(app)
+        response = client.get("/files/report.txt")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_file_serves_file_from_downloads_folder(self):
+        """GET /files/<name> serves the file when a downloads folder is configured."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "report.txt").write_text("hello")
+
+            app = FastAPI()
+            args = argparse.Namespace(
+                downloads_folder=tmpdir, esp32=False, host="localhost", ice_servers=[]
+            )
+
+            with (
+                patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+                patch.dict(sys.modules, _fake_smallwebrtc_modules()),
+            ):
+                _setup_webrtc_routes(app, args, {})
+
+            client = TestClient(app)
+            response = client.get("/files/report.txt")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text, "hello")
+
     def test_setup_webrtc_routes_gives_handler_no_ice_servers_when_unconfigured(self):
         """The bot peer keeps its previous behaviour when nothing is configured."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        args = argparse.Namespace(
+            downloads_folder=None, esp32=False, host="localhost", ice_servers=[]
+        )
         handler_kwargs = []
 
         with (
@@ -180,7 +228,7 @@ class TestRunnerRun(unittest.TestCase):
         """Configured STUN and TURN servers must reach the bot's peer connection."""
         app = FastAPI()
         args = argparse.Namespace(
-            folder=None,
+            downloads_folder=None,
             esp32=False,
             host="localhost",
             ice_servers=[

@@ -988,11 +988,11 @@ def _setup_webrtc_routes(
     @app.get("/files/{filename:path}")
     async def download_file(filename: str):
         """Handle file downloads."""
-        if not args.folder:
+        if not args.downloads_folder:
             logger.warning(f"Attempting to download {filename}, but downloads folder not setup.")
             raise HTTPException(404)
 
-        file_path = _resolve_download_path(args.folder, filename)
+        file_path = _resolve_download_path(args.downloads_folder, filename)
         if not file_path.exists():
             raise HTTPException(404)
 
