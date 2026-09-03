@@ -235,7 +235,7 @@ class SpeechmaticsSTTService(STTService):
             turn_detection_mode: How turns are closed. `TurnDetectionMode.DEFAULT` lets the
                 STT service run its own VAD and close turns itself; `TurnDetectionMode.EXTERNAL`
                 has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD).
-                Defaults to `TurnDetectionMode.EXTERNAL`.
+_                Defaults to `TurnDetectionMode.DEFAULT`.
 
             speaker_active_format: Formatter for the speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -261,7 +261,8 @@ class SpeechmaticsSTTService(STTService):
             audio_encoding: Audio encoding format. Defaults to AudioEncoding.PCM_S16LE.
 
             model: The transcription model (operating point) to use, e.g. `"linden-1"`.
-                Defaults to the SDK's default model. Preferred over `operating_point`.
+                Defaults to `Model.LINDEN_1`, the SDK's default model. Preferred over
+                `operating_point`.
 
             operating_point: Deprecated alias for `model`. If both are given they must name the
                 same value, otherwise a `ValueError` is raised. Optional.
@@ -312,7 +313,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.DEFAULT
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -498,9 +499,9 @@ class SpeechmaticsSTTService(STTService):
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when Speechmatics endpoints server-side.
 
-        Every mode other than the default ``EXTERNAL`` (which uses Pipecat's own
-        endpointing) has Speechmatics detect turns and emit the turn frames, so the
-        user aggregator defers to those. Applied unless the user passed their own
+        Every mode other than ``EXTERNAL`` (which uses Pipecat's own endpointing) has
+        Speechmatics detect turns and emit the turn frames, so the user aggregator
+        defers to those. Applied unless the user passed their own
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
