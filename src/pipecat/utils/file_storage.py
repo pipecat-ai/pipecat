@@ -96,7 +96,7 @@ class LocalFileStorage(FileStorage):
         suffix = uuid.uuid4().hex
         async with aiofiles.open(self._folder / suffix, "wb") as f:
             await f.write(contents)
-        self._trim()
+        await asyncio.to_thread(self._trim)
         return f"{self._ID_PREFIX}{suffix}"
 
     async def load(self, file_id: str) -> bytes:
