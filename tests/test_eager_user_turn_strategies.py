@@ -1,0 +1,299 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import unittest
+
+from pipecat.frames.frames import (
+    EagerEndOfTurnCancelFrame,
+    EagerEndOfTurnTranscriptionFrame,
+    FunctionCallFromLLM,
+    InterruptionFrame,
+    LLMContextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
+)
+from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_stop import NormalizedMatch
+from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+
+
+def aggregator(context: LLMContext, **kwargs) -> LLMUserAggregator:
+    return LLMUserAggregator(
+        context,
+        params=LLMUserAggregatorParams(
+            user_turn_strategies=EagerUserTurnStrategies(**kwargs),
+        ),
+    )
+
+
+def eager(text: str) -> EagerEndOfTurnTranscriptionFrame:
+    return EagerEndOfTurnTranscriptionFrame(text, "user", "2026-09-03T00:00:00Z")
+
+
+def final(text: str) -> TranscriptionFrame:
+    return TranscriptionFrame(text, "user", "2026-09-03T00:00:00Z")
+
+
+class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
+    async def test_eager_end_of_turn_runs_inference_without_touching_the_context(self):
+        context = LLMContext()
+        context.set_messages([{"role": "system", "content": "Be brief."}])
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+            ],
+        )
+
+        # Inference ran against a provisional copy carrying the eager transcript.
+        provisional = next(f for f in down if isinstance(f, LLMContextFrame))
+        assert provisional.speculation_id is not None
+        assert provisional.context is not context
+        assert provisional.context.messages[-1] == {"role": "user", "content": "book a flight"}
+
+        # The real context is untouched: the turn hasn't ended.
+        assert context.messages == [{"role": "system", "content": "Be brief."}]
+
+    async def test_matching_transcript_ends_the_turn_and_keeps_the_response(self):
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+                final("book a flight"),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        stops = [f for f in down if isinstance(f, UserStoppedSpeakingFrame)]
+
+        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        # One inference, the speculative one: the confirmed turn is written to
+        # the context without answering it a second time.
+        assert len(contexts) == 1
+        assert contexts[0].speculation_id is not None
+        # The turn end names the speculation, which is what releases its response.
+        assert [f.speculation_id for f in stops] == [contexts[0].speculation_id]
+        assert context.messages == [{"role": "user", "content": "book a flight"}]
+
+    async def test_differing_transcript_withdraws_the_speculation(self):
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("i want to cancel"),
+                SleepFrame(),
+                final("i want to cancel, actually reschedule it"),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        cancel = next(f for f in down if isinstance(f, EagerEndOfTurnCancelFrame))
+
+        # The speculative inference, then a second one on the committed transcript.
+        assert [c.speculation_id is not None for c in contexts] == [True, False]
+        assert cancel.speculation_id == contexts[0].speculation_id
+        assert contexts[1].context.messages[-1] == {
+            "role": "user",
+            "content": "i want to cancel, actually reschedule it",
+        }
+        # The turn end confirms nothing, so it releases nothing.
+        assert all(
+            f.speculation_id is None for f in down if isinstance(f, UserStoppedSpeakingFrame)
+        )
+
+        # Only the committed transcript reaches the context.
+        assert context.messages == [
+            {"role": "user", "content": "i want to cancel, actually reschedule it"}
+        ]
+
+    async def test_resuming_the_turn_withdraws_the_speculation(self):
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("i think"),
+                SleepFrame(),
+                # The service withdraws its prediction without an id: the
+                # strategy re-emits it identified.
+                EagerEndOfTurnCancelFrame(),
+                SleepFrame(),
+                final("i think i'll book it tomorrow"),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+
+        # The service's unidentified withdrawal is consumed; the strategy
+        # re-emits exactly one carrying the id of what it withdraws.
+        assert [c.speculation_id for c in cancels] == [contexts[0].speculation_id]
+        assert contexts[0].speculation_id is not None
+        assert contexts[1].speculation_id is None
+        assert context.messages == [{"role": "user", "content": "i think i'll book it tomorrow"}]
+
+    async def test_normalized_match_policy_tolerates_formatting(self):
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context, match_policy=NormalizedMatch()),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight to tokyo"),
+                SleepFrame(),
+                # The committed transcript is formatted; the response still holds.
+                final("Book a flight to Tokyo."),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+
+        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        assert len(contexts) == 1
+        # The eager transcript drove the response; the committed one is what the
+        # context records.
+        assert contexts[0].context.messages[-1] == {
+            "role": "user",
+            "content": "book a flight to tokyo",
+        }
+        assert context.messages == [{"role": "user", "content": "Book a flight to Tokyo."}]
+
+    async def test_turn_without_an_eager_prediction_behaves_normally(self):
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                final("hello there"),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+
+        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        assert len(contexts) == 1
+        assert contexts[0].speculation_id is None
+        assert all(
+            f.speculation_id is None for f in down if isinstance(f, UserStoppedSpeakingFrame)
+        )
+        assert context.messages == [{"role": "user", "content": "hello there"}]
+
+    async def test_eager_transcript_is_not_pushed_downstream(self):
+        # It is a TextFrame, so anything downstream that speaks or aggregates
+        # text must never see it.
+        context = LLMContext()
+
+        down, _ = await run_test(
+            Pipeline([aggregator(context)]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+            ],
+        )
+
+        assert not any(isinstance(f, EagerEndOfTurnTranscriptionFrame) for f in down)
+
+
+class SpeculativeToolCallLLM(LLMService):
+    """LLM service that answers every context frame with a tool call."""
+
+    def __init__(self, **kwargs):
+        super().__init__(settings=LLMSettings(model="test-model"), **kwargs)
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            await self.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="book_flight",
+                        tool_call_id="call-1",
+                        arguments={},
+                        context=frame.context,
+                    )
+                ]
+            )
+        else:
+            await self.push_frame(frame, direction)
+
+
+class TestSpeculativeToolCalls(unittest.IsolatedAsyncioTestCase):
+    async def test_speculative_inference_does_not_execute_tools(self):
+        # Tools run inside the service, so a discarded speculation could not
+        # undo them. They must not run until the turn is committed.
+        calls = []
+
+        llm = SpeculativeToolCallLLM()
+        llm.register_function("book_flight", lambda params: calls.append(params))
+
+        context = LLMContext(messages=[{"role": "user", "content": "book a flight"}])
+        speculative = LLMContextFrame(context=context, speculation_id="abc")
+
+        down, up = await run_test(llm, frames_to_send=[speculative, SleepFrame()])
+
+        assert calls == []
+        withdrawals = [f for f in [*down, *up] if isinstance(f, EagerEndOfTurnCancelFrame)]
+        assert [f.speculation_id for f in withdrawals] == ["abc", "abc"]
+
+    async def test_committed_inference_executes_tools(self):
+        calls = []
+
+        llm = SpeculativeToolCallLLM()
+        llm.register_function("book_flight", lambda params: calls.append(params))
+
+        context = LLMContext(messages=[{"role": "user", "content": "book a flight"}])
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[LLMContextFrame(context=context), SleepFrame(sleep=0.5)],
+        )
+
+        assert len(calls) == 1
+        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in [*down, *up])
+
+
+if __name__ == "__main__":
+    unittest.main()
