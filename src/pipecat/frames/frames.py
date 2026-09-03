@@ -201,7 +201,7 @@ class FileRawFrame:
 
     Parameters:
         file: Raw file bytes, base64 data URL, or URL string depending on ``type``.
-        type: Type of the file ('bytes' or 'url'),
+        type: Type of the file ('bytes' or 'url').
         filename: Optional name of the file.
         format: File format (expected in Mime Format).
     """
