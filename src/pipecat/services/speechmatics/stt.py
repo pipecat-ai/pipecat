@@ -1082,7 +1082,7 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
             ("chunk_size", None),
             ("audio_encoding", "audio_encoding"),
             ("end_of_utterance_silence_trigger", "end_of_utterance_silence_trigger"),
-            {"enable_speaker_diarization", "enable_diarization"},
+            ("enable_speaker_diarization", "enable_diarization"),
             ("text_format", "speaker_active_format"),
             ("max_speakers", "max_speakers"),
             ("transcription_config", None),
