@@ -1597,11 +1597,12 @@ class GeminiTTSService(GoogleBaseTTSService):
             config = genai.types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=genai.types.SpeechConfig(
+                    language_code=assert_given(self._settings.language),
                     voice_config=genai.types.VoiceConfig(
                         prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
                             voice_name=assert_given(self._settings.voice)
                         )
-                    )
+                    ),
                 ),
             )
 
