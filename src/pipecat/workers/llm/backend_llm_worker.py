@@ -103,6 +103,8 @@ BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
 def message_text(message: LLMStandardMessage) -> str:
     """Return a context message's text, joining the text parts of list content.
 
+    Text is all the transcript carries today, so non-text parts are left out.
+
     Args:
         message: A standard context message.
 
@@ -132,14 +134,16 @@ def render_backend_request(
     itself said as assistant messages, so it never mistakes the frontend's
     speech for its own.
 
-    Only what a transcript can hold survives: user and assistant text. Tool
-    calls, tool results, images and other non-text content are skipped.
+    Only user and assistant text crosses today: tool calls, tool results,
+    images and other non-text content are skipped, and say so at debug level.
+    Carrying more is a question of how to render it, not something the
+    contract rules out.
 
     Args:
         task: The request the frontend delegated, when it worded one. Without
             it the backend is asked to act on the conversation.
-        conversation: What has been said that the backend hasn't seen yet, as
-            standard context messages.
+        conversation: The conversation the user is having with the frontend,
+            as standard context messages.
         first: Whether this is the backend's first task in the conversation.
 
     Returns:
@@ -188,8 +192,8 @@ class BackendLLMWorker(LLMContextWorker):
     Job contract (``@job(name="run")``, one task at a time):
 
     - request payload: ``{"task": str | None, "conversation": [<standard
-      context message>, ...]}`` — what is being asked, and what has been said
-      that the backend hasn't seen. A frontend whose model words the request
+      context message>, ...]}`` — what is being asked, and the conversation
+      the user is having with the frontend. A frontend whose model words the request
       sends a ``task``; one whose model hands over without wording anything
       sends the conversation alone and lets the backend work out what is being
       asked. Sending both says the most.
@@ -360,11 +364,14 @@ async def run_backend_job(
         task: The request to delegate, when the frontend words one. Omit it
             when the frontend hands over without saying what it wants, and the
             backend will work that out from ``conversation``.
-        conversation: What has been said that the backend hasn't seen yet,
+        conversation: The conversation the user is having with the frontend,
             as standard context messages — a frontend can hand over a slice of
-            its own context unchanged. Worth sending alongside a worded task
-            too: it is what lets the backend read a short reply or a
-            correction. Only user and assistant text survives the flattening.
+            its own context unchanged. Normally just what has been said since
+            the previous delegation, since the backend's own context keeps the
+            rest, though sending more is harmless. Worth sending alongside a
+            worded task too: it is what lets the backend read a short reply or
+            a correction. Only user and assistant text survives the
+            flattening.
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling
