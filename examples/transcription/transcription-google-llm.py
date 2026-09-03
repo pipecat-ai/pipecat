@@ -181,7 +181,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
             )
             new_message_content.append(last_part)
             msg = {"role": "developer", "content": new_message_content}
-            ctx = LLMContext([{"role": "system", "content": transcriber_system_message}, msg])
+            ctx = LLMContext([msg])
 
             await self.push_frame(LLMContextFrame(context=ctx))
         except Exception as e:

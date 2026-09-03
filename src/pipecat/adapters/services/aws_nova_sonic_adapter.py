@@ -146,6 +146,7 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
         # If we have a "system" message as our first message,
         # pull that out into "instruction"
         if ucm and ucm[0].get("role") == "system":
+            self._warn_context_system_message()
             system = ucm.pop(0)
             content = system.get("content")
             if isinstance(content, str):
