@@ -8,6 +8,7 @@
 
 import asyncio
 import base64
+import ipaddress
 from collections.abc import Mapping
 from typing import Any
 
@@ -49,6 +50,7 @@ from pipecat.services.llm_service import (
 )
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.file_storage import FileStorage
+from pipecat.utils.security.ssrf import IPNetwork, classify_url_reachability
 
 
 class RTVIProcessor(FrameProcessor):
@@ -64,6 +66,7 @@ class RTVIProcessor(FrameProcessor):
         *,
         transport: BaseTransport | None = None,
         file_storage: FileStorage | None = None,
+        allowed_file_url_networks: list[str] | None = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -84,11 +87,21 @@ class RTVIProcessor(FrameProcessor):
                 those messages; not needed for inline (``bytes``) or URL file
                 sources. Use ``runner_file_storage()`` when using the development
                 runner, so it shares storage with the ``POST /files`` upload route.
-
+            allowed_file_url_networks: CIDR ranges (e.g. ``["10.0.0.0/8"]``) to
+                trust in addition to the public internet. A send-file ``FileUrl``
+                that isn't publicly routable is, by default, refused: the LLM
+                provider can't reach it, and this server won't blindly fetch
+                arbitrary non-public addresses on the client's behalf. Pass
+                the private network(s) this deployment's file server(s) live
+                on to let this server fetch from them directly and forward
+                the bytes to the LLM instead.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._file_storage = file_storage
+        self._allowed_file_url_networks: list[IPNetwork] = [
+            ipaddress.ip_network(net) for net in (allowed_file_url_networks or [])
+        ]
 
         self._bot_ready = False
         self._client_ready = False
@@ -525,37 +538,73 @@ class RTVIProcessor(FrameProcessor):
                 else:
                     source = f"data:{file.format};base64,{fs.bytes}"
             case RTVI.FileUrl() as fs:
-                if not fs.public:
-                    if not fs.url.startswith(("http://", "https://")):
-                        logger.warning(f"Unsupported URL scheme for file fetch: {fs.url!r}")
-                        await self._send_error_response(message_id, "Unsupported URL scheme")
-                        return
-                    _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-                    type = "bytes"
-                    try:
-                        timeout = aiohttp.ClientTimeout(total=30)
-                        async with aiohttp.ClientSession(timeout=timeout) as session:
-                            async with session.get(fs.url) as response:
-                                response.raise_for_status()
-                                raw_bytes = await response.content.read(_MAX_UPLOAD_BYTES + 1)
-                                if len(raw_bytes) > _MAX_UPLOAD_BYTES:
-                                    logger.warning(
-                                        f"File at URL exceeds {_MAX_UPLOAD_BYTES} byte limit"
-                                    )
-                                    await self._send_error_response(message_id, "File too large")
-                                    return
-                                base64_string = base64.b64encode(raw_bytes).decode("utf-8")
-                                source = f"data:{file.format};base64,{base64_string}"
-                    except TimeoutError:
-                        logger.warning(f"Timed out fetching file from URL: {fs.url}")
-                        await self._send_error_response(message_id, "Timed out fetching file")
-                        return
-                    except aiohttp.ClientError as e:
-                        logger.warning(f"Failed to fetch file from URL: {e}")
-                        await self._send_error_response(message_id, f"Failed to fetch file: {e}")
-                        return
-                else:
+                if fs.url.startswith(("s3://", "gs://")):
+                    # Cloud-storage references (Bedrock/S3, Gemini-Vertex/GCS)
+                    # aren't fetched by this server at all — they're resolved
+                    # provider-side via the LLM's own cloud IAM, so there's no
+                    # DNS/SSRF check to run here. Pass through unchanged; the
+                    # adapter for whichever LLM is configured validates the
+                    # scheme it actually supports.
                     source = fs.url
+                elif not fs.url.startswith(("http://", "https://")):
+                    logger.warning(f"Unsupported URL scheme for file fetch: {fs.url!r}")
+                    await self._send_error_response(message_id, "Unsupported URL scheme")
+                    return
+                else:
+                    reachability = await classify_url_reachability(
+                        fs.url, self._allowed_file_url_networks
+                    )
+                    if reachability == "blocked":
+                        logger.warning(f"Refusing to fetch unreachable URL: {fs.url!r}")
+                        await self._send_error_response(message_id, "Unsupported URL")
+                        return
+                    elif reachability == "public":
+                        # Publicly routable: hand the URL to the LLM provider to fetch itself.
+                        source = fs.url
+                    else:
+                        # Not public, but within an allowed private network: only this
+                        # server (not the LLM provider) can reach it, so fetch it here.
+                        _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+                        type = "bytes"
+                        try:
+                            timeout = aiohttp.ClientTimeout(total=30)
+                            async with aiohttp.ClientSession(timeout=timeout) as session:
+                                # Redirects are not followed: re-validating the host
+                                # on every hop is more machinery than this needs, and
+                                # a redirect into unreachable address space is
+                                # exactly what classify_url_reachability() above is
+                                # meant to rule out.
+                                async with session.get(fs.url, allow_redirects=False) as response:
+                                    if response.status in (301, 302, 303, 307, 308):
+                                        logger.warning(
+                                            f"Refusing to follow redirect fetching file from URL: {fs.url!r}"
+                                        )
+                                        await self._send_error_response(
+                                            message_id, "Unsupported URL (redirect)"
+                                        )
+                                        return
+                                    response.raise_for_status()
+                                    raw_bytes = await response.content.read(_MAX_UPLOAD_BYTES + 1)
+                                    if len(raw_bytes) > _MAX_UPLOAD_BYTES:
+                                        logger.warning(
+                                            f"File at URL exceeds {_MAX_UPLOAD_BYTES} byte limit"
+                                        )
+                                        await self._send_error_response(
+                                            message_id, "File too large"
+                                        )
+                                        return
+                                    base64_string = base64.b64encode(raw_bytes).decode("utf-8")
+                                    source = f"data:{file.format};base64,{base64_string}"
+                        except TimeoutError:
+                            logger.warning(f"Timed out fetching file from URL: {fs.url}")
+                            await self._send_error_response(message_id, "Timed out fetching file")
+                            return
+                        except aiohttp.ClientError as e:
+                            logger.warning(f"Failed to fetch file from URL: {e}")
+                            await self._send_error_response(
+                                message_id, f"Failed to fetch file: {e}"
+                            )
+                            return
             case RTVI.FileId() as fs:
                 if self._file_storage is None:
                     logger.warning(

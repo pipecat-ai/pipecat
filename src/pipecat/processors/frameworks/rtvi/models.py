@@ -268,11 +268,21 @@ class FileBytes(FileSource):
 
 
 class FileUrl(FileSource):
-    """File source as a URL."""
+    """File source as a URL.
+
+    Parameters:
+        url: The file's URL. An ``s3://`` or ``gs://`` URI is passed straight
+            to the LLM provider, which resolves it via its own cloud IAM
+            (e.g. Bedrock reading from S3). Otherwise, a publicly-routable
+            `url` is passed straight to the LLM provider, which fetches it
+            itself; a non-public `url` has the bot server fetch it and send
+            the LLM the bytes instead, if the resolved address is allowed —
+            see ``allowed_file_url_networks`` in
+            :class:`~pipecat.processors.frameworks.rtvi.processor.RTVIProcessor`.
+    """
 
     type: RTVIFileSourceType = "url"
     url: str
-    public: bool = True
 
 
 class FileId(FileSource):
