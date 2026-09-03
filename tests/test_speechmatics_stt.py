@@ -231,7 +231,9 @@ def test_operating_point_resolved_into_model():
 def test_diarization_config_built_when_enabled():
     """Enabling diarization with a knob must produce a wire diarization config carrying
     that knob — the path that actually turns on speaker attribution."""
-    service = _service(settings=SpeechmaticsSTTService.Settings(enable_diarization=True, max_speakers=2))
+    service = _service(
+        settings=SpeechmaticsSTTService.Settings(enable_diarization=True, max_speakers=2)
+    )
     assert service._config.diarization == "speaker"
     assert service._config.speaker_diarization_config.max_speakers == 2
 
@@ -251,7 +253,10 @@ def test_no_diarization_leaves_config_empty():
 
 def test_service_closes_turns_true_for_vad():
     """VAD mode means the service endpoints and emits turn frames; the gate must say so."""
-    assert _service(settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.VAD))._service_closes_turns is True
+    service = _service(
+        settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.VAD)
+    )
+    assert service._service_closes_turns is True
 
 
 def test_service_closes_turns_false_for_external():
@@ -305,8 +310,10 @@ def test_segment_to_frame_final_vs_interim_type():
     service = _service()
     segment = Segment(transcript="hello", speaker="S1")
 
-    assert isinstance(service._segment_to_frame(segment, finalized=True), TranscriptionFrame)
-    assert isinstance(service._segment_to_frame(segment, finalized=False), InterimTranscriptionFrame)
+    final = service._segment_to_frame(segment, finalized=True)
+    interim = service._segment_to_frame(segment, finalized=False)
+    assert isinstance(final, TranscriptionFrame)
+    assert isinstance(interim, InterimTranscriptionFrame)
 
 
 def test_segment_to_frame_applies_speaker_format():
