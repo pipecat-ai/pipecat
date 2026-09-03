@@ -926,14 +926,20 @@ class SpeechmaticsSTTService(STTService):
         Args:
             message: Message to send to the STT service.
             **kwargs: Additional arguments passed to the underlying transport.
+
+        Raises:
+            RuntimeError: If the session is not connected, or the message could not be
+                sent (e.g. a malformed payload).
         """
+        if self._client is None:
+            raise RuntimeError(f"{self} cannot send message: STT session is not connected")
+
+        payload = {"message": message, **kwargs}
+        logger.debug(f"{self} sending message to STT: {payload}")
         try:
-            payload = {"message": message}
-            payload.update(kwargs)
-            logger.debug(f"{self} sending message to STT: {payload}")
-            self.create_task(self._client.send_message(payload))
+            await self._client.send_message(payload)
         except Exception as e:
-            raise RuntimeError(f"{self} error sending message to STT: {e}")
+            raise RuntimeError(f"{self} error sending message to STT: {e}") from e
 
     # ============================================================================
     # METRICS
