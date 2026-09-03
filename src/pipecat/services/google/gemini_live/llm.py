@@ -108,6 +108,7 @@ try:
         SpeechConfig,
         StartSensitivity,
         ThinkingConfig,
+        TurnCoverage,
         VoiceConfig,
     )
 except ModuleNotFoundError as e:
@@ -380,6 +381,8 @@ class GeminiLiveLLMSettings(LLMSettings):
         language: Language for generation.
         media_resolution: Media resolution setting.
         vad: Voice activity detection parameters.
+        turn_coverage: Which realtime input a user turn covers. Unset uses the
+            model's own default.
         context_window_compression: Context window compression configuration.
         thinking: Thinking configuration.
         enable_affective_dialog: Whether to enable affective dialog.
@@ -391,6 +394,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     language: Language | str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     media_resolution: GeminiMediaResolution | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad: GeminiVADParams | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_coverage: TurnCoverage | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     context_window_compression: ContextWindowCompressionParams | dict | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -527,6 +531,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             language="en-US",
             media_resolution=GeminiMediaResolution.UNSPECIFIED,
             vad=None,
+            turn_coverage=None,
             context_window_compression={},
             thinking={},
             enable_affective_dialog=False,
@@ -1241,6 +1246,14 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     config.realtime_input_config = RealtimeInputConfig(
                         automatic_activity_detection=vad_config
                     )
+
+            # Add turn coverage to configuration, if provided
+            turn_coverage = assert_given(self._settings.turn_coverage)
+            if turn_coverage:
+                if config.realtime_input_config:
+                    config.realtime_input_config.turn_coverage = turn_coverage
+                else:
+                    config.realtime_input_config = RealtimeInputConfig(turn_coverage=turn_coverage)
 
             # Add system instruction and tools to configuration, if provided.
             # These settings from the context take precedence over the ones
