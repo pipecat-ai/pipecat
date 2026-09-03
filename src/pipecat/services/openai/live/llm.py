@@ -10,8 +10,8 @@ import asyncio
 import base64
 import json
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal
 
 from loguru import logger
 from openai._types import NotGiven as OpenAINotGiven
@@ -60,7 +60,11 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm.backend_llm_worker import BackendOutput, run_backend_job
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendOutput,
+    TranscriptLine,
+    run_backend_job,
+)
 
 from . import events
 
@@ -327,9 +331,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._open_function_calls: dict[str, str] = {}
         self._pending_responses: dict[str, _PendingResponse] = {}
 
-        # Client delegation: transcript fragments not yet sent to the backend,
-        # and the delegations in flight, by delegation id.
-        self._transcript_fragments: list[dict[str, str]] = []
+        # Client delegation: the conversation not yet sent to the backend, and
+        # the delegations in flight, by delegation id.
+        self._transcript_fragments: list[TranscriptLine] = []
         self._delegation_tasks: dict[str, asyncio.Task] = {}
 
         self._register_event_handler("on_session_started")
@@ -837,7 +841,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         else:
             await self._push_assistant_text(delta)
 
-    def _remember_fragment(self, role: str, delta: str):
+    def _remember_fragment(self, role: Literal["user", "assistant"], delta: str):
         """Keep a transcript fragment for the next client delegation.
 
         Fragments land on frame boundaries rather than word or turn ones, so
@@ -849,19 +853,15 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if not isinstance(self._delegation, ClientDelegation):
             return
         fragments = self._transcript_fragments
-        if fragments and fragments[-1]["role"] == role:
-            fragments[-1]["content"] += delta
+        if fragments and fragments[-1].role == role:
+            fragments[-1].text += delta
         elif delta.strip():
-            fragments.append({"role": role, "content": delta.lstrip()})
+            fragments.append(TranscriptLine(role=role, text=delta.lstrip()))
 
-    def _take_transcript(self) -> list[dict[str, str]]:
+    def _take_transcript(self) -> list[TranscriptLine]:
         """Take the conversation recorded since the previous delegation."""
         taken, self._transcript_fragments = self._transcript_fragments, []
-        return [
-            {"role": f["role"], "content": f["content"].strip()}
-            for f in taken
-            if f["content"].strip()
-        ]
+        return [replace(line, text=line.text.strip()) for line in taken if line.text.strip()]
 
     async def _push_assistant_text(self, text: str):
         if not text:
@@ -930,7 +930,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await run_backend_job(
                 self.pipeline_worker,
                 config.backend.name,
-                messages=fragments,
+                conversation=fragments,
                 on_update=on_update,
                 timeout_secs=config.timeout_secs,
             )

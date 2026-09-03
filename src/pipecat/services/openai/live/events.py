@@ -451,8 +451,8 @@ class TranscriptDeltaEvent(ServerEvent):
     end_ms: int | None = None
 
     @property
-    def role(self) -> str:
-        """The speaker: ``"user"`` or ``"assistant"``."""
+    def role(self) -> Literal["user", "assistant"]:
+        """The speaker."""
         return "user" if self.type == "session.input_transcript.delta" else "assistant"
 
 

@@ -47,7 +47,7 @@ from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.workers.llm import BackendOutput
+from pipecat.workers.llm import BackendOutput, TranscriptLine
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -922,8 +922,8 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, messages, on_update, timeout_secs):
-        calls.append((worker, backend_name, messages, timeout_secs))
+    async def fake_run_backend_job(worker, backend_name, *, conversation, on_update, timeout_secs):
+        calls.append((worker, backend_name, conversation, timeout_secs))
         await on_update(BackendOutput(text="Checking the weather.", speakable=True))
         await on_update(BackendOutput(text="Still looking.", is_thought=True, speakable=False))
         await on_update(
@@ -949,8 +949,8 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
             "worker",
             "backend",
             [
-                {"role": "user", "content": "what's the weather in seattle"},
-                {"role": "assistant", "content": "Let me check."},
+                TranscriptLine(role="user", text="what's the weather in seattle"),
+                TranscriptLine(role="assistant", text="Let me check."),
             ],
             5,
         )
@@ -974,8 +974,8 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     """Frame-boundary fragments are joined back up, spacing and all."""
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, messages, on_update, timeout_secs):
-        calls.append(messages)
+    async def fake_run_backend_job(worker, backend_name, *, conversation, on_update, timeout_secs):
+        calls.append(conversation)
         return ""
 
     service, _ = await _client_delegation_service(monkeypatch, fake_run_backend_job)
@@ -996,8 +996,8 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
 
     assert calls == [
         [
-            {"role": "assistant", "content": "Hey there!"},
-            {"role": "user", "content": "Get me the weather in Washington, DC"},
+            TranscriptLine(role="assistant", text="Hey there!"),
+            TranscriptLine(role="user", text="Get me the weather in Washington, DC"),
         ]
     ]
 

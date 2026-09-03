@@ -34,7 +34,11 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, run_backend_job
-from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_backend_request
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendOutput,
+    TranscriptLine,
+    render_backend_request,
+)
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -114,7 +118,7 @@ async def _run_backend(
     llm: _ScriptedLLM,
     *,
     task: str | None = None,
-    messages: list[dict[str, Any]] | None = None,
+    conversation: list[TranscriptLine] | None = None,
     transform_output=None,
 ) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
     """Run one delegated task against ``llm`` under a WorkerRunner."""
@@ -140,7 +144,7 @@ async def _run_backend(
                 requester,
                 "backend",
                 task=task,
-                messages=messages,
+                conversation=conversation,
                 on_update=on_update,
                 timeout_secs=10,
             )
@@ -163,9 +167,9 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     text, updates, backend = await _run_backend(
         llm,
         task="What's the weather in Seattle?",
-        messages=[
-            {"role": "user", "content": "what's the weather in seattle"},
-            {"role": "assistant", "content": "Let me find out."},
+        conversation=[
+            TranscriptLine(role="user", text="what's the weather in seattle"),
+            TranscriptLine(role="assistant", text="Let me find out."),
         ],
     )
 
@@ -259,10 +263,16 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
     async def body():
         try:
             await run_backend_job(
-                requester, "backend", task="One", messages=[{"role": "user", "content": "one"}]
+                requester,
+                "backend",
+                task="One",
+                conversation=[TranscriptLine(role="user", text="one")],
             )
             await run_backend_job(
-                requester, "backend", task="Two", messages=[{"role": "user", "content": "two"}]
+                requester,
+                "backend",
+                task="Two",
+                conversation=[TranscriptLine(role="user", text="two")],
             )
         finally:
             await runner.cancel()
@@ -280,7 +290,7 @@ def test_render_backend_request_omits_the_transcript_when_there_are_no_turns():
 
 def test_render_backend_request_without_a_task_points_at_the_conversation():
     rendered = render_backend_request(
-        None, [{"role": "user", "content": "what's the weather"}], first=True
+        None, [TranscriptLine(role="user", text="what's the weather")], first=True
     )
     assert rendered == (
         "Voice conversation so far:\n"
@@ -295,7 +305,7 @@ async def test_a_task_less_job_runs_from_the_conversation_alone():
     llm = _ScriptedLLM([[("text", "It's raining.")]])
 
     text, _, _ = await _run_backend(
-        llm, messages=[{"role": "user", "content": "what's the weather"}]
+        llm, conversation=[TranscriptLine(role="user", text="what's the weather")]
     )
 
     assert text == "It's raining."
