@@ -697,8 +697,6 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
             enable_partials=s.include_partials,
         )
 
-        return config
-
     # ============================================================================
     # HANDLE ENGINE MESSAGES
     # ============================================================================
