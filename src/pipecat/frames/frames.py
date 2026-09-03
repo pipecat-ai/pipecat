@@ -1592,7 +1592,7 @@ class UserFileRawFrame(InputFileRawFrame):
         text: Text associated to this file.
         append_to_context: Whether the requested file should be appended to the LLM context.
         custom_options: Dictionary of custom llm-specific options to be used when processing
-                        this file, like 'detail' in openAI or 'citations' in Bedrock.
+            this file, like 'detail' in openAI or 'citations' in Bedrock.
         run_llm: Whether appending this file should trigger an LLM completion.
             None (the default) preserves the old unconditional-trigger behavior;
             only an explicit False suppresses it.
