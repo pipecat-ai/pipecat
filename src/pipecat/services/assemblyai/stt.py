@@ -61,11 +61,8 @@ from .models import (
 # are clipped before sending — a single value can never exceed the whole budget.
 MAX_AGENT_CONTEXT_CHARS = 1500
 
-# Model-name prefixes shared by every Universal-3 Pro streaming variant. The
-# ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future
-# ``u3-rt-pro-*`` releases) and the ``universal-3-5-pro`` / ``universal-3-6-pro``
-# releases (and any ``universal-3-5-pro-*`` / ``universal-3-6-pro-*`` release)
-# all expose the full U3 Pro feature set: built-in turn detection, prompting,
+# Model-name prefixes shared by every Universal-3 Pro streaming variant, all of
+# which expose the full U3 Pro feature set: built-in turn detection, prompting,
 # continuous partials, interruption_delay, context carryover, and voice focus.
 # universal-3-6-pro is universal-3-5-pro upgraded — same model, same features.
 U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
@@ -223,28 +220,28 @@ class AssemblyAISTTSettings(STTSettings):
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
-            audio frames as silence. Only applicable to u3-rt-pro.
+            audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
             set to "medical-v1" to enable Medical Mode for healthcare transcription.
         continuous_partials: Emit partial transcripts at a steady cadence during
             long turns, rather than only one early partial near the turn start.
-            Only applicable to u3-rt-pro; not sent for other models. Defaults to
+            Only applicable to U3 Pro models; not sent for other models. Defaults to
             True in this plugin so voice agents receive continuous interim updates.
         interruption_delay: Override, in milliseconds (0–1000), for how soon the
             first partial is emitted. The server adds 256ms (MIN_TURN_DURATION_MS)
-            on top, so 0 → 256ms effective. Only applicable to u3-rt-pro. Defaults
+            on top, so 0 → 256ms effective. Only applicable to U3 Pro models. Defaults
             to None (use the server default).
         agent_context: Context carryover seed — the agent's most recent spoken
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
-            u3-rt-pro; clipped to ~1500 characters and reset on reconnect. Set this
+            U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
             for a known opening line, or call
             :meth:`AssemblyAISTTService.update_agent_context` to update it
             mid-session. Defaults to None (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable
-            automatic context carryover entirely. Only applicable to u3-rt-pro. Most
+            automatic context carryover entirely. Only applicable to U3 Pro models. Most
             integrations should leave this at the default. Defaults to None (use the
             server default, which is 3).
         voice_focus: Isolate the primary voice and suppress background noise.
@@ -357,7 +354,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - max_turn_silence is ALWAYS set equal to min_turn_silence
                 - VAD stop sends ForceEndpoint as ceiling
                 - No UserStarted/StoppedSpeakingFrame emitted from STT
-                When False (AssemblyAI turn detection mode, u3-rt-pro only): AssemblyAI's model
+                When False (AssemblyAI turn detection mode, U3 Pro models only): AssemblyAI's model
                 controls turn endings using built-in turn detection.
                 - Uses AssemblyAI API defaults for all parameters (unless user explicitly sets them)
                 - Emits UserStarted/StoppedSpeakingFrame from STT
@@ -443,9 +440,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not vad_force_turn_endpoint and not is_u3_pro:
             raise ValueError(
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
-                f"u3-rt-pro for SpeechStarted support. Either set "
+                f"a U3 Pro model for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {default_settings.model}, "
-                f"or use model='u3-rt-pro'."
+                f"or use model='universal-3-5-pro'."
             )
 
         if (
@@ -472,7 +469,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "https://www.assemblyai.com/docs/streaming/prompting"
             )
 
-        # continuous_partials and interruption_delay are u3-rt-pro-only.
+        # continuous_partials and interruption_delay are U3 Pro-only.
         # isinstance(int) narrows away None/NOT_GIVEN so the range check is type-safe.
         interruption_delay = default_settings.interruption_delay
         if isinstance(interruption_delay, int) and not (0 <= interruption_delay <= 1000):
@@ -480,11 +477,11 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if not is_u3_pro and isinstance(interruption_delay, int):
             logger.warning(
-                "interruption_delay is only supported by u3-rt-pro and will be ignored "
+                "interruption_delay is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
             )
 
-        # previous_context_n_turns is u3-rt-pro-only (context carryover). Valid
+        # previous_context_n_turns is U3 Pro-only (context carryover). Valid
         # range is [0, 100] (0 disables carryover entirely), matching the server.
         previous_context_n_turns = default_settings.previous_context_n_turns
         if isinstance(previous_context_n_turns, int) and not (0 <= previous_context_n_turns <= 100):
@@ -492,7 +489,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if not is_u3_pro and isinstance(previous_context_n_turns, int):
             logger.warning(
-                "previous_context_n_turns is only supported by u3-rt-pro and will be ignored "
+                "previous_context_n_turns is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
             )
 
@@ -597,7 +594,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         self._user_speaking = False
 
-        # Warn only once if update_agent_context is called on a non-u3-rt-pro
+        # Warn only once if update_agent_context is called on a non-U3 Pro
         # model (the observer would otherwise warn on every bot turn).
         self._agent_context_warned = False
 
@@ -614,7 +611,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         finals as fast as possible so Pipecat's smart turn analyzer can decide
         when the user is done speaking. VAD stop is the absolute ceiling.
 
-        u3-rt-pro:
+        U3 Pro models:
         - min_turn_silence defaults to 100ms (user can override)
         - max_turn_silence is ALWAYS set equal to min_turn_silence
           to avoid double turn detection (AssemblyAI + Pipecat both analyzing)
@@ -628,10 +625,10 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         Args:
             settings: The settings to configure in place.
-            is_u3_pro: Whether using u3-rt-pro model.
+            is_u3_pro: Whether using a U3 Pro model.
         """
         if is_u3_pro:
-            # u3-rt-pro: Synchronize max_turn_silence with min_turn_silence
+            # U3 Pro: Synchronize max_turn_silence with min_turn_silence
             min_silence = settings.min_turn_silence
             if min_silence is None:
                 min_silence = 100
@@ -926,10 +923,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def update_agent_context(self, text: str):
         """Send the agent's latest spoken reply to AssemblyAI as carryover context.
 
-        Context carryover (u3-rt-pro only) gives the model a short memory of what
+        Context carryover (U3 Pro models only) gives the model a short memory of what
         the agent just said so it can better transcribe the user's reply — short
         answers, spelled-out entities (emails, IDs), and similar-sounding words.
-        No-op for non-u3-rt-pro models.
+        No-op for non-U3 Pro models.
 
         Args:
             text: The agent's spoken reply text. Clipped to ~1500 characters.
@@ -938,7 +935,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             if not self._agent_context_warned:
                 self._agent_context_warned = True
                 logger.warning(
-                    f"{self} update_agent_context is only supported by u3-rt-pro; "
+                    f"{self} update_agent_context is only supported by U3 Pro models; "
                     f"ignoring for model '{self._settings.model}'."
                 )
             return
@@ -1231,7 +1228,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
         else:
             # --- AssemblyAI turn detection mode ---
-            # SpeechStarted always arrives before transcripts with u3-rt-pro,
+            # SpeechStarted always arrives before transcripts on U3 Pro models,
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
             if is_final_turn:
                 # AssemblyAI controls finalization, just mark as finalized
