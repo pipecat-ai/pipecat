@@ -49,6 +49,7 @@ IMPORTS = {
     # STT Services
     "assemblyai_stt": ["from pipecat.services.assemblyai.stt import AssemblyAISTTService"],
     "aws_transcribe_stt": ["from pipecat.services.aws.stt import AWSTranscribeSTTService"],
+    "azure_openai_stt": ["from pipecat.services.azure.openai_stt import AzureOpenAISTTService"],
     "azure_stt": ["from pipecat.services.azure.stt import AzureSTTService"],
     "cartesia_stt": ["from pipecat.services.cartesia.stt import CartesiaSTTService"],
     "cartesia_turns_stt": [
