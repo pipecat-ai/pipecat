@@ -20,10 +20,9 @@ Indian languages:
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
-- **bulbul:v2**: Sarvam's previous TTS model, which its API no longer serves
-    - Supports: pitch, loudness, pace (0.3-3.0)
-    - Default sample rate: 22050 Hz
-    - Speakers: anushka (default), abhilash, manisha, vidya, arya, karun, hitesh
+- **bulbul:v2** (deprecated): Sarvam's previous TTS model. Sarvam's API answers a
+  request for it with "Model 'bulbul:v2' has been deprecated. Please use
+  'bulbul:v3' instead.", so it cannot synthesize.
 
 See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API details.
 """
@@ -31,6 +30,7 @@ See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API
 import asyncio
 import base64
 import json
+import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -61,9 +61,13 @@ class SarvamTTSModel(StrEnum):
     """Available Sarvam TTS models.
 
     Parameters:
-        BULBUL_V2: Previous TTS model, with pitch/loudness control.
-            - Supports pitch, loudness, pace (0.3-3.0)
-            - Default sample rate: 22050 Hz
+        BULBUL_V2: Previous TTS model, with pitch/loudness control. Sarvam's API
+            rejects it, so it cannot synthesize.
+
+            .. deprecated:: 1.9.0
+                Use :attr:`SarvamTTSModel.BULBUL_V3` instead.
+                Will be removed in 2.0.0.
+
         BULBUL_V3_BETA: Pre-GA tag of the v3 model.
         BULBUL_V3: Current TTS model, with temperature control.
             - Does NOT support pitch/loudness
@@ -79,7 +83,7 @@ class SarvamTTSModel(StrEnum):
 
 
 class SarvamTTSSpeakerV2(StrEnum):
-    """Available speakers for bulbul:v2 model.
+    """Available speakers for the deprecated bulbul:v2 model.
 
     Female voices: anushka, manisha, vidya, arya
     Male voices: abhilash, karun, hitesh
@@ -190,7 +194,7 @@ def get_speakers_for_model(model: str) -> list[str]:
     """Get the list of available speakers for a given model.
 
     Args:
-        model: The model name (e.g., "bulbul:v3" or "bulbul:v2").
+        model: The model name (e.g., "bulbul:v3").
 
     Returns:
         List of speaker names available for the model.
@@ -247,16 +251,13 @@ class SarvamHttpTTSSettings(TTSSettings):
     Parameters:
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3 (cannot be disabled).
-        pace: Speech pace multiplier. Defaults to 1.0.
-            - bulbul:v3: Range 0.5 to 2.0
-            - bulbul:v2: Range 0.3 to 3.0
+        pace: Speech pace multiplier, 0.5 to 2.0 on bulbul:v3. Defaults to 1.0.
         pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
         loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
         temperature: Controls output randomness for bulbul:v3 (0.01 to 1.0).
             Lower values = more deterministic, higher = more random. Defaults to 0.6.
-            **Note:** Only supported for bulbul:v3. Ignored for v2.
     """
 
     enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -291,7 +292,7 @@ class SarvamHttpTTSService(TTSService):
     Converts text to speech using Sarvam AI's TTS models with support for multiple
     Indian languages. Provides control over voice characteristics.
 
-    **Model Differences:**
+    **Model:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -302,10 +303,7 @@ class SarvamHttpTTSService(TTSService):
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
 
-    - **bulbul:v2**:
-        - Supports: pitch (-0.75 to 0.75), loudness (0.3 to 3.0), pace (0.3 to 3.0)
-        - Default sample rate: 22050 Hz
-        - Speakers: anushka, abhilash, manisha, vidya, arya, karun, hitesh
+    The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
     Example::
 
@@ -407,9 +405,7 @@ class SarvamHttpTTSService(TTSService):
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use. Options:
-                - "bulbul:v3" (default): Current model with temperature control
-                - "bulbul:v2": Previous model with pitch/loudness support
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
@@ -475,6 +471,14 @@ class SarvamHttpTTSService(TTSService):
         if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        if resolved_model == SarvamTTSModel.BULBUL_V2:
+            warnings.warn(
+                "`SarvamTTSModel.BULBUL_V2` is deprecated since 1.9.0 and will be removed in "
+                "2.0.0. Use `SarvamTTSModel.BULBUL_V3` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         self._config = TTS_MODEL_CONFIGS[resolved_model]
 
@@ -630,7 +634,7 @@ class SarvamTTSService(InterruptibleTTSService):
     Provides streaming TTS with real-time audio generation for multiple Indian languages.
     Uses WebSocket for low-latency streaming audio synthesis.
 
-    **Model Differences:**
+    **Model:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -641,10 +645,7 @@ class SarvamTTSService(InterruptibleTTSService):
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
 
-    - **bulbul:v2**:
-        - Supports: pitch (-0.75 to 0.75), loudness (0.3 to 3.0), pace (0.3 to 3.0)
-        - Default sample rate: 22050 Hz
-        - Speakers: anushka, abhilash, manisha, vidya, arya, karun, hitesh
+    The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
     **WebSocket Protocol:**
     The service uses a WebSocket connection for real-time streaming. Messages include:
@@ -783,9 +784,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: TTS model to use. Options:
-                - "bulbul:v3" (default): Current model with temperature control
-                - "bulbul:v2": Previous model with pitch/loudness support
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
@@ -879,6 +878,14 @@ class SarvamTTSService(InterruptibleTTSService):
         if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        if resolved_model == SarvamTTSModel.BULBUL_V2:
+            warnings.warn(
+                "`SarvamTTSModel.BULBUL_V2` is deprecated since 1.9.0 and will be removed in "
+                "2.0.0. Use `SarvamTTSModel.BULBUL_V3` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         self._config = TTS_MODEL_CONFIGS[resolved_model]
 
