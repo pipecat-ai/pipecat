@@ -459,3 +459,38 @@ async def test_google_llm_leaves_context_alone_on_server_error():
         await service._process_context(context)
 
     assert len(context.get_messages()) == 2
+
+
+@pytest.mark.asyncio
+async def test_google_llm_leaves_context_alone_on_resource_exhausted_error():
+    """A RESOURCE_EXHAUSTED ClientError from Gemini does not trigger file-message cleanup.
+
+    Rate limiting arrives as a 4xx ClientError like INVALID_ARGUMENT does,
+    but it says nothing about whether the request (or its file) was bad —
+    removing the file wouldn't help the next retry succeed, and would just
+    discard it for no reason.
+    """
+    from google.genai.errors import ClientError
+
+    service = GoogleLLMService(api_key="test-key")
+
+    async def raising_stream_content(context):
+        raise ClientError(
+            429,
+            {"error": {"code": 429, "message": "rate exceeded", "status": "RESOURCE_EXHAUSTED"}},
+        )
+
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "hello"})
+    await context.add_file_frame_message(
+        type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+    )
+
+    with (
+        patch.object(service, "push_frame", AsyncMock()),
+        patch.object(service, "push_error", AsyncMock()),
+        patch.object(service, "_stream_content", raising_stream_content),
+    ):
+        await service._process_context(context)
+
+    assert len(context.get_messages()) == 2

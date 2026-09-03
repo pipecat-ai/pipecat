@@ -46,7 +46,14 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
-    from anthropic import APIStatusError, APITimeoutError, AsyncAnthropic
+    from anthropic import (
+        APIStatusError,
+        APITimeoutError,
+        AsyncAnthropic,
+        BadRequestError,
+        RequestTooLargeError,
+        UnprocessableEntityError,
+    )
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -611,11 +618,14 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             context.remove_invalid_file_message()
         except APIStatusError as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            # A rejection of our request (unsupported document, malformed
-            # content, etc.) is grounds to remove a pending file message on a
-            # best-effort basis; a server-side failure (5xx) isn't evidence
-            # our request (or its file) was bad.
-            if 400 <= e.status_code < 500:
+            # Only the payload-shaped errors (bad request, payload too large,
+            # unprocessable content) are grounds to remove a pending file
+            # message on a best-effort basis. The rest of the 4xx range —
+            # auth, permissions, not-found, rate limiting — says nothing
+            # about whether our request (or its file) was bad, and removing
+            # the file there would discard it for no benefit: the file isn't
+            # what needs fixing before the next retry can succeed.
+            if isinstance(e, (BadRequestError, RequestTooLargeError, UnprocessableEntityError)):
                 context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)

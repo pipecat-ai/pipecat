@@ -637,14 +637,16 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             context.remove_invalid_file_message()
         except ClientError as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            # botocore doesn't distinguish client-fault (4xx) from server-fault
-            # (5xx) by exception type, so check the status code directly. A
-            # rejection of our request (bad document name, unsupported format,
-            # etc.) is grounds to remove a pending file message on a
-            # best-effort basis; a server-side failure isn't evidence our
-            # request (or its file) was bad.
-            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if isinstance(status, int) and 400 <= status < 500:
+            # botocore uses a single exception class for the whole 4xx/5xx
+            # range, so check the error code directly rather than the status
+            # code: ValidationException (bad document name, unsupported
+            # format, etc.) is grounds to remove a pending file message on a
+            # best-effort basis, but AccessDeniedException, ThrottlingException,
+            # and the rest say nothing about whether our request (or its
+            # file) was bad, and removing the file there would discard it
+            # for no benefit.
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code == "ValidationException":
                 context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)

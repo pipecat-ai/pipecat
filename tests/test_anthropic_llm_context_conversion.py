@@ -105,3 +105,23 @@ async def test_anthropic_llm_leaves_context_alone_on_server_error():
         await service._process_context(context)
 
     assert len(context.get_messages()) == 2
+
+
+@pytest.mark.asyncio
+async def test_anthropic_llm_leaves_context_alone_on_rate_limit_error():
+    """A 429 RateLimitError from Anthropic does not trigger file-message cleanup.
+
+    A rate limit is a 4xx, but it says nothing about whether the request (or
+    its file) was bad — removing the file wouldn't help the next retry
+    succeed, and would just discard it for no reason.
+    """
+    service = _make_service()
+    context = await _context_with_file_message()
+
+    async def raising_create_message_stream(api_call, params):
+        raise _api_status_error(anthropic.RateLimitError, 429)
+
+    with patch.object(service, "_create_message_stream", raising_create_message_stream):
+        await service._process_context(context)
+
+    assert len(context.get_messages()) == 2

@@ -105,3 +105,28 @@ async def test_aws_bedrock_llm_leaves_context_alone_on_server_error():
         await service._process_context(context)
 
     assert len(context.get_messages()) == 2
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_llm_leaves_context_alone_on_throttling_error():
+    """A ThrottlingException from Bedrock does not trigger file-message cleanup.
+
+    Throttling arrives as a 4xx ClientError like ValidationException does,
+    but it says nothing about whether the request (or its file) was bad —
+    removing the file wouldn't help the next retry succeed, and would just
+    discard it for no reason.
+    """
+    service = _make_service()
+    context = await _context_with_file_message()
+
+    error = ClientError(
+        {
+            "Error": {"Code": "ThrottlingException", "Message": "rate exceeded"},
+            "ResponseMetadata": {"HTTPStatusCode": 429},
+        },
+        "ConverseStream",
+    )
+    with patch.object(service, "_get_llm_invocation_params", side_effect=error):
+        await service._process_context(context)
+
+    assert len(context.get_messages()) == 2
