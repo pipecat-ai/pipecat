@@ -1,3 +1,0 @@
-- Added `profanity_filter` and `redact` to `DeepgramFluxSTTService.Settings` and
-  `DeepgramFluxSageMakerSTTService.Settings`, exposing Flux's profanity masking and
-  number redaction.
