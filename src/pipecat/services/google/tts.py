@@ -1205,10 +1205,16 @@ class GoogleTTSService(GoogleBaseTTSService):
 class GeminiTTSService(GoogleBaseTTSService):
     """Gemini Text-to-Speech streaming service using Gemini TTS models.
 
-    Provides real-time text-to-speech synthesis using Gemini's TTS-specific models
-    (gemini-2.5-flash-tts and gemini-2.5-pro-tts) with support for natural
-    voice control, prompts for style instructions, expressive markup tags,
-    and multi-speaker conversations.
+    Provides real-time text-to-speech synthesis using Gemini's TTS-specific models,
+    with support for natural voice control, prompts for style instructions,
+    expressive markup tags, and multi-speaker conversations.
+
+    Model names differ by backend. Cloud Text-to-Speech takes
+    ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
+    ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``; the Gemini API
+    takes ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-preview-tts`` and
+    ``gemini-2.5-pro-preview-tts``. Defaults to ``gemini-3.1-flash-tts-preview``,
+    which both backends accept.
 
     Note:
         Requires Google Cloud credentials via service account JSON, credentials file,
@@ -1221,7 +1227,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         tts = GeminiTTSService(
             credentials_path="/path/to/service-account.json",
             settings=GeminiTTSService.Settings(
-                model="gemini-2.5-flash-tts",
+                model="gemini-3.1-flash-tts-preview",
                 voice="Kore",
                 language=Language.EN_US,
                 prompt="Say this in a friendly and helpful tone"
@@ -1310,8 +1316,9 @@ class GeminiTTSService(GoogleBaseTTSService):
         """Initializes the Gemini TTS service.
 
         Args:
-            model: Gemini TTS model to use. Must be a TTS model like
-                   "gemini-2.5-flash-tts" or "gemini-2.5-pro-tts".
+            model: Gemini TTS model to use, named as the chosen backend names it —
+                   "gemini-3.1-flash-tts-preview" on either, "gemini-2.5-flash-tts" on
+                   Cloud Text-to-Speech, "gemini-2.5-flash-preview-tts" on the Gemini API.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSService.Settings(model=...)`` instead.
