@@ -366,10 +366,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Source:
         https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
-        Covers every code AWS Transcribe accepts for streaming that has a
-        matching :class:`Language` member. AWS also streams ``ckb-IQ``,
-        ``ckb-IR``, ``en-AB``, ``en-WL``, ``fa-AF``, ``kab-DZ``, ``sw-BI``,
-        ``sw-RW`` and ``sw-UG``, which have no enum equivalent.
 
         Args:
             language: Internal language enumeration value.
@@ -415,6 +411,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Catalan
             Language.CA: "ca-ES",
             Language.CA_ES: "ca-ES",
+            # Central Kurdish
+            Language.CKB_IQ: "ckb-IQ",
+            Language.CKB_IR: "ckb-IR",
             # Chinese
             Language.ZH: "zh-CN",  # Default to Simplified
             Language.ZH_CN: "zh-CN",  # Simplified
@@ -435,19 +434,21 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             Language.NL_NL: "nl-NL",
             # English
             Language.EN: "en-US",  # Default to US
+            Language.EN_AB: "en-AB",  # Scottish
             Language.EN_AU: "en-AU",  # Australian
             Language.EN_GB: "en-GB",  # British
             Language.EN_IN: "en-IN",  # Indian
             Language.EN_IE: "en-IE",  # Irish
             Language.EN_NZ: "en-NZ",  # New Zealand
-            # Note: Scottish (en-AB) and Welsh (en-WL) don't have direct Language enum matches
-            Language.EN_ZA: "en-ZA",  # South African
             Language.EN_US: "en-US",  # US
+            Language.EN_WL: "en-WL",  # Welsh
+            Language.EN_ZA: "en-ZA",  # South African
             # Estonian
             Language.ET: "et-ET",  # AWS uses et-ET rather than the BCP 47 et-EE
             Language.ET_EE: "et-ET",
             # Persian/Farsi
             Language.FA: "fa-IR",
+            Language.FA_AF: "fa-AF",
             Language.FA_IR: "fa-IR",
             # Finnish
             Language.FI: "fi-FI",
@@ -499,6 +500,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             # Javanese
             Language.JV: "jv-ID",
             Language.JV_ID: "jv-ID",
+            # Kabyle
+            Language.KAB: "kab-DZ",
+            Language.KAB_DZ: "kab-DZ",
             # Kannada
             Language.KN: "kn-IN",
             Language.KN_IN: "kn-IN",
@@ -585,8 +589,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             Language.SU_ID: "su-ID",
             # Swahili
             Language.SW: "sw-KE",  # Default to Kenya
+            Language.SW_BI: "sw-BI",
             Language.SW_KE: "sw-KE",
+            Language.SW_RW: "sw-RW",
             Language.SW_TZ: "sw-TZ",
+            Language.SW_UG: "sw-UG",
             # Swedish
             Language.SV: "sv-SE",
             Language.SV_SE: "sv-SE",
