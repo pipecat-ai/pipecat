@@ -8,6 +8,7 @@
 
 import asyncio
 import time
+import uuid
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -277,6 +278,9 @@ class DeepgramFluxSTTBase(STTService):
         self._register_event_handler("on_start_of_turn")
         self._register_event_handler("on_turn_resumed")
         self._register_event_handler("on_end_of_turn")
+        # The eager end of turn in flight, if any. Named on the frames so a
+        # withdrawal can be matched to what was generated from the prediction.
+        self._speculation_id: str | None = None
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
 
@@ -811,7 +815,9 @@ class DeepgramFluxSTTBase(STTService):
             event: The event type string for logging purposes.
         """
         logger.trace(f"Received event TurnResumed: {event}")
-        await self.push_frame(EagerEndOfTurnCancelFrame())
+        if self._speculation_id:
+            await self.push_frame(EagerEndOfTurnCancelFrame(self._speculation_id))
+            self._speculation_id = None
         await self._call_event_handler("on_turn_resumed")
 
     def _calculate_average_confidence(self, transcript_data) -> float | None:
@@ -864,6 +870,8 @@ class DeepgramFluxSTTBase(STTService):
         """
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
+        # The turn is committed, so any eager prediction it followed is resolved.
+        self._speculation_id = None
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
@@ -927,11 +935,13 @@ class DeepgramFluxSTTBase(STTService):
                 result=data,
             )
         )
+        self._speculation_id = str(uuid.uuid4())
         await self.push_frame(
             EagerEndOfTurnTranscriptionFrame(
                 transcript,
                 self._user_id,
                 time_now_iso8601(),
+                self._speculation_id,
                 self._primary_detected_language(data),
                 result=data,
             )

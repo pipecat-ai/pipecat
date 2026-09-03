@@ -139,19 +139,6 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_unidentified_withdrawal_discards_the_speculation_in_flight(self):
-        gate = SpeculativeResponseGate()
-
-        await run_test(
-            gate,
-            frames_to_send=[
-                *response("abc", "Booking.", end=False),
-                SleepFrame(),
-                EagerEndOfTurnCancelFrame(),
-            ],
-            expected_down_frames=[EagerEndOfTurnCancelFrame],
-        )
-
     async def test_tts_audio_is_held_with_the_response(self):
         # The gate placed after the TTS service holds synthesized audio too.
         gate = SpeculativeResponseGate()

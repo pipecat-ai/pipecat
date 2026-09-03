@@ -30,7 +30,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EagerEndOfTurnTranscriptionFrame,
     EndFrame,
     Frame,
@@ -831,12 +830,6 @@ class LLMUserAggregator(LLMContextAggregator):
             # transcripts are consumed here and not pushed downstream, same as
             # final TranscriptionFrame. The turn strategies still see them: the
             # controller is fed every frame below.
-            pass
-        elif isinstance(frame, EagerEndOfTurnCancelFrame) and frame.speculation_id is None:
-            # A service reports the withdrawal without an id, since the id is
-            # minted by the stop strategy. Consumed here; the strategy re-emits
-            # it identified, so consumers can match it against a speculative
-            # response that hasn't reached them yet.
             pass
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)

@@ -511,12 +511,17 @@ class EagerEndOfTurnTranscriptionFrame(TextFrame):
     Parameters:
         user_id: Identifier for the user who spoke.
         timestamp: When the eager end of turn occurred.
+        speculation_id: Identifies this prediction, so whatever is generated from
+            it can be matched against the
+            :class:`EagerEndOfTurnCancelFrame` that may withdraw it. Minted by
+            the service, which is the authority on which prediction it withdraws.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
     """
 
     user_id: str
     timestamp: str
+    speculation_id: str
     language: Language | None = None
     result: Any | None = None
 
@@ -1226,12 +1231,11 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
     A system frame so it overtakes the speculative output it cancels.
 
     Parameters:
-        speculation_id: The speculation to cancel. None cancels whichever one is
-            in flight, which is what an STT service emits — the id is minted
-            downstream, by the turn strategy.
+        speculation_id: The prediction being withdrawn, from the
+            :class:`EagerEndOfTurnTranscriptionFrame` that made it.
     """
 
-    speculation_id: str | None = None
+    speculation_id: str
 
 
 @dataclass

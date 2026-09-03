@@ -27,21 +27,24 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_stop import NormalizedMatch
+from pipecat.turns.user_stop import EagerUserTurnStopStrategy, NormalizedMatch
 from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 
 
-def aggregator(context: LLMContext, **kwargs) -> LLMUserAggregator:
+def aggregator(
+    context: LLMContext, *, user_turn_stop_timeout: float = 5.0, **kwargs
+) -> LLMUserAggregator:
     return LLMUserAggregator(
         context,
         params=LLMUserAggregatorParams(
             user_turn_strategies=EagerUserTurnStrategies(**kwargs),
+            user_turn_stop_timeout=user_turn_stop_timeout,
         ),
     )
 
 
-def eager(text: str) -> EagerEndOfTurnTranscriptionFrame:
-    return EagerEndOfTurnTranscriptionFrame(text, "user", "2026-09-03T00:00:00Z")
+def eager(text: str, speculation_id: str = "abc") -> EagerEndOfTurnTranscriptionFrame:
+    return EagerEndOfTurnTranscriptionFrame(text, "user", "2026-09-03T00:00:00Z", speculation_id)
 
 
 def final(text: str) -> TranscriptionFrame:
@@ -146,9 +149,8 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(),
                 eager("i think"),
                 SleepFrame(),
-                # The service withdraws its prediction without an id: the
-                # strategy re-emits it identified.
-                EagerEndOfTurnCancelFrame(),
+                # The service withdraws the prediction it made.
+                EagerEndOfTurnCancelFrame("abc"),
                 SleepFrame(),
                 final("i think i'll book it tomorrow"),
                 ProposedUserStoppedSpeakingFrame(),
@@ -159,10 +161,10 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
         cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
 
-        # The service's unidentified withdrawal is consumed; the strategy
-        # re-emits exactly one carrying the id of what it withdraws.
-        assert [c.speculation_id for c in cancels] == [contexts[0].speculation_id]
-        assert contexts[0].speculation_id is not None
+        # The service's withdrawal travels on its own, naming the prediction the
+        # speculative inference was run from. The strategy adds none of its own.
+        assert [c.speculation_id for c in cancels] == ["abc"]
+        assert contexts[0].speculation_id == "abc"
         assert contexts[1].speculation_id is None
         assert context.messages == [{"role": "user", "content": "i think i'll book it tomorrow"}]
 
@@ -297,3 +299,62 @@ class TestSpeculativeToolCalls(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
+    async def test_new_turn_withdraws_a_speculation_left_in_flight(self):
+        # A turn boundary the service didn't resolve — a fresh turn starting
+        # over a live prediction — still has to withdraw it, or the gate would
+        # hold the response until its buffer times out.
+        pushed = []
+
+        strategy = EagerUserTurnStopStrategy()
+        strategy.add_event_handler(
+            "on_push_frame", lambda s, frame, direction: pushed.append(frame)
+        )
+
+        await strategy.process_frame(eager("book a flight"))
+        assert strategy.speculation is not None
+
+        await strategy.handle_user_turn_started()
+
+        assert strategy.speculation is None
+        assert [f.speculation_id for f in pushed if isinstance(f, EagerEndOfTurnCancelFrame)] == [
+            "abc"
+        ]
+
+
+class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
+    async def test_speculation_is_withdrawn_when_there_is_nothing_to_compare(self):
+        # A service can commit an end of turn without a transcript — Flux drops
+        # one below `min_confidence`, Cartesia sends `turn.end` with an empty
+        # transcript for a turn that captured only noise. The eager prediction
+        # had a transcript, but there is nothing to check it against, so the
+        # response it produced is discarded rather than spoken.
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context, user_turn_stop_timeout=0.3),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+
+        # Only the speculative inference ran, and it was withdrawn.
+        assert [c.speculation_id for c in contexts] == ["abc"]
+        assert [c.speculation_id for c in cancels] == ["abc"]
+        # The turn end confirms nothing, so the gate would release nothing even
+        # if it saw the turn end before the withdrawal.
+        assert all(
+            f.speculation_id is None for f in down if isinstance(f, UserStoppedSpeakingFrame)
+        )
+        # The eager transcript is never written: only a committed one is.
+        assert context.messages == []

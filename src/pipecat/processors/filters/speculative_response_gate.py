@@ -205,9 +205,8 @@ class SpeculativeResponseGate(FrameProcessor):
         """Discard the buffered response and the rest of the one it belongs to.
 
         Args:
-            speculation_id: The speculation to withdraw. None withdraws the one
-                in flight, and records nothing — an unidentified withdrawal can't
-                be matched against a response that hasn't arrived yet.
+            speculation_id: The speculation to withdraw, or None to withdraw
+                whatever is buffered — which is what an interruption does.
         """
         if speculation_id and speculation_id != self._speculation_id:
             # Not the response we're holding — it hasn't reached us yet, since

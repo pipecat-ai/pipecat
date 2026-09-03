@@ -10,6 +10,7 @@ import asyncio
 import json
 import time
 import urllib.parse
+import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -171,6 +172,9 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
         self._last_audio_chunk_duration: float = 0.0
+        # The eager end of turn in flight, if any. Named on the frames so a
+        # withdrawal can be matched to what was generated from the prediction.
+        self._speculation_id: str | None = None
 
         self._register_event_handler("on_turn_start")
         self._register_event_handler("on_turn_update")
@@ -537,11 +541,13 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         """
         transcript = data.get("transcript", "")
         logger.trace(f"Cartesia Ink-2 ASR turn.eager_end: {transcript}")
+        self._speculation_id = str(uuid.uuid4())
         await self.push_frame(
             EagerEndOfTurnTranscriptionFrame(
                 transcript,
                 self._user_id,
                 time_now_iso8601(),
+                self._speculation_id,
                 self._language,
                 result=data,
             )
@@ -551,13 +557,17 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     async def _handle_turn_resume(self, data: dict):
         """Handle the user resuming a turn that was eagerly predicted to have ended."""
         logger.trace("Cartesia Ink-2 ASR turn.resume")
-        await self.push_frame(EagerEndOfTurnCancelFrame())
+        if self._speculation_id:
+            await self.push_frame(EagerEndOfTurnCancelFrame(self._speculation_id))
+            self._speculation_id = None
         await self._call_event_handler("on_turn_resume")
 
     async def _handle_turn_end(self, data: dict):
         transcript = data.get("transcript", "")
         logger.debug(f"Cartesia Ink-2 ASR turn.end: {transcript}")
         self._user_is_speaking = False
+        # The turn is committed, so any eager prediction it followed is resolved.
+        self._speculation_id = None
         # The watchdog injects silence to force turn.end when audio stops
         # mid-turn, so a turn that captured only silence/noise can end with
         # an empty transcript. Skip the TranscriptionFrame in that case to

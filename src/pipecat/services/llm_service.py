@@ -786,9 +786,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         rest of them. Unlike an interruption this leaves the turn open — the bot
         never spoke, and the user is still mid-turn.
         """
-        if not self._speculation_id:
-            return
-        if frame.speculation_id and frame.speculation_id != self._speculation_id:
+        if frame.speculation_id != self._speculation_id:
             return
 
         logger.debug(f"{self}: eager end of turn withdrawn, stopping the speculative inference")

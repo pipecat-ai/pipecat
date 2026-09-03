@@ -6,8 +6,6 @@
 
 """User turn stop strategy that answers an eager end of turn speculatively."""
 
-import uuid
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -80,7 +78,9 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         if isinstance(frame, EagerEndOfTurnTranscriptionFrame):
             await self._speculate(frame)
         elif isinstance(frame, EagerEndOfTurnCancelFrame):
-            await self._withdraw()
+            # The service withdrew its prediction, and its frame reaches every
+            # consumer on its own. Only our own state is left to clear.
+            self._forget(frame.speculation_id)
 
         return await super().process_frame(frame)
 
@@ -116,7 +116,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"{self}: eager end of turn missed, discarding the speculative response "
             f"(eager: [{speculation.text}], committed: [{self._text}])"
         )
-        await self.push_frame(EagerEndOfTurnCancelFrame(speculation_id=speculation.id))
+        await self.push_frame(EagerEndOfTurnCancelFrame(speculation.id))
         # Inference has to run again, on the committed transcript, so fire both
         # events rather than just finalizing.
         await super().trigger_user_turn_stopped(
@@ -125,25 +125,25 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
+        speculation = self._speculation
         await super()._reset()
-        await self._withdraw()
+        self._speculation = None
+        if speculation:
+            # The turn ended without resolving the speculation — the stop
+            # watchdog, an interruption, session end. Nothing else will withdraw
+            # it, so the response would be held until the gate times out.
+            logger.debug(f"{self}: turn ended unresolved, discarding the speculative response")
+            await self.push_frame(EagerEndOfTurnCancelFrame(speculation.id))
 
     async def _speculate(self, frame: EagerEndOfTurnTranscriptionFrame):
         """Answer an eager end of turn, leaving the turn open."""
         # Segments committed earlier in this turn are part of what the LLM will
         # see, so they're part of what the committed transcript is compared to.
-        self._speculation = Speculation(id=str(uuid.uuid4()), text=self._text + frame.text)
+        self._speculation = Speculation(id=frame.speculation_id, text=self._text + frame.text)
         logger.debug(f"{self}: speculating on eager end of turn: [{self._speculation.text}]")
         await self.trigger_user_turn_inference_triggered()
 
-    async def _withdraw(self):
-        """Withdraw the speculation in flight, if any, leaving the turn open."""
-        if not self._speculation:
-            return
-
-        speculation, self._speculation = self._speculation, None
-        logger.debug(f"{self}: eager end of turn withdrawn, discarding the speculative response")
-        # Services report the withdrawal without an id, since the id is minted
-        # here. Re-emit it identified, so consumers can match it against a
-        # response that hasn't reached them yet.
-        await self.push_frame(EagerEndOfTurnCancelFrame(speculation_id=speculation.id))
+    def _forget(self, speculation_id: str):
+        """Drop a speculation the service withdrew."""
+        if self._speculation and self._speculation.id == speculation_id:
+            self._speculation = None
