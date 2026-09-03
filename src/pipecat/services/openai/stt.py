@@ -9,7 +9,7 @@
 Provides two STT services:
 
 - ``OpenAISTTService``: REST-based transcription using the Audio API
-  (Whisper / GPT-4o).
+  (Whisper / GPT transcription models).
 - ``OpenAIRealtimeSTTService``: WebSocket-based streaming transcription
   using the Realtime API in transcription-only mode.
 """
@@ -64,6 +64,10 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    With ``include_prob_metrics=True``, GPT transcription models report per-token
+    logprobs and Whisper models report per-segment logprobs. Diarization models
+    support neither, so they report no probabilities.
     """
 
     Settings = OpenAISTTSettings
@@ -151,21 +155,36 @@ class OpenAISTTService(BaseWhisperSTTService):
             **kwargs,
         )
 
+        # Model already reported as unable to supply probabilities, so that
+        # warning is logged once per model rather than once per utterance.
+        self._prob_metrics_warned_model: str | None = None
+
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._settings.language is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
 
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self._settings.model,
+            "model": model,
             "language": self._settings.language,
         }
 
         if self._include_prob_metrics:
             # GPT transcription models return logprobs alongside a "json" response;
             # Whisper models carry per-segment logprobs in "verbose_json" instead.
-            if self._settings.model.startswith("whisper"):
+            # Diarization models support neither and reject the logprobs request.
+            if model.startswith("whisper"):
                 kwargs["response_format"] = "verbose_json"
+            elif "diarize" in model:
+                if self._prob_metrics_warned_model != model:
+                    self._prob_metrics_warned_model = model
+                    logger.warning(
+                        f"{self}: {model} does not support probability metrics; "
+                        "transcription results will carry no probability."
+                    )
             else:
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]

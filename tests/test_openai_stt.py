@@ -92,3 +92,34 @@ def test_openai_realtime_local_vad_mode_recommends_no_strategies():
     """With turn detection off the server reports no boundaries to propose."""
     service = OpenAIRealtimeSTTService(api_key="test-key")
     assert service.service_metadata_frame().user_turn_strategies is None
+
+
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("gpt-transcribe", {"response_format": "json", "include": ["logprobs"]}),
+        ("whisper-1", {"response_format": "verbose_json"}),
+        ("gpt-4o-transcribe-diarize", {}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_prob_metrics_request_shape(model, expected):
+    """Probability metrics are requested in the form each model family accepts."""
+    service = OpenAISTTService(
+        api_key="test-key",
+        settings=OpenAISTTService.Settings(model=model),
+        include_prob_metrics=True,
+    )
+
+    captured = {}
+
+    async def fake_create(**kwargs):
+        captured.update(kwargs)
+        return Transcription(text="hello world")
+
+    service._client.audio.transcriptions.create = fake_create
+
+    await service._transcribe(b"\x01\x02")
+
+    assert captured["model"] == model
+    assert {k: captured[k] for k in ("response_format", "include") if k in captured} == expected
