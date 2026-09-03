@@ -90,7 +90,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = FireworksLLMService(
         api_key=os.environ["FIREWORKS_API_KEY"],
         settings=FireworksLLMService.Settings(
-            model="accounts/fireworks/models/gpt-oss-20b",
+            model="accounts/fireworks/models/nemotron-3-ultra-nvfp4",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
