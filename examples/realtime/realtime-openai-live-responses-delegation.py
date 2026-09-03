@@ -123,9 +123,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILiveLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILiveLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
+        # Delegation buys the conversation a heavier model than a live one can
+        # be: the backend thinks and calls tools while the live model keeps
+        # talking, so its latency is spent off the critical path.
         delegation=OpenAILiveLLMService.ResponsesDelegation(
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.4-mini",
+                model="gpt-5.6-terra",
                 system_instruction=BACKEND_INSTRUCTIONS,
                 reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
             ),

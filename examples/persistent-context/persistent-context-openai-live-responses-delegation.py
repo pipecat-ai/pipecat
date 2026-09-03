@@ -164,7 +164,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILiveLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         delegation=OpenAILiveLLMService.ResponsesDelegation(
             settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-5.4-mini",
+                model="gpt-5.6-terra",
                 system_instruction=BACKEND_INSTRUCTIONS,
                 reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low"),
             ),
