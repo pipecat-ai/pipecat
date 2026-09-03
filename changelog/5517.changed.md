@@ -1,0 +1,1 @@
+- `SarvamTTSService` and `SarvamHttpTTSService` now default to `bulbul:v3`, Sarvam's current TTS model. Sarvam's API no longer serves `bulbul:v2` and rejects requests for it, so the previous default could not synthesize. The v3 defaults come with it: `shubh` as the speaker and a 24000 Hz sample rate.

@@ -1,0 +1,1 @@
+- Fixed `SarvamHttpTTSService` ignoring its `sample_rate`. It named the field `sample_rate` in the request body where Sarvam's REST API reads `speech_sample_rate`, so synthesis always came back at the model's default rate while the audio frames were tagged with the requested one — audio played back at the wrong speed for any other rate.

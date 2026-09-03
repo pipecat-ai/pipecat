@@ -3391,6 +3391,17 @@
       "location": "pipecat/services/sarvam/tts.py"
     },
     {
+      "subject": "SarvamTTSModel.BULBUL_V2",
+      "module": "pipecat.services.sarvam.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SarvamTTSModel.BULBUL_V3",
+      "message": "Use :attr:`SarvamTTSModel.BULBUL_V3` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/sarvam/tts.py"
+    },
+    {
       "subject": "SarvamTTSService.InputParams",
       "module": "pipecat.services.sarvam.tts",
       "kind": "class",
