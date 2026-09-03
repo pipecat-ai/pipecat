@@ -462,6 +462,18 @@ class TTSService(AIService):
         self._text_aggregation_metrics_started = False
         await super().stop_text_aggregation_metrics()
 
+    async def _flush_tts_usage_metrics(self):
+        """Report the text accumulated for synthesis but not yet counted.
+
+        Does nothing if there is no usage to report.
+        """
+        text = self._streamed_text
+        self._streamed_text = ""
+        if not text:
+            return
+        logger.debug(f"{self}: Generating TTS [{text}]")
+        await super().start_tts_usage_metrics(text)
+
     @property
     def sample_rate(self) -> int:
         """Get the current sample rate for audio output.
@@ -639,6 +651,7 @@ class TTSService(AIService):
         await super().cancel(frame)
         # Prompt stop of audio production. cleanup() repeats this idempotently.
         await self._stop_audio_context_task()
+        await self._flush_tts_usage_metrics()
 
     def add_text_transformer(
         self,
@@ -814,11 +827,7 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            # Log accumulated streamed text and emit aggregated usage metric.
-            if self._streamed_text:
-                logger.debug(f"{self}: Generating TTS [{self._streamed_text}]")
-                await super().start_tts_usage_metrics(self._streamed_text)
-                self._streamed_text = ""
+            await self._flush_tts_usage_metrics()
 
             # Reset aggregator state
             self._processing_text = False
@@ -849,6 +858,10 @@ class TTSService(AIService):
             # so create_context_id() generates a fresh UUID for this utterance.
             saved_turn_context_id = self._turn_context_id
             self._turn_context_id = None
+            # Set aside the enclosing LLM turn's text so this utterance reports
+            # only its own usage.
+            saved_streamed_text = self._streamed_text
+            self._streamed_text = ""
             # Creating a new context_id for the TTS request.
             self._turn_context_id = self.create_context_id()
             await self.on_turn_context_created(self._turn_context_id)
@@ -868,6 +881,8 @@ class TTSService(AIService):
                 await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
                 self._turn_context_id,
             )
+            await self._flush_tts_usage_metrics()
+            self._streamed_text = saved_streamed_text
             await self.on_turn_context_completed()
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
@@ -1037,7 +1052,7 @@ class TTSService(AIService):
             await filter.handle_interruption()
 
         self._llm_response_started = False
-        self._streamed_text = ""
+        await self._flush_tts_usage_metrics()
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
         self._pending_llm_response_end_frames.clear()
