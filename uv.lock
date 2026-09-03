@@ -329,22 +329,21 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "0.124.0"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "distro" },
     { name = "docstring-parser" },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "jiter" },
     { name = "pydantic", version = "2.11.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
     { name = "pydantic", version = "2.13.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/44/2afd86c9aac387b41f1b133cd3f595e0b110a2b980625f7987e897cee543/anthropic-0.124.0.tar.gz", hash = "sha256:b5c855a2912b157829a667ce21e10561f2b23bca98bb03af6abee2aa7f4a4cf3", size = 1054437, upload-time = "2026-08-19T16:51:31.493Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/50/463166f02179ab279edb61de1589a6f69cb3838d6a2fb6f2c92a3f8042f1/anthropic-1.3.0.tar.gz", hash = "sha256:6873492a77ede8849a161ab1bc78bc9a1e492a006d0b5bb4c57ac77845df838a", size = 1148177, upload-time = "2026-09-01T17:37:10.392Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/6a/3ab35f7bb9a2c512c80638eb108fbbcee21c433a00baca8ab0ded485e007/anthropic-0.124.0-py3-none-any.whl", hash = "sha256:e7f86e3182c4173edf09fd8f42aa328d1aa9246355a90a300287c355228bb356", size = 1147647, upload-time = "2026-08-19T16:51:33.459Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/5d/7863a9961d320c23787c7b594956afe4e878f9c0ae2376b11a20e416791d/anthropic-1.3.0-py3-none-any.whl", hash = "sha256:e7e7dbebf9f3c84a23954ab989378af6ae10a4d1804c81e9fea4b5ced695ce75", size = 1296959, upload-time = "2026-09-01T17:37:08.525Z" },
 ]
 
 [[package]]
@@ -5591,7 +5590,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0,<27" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<1" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<2" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
     { name = "av", marker = "extra == 'rnnoise'", specifier = "<17.1.0" },
