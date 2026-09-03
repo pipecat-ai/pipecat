@@ -810,17 +810,31 @@ class SegmentedSTTService(STTService):
     :attr:`wants_wav_segments` to return ``False`` so they receive the
     unwrapped buffer instead. This is a subclass-level contract, not a
     user-configurable option: the format is dictated by what the model expects.
+
+    A segment ends right where the VAD stopped, and models tend to drop or
+    garble the final word when the audio ends that abruptly, so each segment
+    is padded with ``trailing_silence_secs`` of silence before transcription.
     """
 
-    def __init__(self, *, sample_rate: int | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        sample_rate: int | None = None,
+        trailing_silence_secs: float = 0.3,
+        **kwargs,
+    ):
         """Initialize the segmented STT service.
 
         Args:
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            trailing_silence_secs: Seconds of silence appended to each segment
+                before it is transcribed, so the model hears the end of speech
+                and can finish the last word. Set to 0 to disable.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._trailing_silence_secs = trailing_silence_secs
         self._content = None
         self._wave = None
         self._audio_buffer = bytearray()
@@ -881,22 +895,28 @@ class SegmentedSTTService(STTService):
             self._audio_buffer.clear()
             return
 
-        # Report usage for the raw segment before transcription so tracing can
-        # attach it to the STT span the resulting TranscriptionFrame closes.
-        self._record_stt_audio_usage(self._audio_buffer)
+        pcm = bytes(self._audio_buffer) + self._trailing_silence()
+        self._audio_buffer.clear()
+
+        # The padded segment is what the provider receives, so it is what
+        # usage measures. Usage is reported before transcription so tracing
+        # can attach it to the STT span the resulting TranscriptionFrame closes.
+        self._record_stt_audio_usage(pcm)
         await self.emit_stt_usage_metrics()
 
         if self.wants_wav_segments:
-            audio = pcm_to_wav(self._audio_buffer, self.sample_rate)
+            audio = pcm_to_wav(pcm, self.sample_rate)
         else:
             # Local models read the buffer as raw 16-bit PCM; wrapping it in a
             # WAV container would make them misread the 44-byte header as audio.
-            audio = bytes(self._audio_buffer)
-
-        # Start clean.
-        self._audio_buffer.clear()
+            audio = pcm
 
         await self.process_generator(self.run_stt(audio))
+
+    def _trailing_silence(self) -> bytes:
+        """Silence appended to a segment, as 16-bit mono PCM at the service sample rate."""
+        num_samples = max(0, int(self.sample_rate * self._trailing_silence_secs))
+        return bytes(num_samples * 2)
 
     async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.

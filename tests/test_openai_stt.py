@@ -25,7 +25,8 @@ SAMPLE_RATE = 16000
 
 @pytest.mark.asyncio
 async def test_segment_emits_usage_and_transcription(monkeypatch):
-    service = OpenAISTTService(api_key="test-key")
+    # No trailing padding, so usage equals the buffered audio.
+    service = OpenAISTTService(api_key="test-key", trailing_silence_secs=0)
 
     async def fake_transcribe(audio: bytes) -> Transcription:
         return Transcription(text="hello world")
