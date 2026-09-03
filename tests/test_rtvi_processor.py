@@ -624,6 +624,21 @@ class TestRTVISendFile(unittest.IsolatedAsyncioTestCase):
         expected_b64 = base64.b64encode(raw).decode()
         self.assertEqual(frames[0].file, f"data:application/pdf;base64,{expected_b64}")
 
+    async def test_file_id_image_pushes_user_image_frame_with_bytes(self):
+        raw = b"\x89PNG\r\n\x1a\n fake png"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_id = uuid.uuid4().hex
+            (Path(tmpdir) / file_id).write_bytes(raw)
+
+            self.processor._file_storage = LocalFileStorage(tmpdir)
+            data = self._make_send_file_data(RTVI.FileId(id=f"pipecat:{file_id}"), fmt="image/png")
+            await self.processor._handle_send_file(data, "msg-1")
+
+        frames = self._pushed_frames()
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserImageRawFrame)
+        self.assertEqual(frames[0].image, raw)
+
     async def test_file_id_path_traversal_sends_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.processor._file_storage = LocalFileStorage(tmpdir)

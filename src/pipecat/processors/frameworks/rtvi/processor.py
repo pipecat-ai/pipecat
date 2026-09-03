@@ -525,6 +525,7 @@ class RTVIProcessor(FrameProcessor):
         """Handle a send-file message from the client."""
         file = data.file
         source = None
+        raw_bytes: bytes | None = None
         type = file.source.type
         opts = data.options if data.options is not None else RTVI.SendFileOptions()
 
@@ -634,11 +635,13 @@ class RTVIProcessor(FrameProcessor):
                 size = (file.source.width or 0, file.source.height or 0)
             else:
                 size = (0, 0)
-            image_bytes: bytes = (
-                base64.b64decode(source.split("base64,")[1])
-                if isinstance(source, str) and source.startswith("data:")
-                else source  # type: ignore[assignment]
-            )
+            image_bytes: bytes
+            if raw_bytes is not None:
+                image_bytes = raw_bytes
+            elif isinstance(source, str) and source.startswith("data:"):
+                image_bytes = base64.b64decode(source.split("base64,")[1])
+            else:
+                image_bytes = source  # type: ignore[assignment]
             file_frame = UserImageRawFrame(
                 text=data.content,
                 image=image_bytes,
