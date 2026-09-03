@@ -483,7 +483,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             else None
                         )
                         # Tokens written into the prompt cache, billed above the
-                        # input rate. getattr: older SDKs have no such field.
+                        # input rate. Providers without prompt caching omit the
+                        # field, which reads as "not reported" rather than zero.
                         cache_write_tokens = (
                             getattr(chunk.usage.prompt_tokens_details, "cache_write_tokens", None)
                             if chunk.usage.prompt_tokens_details
