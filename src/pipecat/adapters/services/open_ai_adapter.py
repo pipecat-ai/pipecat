@@ -271,11 +271,18 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                                     )
                                 )
                         elif item["type"] == "file_url":
-                            raise LLMContextConversionError(
-                                ValueError(
-                                    f"OpenAI does not support URL-based files: {item['file']['url']}"
+                            f_data = item["file"]
+                            if f_data["mime_type"].startswith("image/"):
+                                item = {
+                                    "type": "image_url",
+                                    "image_url": {"url": f_data["url"]},
+                                }
+                            else:
+                                raise LLMContextConversionError(
+                                    ValueError(
+                                        f"OpenAI does not support URL-based files: {f_data['url']}"
+                                    )
                                 )
-                            )
                         new_content.append(item)
                     msg["content"] = new_content
                 result.append(cast("ChatCompletionMessageParam", msg))

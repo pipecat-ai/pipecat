@@ -160,6 +160,29 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         self.assertIn("does not support URL-based files", str(ctx.exception))
 
+    def test_image_file_url_converted_to_image_url(self):
+        """Test that a file_url with an image MIME type becomes image_url content.
+
+        OpenAI Chat supports public image URLs natively via image_url, so an
+        image sent as a file_url shouldn't be rejected as an unsupported file.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {"url": "https://example.com/photo.jpg", "mime_type": "image/jpeg"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        content = params["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "https://example.com/photo.jpg")
+
     def test_standard_messages_passed_through_unchanged(self):
         """Test that LLMStandardMessage objects are passed through unchanged to OpenAI params."""
         # Create standard messages (OpenAI format)
@@ -2803,6 +2826,57 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
 
         content = params["input"][0]["content"]
         self.assertEqual(content[0]["detail"], "high")
+
+    def test_image_file_url_converted_to_input_image(self):
+        """A file_url with an image MIME type becomes input_image, not input_file.
+
+        The Responses API supports public image URLs directly via
+        input_image, so an image sent as a file_url shouldn't be mishandled
+        as a generic file.
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": "https://example.com/photo.jpg",
+                            "mime_type": "image/jpeg",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_image")
+        self.assertEqual(content[0]["image_url"], "https://example.com/photo.jpg")
+
+    def test_non_image_file_url_converted_to_input_file(self):
+        """A file_url with a non-image MIME type becomes input_file."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": "https://example.com/doc.pdf",
+                            "mime_type": "application/pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_file")
+        self.assertEqual(content[0]["file_url"], "https://example.com/doc.pdf")
 
     def test_tools_schema_flattening(self):
         """Tools schema with nested function dict is flattened to Responses API format."""
