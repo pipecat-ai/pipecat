@@ -468,6 +468,14 @@ class GoogleSTTSettings(STTSettings):
             service. The telephony model rejects adaptation and transcribes
             without it; support otherwise varies by model and language — see
             https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
+
+        denoiser_config: Background-noise removal, as a ``DenoiserConfig``
+            message or an equivalent dict::
+
+                denoiser_config={"denoise_audio": True}
+
+            Only the Chirp 3 models denoise; see
+            https://cloud.google.com/speech-to-text/docs/models/chirp-3
     """
 
     languages: list[Language] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -482,6 +490,9 @@ class GoogleSTTSettings(STTSettings):
     enable_interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_activity_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     adaptation: dict[str, Any] | cloud_speech.SpeechAdaptation | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    denoiser_config: dict[str, Any] | cloud_speech.DenoiserConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -624,6 +635,7 @@ class GoogleSTTService(STTService):
             enable_interim_results=True,
             enable_voice_activity_events=False,
             adaptation=None,
+            denoiser_config=None,
         )
 
         # 2. No direct init arg overrides
@@ -765,6 +777,15 @@ class GoogleSTTService(STTService):
             return None
         # Already a message: normalizing on the way in leaves nothing to convert.
         return _normalize_speech_adaptation(adaptation)
+
+    def _get_denoiser_config(self) -> cloud_speech.DenoiserConfig | None:
+        """Build the DenoiserConfig message from settings."""
+        denoiser_config = self._settings.denoiser_config
+        if not is_given(denoiser_config) or denoiser_config is None:
+            return None
+        if isinstance(denoiser_config, cloud_speech.DenoiserConfig):
+            return denoiser_config
+        return cloud_speech.DenoiserConfig(denoiser_config)
 
     async def _reconnect_if_needed(self):
         """Reconnect the stream if it's currently active."""
@@ -964,6 +985,10 @@ class GoogleSTTService(STTService):
                 enable_word_confidence=self._settings.enable_word_confidence,
             ),
         )
+
+        denoiser_config = self._get_denoiser_config()
+        if denoiser_config is not None:
+            recognition_config.denoiser_config = denoiser_config
 
         speech_adaptation = self._get_speech_adaptation()
         if speech_adaptation is not None:
