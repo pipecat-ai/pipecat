@@ -607,7 +607,6 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         self._client.on(AgentServerMessageType.ADD_SEGMENT, add_message)
         self._client.on(AgentServerMessageType.ERROR, add_message)
         self._client.on(AgentServerMessageType.WARNING, add_message)
-        self._client.on(AgentServerMessageType.INFO, add_message)
 
         # Service-side turn events (only emitted when the service closes turns).
         if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
@@ -719,6 +718,10 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
                 await self._handle_end_of_turn(message)
             case AgentServerMessageType.SPEAKERS_RESULT:
                 await self._handle_speakers_result(message)
+            case AgentServerMessageType.ERROR:
+                await self._handle_error(message)
+            case AgentServerMessageType.WARNING:
+                self._handle_warning(message)
             case _:
                 logger.debug(f"{self} {event} -> {message}")
 
@@ -805,6 +808,32 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         """
         logger.debug(f"{self} speakers result received from STT")
         await self._call_event_handler("on_speakers_result", message)
+
+    @staticmethod
+    def _describe_status(message: dict[str, Any]) -> str:
+        """Build a human-readable string from a server status message.
+
+        Error/Warning/Info messages carry a ``type`` and ``reason`` (and sometimes a
+        numeric ``code``); any may be absent, so fall back to the raw payload.
+        """
+        parts = [str(message[k]) for k in ("type", "code", "reason") if message.get(k) is not None]
+        return " ".join(parts) if parts else str(message)
+
+    async def _handle_error(self, message: dict[str, Any]) -> None:
+        """Handle Error events.
+
+        An Error ends the session server-side, so surface it upstream via
+        ``push_error`` instead of letting the session die silently.
+        """
+        await self.push_error(f"Speechmatics STT error: {self._describe_status(message)}")
+
+    def _handle_warning(self, message: dict[str, Any]) -> None:
+        """Handle Warning events.
+
+        The session continues (possibly with adjusted config), so log without
+        interrupting the pipeline.
+        """
+        logger.warning(f"{self} Speechmatics STT warning: {self._describe_status(message)}")
 
     # ============================================================================
     # SEND FRAMES TO PIPELINE
