@@ -170,8 +170,9 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     )
 
     assert text == "It's 62 and raining in Seattle."
+    # Only the answer is speakable; what the backend says on the way is not.
     assert updates == [
-        BackendOutput(text="Let me check.", is_final=False, speakable=True),
+        BackendOutput(text="Let me check.", is_final=False, speakable=False),
         BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, speakable=True),
     ]
 

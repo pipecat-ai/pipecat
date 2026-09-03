@@ -204,8 +204,9 @@ class BackendLLMWorker(LLMContextWorker):
             name: Worker name; auto-generated when omitted.
             transform_output: Called with each :class:`BackendOutput` before it
                 is sent, to adjust its text or whether the user may hear it.
-                Without one, responses are speakable and reasoning summaries
-                are not.
+                Without one, only the final answer is speakable: a frontend
+                filling the wait is usually mid-sentence when progress
+                arrives, and speaking it talks over them.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the

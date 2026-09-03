@@ -134,15 +134,16 @@ async def delegate(params: FunctionCallParams, task: str):
 
     async def on_update(output: BackendOutput):
         # The final answer comes back as this tool's result, below, so it is
-        # skipped here; progress — what the backend says before calling tools,
-        # and its reasoning summaries — is recorded as an intermediate result:
-        # context the frontend can draw on if asked, without prompting a reply.
+        # skipped here. Everything else is recorded as an intermediate result,
+        # and `speakable` decides whether the frontend says it now or merely
+        # knows it: running the LLM is what gives this pipeline a voice, the
+        # way the commentary channel does for a speech-to-speech frontend.
         if output.is_final:
             return
         logger.info(f"Backend update (speakable={output.speakable}): {output.text!r}")
         await params.result_callback(
             {"text": output.text},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
+            properties=FunctionCallResultProperties(is_final=False, run_llm=output.speakable),
         )
 
     text = await run_backend_job(
