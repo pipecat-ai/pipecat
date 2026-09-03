@@ -33,7 +33,13 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    WorkerFrame,
 )
+
+# Lifecycle frames that must still flow after a gate closes. Worker frames
+# (e.g. EndWorkerFrame) are addressed to PipelineWorker; CancelWorkerFrame
+# already passes because it is a SystemFrame.
+_CLOSED_GATE_ALLOWLIST = (SystemFrame, EndFrame, StopFrame, WorkerFrame)
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -55,8 +61,9 @@ class NotifierGate(FrameProcessor):
     which frames are allowed through when the gate is closed.
 
     The gate starts open to allow initial processing and closes permanently once
-    the notifier signals. This ensures controlled frame flow based on external
-    decisions or events.
+    the notifier signals. Closed gates still admit system frames, EndFrame,
+    StopFrame, and WorkerFrame so pipeline lifecycle signals (including
+    EndWorkerFrame) can reach PipelineWorker.
     """
 
     def __init__(self, notifier: BaseNotifier, worker_name: str = "gate"):
@@ -100,10 +107,7 @@ class NotifierGate(FrameProcessor):
         # Gate logic: open gate allows all frames, closed gate filters frames
         if self._gate_opened:
             await self.push_frame(frame, direction)
-        elif isinstance(
-            frame,
-            (SystemFrame, EndFrame, StopFrame),
-        ):
+        elif isinstance(frame, _CLOSED_GATE_ALLOWLIST):
             await self.push_frame(frame, direction)
 
     async def _wait_for_notification(self):
@@ -127,8 +131,9 @@ class ClassifierGate(NotifierGate):
     definitive decision is reached, preventing unnecessary LLM calls and maintaining
     system efficiency.
 
-    When closed, only allows system frames and user speaking frames to continue.
-    Speaking frames are needed for voicemail timing control, but not for conversation.
+    When closed, only allows system frames, worker lifecycle frames, and user
+    speaking frames to continue. Speaking frames are needed for voicemail timing
+    control, but not for conversation.
     """
 
     def __init__(self, gate_notifier: BaseNotifier, conversation_notifier: BaseNotifier):
@@ -178,10 +183,8 @@ class ClassifierGate(NotifierGate):
             # to push.
             if not self._conversation_detected:
                 await self.push_frame(frame, direction)
-        elif isinstance(frame, (SystemFrame, EndFrame, StopFrame)):
-            # Always allow system frames through
-            # This includes the UserStartedSpeakingFrame and UserStoppedSpeakingFrame
-            # which are used to detect voicemail timing.
+        elif isinstance(frame, _CLOSED_GATE_ALLOWLIST):
+            # Always allow system, end/stop, and worker lifecycle frames through.
             await self.push_frame(frame, direction)
 
     async def _wait_for_conversation(self):
@@ -198,7 +201,8 @@ class ConversationGate(NotifierGate):
     main conversation LLM from processing additional input after voicemail
     classification.
 
-    When closed, only allows system frames and user speaking frames to continue.
+    When closed, only allows system frames, worker lifecycle frames, and user
+    speaking frames to continue.
     """
 
     def __init__(self, voicemail_notifier: BaseNotifier):
