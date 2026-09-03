@@ -1094,5 +1094,5 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         for old, new in deprecated_args:
             if old in kwargs:
                 _deprecation_warning(old, new)
-                if kwargs.get(old, None) is not None:
-                    params.__setattr__(new, kwargs[old])
+                if new is not None and kwargs.get(old, None) is not None:
+                    setattr(params, new, kwargs[old])
