@@ -118,6 +118,11 @@ class SmallestTTSService(InterruptibleTTSService):
     Supports streaming audio generation with configurable voice parameters and
     language settings. Handles interruptions by reconnecting the WebSocket.
 
+    Text fragments within the same LLM turn share a continuation context: they're
+    sent with the turn's ``context_id`` and ``continue: true`` so the server joins
+    them into one continuous generation instead of resetting prosody on each
+    fragment, and the context is closed with ``continue: false`` once the turn ends.
+
     Example::
 
         tts = SmallestTTSService(
@@ -141,6 +146,7 @@ class SmallestTTSService(InterruptibleTTSService):
         sample_rate: int | None = None,
         output_format: str = "pcm",
         word_timestamps: bool = True,
+        max_buffer_delay_ms: int | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -161,6 +167,9 @@ class SmallestTTSService(InterruptibleTTSService):
                 voices silently emit no word events, so leaving this on is safe
                 regardless of voice. Fixed at init time because it determines
                 whether text frames are produced from word timing or pushed whole.
+            max_buffer_delay_ms: Upper bound, in milliseconds (0-5000), on how long
+                the server buffers a continuation fragment before speaking it. If
+                None, the server's default (3000ms) applies.
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
@@ -198,6 +207,7 @@ class SmallestTTSService(InterruptibleTTSService):
         self._base_url = base_url.rstrip("/")
         self._output_format = output_format
         self._word_timestamps = word_timestamps
+        self._max_buffer_delay_ms = max_buffer_delay_ms
         self._receive_task = None
         self._keepalive_task = None
 
@@ -223,8 +233,18 @@ class SmallestTTSService(InterruptibleTTSService):
         return True
 
     async def flush_audio(self, context_id: str | None = None):
-        """Flush any pending audio data."""
+        """Close out a continuation context, releasing any buffered text.
+
+        Args:
+            context_id: The context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
+            return
         logger.trace(f"{self}: flushing audio")
+        msg = self._build_msg(text="", context_id=flush_id, continue_transcript=False)
+        await self._get_websocket().send(json.dumps(msg))
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
@@ -237,11 +257,17 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         return language_to_smallest_tts_language(language)
 
-    def _build_msg(self, text: str) -> dict:
+    def _build_msg(self, text: str, context_id: str = "", continue_transcript: bool = True) -> dict:
         """Build a WebSocket message for the Smallest API.
 
         Args:
             text: The text to synthesize.
+            context_id: Groups this fragment with others sharing the same ID so the
+                server buffers and joins them into one continuous generation instead
+                of resetting prosody on each request.
+            continue_transcript: Whether more fragments are coming for ``context_id``.
+                ``False`` marks this as the last fragment, closing the context once
+                it has been spoken.
 
         Returns:
             Dictionary with the API message payload.
@@ -252,6 +278,8 @@ class SmallestTTSService(InterruptibleTTSService):
             "model": self._settings.model,
             "language": self._settings.language,
             "sample_rate": self.sample_rate,
+            "context_id": context_id,
+            "continue": continue_transcript,
         }
 
         if self._settings.speed is not None:
@@ -259,6 +287,9 @@ class SmallestTTSService(InterruptibleTTSService):
 
         if self._word_timestamps:
             msg["word_timestamps"] = True
+
+        if self._max_buffer_delay_ms is not None:
+            msg["max_buffer_delay_ms"] = self._max_buffer_delay_ms
 
         msg["output_format"] = self._output_format
 
@@ -489,7 +520,7 @@ class SmallestTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                msg = self._build_msg(text=text)
+                msg = self._build_msg(text=text, context_id=context_id)
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
