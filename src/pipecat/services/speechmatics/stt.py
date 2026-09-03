@@ -204,6 +204,12 @@ class SpeechmaticsSTTService(STTService):
     SpeakerIdentifier = SpeakerIdentifier
     AdditionalVocabEntry = AdditionalVocabEntry
 
+    # Reconnect backoff: first retry after this many seconds, doubling each attempt up
+    # to the cap. Retries continue for the life of the session so a transient drop can
+    # never permanently deafen the pipeline.
+    RECONNECT_INITIAL_DELAY: ClassVar[float] = 1.0
+    RECONNECT_MAX_DELAY: ClassVar[float] = 30.0
+
     class InputParams(BaseModel):
         """Configuration parameters for Speechmatics STT service.
 
@@ -428,6 +434,11 @@ class SpeechmaticsSTTService(STTService):
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
 
+        # Reconnect state. `_closed` gates the reconnect loop off once the session is
+        # torn down (stop/cancel/cleanup); `_reconnect_task` holds the in-flight retry.
+        self._closed: bool = False
+        self._reconnect_task: asyncio.Task | None = None
+
         # Event handlers
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
@@ -459,6 +470,7 @@ class SpeechmaticsSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
+        self._closed = False
         await self._connect()
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -494,25 +506,42 @@ class SpeechmaticsSTTService(STTService):
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
         await super().stop(frame)
+        self._closed = True
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
         await super().cancel(frame)
+        self._closed = True
         await self._disconnect()
 
     async def cleanup(self):
         """Release Speechmatics resources at pipeline teardown."""
         await super().cleanup()
+        self._closed = True
         await self._disconnect()
 
     async def _connect(self) -> None:
-        """Connect to the STT service.
+        """Connect to the STT service, scheduling a retry if the attempt fails."""
+        if not await self._open_connection():
+            self._schedule_reconnect()
+
+    async def _open_connection(self, *, report_error: bool = True) -> bool:
+        """Build the client, register handlers, and open the connection.
 
         - Create STT client
         - Register handlers for messages
         - Connect to the client
         - Start message processing task
+
+        Args:
+            report_error: Whether to surface a connect failure via ``push_error``. The
+                reconnect loop passes False so retries only log instead of spamming the
+                pipeline with an error per attempt.
+
+        Returns:
+            True if the connection is live, False if the attempt failed (the caller
+            decides whether to retry).
         """
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
@@ -562,19 +591,61 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} connected")
         except Exception as e:
             self._client = None
-            await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
+            if report_error:
+                await self.push_error(
+                    error_msg=f"Error connecting to STT service: {e}", exception=e
+                )
+            else:
+                logger.warning(f"{self} reconnect attempt failed: {e}")
+            return False
 
         # Start message processing task
         if not self._stt_msg_task:
             self._stt_msg_task = self.create_task(self._process_stt_messages())
+        return True
+
+    def _schedule_reconnect(self) -> None:
+        """Start the background reconnect loop, unless one is already running or the
+        session has been torn down."""
+        if self._closed or self._reconnect_task is not None:
+            return
+        self._reconnect_task = self.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Retry the connection with exponential backoff until it comes back.
+
+        Runs for the life of the session: a transient drop is retried indefinitely (with
+        a capped, doubling delay) so audio is never permanently dropped in silence. The
+        loop exits on the first successful reconnect or once the session is closed. The
+        initial failure was already surfaced via ``push_error``; retries only log.
+        """
+        delay = self.RECONNECT_INITIAL_DELAY
+        try:
+            while not self._closed and self._client is None:
+                logger.warning(f"{self} reconnecting to Speechmatics STT in {delay:.0f}s")
+                await asyncio.sleep(delay)
+                if self._closed:
+                    return
+                if await self._open_connection(report_error=False):
+                    logger.debug(f"{self} reconnected to Speechmatics STT")
+                    return
+                delay = min(delay * 2, self.RECONNECT_MAX_DELAY)
+        finally:
+            self._reconnect_task = None
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
 
+        - Cancel any in-flight reconnect attempt
         - Cancel message processing task
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
+        # Cancel a pending reconnect so it doesn't race this teardown.
+        if self._reconnect_task:
+            await self.cancel_task(self._reconnect_task)
+            self._reconnect_task = None
+
         # Cancel the message processing task
         if self._stt_msg_task:
             await self.cancel_task(self._stt_msg_task)
@@ -889,7 +960,10 @@ class SpeechmaticsSTTService(STTService):
             yield None
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
+            # The stream is broken; tear down and retry rather than silently dropping
+            # all further audio for the rest of the session.
             await self._disconnect()
+            self._schedule_reconnect()
 
     # ============================================================================
     # HELPERS
