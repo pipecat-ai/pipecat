@@ -2009,7 +2009,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         else:
             image_appended = await self._maybe_append_image_to_context(frame)
 
-        if image_appended:
+        if image_appended and frame.run_llm is not False:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_user_file_frame(self, frame: UserFileRawFrame):
@@ -2028,7 +2028,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
         await self.push_aggregation()
-        await self.push_context_frame(FrameDirection.UPSTREAM)
+        if frame.run_llm is not False:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
         logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")

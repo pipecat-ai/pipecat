@@ -1565,12 +1565,16 @@ class UserImageRawFrame(InputImageRawFrame):
         text: An optional text associated to this image.
         append_to_context: Whether the requested image should be appended to the LLM context.
         request: The original image request frame if this is a response.
+        run_llm: Whether appending this image should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
     """
 
     user_id: str = ""
     text: str | None = None
     append_to_context: bool | None = None
     request: UserImageRequestFrame | None = None
+    run_llm: bool | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -1589,12 +1593,16 @@ class UserFileRawFrame(InputFileRawFrame):
         append_to_context: Whether the requested file should be appended to the LLM context.
         custom_options: Dictionary of custom llm-specific options to be used when processing
                         this file, like 'detail' in openAI or 'citations' in Bedrock.
+        run_llm: Whether appending this file should trigger an LLM completion.
+            None (the default) preserves the old unconditional-trigger behavior;
+            only an explicit False suppresses it.
     """
 
     user_id: str = ""
     text: str = ""
     append_to_context: bool | None = None
     custom_options: dict | None = None
+    run_llm: bool | None = None
 
     def __str__(self):
         pts = format_pts(self.pts)

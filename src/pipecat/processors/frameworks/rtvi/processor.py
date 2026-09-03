@@ -645,6 +645,7 @@ class RTVIProcessor(FrameProcessor):
                 size=size,
                 format=file.format,
                 append_to_context=True,
+                run_llm=opts.run_immediately,
             )
         else:
             file_frame = UserFileRawFrame(
@@ -655,6 +656,7 @@ class RTVIProcessor(FrameProcessor):
                 format=file.format,
                 custom_options=opts.custom_options,
                 append_to_context=True,
+                run_llm=opts.run_immediately,
             )
 
         if opts.run_immediately:
