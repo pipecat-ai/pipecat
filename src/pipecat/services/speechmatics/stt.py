@@ -443,6 +443,18 @@ class SpeechmaticsSTTService(STTService):
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
+    @property
+    def _service_closes_turns(self) -> bool:
+        """True when Speechmatics detects turns itself and emits Start/EndOfTurn.
+
+        Every turn-detection mode except ``EXTERNAL`` (where the caller drives turns via
+        ``finalize()``) has the service close turns. This gates the turn-scoped behavior
+        — turn frames, turn-event subscriptions, and processing metrics — off in EXTERNAL
+        mode, where Pipecat owns endpointing.
+        """
+        mode = self._settings.turn_detection_mode
+        return is_given(mode) and mode != TurnDetectionMode.EXTERNAL
+
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when Speechmatics endpoints server-side.
 
@@ -452,8 +464,7 @@ class SpeechmaticsSTTService(STTService):
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        mode = self._settings.turn_detection_mode
-        if is_given(mode) and mode != TurnDetectionMode.EXTERNAL:
+        if self._service_closes_turns:
             frame.user_turn_strategies = ExternalUserTurnStrategies()
         return frame
 
@@ -576,7 +587,7 @@ class SpeechmaticsSTTService(STTService):
         self._client.on(AgentServerMessageType.WARNING, add_message)
 
         # Service-side turn events (only emitted when the service closes turns).
-        if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
+        if self._service_closes_turns:
             self._client.on(AgentServerMessageType.START_OF_TURN, add_message)
             self._client.on(AgentServerMessageType.END_OF_TURN, add_message)
 
@@ -770,15 +781,18 @@ class SpeechmaticsSTTService(STTService):
         synthesis and signals the start of user speech detection.
 
         The service will:
+        - Start the processing-metrics span for the turn
         - Send a BotInterruptionFrame upstream to stop bot speech
         - Send a UserStartedSpeakingFrame downstream to notify other components
-        - Start metrics collection for measuring response times
+
+        Only reached when the service closes turns; EXTERNAL mode never subscribes to
+        StartOfTurn, so the span is never opened there.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        # await self.start_processing_metrics()
+        await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.broadcast_interruption()
@@ -792,14 +806,12 @@ class SpeechmaticsSTTService(STTService):
         transcript for the completed turn.
 
         The service will:
-        - Stop processing metrics collection
         - Send a UserStoppedSpeakingFrame to signal turn completion
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} EndOfTurn received")
-        # await self.stop_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:
@@ -856,7 +868,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Force finalization — only when the caller drives turns (EXTERNAL).
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if self._settings.turn_detection_mode != TurnDetectionMode.EXTERNAL:
+            if self._service_closes_turns:
                 logger.warning(
                     f"{self} VADUserStoppedSpeakingFrame received but the service VAD is in use"
                 )
@@ -911,6 +923,11 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} interim transcript: {frame.text!r}")
 
         await self.push_frame(frame)
+
+        # Close the turn's processing-metrics span on the final transcript. Gated so
+        # EXTERNAL mode — which never opens the span (no StartOfTurn) — emits nothing.
+        if finalized and self._service_closes_turns:
+            await self.stop_processing_metrics()
 
     # ============================================================================
     # PUBLIC FUNCTIONS
