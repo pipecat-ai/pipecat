@@ -19,8 +19,6 @@ from pydantic import BaseModel
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -92,17 +90,17 @@ def _resolve_model(model: Model | str | None, operating_point: Model | str | Non
 class TurnDetectionMode(str, Enum):
     """How turn boundaries (end of speech) are detected.
 
-    `DEFAULT`: the STT service runs its own VAD and closes turns itself.
+    `VAD`: the STT service runs its own VAD and closes turns itself.
 
     `EXTERNAL`: turn boundaries are controlled by the caller — the service does not
     endpoint on its own, and the caller drives turns by calling `finalize()` (for
     example from Pipecat's own VAD).
 
     The values mirror the Agent STT SDK's own turn-detection modes so the two never
-    drift; only the member names differ (DEFAULT=VAD).
+    drift.
     """
 
-    DEFAULT = AgentTurnDetectionMode.VAD.value
+    VAD = AgentTurnDetectionMode.VAD.value
     EXTERNAL = AgentTurnDetectionMode.EXTERNAL.value
 
 
@@ -228,10 +226,10 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            turn_detection_mode: How turns are closed. `TurnDetectionMode.DEFAULT` lets the
+            turn_detection_mode: How turns are closed. `TurnDetectionMode.VAD` lets the
                 STT service run its own VAD and close turns itself; `TurnDetectionMode.EXTERNAL`
                 has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD).
-_                Defaults to `TurnDetectionMode.DEFAULT`.
+                Defaults to `TurnDetectionMode.VAD`.
 
             speaker_active_format: Formatter for the speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -309,7 +307,7 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.DEFAULT
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.VAD
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -403,7 +401,7 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
             model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
-            turn_detection_mode=TurnDetectionMode.DEFAULT,
+            turn_detection_mode=TurnDetectionMode.VAD,
             speaker_active_format="{text}",
             known_speakers=[],
             additional_vocab=[],
@@ -479,16 +477,9 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
             **kwargs,
         )
 
-        # Outbound frame queue
-        self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()
-
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
-
-        # Speaking states
-        self._is_speaking: bool = False
-        self._bot_speaking: bool = False
 
         # Event handlers
         if default_settings.enable_diarization:
@@ -848,12 +839,6 @@ _                Defaults to `TurnDetectionMode.DEFAULT`.
         """
         # Forward to parent
         await super().process_frame(frame, direction)
-
-        # Track the bot
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
 
         # Force finalization — only when the caller drives turns (EXTERNAL).
         if isinstance(frame, VADUserStoppedSpeakingFrame):
