@@ -277,6 +277,23 @@ async def test_send_message_without_connection_raises():
         await service.send_message("SomeMessage")
 
 
+@pytest.mark.asyncio
+async def test_send_message_propagates_send_failure():
+    """A failure from a live client must reach the caller. This locks the fix that
+    awaits the send instead of firing it off in an untracked task (where the error
+    would be swallowed) — a passing no-connection test alone cannot catch that."""
+
+    class _FailingClient:
+        async def send_message(self, payload):
+            raise ValueError("bad payload")
+
+    service = _service()
+    service._client = _FailingClient()
+
+    with pytest.raises(RuntimeError):
+        await service.send_message("SomeMessage")
+
+
 # ---------------------------------------------------------------------------
 # _segment_to_frame — pure Segment -> Pipecat frame mapping
 # ---------------------------------------------------------------------------
