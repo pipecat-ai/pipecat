@@ -386,26 +386,7 @@ class SpeechmaticsSTTService(STTService):
         # Apply the migrated params whenever the legacy path was used — either an
         # explicit `params=` or deprecated kwargs migrated into `_params`.
         if (params is not None or _legacy_kwargs) and not settings:
-            default_settings.language = _params.language
-            default_settings.domain = _params.domain
-            default_settings.turn_detection_mode = _params.turn_detection_mode
-            # Output formatting default — prefix the speaker when diarizing.
-            speaker_active_format = _params.speaker_active_format
-            if speaker_active_format is None:
-                speaker_active_format = (
-                    "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
-                )
-            default_settings.speaker_active_format = speaker_active_format
-            default_settings.known_speakers = _params.known_speakers
-            default_settings.additional_vocab = _params.additional_vocab
-            encoding = _params.audio_encoding
-            default_settings.model = _params.model
-            default_settings.operating_point = _params.operating_point
-            default_settings.include_partials = _params.include_partials
-            default_settings.enable_diarization = _params.enable_diarization
-            default_settings.speaker_sensitivity = _params.speaker_sensitivity
-            default_settings.max_speakers = _params.max_speakers
-            default_settings.prefer_current_speaker = _params.prefer_current_speaker
+            encoding = self._apply_legacy_params(default_settings, _params)
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
@@ -442,6 +423,34 @@ class SpeechmaticsSTTService(STTService):
         # Event handlers
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
+
+    @staticmethod
+    def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding:
+        """Fold the deprecated ``InputParams`` into canonical ``Settings``.
+
+        Every field the two shapes share by name is copied straight across. Two are
+        special-cased and excluded from the generic copy: ``speaker_active_format`` has a
+        diarization-aware default, and ``audio_encoding`` has no ``Settings`` field (it
+        reaches the client via the separate ``encoding`` argument).
+
+        Args:
+            settings: The canonical settings to populate in place.
+            params: The deprecated input params to migrate from.
+
+        Returns:
+            The audio encoding to use, taken from ``params``.
+        """
+        shared = type(settings).__dataclass_fields__.keys() & type(params).model_fields.keys()
+        for name in shared - {"speaker_active_format"}:
+            setattr(settings, name, getattr(params, name))
+
+        # Output formatting default — prefix the speaker when diarizing.
+        fmt = params.speaker_active_format
+        if fmt is None:
+            fmt = "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
+        settings.speaker_active_format = fmt
+
+        return params.audio_encoding
 
     @property
     def _service_closes_turns(self) -> bool:
