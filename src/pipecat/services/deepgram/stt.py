@@ -411,6 +411,11 @@ class DeepgramSTTService(STTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            # Sync the delta first: on a delta, an unset field is NOT_GIVEN, so a
+            # matching extra key can still be promoted. On the merged store every
+            # field already holds a default and the value would be dropped.
+            settings = settings.copy()
+            settings._sync_extra_to_fields()
             default_settings.apply_update(settings)
 
         # Sync extra to top-level fields so self._settings is unambiguous
@@ -496,6 +501,10 @@ class DeepgramSTTService(STTService):
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
+        if isinstance(delta, self.Settings):
+            delta = delta.copy()
+            delta._sync_extra_to_fields()
+
         changed = await super()._update_settings(delta)
 
         if not changed:
