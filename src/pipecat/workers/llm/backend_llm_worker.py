@@ -288,7 +288,9 @@ class BackendLLMWorker(LLMContextWorker):
         )
         text = (message.content or "").strip()
         if text:
-            await self._emit(run, BackendOutput(text=text, is_final=finished))
+            # Default behavior: only the final answer is speakable.
+            # This behavior can be adjusted by a transform_output callback.
+            await self._emit(run, BackendOutput(text=text, is_final=finished, speakable=finished))
         if finished:
             run.final_text = text
             run.finished.set()
