@@ -8,7 +8,6 @@
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import openai
 import pytest
 
@@ -20,14 +19,18 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS
+from tests.openai_http_helpers import http
 
 
 @pytest.mark.asyncio
-async def test_openai_llm_emits_error_frame_on_timeout():
+@pytest.mark.parametrize("timeout_exception", TIMEOUT_EXCEPTIONS, ids=lambda e: e.__module__)
+async def test_openai_llm_emits_error_frame_on_timeout(timeout_exception):
     """Test that OpenAI LLM service emits ErrorFrame when a timeout occurs.
 
     This enables LLMSwitcher to trigger failover to backup LLMs when the
-    primary LLM times out.
+    primary LLM times out. Runs against every installed HTTP client family,
+    since a timeout mid-stream surfaces as that family's own exception.
     """
     with patch.object(OpenAILLMService, "create_client"):
         service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
@@ -57,9 +60,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         service._call_event_handler = AsyncMock(side_effect=mock_timeout_handler)
 
         # Mock _process_context to raise TimeoutException
-        service._process_context = AsyncMock(
-            side_effect=httpx.TimeoutException("Connection timed out")
-        )
+        service._process_context = AsyncMock(side_effect=timeout_exception("Connection timed out"))
 
         # Mock metrics methods
         service.start_processing_metrics = AsyncMock()
@@ -82,7 +83,7 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         # Verify push_error was called with correct message
         assert len(pushed_errors) == 1
         assert pushed_errors[0]["error_msg"] == "LLM completion timeout"
-        assert isinstance(pushed_errors[0]["exception"], httpx.TimeoutException)
+        assert isinstance(pushed_errors[0]["exception"], timeout_exception)
 
         # Verify LLMFullResponseStartFrame and LLMFullResponseEndFrame were pushed
         frame_types = [type(f) for f in pushed_frames]
@@ -108,7 +109,7 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
         service.push_frame = mock_push_frame
         service.push_error = AsyncMock()
         service._call_event_handler = AsyncMock()
-        service._process_context = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
+        service._process_context = AsyncMock(side_effect=http.TimeoutException("Timeout"))
         service.start_processing_metrics = AsyncMock()
         service.stop_processing_metrics = AsyncMock()
 
@@ -305,11 +306,11 @@ async def test_openai_llm_rejected_api_key_misconfigures_the_service():
         service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
-        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
         service._process_context = AsyncMock(
             side_effect=openai.AuthenticationError(
                 "Incorrect API key provided",
-                response=httpx.Response(401, request=request),
+                response=http.Response(401, request=request),
                 body=None,
             )
         )
@@ -326,11 +327,11 @@ async def test_openai_llm_server_error_leaves_the_service_usable():
         service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
-        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
         service._process_context = AsyncMock(
             side_effect=openai.InternalServerError(
                 "server had an error",
-                response=httpx.Response(500, request=request),
+                response=http.Response(500, request=request),
                 body=None,
             )
         )

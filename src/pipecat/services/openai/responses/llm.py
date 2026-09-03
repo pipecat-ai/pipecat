@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import httpx
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
@@ -64,6 +63,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -324,7 +324,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=connection_limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),
@@ -1244,7 +1244,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(frame.context)
-            except httpx.TimeoutException as e:
+            except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
