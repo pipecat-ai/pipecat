@@ -655,6 +655,37 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         for i, expected_text in enumerate(expected_texts):
             self.assertEqual(model_with_text.parts[i].text, expected_text)
 
+    def test_file_url_converted_to_file_uri_part(self):
+        """Test that a file_url message part is converted to a Gemini file_uri Part.
+
+        Gemini's `Part.from_uri` accepts an arbitrary URL directly, the same
+        way the adapter already handles public `image_url` content, so a
+        `file_url` part shouldn't be silently dropped.
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": "https://example.com/report.pdf",
+                            "mime_type": "application/pdf",
+                            "filename": "report.pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        part = params["messages"][0].parts[0]
+        self.assertEqual(part.file_data.file_uri, "https://example.com/report.pdf")
+        self.assertEqual(part.file_data.mime_type, "application/pdf")
+
     def test_single_system_instruction_converted_to_user(self):
         """Test that when there's only a system instruction, it gets converted to user message."""
         # Create context with only a system message

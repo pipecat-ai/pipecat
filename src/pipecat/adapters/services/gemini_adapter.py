@@ -529,7 +529,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                         )
                     )
                 elif c["type"] == "file_url":
-                    logger.warning(f"Unsupported 'file_url': {c['file']['url']}")
+                    f_data = c["file"]
+                    parts.append(
+                        Part.from_uri(file_uri=f_data["url"], mime_type=f_data["mime_type"])
+                    )
                 elif c["type"] == "file_data":
                     file_data = c["file_data"]
                     parts.append(
