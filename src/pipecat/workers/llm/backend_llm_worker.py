@@ -16,9 +16,9 @@ streams back everything it produces and returns its final answer.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from loguru import logger
 
@@ -26,7 +26,7 @@ from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame
 from pipecat.pipeline.job_context import JobEvent, JobParams
 from pipecat.pipeline.job_decorator import job
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
@@ -40,47 +40,6 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
-
-
-@dataclass
-class TranscriptLine:
-    """One thing said in the voice conversation, on its way to the backend.
-
-    Deliberately narrower than a context message: the backend is shown the
-    conversation as labelled transcript text, so a line is a speaker and what
-    they said, with no place for tool calls, images or multi-part content.
-
-    Parameters:
-        role: Who said it, "user" or "assistant".
-        text: What they said.
-    """
-
-    role: Literal["user", "assistant"]
-    text: str
-
-    def to_payload(self) -> dict[str, str]:
-        """Render the line as part of a job request payload.
-
-        Returns:
-            The payload.
-        """
-        return {"role": self.role, "text": self.text}
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "TranscriptLine":
-        """Rebuild a line from a job request payload.
-
-        Args:
-            payload: The line's payload.
-
-        Returns:
-            The line.
-        """
-        role = payload.get("role")
-        return cls(
-            role="assistant" if role == "assistant" else "user",
-            text=str(payload.get("text") or ""),
-        )
 
 
 @dataclass
@@ -141,19 +100,46 @@ BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
 BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
 
 
+def message_text(message: LLMStandardMessage) -> str:
+    """Return a context message's text, joining the text parts of list content.
+
+    Args:
+        message: A standard context message.
+
+    Returns:
+        The text, or ``""`` for a message that carries none.
+    """
+    content = message.get("content")  # type: ignore[attr-defined]
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
+        )
+    return ""
+
+
 def render_backend_request(
-    task: str | None, conversation: list[TranscriptLine], *, first: bool
+    task: str | None, conversation: Sequence[LLMStandardMessage], *, first: bool
 ) -> str:
     """Render a delegated task, with the conversation that led to it, as one user message.
 
-    The conversation is labelled transcript text rather than context messages
-    of their own, so the backend's context holds only what the backend itself
-    said as assistant messages.
+    The conversation is flattened into labelled transcript text rather than
+    carried over as context messages of their own. That keeps the two
+    conversations apart: the backend's context holds only what the backend
+    itself said as assistant messages, so it never mistakes the frontend's
+    speech for its own.
+
+    Only what a transcript can hold survives: user and assistant text. Tool
+    calls, tool results, images and other non-text content are skipped.
 
     Args:
         task: The request the frontend delegated, when it worded one. Without
             it the backend is asked to act on the conversation.
-        conversation: What has been said that the backend hasn't seen yet.
+        conversation: What has been said that the backend hasn't seen yet, as
+            standard context messages.
         first: Whether this is the backend's first task in the conversation.
 
     Returns:
@@ -164,9 +150,13 @@ def render_backend_request(
         lines.append(
             "Voice conversation so far:" if first else "Voice conversation since your last task:"
         )
-        for line in conversation:
-            if line.text:
-                lines.append(f"{line.role.upper()}: {line.text}")
+        for message in conversation:
+            role = message.get("role")  # type: ignore[attr-defined]
+            text = message_text(message)
+            if role in ("user", "assistant") and text:
+                lines.append(f"{str(role).upper()}: {text}")
+            else:
+                logger.debug(f"Skipping delegated message with no transcript form: role={role!r}")
         lines.append("")
     if task:
         lines.append(f"Task from the voice assistant: {task}")
@@ -197,12 +187,12 @@ class BackendLLMWorker(LLMContextWorker):
 
     Job contract (``@job(name="run")``, one task at a time):
 
-    - request payload: ``{"task": str | None, "conversation":
-      [<:class:`TranscriptLine` payload>, ...]}`` — what is being asked, and
-      what has been said that the backend hasn't seen. A frontend whose model
-      words the request sends a ``task``; one whose model hands over without
-      wording anything sends the conversation alone and lets the backend work
-      out what is being asked. Sending both says the most.
+    - request payload: ``{"task": str | None, "conversation": [<standard
+      context message>, ...]}`` — what is being asked, and what has been said
+      that the backend hasn't seen. A frontend whose model words the request
+      sends a ``task``; one whose model hands over without wording anything
+      sends the conversation alone and lets the backend work out what is being
+      asked. Sending both says the most.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
@@ -296,9 +286,7 @@ class BackendLLMWorker(LLMContextWorker):
         """
         payload = message.payload or {}
         task = str(payload.get("task") or "").strip() or None
-        conversation = [
-            TranscriptLine.from_payload(line) for line in payload.get("conversation") or []
-        ]
+        conversation = payload.get("conversation") or []
         if not task and not conversation:
             logger.warning(
                 f"Worker '{self.name}': job {message.job_id} has neither a task nor conversation"
@@ -359,7 +347,7 @@ async def run_backend_job(
     backend_name: str,
     *,
     task: str | None = None,
-    conversation: list[TranscriptLine] | None = None,
+    conversation: Sequence[LLMStandardMessage] | None = None,
     on_update: BackendUpdateCallback | None = None,
     timeout_secs: float | None = None,
 ) -> str:
@@ -372,9 +360,11 @@ async def run_backend_job(
         task: The request to delegate, when the frontend words one. Omit it
             when the frontend hands over without saying what it wants, and the
             backend will work that out from ``conversation``.
-        conversation: What has been said that the backend hasn't seen yet.
-            Worth sending alongside a worded task too: it is what lets the
-            backend read a short reply or a correction.
+        conversation: What has been said that the backend hasn't seen yet,
+            as standard context messages — a frontend can hand over a slice of
+            its own context unchanged. Worth sending alongside a worded task
+            too: it is what lets the backend read a short reply or a
+            correction. Only user and assistant text survives the flattening.
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling
@@ -390,10 +380,7 @@ async def run_backend_job(
     """
     params = JobParams(
         name=BACKEND_JOB_NAME,
-        payload={
-            "task": task,
-            "conversation": [line.to_payload() for line in conversation or []],
-        },
+        payload={"task": task, "conversation": list(conversation or [])},
         timeout=timeout_secs,
     )
     async with worker.job(backend_name, params=params) as backend_job:

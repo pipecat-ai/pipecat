@@ -34,11 +34,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, run_backend_job
-from pipecat.workers.llm.backend_llm_worker import (
-    BackendOutput,
-    TranscriptLine,
-    render_backend_request,
-)
+from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_backend_request
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -118,7 +114,7 @@ async def _run_backend(
     llm: _ScriptedLLM,
     *,
     task: str | None = None,
-    conversation: list[TranscriptLine] | None = None,
+    conversation: list[dict[str, Any]] | None = None,
     transform_output=None,
 ) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
     """Run one delegated task against ``llm`` under a WorkerRunner."""
@@ -168,8 +164,8 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
         llm,
         task="What's the weather in Seattle?",
         conversation=[
-            TranscriptLine(role="user", text="what's the weather in seattle"),
-            TranscriptLine(role="assistant", text="Let me find out."),
+            {"role": "user", "content": "what's the weather in seattle"},
+            {"role": "assistant", "content": "Let me find out."},
         ],
     )
 
@@ -266,13 +262,13 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
                 requester,
                 "backend",
                 task="One",
-                conversation=[TranscriptLine(role="user", text="one")],
+                conversation=[{"role": "user", "content": "one"}],
             )
             await run_backend_job(
                 requester,
                 "backend",
                 task="Two",
-                conversation=[TranscriptLine(role="user", text="two")],
+                conversation=[{"role": "user", "content": "two"}],
             )
         finally:
             await runner.cancel()
@@ -290,7 +286,7 @@ def test_render_backend_request_omits_the_transcript_when_there_are_no_turns():
 
 def test_render_backend_request_without_a_task_points_at_the_conversation():
     rendered = render_backend_request(
-        None, [TranscriptLine(role="user", text="what's the weather")], first=True
+        None, [{"role": "user", "content": "what's the weather"}], first=True
     )
     assert rendered == (
         "Voice conversation so far:\n"
@@ -305,7 +301,7 @@ async def test_a_task_less_job_runs_from_the_conversation_alone():
     llm = _ScriptedLLM([[("text", "It's raining.")]])
 
     text, _, _ = await _run_backend(
-        llm, conversation=[TranscriptLine(role="user", text="what's the weather")]
+        llm, conversation=[{"role": "user", "content": "what's the weather"}]
     )
 
     assert text == "It's raining."
@@ -338,3 +334,34 @@ async def test_transform_output_can_rewrite_text_and_speakability():
         ("Checking.", True),
         ("Internal note.", False),
     ]
+
+
+def test_render_backend_request_flattens_what_a_transcript_can_hold():
+    """A frontend can pass its context slice as-is; only spoken text survives."""
+    rendered = render_backend_request(
+        None,
+        [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": [{"type": "text", "text": "what is this"}]},
+            {
+                "role": "assistant",
+                "content": "Let me look.",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "look", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"seen": true}'},
+        ],
+        first=True,
+    )
+    assert rendered == (
+        "Voice conversation so far:\n"
+        "USER: what is this\n"
+        "ASSISTANT: Let me look.\n"
+        "\n"
+        "Act on the user's most recent request in the conversation above."
+    )

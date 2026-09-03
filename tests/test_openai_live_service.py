@@ -47,7 +47,7 @@ from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.workers.llm import BackendOutput, TranscriptLine
+from pipecat.workers.llm import BackendOutput
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -949,8 +949,8 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
             "worker",
             "backend",
             [
-                TranscriptLine(role="user", text="what's the weather in seattle"),
-                TranscriptLine(role="assistant", text="Let me check."),
+                {"role": "user", "content": "what's the weather in seattle"},
+                {"role": "assistant", "content": "Let me check."},
             ],
             5,
         )
@@ -996,8 +996,8 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
 
     assert calls == [
         [
-            TranscriptLine(role="assistant", text="Hey there!"),
-            TranscriptLine(role="user", text="Get me the weather in Washington, DC"),
+            {"role": "assistant", "content": "Hey there!"},
+            {"role": "user", "content": "Get me the weather in Washington, DC"},
         ]
     ]
 

@@ -10,8 +10,8 @@ import asyncio
 import base64
 import json
 import re
-from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from loguru import logger
 from openai._types import NotGiven as OpenAINotGiven
@@ -47,7 +47,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
@@ -60,11 +60,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm.backend_llm_worker import (
-    BackendOutput,
-    TranscriptLine,
-    run_backend_job,
-)
+from pipecat.workers.llm.backend_llm_worker import BackendOutput, run_backend_job
 
 from . import events
 
@@ -333,7 +329,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         # Client delegation: the conversation not yet sent to the backend, and
         # the delegations in flight, by delegation id.
-        self._transcript_fragments: list[TranscriptLine] = []
+        self._transcript_fragments: list[dict[str, str]] = []
         self._delegation_tasks: dict[str, asyncio.Task] = {}
 
         self._register_event_handler("on_session_started")
@@ -853,15 +849,19 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if not isinstance(self._delegation, ClientDelegation):
             return
         fragments = self._transcript_fragments
-        if fragments and fragments[-1].role == role:
-            fragments[-1].text += delta
+        if fragments and fragments[-1]["role"] == role:
+            fragments[-1]["content"] += delta
         elif delta.strip():
-            fragments.append(TranscriptLine(role=role, text=delta.lstrip()))
+            fragments.append({"role": role, "content": delta.lstrip()})
 
-    def _take_transcript(self) -> list[TranscriptLine]:
+    def _take_transcript(self) -> list[LLMStandardMessage]:
         """Take the conversation recorded since the previous delegation."""
         taken, self._transcript_fragments = self._transcript_fragments, []
-        return [replace(line, text=line.text.strip()) for line in taken if line.text.strip()]
+        return [
+            cast(LLMStandardMessage, {"role": f["role"], "content": f["content"].strip()})
+            for f in taken
+            if f["content"].strip()
+        ]
 
     async def _push_assistant_text(self, text: str):
         if not text:
