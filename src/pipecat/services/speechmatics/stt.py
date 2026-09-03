@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
 
-from dotenv import load_dotenv
 from loguru import logger
 from pydantic import BaseModel
 
@@ -65,9 +64,6 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
-
-
-load_dotenv()
 
 
 def _resolve_model(model: Model | str | None, operating_point: Model | str | None) -> str:
