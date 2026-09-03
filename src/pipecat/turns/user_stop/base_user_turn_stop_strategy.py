@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult, Speculation
 from pipecat.utils.base_object import BaseObject
 
 
@@ -29,10 +29,14 @@ class UserTurnStoppedParams:
             turn. False when the turn end was already announced elsewhere — by a
             shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
             or by a service that emits turn frames rather than proposing them.
+        speculation_id: The speculative response this turn end confirms, if any.
+            Travels to the :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame`
+            the aggregator emits, which is what releases that response.
 
     """
 
     enable_user_speaking_frames: bool
+    speculation_id: str | None = None
 
 
 class BaseUserTurnStopStrategy(BaseObject):
@@ -104,6 +108,16 @@ class BaseUserTurnStopStrategy(BaseObject):
                 DeprecationWarning,
                 stacklevel=2,
             )
+
+    @property
+    def speculation(self) -> Speculation | None:
+        """The speculative inference this strategy has in flight, if any.
+
+        Non-None between an eager end of turn and its resolution. The user
+        aggregator reads it to run that inference against a provisional context
+        instead of writing the turn to the real one.
+        """
+        return None
 
     @property
     def resolves_proposed_turn_stop_frames(self) -> bool:
@@ -225,7 +239,12 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Trigger only the `on_user_turn_inference_triggered` event."""
         await self._call_event_handler("on_user_turn_inference_triggered")
 
-    async def trigger_user_turn_finalized(self, *, enable_user_speaking_frames: bool | None = None):
+    async def trigger_user_turn_finalized(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        speculation_id: str | None = None,
+    ):
         """Trigger only the `on_user_turn_stopped` event.
 
         Args:
@@ -233,6 +252,9 @@ class BaseUserTurnStopStrategy(BaseObject):
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn. Pass False when something else in the pipeline has already
                 emitted it.
+            speculation_id: The speculative response this turn end confirms, if
+                any. Pass it to release a response generated ahead of the turn
+                ending.
         """
         await self._call_event_handler(
             "on_user_turn_stopped",
@@ -241,6 +263,7 @@ class BaseUserTurnStopStrategy(BaseObject):
                     self._enable_user_speaking_frames
                     if enable_user_speaking_frames is None
                     else enable_user_speaking_frames
-                )
+                ),
+                speculation_id=speculation_id,
             ),
         )

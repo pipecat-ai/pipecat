@@ -19,6 +19,8 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
+    EagerEndOfTurnTranscriptionFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -72,8 +74,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     Each ``turn.start`` pushes a :class:`ProposedUserStartedSpeakingFrame`; each
     ``turn.update`` pushes an :class:`InterimTranscriptionFrame`; ``turn.end``
     pushes a final :class:`TranscriptionFrame` followed by a
-    :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` and
-    ``turn.resume`` are surfaced only via their respective event handlers.
+    :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` pushes an
+    :class:`EagerEndOfTurnTranscriptionFrame` and ``turn.resume`` an
+    :class:`EagerEndOfTurnCancelFrame`, which
+    :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` uses to
+    answer a predicted end of turn ahead of the committed one.
 
     Event handlers available (in addition to the base
     ``on_connected`` / ``on_disconnected`` / ``on_connection_error``):
@@ -523,12 +528,30 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         await self._call_event_handler("on_turn_update", transcript)
 
     async def _handle_turn_eager_end(self, data: dict):
+        """Handle an eagerly predicted end of turn.
+
+        The prediction may be withdrawn by ``turn.resume``, and the transcript
+        committed by ``turn.end`` may differ from this one. Pair the service with
+        :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` to
+        have a response generated here and discarded if either happens.
+        """
         transcript = data.get("transcript", "")
         logger.trace(f"Cartesia Ink-2 ASR turn.eager_end: {transcript}")
+        await self.push_frame(
+            EagerEndOfTurnTranscriptionFrame(
+                transcript,
+                self._user_id,
+                time_now_iso8601(),
+                self._language,
+                result=data,
+            )
+        )
         await self._call_event_handler("on_turn_eager_end", transcript)
 
     async def _handle_turn_resume(self, data: dict):
+        """Handle the user resuming a turn that was eagerly predicted to have ended."""
         logger.trace("Cartesia Ink-2 ASR turn.resume")
+        await self.push_frame(EagerEndOfTurnCancelFrame())
         await self._call_event_handler("on_turn_resume")
 
     async def _handle_turn_end(self, data: dict):

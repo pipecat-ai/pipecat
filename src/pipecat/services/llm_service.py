@@ -32,6 +32,7 @@ from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunct
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -359,6 +360,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
         # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
         self._filter_incomplete_user_turns: bool = False
+        # Set for the duration of a speculative inference, from the
+        # LLMContextFrame that started it. Stamped onto the response frames so
+        # downstream processors can tell which frames the speculation owns.
+        self._speculation_id: str | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -687,6 +692,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
+        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+            await self._handle_eager_end_of_turn_cancel(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
         elif isinstance(frame, LLMUpdateSettingsFrame):
@@ -710,6 +717,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._handle_summary_request(frame)
 
         if isinstance(frame, LLMContextFrame):
+            # Runs before the subclass starts the completion, so the response
+            # frames it pushes are stamped with this id.
+            self._speculation_id = frame.speculation_id
+
             # Sync the registered handlers with the tools advertised in the
             # context: register any newly advertised handler, drop the ones we
             # auto-registered that are no longer advertised. The context carries
@@ -732,6 +743,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
+
+        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            frame.speculation_id = self._speculation_id
+            if isinstance(frame, LLMFullResponseEndFrame):
+                # The speculation is bounded by the response it produced, so a
+                # later response isn't mistaken for part of it.
+                self._speculation_id = None
 
         await super().push_frame(frame, direction)
 
@@ -756,9 +774,27 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self.push_frame(LLMTextFrame(text))
 
     async def _handle_interruptions(self, _: InterruptionFrame):
+        self._speculation_id = None
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
+
+    async def _handle_eager_end_of_turn_cancel(self, frame: EagerEndOfTurnCancelFrame):
+        """Stop generating a response whose user turn turned out to be unfinished.
+
+        The tokens are wasted either way; stopping keeps us from paying for the
+        rest of them. Unlike an interruption this leaves the turn open — the bot
+        never spoke, and the user is still mid-turn.
+        """
+        if not self._speculation_id:
+            return
+        if frame.speculation_id and frame.speculation_id != self._speculation_id:
+            return
+
+        logger.debug(f"{self}: eager end of turn withdrawn, stopping the speculative inference")
+        self._speculation_id = None
+        await self._start_interruption()
+        await self.stop_all_metrics()
 
     async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
         """Handle context summarization request from aggregator.
@@ -1444,6 +1480,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             function_calls: The function calls to execute.
         """
         if len(function_calls) == 0:
+            return
+
+        if self._speculation_id:
+            # Tools run inside the service, so no downstream gate can undo their
+            # side effects if the speculation is discarded. Withdraw it instead;
+            # the inference that follows the committed transcript runs the call.
+            logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
+            await self.broadcast_frame(
+                EagerEndOfTurnCancelFrame, speculation_id=self._speculation_id
+            )
             return
 
         # Exclude the built-in cancel tool — it's an internal mechanism and

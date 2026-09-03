@@ -498,6 +498,33 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class EagerEndOfTurnTranscriptionFrame(TextFrame):
+    """Transcript of a turn a service predicts has ended, before it commits.
+
+    Some STT services emit a provisional end of turn ahead of the real one, so a
+    response can be generated during the gap. The prediction may be withdrawn
+    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    from this one, so nothing produced from it may reach the user or the context
+    until it is confirmed. See
+    :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
+
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the eager end of turn occurred.
+        language: Detected or specified language of the speech.
+        result: Raw result from the STT service.
+    """
+
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+    result: Any | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
 class TranslationFrame(TextFrame):
     """Text frame containing translated transcription data.
 
@@ -556,9 +583,14 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
+        speculation_id: Identifies a speculative inference, run from a provisional
+            context that is not part of the conversation. Non-None means the
+            response must not reach the user or the context until the speculation
+            is confirmed, and that the service must not execute tool calls for it.
     """
 
     context: LLMContext
+    speculation_id: str | None = None
 
 
 @dataclass
@@ -1167,9 +1199,39 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
     Emitted when the user turn ends. This usually coincides with the start of
     the bot turn.
+
+    Parameters:
+        speculation_id: Set when the turn ended on an eager end of turn that
+            held, naming the speculative response that answers it. The
+            :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`
+            releases that response on this frame. None on every other turn end,
+            including one where the eager prediction missed — a response held
+            for a speculation this frame doesn't name is never released by it.
     """
 
-    pass
+    speculation_id: str | None = None
+
+
+@dataclass
+class EagerEndOfTurnCancelFrame(SystemFrame):
+    """Frame withdrawing an eager end of turn.
+
+    Emitted when a service reports the user resumed speaking after an eager end
+    of turn, or when the committed transcript doesn't match the eager one. Every
+    consumer of the speculation drops it: the LLM service stops generating, the
+    TTS service stops synthesizing, and
+    :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`
+    discards what it buffered.
+
+    A system frame so it overtakes the speculative output it cancels.
+
+    Parameters:
+        speculation_id: The speculation to cancel. None cancels whichever one is
+            in flight, which is what an STT service emits — the id is minted
+            downstream, by the turn strategy.
+    """
+
+    speculation_id: str | None = None
 
 
 @dataclass
@@ -2082,24 +2144,42 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Used to indicate the beginning of an LLM response. Followed by one or
     more TextFrames and a final LLMFullResponseEndFrame.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
+        speculation_id: Set by the LLM service when the response comes from a
+            speculative inference. It bounds the speculation: every frame between
+            this frame and the matching :class:`LLMFullResponseEndFrame` belongs
+            to it.
     """
 
     skip_tts: bool | None = field(init=False)
+    speculation_id: str | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
+        self.speculation_id = None
 
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Frame indicating the end of an LLM response."""
+    """Frame indicating the end of an LLM response.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
+        speculation_id: Set by the LLM service when the response comes from a
+            speculative inference. Closes the window opened by the matching
+            :class:`LLMFullResponseStartFrame`.
+    """
 
     skip_tts: bool | None = field(init=False)
+    speculation_id: str | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
+        self.speculation_id = None
 
 
 @dataclass

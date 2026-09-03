@@ -10,6 +10,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
@@ -172,6 +173,12 @@ class UserTurnProcessor(FrameProcessor):
         elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
             if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, EagerEndOfTurnCancelFrame) and frame.speculation_id is None:
+            # A service reports the withdrawal without an id, since the id is
+            # minted by the stop strategy. Consumed here; the strategy re-emits
+            # it identified, so consumers can match it against a speculative
+            # response that hasn't reached them yet.
+            pass
         else:
             await self.push_frame(frame, direction)
 
@@ -230,7 +237,9 @@ class UserTurnProcessor(FrameProcessor):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            await self.broadcast_frame(UserStoppedSpeakingFrame)
+            await self.broadcast_frame(
+                UserStoppedSpeakingFrame, speculation_id=params.speculation_id
+            )
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 

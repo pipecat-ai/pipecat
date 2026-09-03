@@ -18,6 +18,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -384,7 +385,9 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
         self._audio_buffer = b""
         self._playback_started = False
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(
+        self, frame: InterruptionFrame | EagerEndOfTurnCancelFrame, direction: FrameDirection
+    ):
         self._reset_audio_buffer()
         if (self._bot_speaking or self._tts_started) and self._client:
             logger.debug(
