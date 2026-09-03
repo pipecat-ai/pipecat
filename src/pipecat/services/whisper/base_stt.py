@@ -14,6 +14,13 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
 import httpx
+
+try:
+    import httpx2
+
+    HttpClientType = httpx.AsyncClient | httpx2.AsyncClient
+except ImportError:
+    HttpClientType = httpx.AsyncClient  # type: ignore
 from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.audio import Transcription
@@ -136,7 +143,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: HttpClientType | None = None,
         language: Language | None = None,
         prompt: str | None = None,
         temperature: float | None = None,
@@ -157,11 +164,11 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
-            http_client: Custom ``httpx.AsyncClient`` for API requests, e.g. one with a
+            http_client: Custom HTTP client for API requests, e.g. one with a
                 longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
                 keeps the SDK's connection limits and redirect handling; a bare
-                ``httpx.AsyncClient`` uses httpx's defaults instead. Defaults to None,
-                which lets the SDK build its own client.
+                ``httpx.AsyncClient`` or ``httpx2.AsyncClient`` uses default limits instead.
+                Defaults to None, which lets the SDK build its own client.
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105

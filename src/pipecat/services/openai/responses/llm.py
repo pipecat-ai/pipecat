@@ -18,6 +18,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
+
+try:
+    from httpx2 import Limits as HttpxLimits
+except ImportError:
+    from httpx import Limits as HttpxLimits  # type: ignore
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
@@ -324,7 +329,7 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
+                limits=HttpxLimits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
                 )
             ),

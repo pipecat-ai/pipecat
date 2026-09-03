@@ -514,6 +514,7 @@ class TestHttpStreamErrorEvents:
 
         down_frames, up_frames = await run_test(
             service,
+            start_timeout=5.0,
             frames_to_send=[LLMContextFrame(context=context)],
             expected_down_frames=[
                 LLMServiceMetadataFrame,

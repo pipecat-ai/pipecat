@@ -1,0 +1,1 @@
+- Relaxed the `openai` dependency constraint to `<4` to support OpenAI SDK 3.x alongside 1.x and 2.x, updating internal HTTP client and connection limits handling for HTTPX2 compatibility.
