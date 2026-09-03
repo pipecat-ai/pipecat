@@ -199,9 +199,9 @@ class DeepgramSTTSettings(STTSettings):
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
         utterance_end_ms: Silence duration in ms before an utterance-end event.
-        version: Model version to transcribe with, e.g. ``"latest"``, a dated
-            standard-model version such as ``"2021-03-17.0"``, or a custom model's
-            version id. Deepgram defaults to ``"latest"``.
+        version: Model version to transcribe with, e.g. a dated standard-model
+            version such as ``"2021-03-17.0"`` or a custom model's version id.
+            ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
     """
 
     detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -219,7 +219,7 @@ class DeepgramSTTSettings(STTSettings):
     search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    version: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -367,6 +367,7 @@ class DeepgramSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
+            version=None,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
