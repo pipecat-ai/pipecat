@@ -406,7 +406,7 @@ class SpeechmaticsSTTService(STTService):
             model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
-            turn_detection_mode=TurnDetectionMode.EXTERNAL,
+            turn_detection_mode=TurnDetectionMode.DEFAULT,
             speaker_active_format="{text}",
             known_speakers=[],
             additional_vocab=[],
