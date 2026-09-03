@@ -837,10 +837,31 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         else:
             await self._push_assistant_text(delta)
 
-    def _remember_fragment(self, role: str, text: str):
-        """Keep a transcript fragment for the next client delegation."""
-        if isinstance(self._delegation, ClientDelegation) and text.strip():
-            self._transcript_fragments.append({"role": role, "content": text.strip()})
+    def _remember_fragment(self, role: str, delta: str):
+        """Keep a transcript fragment for the next client delegation.
+
+        Fragments land on frame boundaries rather than word or turn ones, so
+        consecutive ones from the same speaker are joined back up as they
+        arrive: the backend should read a conversation, not a column of 200 ms
+        slices. Deltas carry their own leading spaces, so they concatenate
+        into the original text unaltered.
+        """
+        if not isinstance(self._delegation, ClientDelegation):
+            return
+        fragments = self._transcript_fragments
+        if fragments and fragments[-1]["role"] == role:
+            fragments[-1]["content"] += delta
+        elif delta.strip():
+            fragments.append({"role": role, "content": delta.lstrip()})
+
+    def _take_transcript(self) -> list[dict[str, str]]:
+        """Take the conversation recorded since the previous delegation."""
+        taken, self._transcript_fragments = self._transcript_fragments, []
+        return [
+            {"role": f["role"], "content": f["content"].strip()}
+            for f in taken
+            if f["content"].strip()
+        ]
 
     async def _push_assistant_text(self, text: str):
         if not text:
@@ -898,7 +919,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         assert isinstance(config, ClientDelegation)
         # The delegation carries no task text: the backend is handed the
         # conversation since the last one and works out the request itself.
-        fragments, self._transcript_fragments = self._transcript_fragments, []
+        fragments = self._take_transcript()
 
         async def on_update(output: BackendOutput):
             await self._send_context_append(delegation.id, output.text, speakable=output.speakable)

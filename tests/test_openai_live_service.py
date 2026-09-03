@@ -970,6 +970,39 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
+    """Frame-boundary fragments are joined back up, spacing and all."""
+    calls = []
+
+    async def fake_run_backend_job(worker, backend_name, *, messages, on_update, timeout_secs):
+        calls.append(messages)
+        return ""
+
+    service, _ = await _client_delegation_service(monkeypatch, fake_run_backend_job)
+
+    await _drive(
+        service,
+        [
+            _transcript_delta("assistant", "Hey there"),
+            _transcript_delta("assistant", "!", start_ms=200),
+            _transcript_delta("user", "Get", start_ms=400),
+            _transcript_delta("user", " me the", start_ms=600),
+            _transcript_delta("user", " weather in", start_ms=800),
+            _transcript_delta("user", " Washington", start_ms=1000),
+            _transcript_delta("user", ", DC", start_ms=1200),
+        ],
+    )
+    await service._run_client_delegation(_client_delegation("item_d1"))
+
+    assert calls == [
+        [
+            {"role": "assistant", "content": "Hey there!"},
+            {"role": "user", "content": "Get me the weather in Washington, DC"},
+        ]
+    ]
+
+
+@pytest.mark.asyncio
 async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
     async def failing_run_backend_job(*args, **kwargs):
         raise JobError("timed out")
