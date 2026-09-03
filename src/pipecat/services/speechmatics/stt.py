@@ -128,16 +128,11 @@ class SpeechmaticsSTTSettings(STTSettings):
         additional_vocab: List of additional vocabulary entries.
         model: Resolved transcription model (operating point). See ``_resolve_model``.
         operating_point: Deprecated alias for ``model``.
-        max_delay: Maximum delay in seconds for transcription.
-        end_of_utterance_silence_trigger: Maximum delay for end of utterance trigger.
-        end_of_utterance_max_delay: Maximum delay for end of utterance.
-        punctuation_overrides: Punctuation overrides.
         include_partials: Include partial segment fragments.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
         prefer_current_speaker: Prefer current speaker ID.
-        extra_params: Extra parameters for the STT engine.
     """
 
     domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -148,20 +143,11 @@ class SpeechmaticsSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     operating_point: Model | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_silence_trigger: float | None | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    end_of_utterance_max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuation_overrides: dict[str, Any] | None | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
     include_partials: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prefer_current_speaker: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    extra_params: dict[str, Any] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that are purely local (formatting templates) — no reconnect
     #: and no API call needed.
@@ -261,22 +247,6 @@ class SpeechmaticsSTTService(STTService):
             operating_point: Deprecated alias for `model`. If both are given they must name the
                 same value, otherwise a `ValueError` is raised. Optional.
 
-            max_delay: Maximum delay in seconds for transcription. This forces the STT engine to
-                speed up the processing of transcribed words and reduces the interval between partial
-                and final results. Lower values can have an impact on accuracy.
-
-            end_of_utterance_silence_trigger: Maximum delay in seconds for end of utterance trigger.
-                The delay is used to wait for any further transcribed words before emitting the final
-                word frames. The value must be lower than max_delay.
-
-            end_of_utterance_max_delay: Maximum delay in seconds for end of utterance delay.
-                The delay is used to wait for any further transcribed words before emitting the final
-                word frames. The value must be greater than end_of_utterance_silence_trigger.
-
-            punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
-                in the STT engine. This is useful for languages that use different punctuation
-                than English. See documentation for more information.
-
             include_partials: Include partial segment fragments (words) in the output of
                 AddPartialSegment messages. Partial fragments from the STT will always be used for
                 speaker activity detection. This setting is used only for the formatted text output
@@ -295,10 +265,6 @@ class SpeechmaticsSTTService(STTService):
 
             prefer_current_speaker: Prefer current speaker ID. When set to true, groups of words close
                 together are given extra weight to be identified as the same speaker.
-
-            extra_params: Extra parameters to pass to the STT engine. This is a dictionary of
-                additional parameters that can be used to configure the STT engine.
-                Default to None.
 
         """
 
@@ -328,10 +294,6 @@ class SpeechmaticsSTTService(STTService):
         # Features
         model: Model | str | None = None
         operating_point: Model | str | None = None
-        max_delay: float | None = None
-        end_of_utterance_silence_trigger: float | None = None
-        end_of_utterance_max_delay: float | None = None
-        punctuation_overrides: dict | None = None
         include_partials: bool | None = None
 
         # Diarization
@@ -339,9 +301,6 @@ class SpeechmaticsSTTService(STTService):
         speaker_sensitivity: float | None = None
         max_speakers: int | None = None
         prefer_current_speaker: bool | None = None
-
-        # Extra parameters
-        extra_params: dict | None = None
 
     def __init__(
         self,
@@ -406,16 +365,11 @@ class SpeechmaticsSTTService(STTService):
             known_speakers=[],
             additional_vocab=[],
             operating_point=None,
-            max_delay=None,
-            end_of_utterance_silence_trigger=None,
-            end_of_utterance_max_delay=None,
-            punctuation_overrides=None,
             include_partials=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
             prefer_current_speaker=None,
-            extra_params=None,
         )
 
         # --- 2. No direct init arg overrides ---
@@ -441,18 +395,11 @@ class SpeechmaticsSTTService(STTService):
             encoding = _params.audio_encoding
             default_settings.model = _params.model
             default_settings.operating_point = _params.operating_point
-            default_settings.max_delay = _params.max_delay
-            default_settings.end_of_utterance_silence_trigger = (
-                _params.end_of_utterance_silence_trigger
-            )
-            default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
-            default_settings.punctuation_overrides = _params.punctuation_overrides
             default_settings.include_partials = _params.include_partials
             default_settings.enable_diarization = _params.enable_diarization
             default_settings.speaker_sensitivity = _params.speaker_sensitivity
             default_settings.max_speakers = _params.max_speakers
             default_settings.prefer_current_speaker = _params.prefer_current_speaker
-            default_settings.extra_params = _params.extra_params
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
@@ -669,10 +616,6 @@ class SpeechmaticsSTTService(STTService):
         Only fields Agent STT accepts on the wire are set. Audio encoding / sample rate are
         passed to the client via ``AudioFormat``; turn detection is passed to the client via
         ``TurnConfig`` (a top-level ``turn_config`` sibling of ``transcription_config``).
-
-        Dropped — no Agent STT equivalent: speaker focus (focus_speakers / ignore_speakers /
-        focus_mode / speaker_passive_format), ``split_sentences`` (-> emit_sentences), and the
-        ``extra_params`` passthrough.
         """
         s = settings
         language = assert_given(s.language)
@@ -1099,10 +1042,10 @@ class SpeechmaticsSTTService(STTService):
             ("output_locale", None),
             ("output_locale_code", None),
             ("enable_partials", None),
-            ("max_delay", "max_delay"),
+            ("max_delay", None),
             ("chunk_size", None),
             ("audio_encoding", "audio_encoding"),
-            ("end_of_utterance_silence_trigger", "end_of_utterance_silence_trigger"),
+            ("end_of_utterance_silence_trigger", None),
             ("enable_speaker_diarization", "enable_diarization"),
             ("text_format", "speaker_active_format"),
             ("max_speakers", "max_speakers"),
