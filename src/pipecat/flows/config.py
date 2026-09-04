@@ -10,12 +10,13 @@ A :class:`FlowConfig` describes a conversation flow as data: the nodes, what
 each one says, which tools each node offers, and where each tool leads. It
 contains no Python callables. Every tool a node references is a Flows direct
 function that lives in the application's code and is resolved by name when the
-config is bound to the application's tools with :meth:`FlowConfig.bind`.
+config is joined to the application's tools by constructing a
+:class:`~pipecat.flows.Flow`.
 
 The config loads from YAML, JSON, or a plain dict, and is validated
 structurally on load: the initial node exists, every transition names a node,
-tool names are unique within a node, and every action is well-formed. Binding
-validates the references to code.
+tool names are unique within a node, and every action is well-formed.
+Constructing a :class:`~pipecat.flows.Flow` validates the references to code.
 
 Example YAML::
 
@@ -51,18 +52,14 @@ Example YAML::
 """
 
 import json
-from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pipecat.flows.types import ContextStrategy
 from pipecat.utils.yaml import include_loader
-
-if TYPE_CHECKING:
-    from pipecat.flows.flow import Flow
 
 
 class FlowConfig(BaseModel):
@@ -82,7 +79,7 @@ class FlowConfig(BaseModel):
         Parameters:
             role: Message role, e.g. ``developer`` or ``system``.
             content: Message text. May contain ``{{ variable }}`` placeholders
-                substituted at bind time.
+                substituted when a :class:`~pipecat.flows.Flow` is constructed.
         """
 
         model_config = ConfigDict(extra="forbid")
@@ -228,35 +225,6 @@ class FlowConfig(BaseModel):
             _check_targets(func, self.nodes, "global_functions")
         return self
 
-    def bind(
-        self,
-        *,
-        tools: Mapping[str, Callable] | Any,
-        variables: Mapping[str, Any] | None = None,
-    ) -> "Flow":
-        """Bind this config to the application's tools.
-
-        Args:
-            tools: Where tool and action-handler names resolve. A mapping of
-                names to callables, or any object whose attributes are the
-                callables, typically a module. Only the names this config
-                references are looked up.
-            variables: Values for the ``{{ variable }}`` placeholders in
-                messages and action text.
-
-        Returns:
-            A :class:`~pipecat.flows.Flow` whose node configs are ready for
-            :class:`~pipecat.flows.FlowManager`.
-
-        Raises:
-            ~pipecat.flows.FlowError: If a referenced tool or handler is
-                missing, a tool is not a valid direct function, or a template
-                variable has no value.
-        """
-        from pipecat.flows.flow import Flow
-
-        return Flow(self, tools=tools, variables=variables)
-
     @classmethod
     def from_yaml(cls, text: str, *, base_dir: Path | None = None) -> "FlowConfig":
         """Load a config from YAML text.
@@ -271,18 +239,6 @@ class FlowConfig(BaseModel):
         """
         loader = include_loader(base_dir) if base_dir is not None else yaml.SafeLoader
         return cls.model_validate(_require_mapping(yaml.load(text, loader)))
-
-    @classmethod
-    def from_json(cls, text: str) -> "FlowConfig":
-        """Load a config from JSON text.
-
-        Args:
-            text: The JSON document.
-
-        Returns:
-            The validated config.
-        """
-        return cls.model_validate(_require_mapping(json.loads(text)))
 
     @classmethod
     def from_file(cls, path: str | Path) -> "FlowConfig":
@@ -300,7 +256,7 @@ class FlowConfig(BaseModel):
         path = Path(path)
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".json":
-            return cls.from_json(text)
+            return cls.model_validate(_require_mapping(json.loads(text)))
         return cls.from_yaml(text, base_dir=path.parent)
 
 

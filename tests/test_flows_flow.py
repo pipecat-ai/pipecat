@@ -171,11 +171,11 @@ VARIABLES = {"restaurant": "Luigi's", "caller": "friend"}
 
 
 def bind(cfg: FlowConfig, tools=TOOLS, variables=VARIABLES) -> Flow:
-    return cfg.bind(tools=tools, variables=variables)
+    return Flow(cfg, tools=tools, variables=variables)
 
 
 class TestBinding(unittest.TestCase):
-    def test_bind_returns_flow(self):
+    def test_flow_keeps_its_config(self):
         cfg = config()
         flow = bind(cfg)
         self.assertIsInstance(flow, Flow)

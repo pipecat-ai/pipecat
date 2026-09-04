@@ -6,12 +6,12 @@
 
 """A flow config bound to the application's tools.
 
-:class:`Flow` is what ``FlowConfig.bind`` returns: the config's nodes turned
-into runnable :data:`~pipecat.flows.NodeConfig` dicts, with every tool
+A :class:`Flow` is a :class:`~pipecat.flows.FlowConfig` joined to the code it
+names: the config's nodes turned into runnable :data:`~pipecat.flows.NodeConfig` dicts, with every tool
 reference resolved to a Flows direct function, every template variable
 substituted, and every transition wired to the node the config names.
 
-Binding validates the references the config could not: each tool exists and
+Constructing a flow validates the references the config could not: each tool exists and
 has a valid direct-function signature, each ``function`` action names a
 callable, and each ``{{ variable }}`` has a value. Tool return values are
 checked at call time against the configured-flow contract: a tool returns
@@ -48,10 +48,11 @@ _VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 class Flow:
     """A :class:`~pipecat.flows.FlowConfig` bound to tools and variables.
 
-    Construct one with ``FlowConfig.bind``. The bound flow hands ready-made
-    node configs to :class:`~pipecat.flows.FlowManager`::
+    The flow hands ready-made node configs to
+    :class:`~pipecat.flows.FlowManager`::
 
-        flow = config.bind(tools=tools, variables={"restaurant_name": "Luigi's"})
+        config = FlowConfig.from_file("flow.yaml")
+        flow = Flow(config, tools=tools, variables={"restaurant_name": "Luigi's"})
         flow_manager = FlowManager(..., global_functions=flow.global_functions)
         await flow_manager.initialize(flow.initial_node)
     """
@@ -63,10 +64,10 @@ class Flow:
         tools: Mapping[str, Callable] | Any,
         variables: Mapping[str, Any] | None = None,
     ):
-        """Bind a config to tools and variables.
+        """Join a config to the tools and variables it refers to.
 
         Args:
-            config: The flow config to bind.
+            config: The flow config.
             tools: Where tool and action-handler names resolve. A mapping of
                 names to callables, or any object whose attributes are the
                 callables, typically a module. Only the names the config

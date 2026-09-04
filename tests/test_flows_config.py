@@ -138,9 +138,9 @@ class TestFlowConfigLoading(unittest.TestCase):
         self.assertIsNone(node.context_strategy_enum())
         self.assertTrue(node.respond_immediately)
 
-    def test_from_json_matches_yaml(self):
+    def test_json_round_trip_matches_yaml(self):
         from_yaml = FlowConfig.from_yaml(FOOD_ORDERING)
-        from_json = FlowConfig.from_json(json.dumps(from_yaml.model_dump()))
+        from_json = FlowConfig.model_validate(json.loads(json.dumps(from_yaml.model_dump())))
         self.assertEqual(from_json, from_yaml)
 
     def test_from_file_yaml_with_include(self):

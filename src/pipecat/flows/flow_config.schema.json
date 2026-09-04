@@ -96,7 +96,7 @@
     },
     "Message": {
       "additionalProperties": false,
-      "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ variable }}`` placeholders\n        substituted at bind time.",
+      "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ variable }}`` placeholders\n        substituted when a :class:`~pipecat.flows.Flow` is constructed.",
       "properties": {
         "role": {
           "title": "Role",

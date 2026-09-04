@@ -40,7 +40,7 @@ from utils import create_llm
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.flows import FlowConfig, FlowManager
+from pipecat.flows import Flow, FlowConfig, FlowManager
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -130,11 +130,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.add_workers(worker)
 
-    # Load the flow graph and bind it to the tools module. The config is
-    # validated as it loads; binding checks that every tool it names exists and
-    # has a valid direct-function signature, and fills in template variables.
+    # Load the flow graph and join it to the tools module. The config is
+    # validated as it loads; constructing the Flow checks that every tool it
+    # names exists and has a valid direct-function signature, and fills in
+    # template variables.
     config = FlowConfig.from_file(FLOW_CONFIG_PATH)
-    flow = config.bind(
+    flow = Flow(
+        config,
         tools=food_ordering_tools,
         variables={"restaurant_name": os.getenv("RESTAURANT_NAME", "Pipecat Pizza and Sushi")},
     )
