@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from loguru import logger
 
 from pipecat.frames.frames import (
+    ControlFrame,
     DataFrame,
     EndFrame,
     Frame,
@@ -193,6 +194,42 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             pipeline,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+        )
+
+    async def test_uninterruptible_frame_does_not_deadlock_a_paused_processor(self):
+        """An interruption resumes a processor paused before an uninterruptible frame."""
+
+        @dataclass
+        class MarkerFrame(ControlFrame, UninterruptibleFrame):
+            label: str = ""
+
+        @dataclass
+        class AfterInterruptionFrame(DataFrame):
+            label: str = ""
+
+        class PauseProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.pause_processing_frames()
+                await self.push_frame(frame, direction)
+
+        await run_test(
+            PauseProcessor(),
+            frames_to_send=[
+                TextFrame(text="pause"),
+                MarkerFrame(label="must-finish"),
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.05),
+                AfterInterruptionFrame(label="after-interruption"),
+            ],
+            expected_down_frames=[
+                TextFrame,
+                InterruptionFrame,
+                MarkerFrame,
+                AfterInterruptionFrame,
+            ],
         )
 
     async def test_broadcast_frame(self):
