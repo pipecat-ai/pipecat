@@ -35,7 +35,7 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -54,7 +54,7 @@ from pipecat.services.openai.realtime.events import (
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import BackendLLMWorker, BackendOutput, delegate_to_backend
+from pipecat.workers.llm import BackendLLMWorker, delegate_to_backend
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -141,10 +141,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # A speech-to-speech model responds to the audio, and the transcript of
-    # that audio reaches the context later. The turns that prompted a handoff
-    # may not be recorded yet when it runs, so the model words the request
-    # itself.
+    # When using a speech-to-speech model for the frontend, we can't rely on the
+    # context to be up-to-date at delegation time (see realtime_service_mode
+    # for background on that). So instead of asking the backend to extract the
+    # user's intent from the conversation, like we would with a cascade
+    # frontend, we have the frontend pass a specific request to the backend.
     @tool_options(cancel_on_interruption=False)
     async def delegate(params: FunctionCallParams, task: str):
         """Hand work to the backend, for anything needing tools, current information or careful reasoning.
@@ -155,26 +156,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         """
         logger.info(f"Delegating to the backend: {task!r}")
 
-        async def on_update(output: BackendOutput):
-            # The final answer comes back as this tool's result, below, so it
-            # is skipped here. Everything else is recorded as an intermediate
-            # result, and `speakable` decides whether the frontend says it now
-            # or merely knows it: running the LLM is what gives this pipeline a
-            # voice, the way the commentary channel does for a speech-to-speech
-            # frontend.
-            if output.is_final:
-                return
-            logger.info(f"Backend update (speakable={output.speakable}): {output.text!r}")
-            await params.result_callback(
-                {"text": output.text},
-                properties=FunctionCallResultProperties(is_final=False, run_llm=output.speakable),
-            )
-
+        # No on_update here: realtime models don't accept intermediate tool
+        # results — they take one result, when the call completes. So the
+        # backend's progress, which a cascade frontend can use, is ignored.
         text = await delegate_to_backend(
             params.pipeline_worker,
             BACKEND_NAME,
             request=task,
-            on_update=on_update,
             timeout_secs=120,
         )
         logger.info(f"Backend result: {text!r}")
