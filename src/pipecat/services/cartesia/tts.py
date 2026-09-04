@@ -212,10 +212,14 @@ class CartesiaTTSSettings(TTSSettings):
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
+        normalization: How Cartesia normalizes the transcript before synthesis:
+            ``"auto"`` (Cartesia's default), ``"off"``, or a locale code such as
+            ``"en-GB"`` to pin the normalizer independently of the language.
     """
 
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTTSService(WebsocketTTSService):
@@ -333,6 +337,7 @@ class CartesiaTTSService(WebsocketTTSService):
             language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -564,6 +569,9 @@ class CartesiaTTSService(WebsocketTTSService):
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+        if self._settings.normalization:
+            msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
 
@@ -874,6 +882,7 @@ class CartesiaHttpTTSService(TTSService):
             language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1001,6 +1010,9 @@ class CartesiaHttpTTSService(TTSService):
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+            if self._settings.normalization:
+                payload["normalization"] = self._settings.normalization
 
             headers = {
                 "Cartesia-Version": self._cartesia_version,
