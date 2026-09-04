@@ -396,6 +396,8 @@ suite:
     scenarios: [patient_intake]
   - bot: flows/restaurant_reservation.py
     scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]
+  - bot: flows/restaurant_reservation_yaml.py
+    scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]
   - bot: flows/insurance_quote.py
     scenarios: [insurance_quote]
   # Constructs and switches between OpenAI, Google, and Anthropic, so all
