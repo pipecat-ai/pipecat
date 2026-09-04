@@ -78,22 +78,14 @@ Example::
 """
 
 import asyncio
-import base64
-import mimetypes
 import time
 import traceback
 import warnings
 from collections.abc import Callable
-from pathlib import Path
-from urllib.parse import urlsplit
 
 from loguru import logger
 
-import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
+from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
@@ -104,45 +96,11 @@ from pipecat.evals.results import (
     EvalTurnProgress,
     EvalTurnResult,
 )
-from pipecat.evals.scenario import (
-    FUNCTION_CALL_EVENTS,
-    EvalScenario,
-    EvalSendAfter,
-    EvalTurn,
-    describe_config,
-)
-from pipecat.evals.serializer import (
-    EVAL_CANCEL_MESSAGE_TYPE,
-    EVAL_CONFIGURE_MESSAGE_TYPE,
-    EVAL_CONTEXT_MESSAGE_TYPE,
-    EVAL_IMAGE_MESSAGE_TYPE,
-    HARNESS_STT_SAMPLE_RATE,
-    RTVIHarnessSerializer,
-)
+from pipecat.evals.scenario import EvalScenario, EvalSendAfter, EvalTurn, describe_config
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
-from pipecat.evals.tts import CachingTTSService, tts_sample_rate
-from pipecat.frames.frames import (
-    EndFrame,
-    Frame,
-    InterruptionFrame,
-    OutputTransportMessageUrgentFrame,
-    TTSAudioRawFrame,
-    TTSSpeakFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-)
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
-from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.utils.base_object import BaseObject
-from pipecat.workers.runner import WorkerRunner
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -150,39 +108,6 @@ from pipecat.workers.runner import WorkerRunner
 DEFAULT_EVENT_TIMEOUT_MS = 60000
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
-BOT_READY_TIMEOUT_S = 10.0
-
-
-class _BotFrameSink(FrameProcessor):
-    """Pipeline tap that turns the bot's incoming frames into matcher events.
-
-    Sits between the bot-audio side and the user-audio side of the eval pipeline;
-    for every frame it calls the stream's
-    :meth:`~pipecat.evals.events.EvalEventStream.frames_to_events` and appends
-    the results with :meth:`~pipecat.evals.events.EvalEventStream.append`, then
-    passes the frame on. Outgoing frames (the RTVI client messages the session
-    injects) flow through untouched — they don't map to events.
-
-    It also stops the harness's *computed* interruptions here: the user aggregator
-    runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts an
-    ``InterruptionFrame`` downstream. Letting that reach the user TTS / output would
-    flush the user audio we're paced-sending (dropping a barge-in turn, and the
-    user's side of the recording), so the sink swallows it.
-    """
-
-    def __init__(self, stream: EvalEventStream):
-        super().__init__()
-        self._stream = stream
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        for event in self._stream.frames_to_events(frame):
-            await self._stream.append(event)
-        # The bot-audio VAD's interruption must not propagate into the user-audio
-        # path (user TTS + output); see the class docstring.
-        if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
-            return
-        await self.push_frame(frame, direction)
 
 
 class EvalSession(BaseObject):
@@ -266,41 +191,32 @@ class EvalSession(BaseObject):
 
         self._scenario = scenario
         self._bot_url = bot_url
-        self._connect_timeout_s = connect_timeout_s
         self._default_timeout_ms = default_timeout_ms
-        self._record_path = record_path
-        self._stop_bot = stop_bot
-        # Either the run-wide CLI flag or the scenario's own field opts in.
-        self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
-
-        # The eval pipeline's worker that talks to the bot (built in run()).
-        self._worker: PipelineWorker | None = None
-        # Records the conversation audio (bot + user) when record_path is set and
-        # the scenario is audio mode; fed raw audio by the transport, written in run().
-        self._recorder: HarnessRecorder | None = None
-        # Set by the transport's on_bot_ready handler once the bot completes the
-        # RTVI handshake; _handshake() waits on it.
-        self._bot_ready_event = asyncio.Event()
-        # Timestamped trace of the harness's own decisions, for diagnosing flakes.
-        self._trace = EvalTrace()
-        self._next_id = 0
         self._judge: EvalJudge | None = judge
-
-        # One persistent TTS pipeline reused across the scenario's audio turns,
-        # started in run(); None for text-mode scenarios.
-        self._user_tts: CachingTTSService | None = user_tts
-
-        # The bot's output as events: fed by the pipeline's sink, read by the matcher.
-        self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
-
-        self._matcher = ExpectationMatcher(stream=self._stream, judge=judge, trace=self._trace)
-
-        # response (audio modality): an STT in the eval pipeline transcribes the
-        # bot's actual audio. Only built when a scenario asserts `response`.
+        # response (audio modality): the bot's actual audio, transcribed by an STT
+        # in the client's pipeline. Needs audio mode, so run() skips otherwise.
         self._wants_response: bool = any(
             exp.event == "response" for turn in scenario.turns for exp in turn.expect
         )
-        self._bot_stt: STTService | None = bot_stt
+
+        # Timestamped trace of the harness's own decisions, for diagnosing flakes.
+        self._trace = EvalTrace()
+        # The bot's output as events: fed by the client's pipeline, read by the matcher.
+        self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
+        self._matcher = ExpectationMatcher(stream=self._stream, judge=judge, trace=self._trace)
+        # The connection to the bot: the eval pipeline and the user's sends.
+        self._client = EvalClient(
+            scenario=scenario,
+            bot_url=bot_url,
+            stream=self._stream,
+            trace=self._trace,
+            connect_timeout_s=connect_timeout_s,
+            record_path=record_path,
+            stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
+        )
 
         self._register_event_handler("on_progress")
         if on_progress is not None:
@@ -421,190 +337,70 @@ class EvalSession(BaseObject):
         if self._wants_response and not self._scenario.bot_audio:
             reason = "asserts 'response' transcription but judge modality is text (no audio)"
             logger.warning(f"Eval '{self._scenario.name}': {reason}; skipping")
-            return EvalResult(
-                scenario_name=self._scenario.name,
-                passed=False,
-                turns=turns,
-                skipped=reason,
-                duration_ms=int((time.monotonic() - started) * 1000),
+            return self._result(started, turns, [], skipped=reason)
+
+        # A bot that never accepts is a clean <connect> failure.
+        try:
+            await self._client.wait_for_bot()
+        except (OSError, TimeoutError) as e:
+            failure = EvalAssertionFailure(
+                turn_index=-1,
+                expectation_index=-1,
+                event_name="<connect>",
+                reason=f"failed to connect to {self._bot_url}: {e.__class__.__name__}",
+                kind="connect_failed",
             )
+            return self._result(started, turns, [failure])
 
-        # Readiness wait: the suite spawns a bot and immediately drives it, so retry a
-        # lightweight TCP connect until the bot's server is accepting (this is the only
-        # readiness wait — see EvalSuite). It deliberately does *not* complete the
-        # WebSocket/RTVI handshake: a full connect would fire the bot's
-        # on_client_connected (kicking off a greeting and mutating its context) and then
-        # throw it away, leaving the real session below with a duplicated opening. The
-        # transport owns the one real connection. A bot that never accepts is a clean
-        # <connect> failure.
-        u = urlsplit(self._bot_url)
-        host, port = u.hostname or "localhost", u.port or (443 if u.scheme == "wss" else 80)
-        deadline = time.monotonic() + self._connect_timeout_s
-        connect_error: Exception | None = None
-        ready = False
-        while not ready and time.monotonic() < deadline:
-            try:
-                _reader, writer = await asyncio.open_connection(host, port)
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except OSError:
-                    pass
-                ready = True
-            except OSError as e:  # not accepting connections yet
-                connect_error = e
-                await asyncio.sleep(0.25)
-        if not ready:
-            e = connect_error or TimeoutError("timed out")
-            return EvalResult(
-                scenario_name=self._scenario.name,
-                passed=False,
-                failures=[
-                    EvalAssertionFailure(
-                        turn_index=-1,
-                        expectation_index=-1,
-                        event_name="<connect>",
-                        reason=f"failed to connect to {self._bot_url}: {e.__class__.__name__}",
-                        kind="connect_failed",
-                    )
-                ],
-                turns=turns,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
+        failures = await self._drive(turns)
+        self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
+        return self._result(started, turns, failures)
 
-        # Build one eval pipeline for both modes:
-        #
-        #   input -> [STT -> user aggregator] -> sink -> [user TTS] -> output
-        #
-        # The STT + aggregator (with the aggregator's own VAD) transcribe the bot's
-        # audio into the `response`; the user TTS turns TTSSpeakFrames into the audio
-        # sent to the bot. Each bracketed stage is present only when its service was
-        # built (audio scenarios); in text mode they're simply absent and no audio
-        # flows. The sink turns the bot's frames into matcher events either way.
-        user_audio_rate = (
-            tts_sample_rate(self._scenario.user_speech) if self._scenario.user_speech else 0
+    def _result(
+        self,
+        started: float,
+        turns: list[EvalTurnResult],
+        failures: list[EvalAssertionFailure],
+        skipped: str | None = None,
+    ) -> EvalResult:
+        """Assemble the run's result."""
+        return EvalResult(
+            scenario_name=self._scenario.name,
+            passed=not failures and skipped is None,
+            failures=failures,
+            turns=turns,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            events_seen=self._stream.events_seen,
+            debug_log=self._trace.lines,
+            skipped=skipped,
         )
-        params = WebsocketClientParams(
-            audio_in_enabled=self._scenario.bot_audio,
-            audio_out_enabled=self._sends_user_audio,
-            audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._scenario.bot_audio else 0,
-            audio_out_sample_rate=user_audio_rate,
-            serializer=RTVIHarnessSerializer(),
-        )
-        # Record the conversation from the *raw* audio the transport sees on each
-        # edge (the user TTS as produced, the bot's chunks as received), not the
-        # paced/filled pipeline frames: Python can't hold the 40ms pacing tick
-        # precisely, and recording the paced streams stutters. The recorder
-        # reconstructs gapless turns and pads only the real between-turn pauses.
-        if self._record_path and self._scenario.bot_audio:
-            self._recorder = HarnessRecorder(user_audio_rate or HARNESS_STT_SAMPLE_RATE)
-        # EvalHarnessTransport reshapes both audio edges into the continuous
-        # real-time stream VAD/STT expect: its output paces the user TTS to the bot
-        # and its input fills gaps in the bot's audio (both audio-mode only). When a
-        # recorder is set, both edges also feed it the raw audio for the recording.
-        transport = EvalHarnessTransport(self._connect_url(), params, recorder=self._recorder)
 
-        @transport.event_handler("on_bot_ready")
-        async def _on_bot_ready(_transport):
-            self._bot_ready_event.set()
-
-        sink = _BotFrameSink(self._stream)
-        processors: list = [transport.input()]
-        if self._bot_stt is not None:
-            user_aggregator = LLMContextAggregatorPair(
-                LLMContext(),
-                user_params=LLMUserAggregatorParams(
-                    vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
-                ),
-            ).user()
-
-            # The aggregator consumes the STT's TranscriptionFrames to build the
-            # bot's turn, so the response comes from the aggregated turn text here
-            # (not from a frame at the sink). This is also the judge hook for sims.
-            # Skip while awaiting an LLM restart: an interrupted turn finalizes
-            # *after* the interruption, and that straggler must not be matched
-            # against the next turn (mirrors the llm_response suppression).
-            @user_aggregator.event_handler("on_user_turn_stopped")
-            async def _on_user_turn_stopped(_aggregator, _strategy, message):
-                if message.content and not self._stream.awaiting_llm_restart:
-                    await self._stream.append({"type": "response", "text": message.content})
-
-            processors += [self._bot_stt, user_aggregator]
-        processors.append(sink)
-        if self._user_tts is not None:
-            # The user TTS speaks only the harness's TTSSpeakFrames; the bot's text
-            # flowing past it is passed through unspoken (see CachingTTSService), so
-            # no echo and no gate needed.
-            processors.append(self._user_tts)
-        processors.append(transport.output())
-        pipeline = Pipeline(processors)
-        # The StartFrame's rates drive the in-pipeline services: the bot-audio STT
-        # reads `audio_in_sample_rate`, the user TTS produces `audio_out_sample_rate`.
-        # Set them from the scenario so the user TTS synthesizes at the configured
-        # user_audio rate rather than the PipelineParams `audio_out` default (a
-        # mismatch that would mislabel the cached audio). Text-mode scenarios have no
-        # audio in/out, so the STT rate is a harmless placeholder for `audio_out`.
-        worker = PipelineWorker(
-            pipeline,
-            params=PipelineParams(
-                audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE,
-                audio_out_sample_rate=user_audio_rate or HARNESS_STT_SAMPLE_RATE,
-            ),
-            enable_rtvi=False,
-            cancel_on_idle_timeout=False,
-        )
-        self._worker = worker
-        runner = WorkerRunner()
-        await runner.add_workers(worker)
-        run_task = asyncio.create_task(runner.run())
-
+    async def _drive(self, turns: list[EvalTurnResult]) -> list[EvalAssertionFailure]:
+        """Start the client, run the handshake and the turns, and tear down."""
+        await self._client.start()
         failures: list[EvalAssertionFailure] = []
         try:
-            # The STT and user TTS run inside the pipeline (started by the worker
-            # above); the judge runs out-of-band during matching. Everything below
-            # is under this `try` so a service that fails to start (e.g. a local
-            # model under load) surfaces as a failure rather than propagating raw.
+            # The STT and user TTS run inside the client's pipeline; the judge runs
+            # out-of-band during matching. Everything below is under this `try` so
+            # a service that fails to start (e.g. a local model under load)
+            # surfaces as a failure rather than propagating raw.
             self._trace.log("connected")
             try:
-                await self._handshake()
+                await self._client.handshake()
                 self._trace.log("handshake: ok (bot-ready)")
-            except TimeoutError:
+            except TimeoutError as e:
                 self._trace.log("handshake: failed (bot-ready not received)")
                 failures.append(
                     EvalAssertionFailure(
                         turn_index=-1,
                         expectation_index=-1,
                         event_name="<bot-ready>",
-                        reason=f"bot-ready not received within {int(BOT_READY_TIMEOUT_S * 1000)}ms",
+                        reason=str(e),
                         kind="handshake_timeout",
                     )
                 )
             else:
-                for turn_idx, turn in enumerate(self._scenario.turns):
-                    self._trace.turn = turn_idx
-                    self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
-                    turn_started = time.monotonic()
-                    turn_failures = await self._run_turn(turn, turn_idx)
-                    record = turns[turn_idx]
-                    record.status = "failed" if turn_failures else "passed"
-                    record.failures = turn_failures
-                    record.duration_ms = int((time.monotonic() - turn_started) * 1000)
-                    failures.extend(turn_failures)
-                    if turn_failures:
-                        # By default a failed turn ends the scenario: it leaves the
-                        # conversation in an unknown state, so running the rest just
-                        # burns another timeout per turn (e.g. a broken greeting turn
-                        # shouldn't cost the full budget here and again on the
-                        # question). A scenario whose turns are scored independently
-                        # sets stop_on_failure: false and drives all of them.
-                        if self._scenario.stop_on_failure:
-                            self._trace.log(
-                                f"turn {turn_idx} failed; stopping scenario (stop_on_failure)"
-                            )
-                            break
-                        self._trace.log(
-                            f"turn {turn_idx} failed; continuing (stop_on_failure: false)"
-                        )
+                failures = await self._run_turns(turns)
         except Exception as e:
             # An unexpected harness-side error (a sub-pipeline failing to start
             # under load, a judge/transcriber raising mid-turn, ...) would
@@ -631,189 +427,37 @@ class EvalSession(BaseObject):
                 record.status = "failed"
                 record.failures.append(failure)
         finally:
-            # Write the recording now that the conversation is done (the recorder is
-            # harness-owned, fed raw audio by the transport, so nothing in teardown
-            # clears it -- but write here so it lands even if teardown below raises).
-            await self._write_recording()
-            # Optionally ask the bot to tear its pipeline down gracefully so it exits
-            # on its own (best-effort; skipped by default so it stays up for more
-            # scenarios).
-            if self._stop_bot:
-                await self._send_cancel()
-            # Stop the eval pipeline: end the worker (which disconnects the
-            # transport), falling back to cancel if it doesn't wind down cleanly.
-            try:
-                await self._worker.queue_frame(EndFrame())
-                await asyncio.wait_for(run_task, timeout=5.0)
-            except (TimeoutError, asyncio.CancelledError, Exception):
-                run_task.cancel()
-                try:
-                    await run_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            await self._client.stop()
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
+        return failures
 
-        self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
-        return EvalResult(
-            scenario_name=self._scenario.name,
-            passed=not failures,
-            failures=failures,
-            turns=turns,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            events_seen=self._stream.events_seen,
-            debug_log=self._trace.lines,
-        )
-
-    @property
-    def _sends_user_audio(self) -> bool:
-        """Whether any user turn reaches the bot as audio, synthesized or from a file."""
-        return self._user_tts is not None or any(t.audio for t in self._scenario.turns)
-
-    async def _write_recording(self) -> None:
-        """Write the recorded conversation audio (bot + user) to ``record_path``."""
-        if self._recorder is None or not self._record_path or not self._recorder.has_audio():
-            return
-        if await self._recorder.write(self._record_path):
-            self._trace.log(f"recording saved: {self._record_path}")
-
-    def _connect_url(self) -> str:
-        """Bot URL with the per-connection eval query flags.
-
-        ``skip_tts`` (text mode) silences the bot before any LLM runs; the eval
-        transport must read it at connect time because frames are ordered and a
-        later message can't precede an on-connect greeting (see
-        :mod:`pipecat.evals.transport`). ``capture_bot_audio`` makes the bot forward
-        its synthesized audio to the harness, both for ``response``/``tts_response``
-        transcription and so the harness can record the bot's side (recording itself
-        is harness-side now). ``trigger_disconnect`` asks the transport to fire the
-        bot's ``on_client_disconnected`` handler when the connection ends (off by
-        default, since bots often cancel there).
-        """
-        flags = []
-        if not self._scenario.bot_audio:
-            flags.append("skip_tts=true")
-        # Forward the bot's audio when a scenario asserts on it (response) or when
-        # recording an audio scenario (the harness records the bot's side from it).
-        if self._wants_response or (self._record_path and self._scenario.bot_audio):
-            flags.append("capture_bot_audio=true")
-        if self._trigger_disconnect:
-            flags.append("trigger_disconnect=true")
-        if not flags:
-            return self._bot_url
-        sep = "&" if "?" in self._bot_url else "?"
-        return f"{self._bot_url}{sep}{'&'.join(flags)}"
-
-    def _message_id(self) -> str:
-        self._next_id += 1
-        return str(self._next_id)
-
-    def _required_report_level(self) -> str | None:
-        """Minimal function-call report level the scenario's assertions need.
-
-        Returns ``"full"`` if any ``function_call`` expectation checks ``args``,
-        ``"name"`` if one checks ``name`` only, else ``None`` (no elevation —
-        the bot's default applies and a function_call event still arrives).
-        """
-        needs_name = False
-        for turn in self._scenario.turns:
-            for exp in turn.expect:
-                if exp.event not in FUNCTION_CALL_EVENTS:
-                    continue
-                # name/args live in exp.calls (the parser normalizes the single
-                # name:/args: shorthand into it too).
-                for call in exp.calls or []:
-                    if call.args is not None:
-                        return "full"
-                    if call.name is not None:
-                        needs_name = True
-        return "name" if needs_name else None
-
-    def _needs_vad_events(self) -> bool:
-        """Whether the scenario references raw VAD speaking events.
-
-        These (``vad_user_started_speaking`` / ``vad_user_stopped_speaking``) are
-        off by default; the harness asks the bot's RTVIObserver to emit them only
-        when a scenario asserts on or schedules from them.
-        """
-        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
-        for turn in self._scenario.turns:
-            if turn.send_after is not None and turn.send_after.event in vad_events:
-                return True
-            if any(exp.event in vad_events for exp in turn.expect):
-                return True
-        return False
-
-    async def _handshake(self) -> None:
-        """Send client-ready, wait for bot-ready, then optionally seed context.
-
-        ``bot-ready`` is a hard gate: the eval framework requires an RTVI bot, so a
-        bot that never announces readiness either isn't a valid eval target or
-        hasn't finished starting (services still connecting). Rather than fire
-        turns at a half-started bot — which produces flaky, hard-to-read failures —
-        we raise :class:`TimeoutError` so the caller reports a clean connect-level
-        failure.
-        """
-        # The transport sends client-ready on connect and fires on_bot_ready when
-        # the bot answers; our handler sets _bot_ready_event. Hard gate — raises
-        # TimeoutError if the bot never announces readiness.
-        await asyncio.wait_for(self._bot_ready_event.wait(), timeout=BOT_READY_TIMEOUT_S)
-
-        # Ask the bot's RTVIObserver to expose what this scenario needs, for the
-        # duration of this eval only (bots keep their defaults; only the eval
-        # transport understands this): raise the function-call report level if it
-        # asserts on call name/args, and enable raw VAD speaking events if it uses
-        # them.
-        level = self._required_report_level()
-        vad = self._needs_vad_events()
-        if level is not None or vad:
-            config: dict = {}
-            if level is not None:
-                config["function_call_report_level"] = {"*": level}
-            if vad:
-                config["vad_user_speaking"] = True
-            configure = RTVI.Message(
-                type="client-message",
-                id=self._message_id(),
-                data={"t": EVAL_CONFIGURE_MESSAGE_TYPE, "d": config},
-            )
-            await self._send(configure)
-
-        # Only send the eval-context when the scenario provides starting context.
-        # An implicit empty one would race with bot startup flows (e.g. a greeting
-        # added in on_client_connected), wiping the bot's context right after it
-        # set it up.
-        if self._scenario.context:
-            context_message = RTVI.Message(
-                type="client-message",
-                id=self._message_id(),
-                data={"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {"messages": self._scenario.context}},
-            )
-            await self._send(context_message)
-
-    async def _send(self, message: RTVI.Message) -> None:
-        """Send an RTVI client message to the bot through the transport pipeline."""
-        assert self._worker is not None  # pipeline built before any send
-        await self._worker.queue_frame(
-            OutputTransportMessageUrgentFrame(message=message.model_dump())
-        )
-
-    async def _send_cancel(self) -> None:
-        """Ask the bot to cancel its pipeline so it shuts down gracefully.
-
-        Best-effort: the connection may already be gone, in which case the
-        orchestrator's kill fallback handles teardown.
-        """
-        try:
-            message = RTVI.Message(
-                type="client-message",
-                id=self._message_id(),
-                data={"t": EVAL_CANCEL_MESSAGE_TYPE, "d": {}},
-            )
-            await self._send(message)
-        except Exception:
-            pass
+    async def _run_turns(self, turns: list[EvalTurnResult]) -> list[EvalAssertionFailure]:
+        """Drive the scenario's turns in order, filling in their records."""
+        failures: list[EvalAssertionFailure] = []
+        for turn_idx, turn in enumerate(self._scenario.turns):
+            self._trace.turn = turn_idx
+            self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
+            turn_started = time.monotonic()
+            turn_failures = await self._run_turn(turn, turn_idx)
+            record = turns[turn_idx]
+            record.status = "failed" if turn_failures else "passed"
+            record.failures = turn_failures
+            record.duration_ms = int((time.monotonic() - turn_started) * 1000)
+            failures.extend(turn_failures)
+            if turn_failures:
+                # By default a failed turn ends the scenario: it leaves the
+                # conversation in an unknown state, so running the rest just
+                # burns another timeout per turn (e.g. a broken greeting turn
+                # shouldn't cost the full budget here and again on the
+                # question). A scenario whose turns are scored independently
+                # sets stop_on_failure: false and drives all of them.
+                if self._scenario.stop_on_failure:
+                    self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
+                    break
+                self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
+        return failures
 
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
@@ -873,7 +517,7 @@ class EvalSession(BaseObject):
         # Register the turn's image (if any) before the user input, so the bot can
         # serve it when it requests a user image during the turn.
         if turn.image is not None:
-            await self._send_image(turn.image)
+            await self._client.send_image(turn.image)
 
         # Anything still queued belongs to an earlier turn: this turn's input hasn't
         # been sent, so the bot cannot have responded to it yet. Drop it, or an
@@ -891,21 +535,21 @@ class EvalSession(BaseObject):
             self._stream.drop_pending_bot_output("before send")
 
         if turn.user is not None:
-            how = turn.audio or ("audio" if self._user_tts is not None else "text")
+            how = turn.audio or ("audio" if self._client.has_user_tts else "text")
             self._trace.log(f"send: {turn.user!r} ({how})")
             if turn.audio is not None:
-                await self._send_audio_file(turn.audio)
-            elif self._user_tts is not None:
-                await self._send_user_audio(turn.user)
+                await self._client.play(turn.audio)
+            elif self._client.has_user_tts:
+                await self._client.say(turn.user)
             else:
-                await self._send_user_text(turn.user, self._scenario.bot_audio)
+                await self._client.send_text(turn.user, audio_response=self._scenario.bot_audio)
             # Record the user turn in the judge's conversation, so a later reply is
             # judged in context (e.g. a terse "That's four" answering this question).
             if self._judge is not None:
                 self._judge.add_user_message(turn.user)
         elif turn.dtmf is not None:
             self._trace.log(f"send: dtmf {turn.dtmf!r}")
-            await self._send_user_dtmf(turn.dtmf)
+            await self._client.send_dtmf(turn.dtmf)
             # Record the keypresses for judge context, so the bot's reply is judged
             # knowing what was pressed.
             if self._judge is not None:
@@ -966,85 +610,6 @@ class EvalSession(BaseObject):
                 )
 
         return failures
-
-    async def _send_user_text(self, text: str, bot_audio: bool) -> None:
-        """Send a text user turn via the RTVI ``send-text`` message.
-
-        ``audio_response`` mirrors the scenario's ``bot_audio``: when False the
-        LLM bypasses TTS for this turn (content-only evals).
-        """
-        message = RTVI.Message(
-            type="send-text",
-            id=self._message_id(),
-            data=RTVI.SendTextData(
-                content=text,
-                options=RTVI.SendTextOptions(run_immediately=True, audio_response=bot_audio),
-            ).model_dump(),
-        )
-        await self._send(message)
-
-    async def _send_user_dtmf(self, keys: str) -> None:
-        """Send a DTMF keypress turn as one RTVI ``dtmf`` message.
-
-        The bot's ``RTVIProcessor`` turns each key into an ``InputDTMFFrame``
-        pushed downstream, the same path a telephony transport's keypress takes.
-        The bot's ``DTMFAggregator`` (if any) accumulates them and flushes — on
-        the ``#`` terminator or its idle timeout — into a transcription the bot
-        reacts to. Use ``send_after`` across turns to pace key sequences.
-        """
-        message = RTVI.Message(
-            type="dtmf",
-            id=self._message_id(),
-            data={"buttons": list(keys)},
-        )
-        await self._send(message)
-
-    async def _send_image(self, image_path: str) -> None:
-        """Register an image (base64, with its MIME type) for the current turn.
-
-        The eval transport serves it back as a ``UserImageRawFrame`` when the bot
-        requests a user image. The file is sent as-is (already PNG/JPEG/...), so
-        nothing is decoded or re-encoded.
-        """
-        path = Path(image_path)
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-        self._trace.log(f"send: image {path.name} ({mime})")
-        message = RTVI.Message(
-            type="client-message",
-            id=self._message_id(),
-            data={"t": EVAL_IMAGE_MESSAGE_TYPE, "d": {"image": encoded, "format": mime}},
-        )
-        await self._send(message)
-
-    async def _send_user_audio(self, text: str) -> None:
-        """Speak ``text`` as the user by pushing a ``TTSSpeakFrame`` into the pipeline.
-
-        The user TTS (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to
-        audio (cached), which the output transport
-        (:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`) paces
-        to the bot as a continuous real-time stream.
-        """
-        assert self._worker is not None  # pipeline built before any send
-        await self._worker.queue_frame(TTSSpeakFrame(text))
-
-    async def _send_audio_file(self, path: str) -> None:
-        """Play a turn's ``audio:`` recording to the bot in place of synthesizing it.
-
-        The recording is spoken exactly like a user TTS utterance: one audio frame
-        bracketed by ``TTSStartedFrame`` / ``TTSStoppedFrame``, pushed into the
-        pipeline. The output transport resamples it to the user-audio rate, paces
-        it to the bot, flushes its final partial chunk on the stop frame, and
-        records it.
-        """
-        assert self._worker is not None  # pipeline built before any send
-        pcm, sample_rate = await load_user_audio(path)
-        for frame in (
-            TTSStartedFrame(),
-            TTSAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
-            TTSStoppedFrame(),
-        ):
-            await self._worker.queue_frame(frame)
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.

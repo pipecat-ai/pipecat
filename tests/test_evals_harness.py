@@ -31,6 +31,7 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
+from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.harness import EvalSession
 from pipecat.evals.matcher import ExpectationMatcher
@@ -73,6 +74,15 @@ def _stream(bot_audio: bool = False) -> EvalEventStream:
 
 def _matcher(judge=None, bot_audio: bool = False) -> ExpectationMatcher:
     return ExpectationMatcher(stream=_stream(bot_audio), judge=judge, trace=EvalTrace())
+
+
+def _client(
+    scenario: EvalScenario | None = None, bot_audio: bool = False, bot_url: str = "ws://localhost:0"
+) -> EvalClient:
+    scenario = scenario or EvalScenario(name="t", turns=[], bot_audio=bot_audio)
+    return EvalClient(
+        scenario=scenario, bot_url=bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
+    )
 
 
 class TestFramesToEvents(unittest.TestCase):
@@ -345,7 +355,7 @@ class TestRequiredReportLevel(unittest.TestCase):
         scenario = EvalScenario(
             name="t", bot_audio=False, turns=[EvalTurn(user="x", expect=list(expects))]
         )
-        return EvalSession(scenario, "ws://localhost:0")._required_report_level()
+        return _client(scenario)._required_report_level()
 
     def test_none_without_function_call(self):
         self.assertIsNone(self._level(EvalExpectation(event="llm_response")))
@@ -379,7 +389,7 @@ class TestNeedsVadEvents(unittest.TestCase):
 
     def _needs(self, turn: EvalTurn) -> bool:
         scenario = EvalScenario(name="t", turns=[turn])
-        return EvalSession(scenario, "ws://localhost:0")._needs_vad_events()
+        return _client(scenario)._needs_vad_events()
 
     def test_false_without_vad_events(self):
         self.assertFalse(
@@ -410,7 +420,7 @@ class TestConnectURL(unittest.TestCase):
 
     def _url(self, bot_audio: bool, base: str = "ws://localhost:7860") -> str:
         scenario = EvalScenario(name="t", turns=[], bot_audio=bot_audio)
-        return EvalSession(scenario, base)._connect_url()
+        return _client(scenario, bot_url=base)._connect_url()
 
     def test_text_mode_adds_skip_tts(self):
         self.assertEqual(self._url(bot_audio=False), "ws://localhost:7860?skip_tts=true")
@@ -430,7 +440,7 @@ class TestConnectURL(unittest.TestCase):
             bot_audio=True,
             turns=[EvalTurn(user="x", expect=[EvalExpectation(event="response", eval="ok")])],
         )
-        url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
+        url = _client(scenario, bot_url="ws://localhost:7860")._connect_url()
         self.assertIn("capture_bot_audio=true", url)
         self.assertNotIn("skip_tts", url)  # audio mode, so no skip
 
@@ -438,9 +448,9 @@ class TestConnectURL(unittest.TestCase):
         # Text-mode scenarios silence the bot (skip_tts before any greeting);
         # audio-mode scenarios let it speak.
         text = EvalScenario(name="t", turns=[], bot_audio=False)
-        self.assertIn("skip_tts=true", EvalSession(text, "ws://localhost:7860")._connect_url())
+        self.assertIn("skip_tts=true", _client(text, bot_url="ws://localhost:7860")._connect_url())
         audio = EvalScenario(name="t", turns=[], bot_audio=True)
-        self.assertNotIn("skip_tts", EvalSession(audio, "ws://localhost:7860")._connect_url())
+        self.assertNotIn("skip_tts", _client(audio, bot_url="ws://localhost:7860")._connect_url())
 
 
 class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
@@ -490,7 +500,7 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
     async def test_send_user_audio_queues_tts_speak_frame(self):
         from pipecat.frames.frames import TTSSpeakFrame
 
-        s = _session(bot_audio=True)
+        s = _client(bot_audio=True)
         queued: list = []
 
         class _FakeWorker:
@@ -498,7 +508,7 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
                 queued.append(frame)
 
         s._worker = _FakeWorker()
-        await s._send_user_audio("hello world")
+        await s.say("hello world")
 
         self.assertEqual(len(queued), 1)
         self.assertIsInstance(queued[0], TTSSpeakFrame)
@@ -536,9 +546,9 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         d = Path(tempfile.mkdtemp())
         tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
 
-        s = _session(bot_audio=True)
+        s = _client(bot_audio=True)
         queued = self._capture_queued(s)
-        await s._send_audio_file(str(d / "hi.wav"))
+        await s.play(str(d / "hi.wav"))
 
         # Bracketed like the user TTS's output, so the output transport flushes
         # the utterance's final partial chunk on the stop frame.
@@ -555,9 +565,9 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         d = Path(tempfile.mkdtemp())
         self._write_tone(d / "hi.wav", sample_rate=44100, seconds=0.5)
 
-        s = _session(bot_audio=True)
+        s = _client(bot_audio=True)
         queued = self._capture_queued(s)
-        await s._send_audio_file(str(d / "hi.wav"))
+        await s.play(str(d / "hi.wav"))
 
         self.assertEqual(len(queued), 3)
         self.assertEqual(queued[1].sample_rate, 44100)
@@ -589,39 +599,39 @@ class TestAudioFileEnablesUserAudio(unittest.TestCase):
             user_audio=True,
             turns=[EvalTurn(user="hi", audio="hi.wav", expect=[])],
         )
-        self.assertTrue(EvalSession(scenario, "ws://localhost:7860")._sends_user_audio)
+        self.assertTrue(_client(scenario).sends_user_audio)
 
     def test_text_turns_do_not(self):
         scenario = EvalScenario(name="t", bot_audio=True, turns=[EvalTurn(user="hi", expect=[])])
-        self.assertFalse(EvalSession(scenario, "ws://localhost:7860")._sends_user_audio)
+        self.assertFalse(_client(scenario).sends_user_audio)
 
 
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
     """A dtmf turn sends one RTVI ``dtmf`` message with all keys."""
 
     async def test_send_user_dtmf_single_message_with_all_keys(self):
-        s = _session()
+        s = _client()
         sent: list[RTVI.Message] = []
 
         async def fake_send(message):
             sent.append(message)
 
-        s._send = fake_send
-        await s._send_user_dtmf("12#")
+        s.send = fake_send
+        await s.send_dtmf("12#")
 
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0].type, "dtmf")
         self.assertEqual(sent[0].data["buttons"], ["1", "2", "#"])
 
     async def test_send_user_dtmf_single_key(self):
-        s = _session()
+        s = _client()
         sent: list[RTVI.Message] = []
 
         async def fake_send(message):
             sent.append(message)
 
-        s._send = fake_send
-        await s._send_user_dtmf("1")
+        s.send = fake_send
+        await s.send_dtmf("1")
 
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0].type, "dtmf")
