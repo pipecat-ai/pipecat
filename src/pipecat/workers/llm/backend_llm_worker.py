@@ -12,7 +12,7 @@ speech-to-speech model delegating on its own, or a pipeline calling a tool.
 A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work: over the worker job API it
 streams back everything it produces and returns its final answer.
-:func:`run_backend_job` is the caller side of that contract.
+:func:`delegate_to_backend` is the caller side of that contract.
 
 A request is text, so how a frontend words one is its own business.
 :func:`render_transcript_request` renders the conversation as a labelled
@@ -221,7 +221,7 @@ class BackendLLMWorker(LLMContextWorker):
     reads the updates, while one that needs a return value (a tool handler,
     say) reads the response and skips updates marked ``is_final``.
 
-    :func:`run_backend_job` wraps the caller side.
+    :func:`delegate_to_backend` wraps the caller side.
 
     Example::
 
@@ -353,7 +353,7 @@ class BackendLLMWorker(LLMContextWorker):
             await self.send_job_update(run.job_id, output.to_payload())
 
 
-async def run_backend_job(
+async def delegate_to_backend(
     worker: BaseWorker,
     backend_name: str,
     *,
@@ -373,7 +373,7 @@ async def run_backend_job(
             signals a handoff without wording a request. A frontend whose
             model does word one can send it as it stands::
 
-                await run_backend_job(worker, "backend", request=task)
+                await delegate_to_backend(worker, "backend", request=task)
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling

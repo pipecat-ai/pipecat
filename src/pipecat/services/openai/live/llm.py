@@ -62,8 +62,8 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     BackendOutput,
+    delegate_to_backend,
     render_transcript_request,
-    run_backend_job,
 )
 
 from . import events
@@ -935,7 +935,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         try:
             # Every output, the final answer included, arrives through
             # on_update, so the job's return value is not needed here.
-            await run_backend_job(
+            await delegate_to_backend(
                 self.pipeline_worker,
                 config.backend.name,
                 request=request,

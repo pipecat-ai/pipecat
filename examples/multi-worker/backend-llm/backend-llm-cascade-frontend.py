@@ -57,8 +57,8 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import (
     BackendLLMWorker,
     BackendOutput,
+    delegate_to_backend,
     render_transcript_request,
-    run_backend_job,
 )
 from pipecat.workers.runner import WorkerRunner
 
@@ -176,7 +176,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 properties=FunctionCallResultProperties(is_final=False, run_llm=output.speakable),
             )
 
-        text = await run_backend_job(
+        text = await delegate_to_backend(
             params.pipeline_worker,
             BACKEND_NAME,
             request=render_transcript_request(conversation, first=first),

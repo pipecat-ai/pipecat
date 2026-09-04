@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for BackendLLMWorker and run_backend_job.
+"""Unit tests for BackendLLMWorker and delegate_to_backend.
 
 A scripted LLM service stands in for the backend model: each LLMContextFrame
 plays the next scripted response (text and/or function calls), so the tests
@@ -33,7 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm import BackendLLMWorker, run_backend_job
+from pipecat.workers.llm import BackendLLMWorker, delegate_to_backend
 from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_transcript_request
 from pipecat.workers.runner import WorkerRunner
 
@@ -156,7 +156,7 @@ async def _run_backend(
 
     async def body():
         try:
-            result["text"] = await run_backend_job(
+            result["text"] = await delegate_to_backend(
                 requester, "backend", request=request, on_update=on_update, timeout_secs=10
             )
         finally:
@@ -303,12 +303,12 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
 
     async def body():
         try:
-            await run_backend_job(
+            await delegate_to_backend(
                 requester,
                 "backend",
                 request=render_transcript_request([{"role": "user", "content": "one"}], first=True),
             )
-            await run_backend_job(
+            await delegate_to_backend(
                 requester,
                 "backend",
                 request=render_transcript_request(

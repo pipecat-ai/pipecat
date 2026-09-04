@@ -903,13 +903,13 @@ class _FakeBackend:
     name = "backend"
 
 
-async def _client_delegation_service(monkeypatch, run_backend_job):
+async def _client_delegation_service(monkeypatch, delegate_to_backend):
     service = await _make_service_with_tasks(
         delegation=OpenAILiveLLMService.ClientDelegation(backend=_FakeBackend(), timeout_secs=5)
     )
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    monkeypatch.setattr(live_llm, "run_backend_job", run_backend_job)
+    monkeypatch.setattr(live_llm, "delegate_to_backend", delegate_to_backend)
     monkeypatch.setattr(type(service), "pipeline_worker", property(lambda self: "worker"))
     return service, recorder
 
@@ -922,7 +922,7 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, request, on_update, timeout_secs):
+    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
         calls.append((worker, backend_name, request, timeout_secs))
         await on_update(BackendOutput(text="Checking the weather.", speakable=True))
         await on_update(BackendOutput(text="Still looking.", is_thought=True, speakable=False))
@@ -931,7 +931,7 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
         )
         return "It's 62 and raining in Seattle."
 
-    service, recorder = await _client_delegation_service(monkeypatch, fake_run_backend_job)
+    service, recorder = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
 
     await _drive(
         service,
@@ -975,11 +975,11 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     """Frame-boundary fragments are joined back up, spacing and all."""
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, request, on_update, timeout_secs):
+    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
         calls.append(request)
         return ""
 
-    service, _ = await _client_delegation_service(monkeypatch, fake_run_backend_job)
+    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
 
     await _drive(
         service,
@@ -1006,10 +1006,10 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
-    async def failing_run_backend_job(*args, **kwargs):
+    async def failing_delegate_to_backend(*args, **kwargs):
         raise JobError("timed out")
 
-    service, recorder = await _client_delegation_service(monkeypatch, failing_run_backend_job)
+    service, recorder = await _client_delegation_service(monkeypatch, failing_delegate_to_backend)
     service.push_error = AsyncMock()
 
     await service._run_client_delegation(_client_delegation("item_d1"))
@@ -1021,12 +1021,12 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
-    async def run_backend_job(*args, on_update, **kwargs):
+    async def delegate_to_backend(*args, on_update, **kwargs):
         text = " ".join(f"Sentence number {i} is here." for i in range(120))
         await on_update(BackendOutput(text=text, speakable=True))
         return ""
 
-    service, recorder = await _client_delegation_service(monkeypatch, run_backend_job)
+    service, recorder = await _client_delegation_service(monkeypatch, delegate_to_backend)
     await service._run_client_delegation(_client_delegation("item_d1"))
 
     appends = recorder.of_type("session.commentary.append")
