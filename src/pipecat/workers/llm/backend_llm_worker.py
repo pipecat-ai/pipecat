@@ -324,7 +324,10 @@ class BackendLLMWorker(LLMContextWorker):
         run.runs_completed += 1
         # A further run is on the way while a tool call is in flight, or while
         # a re-run is queued that the LLM hasn't picked up yet (a tool that
-        # returns before its response ends queues one early).
+        # returns before its response ends queues one early). The check assumes
+        # a settled tool call leaves the LLM something more to do: a tool that
+        # returns no result, or passes run_llm=False, runs nothing further, so
+        # the delegation waits out the caller's timeout.
         finished = (
             run.runs_completed >= run.runs_requested
             and not self.assistant_aggregator.has_function_calls_in_progress
