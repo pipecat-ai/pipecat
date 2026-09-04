@@ -290,8 +290,8 @@ class _BotFrameSink(FrameProcessor):
 
     Sits between the bot-audio side and the user-audio side of the eval pipeline;
     for every frame it calls back into the session's
-    :meth:`EvalSession._frames_to_events` and enqueues the results for the
-    matcher, then passes the frame on. Outgoing frames (the RTVI client messages
+    :meth:`EvalSession.frames_to_events` and appends the results for the
+    matcher with :meth:`EvalSession.append_event`, then passes the frame on. Outgoing frames (the RTVI client messages
     the session injects) flow through untouched — they don't map to events.
 
     It also stops the harness's *computed* interruptions here: the user aggregator
@@ -307,8 +307,8 @@ class _BotFrameSink(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        for event in self._session._frames_to_events(frame):
-            await self._session._enqueue(event)
+        for event in self._session.frames_to_events(frame):
+            await self._session.append_event(event)
         # The bot-audio VAD's interruption must not propagate into the user-audio
         # path (user TTS + output); see the class docstring.
         if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
@@ -679,7 +679,7 @@ class EvalSession(BaseObject):
             @user_aggregator.event_handler("on_user_turn_stopped")
             async def _on_user_turn_stopped(_aggregator, _strategy, message):
                 if message.content and not self._awaiting_llm_restart:
-                    await self._enqueue({"type": "response", "text": message.content})
+                    await self.append_event({"type": "response", "text": message.content})
 
             processors += [self._bot_stt, user_aggregator]
         processors.append(sink)
@@ -978,8 +978,18 @@ class EvalSession(BaseObject):
         tag = f"t{self._current_turn}" if self._current_turn >= 0 else "--"
         self._debug_log.append(f"{t:8.3f}  [{tag:>3}]  {msg}")
 
-    async def _enqueue(self, event: dict) -> None:
-        """Record and queue a friendly event for the matcher."""
+    async def append_event(self, event: dict) -> None:
+        """Append a bot event for the matcher.
+
+        Records the event in the result's ``events_seen``, stamps its arrival
+        time for ``send_after`` anchoring, and queues it for the turn's
+        expectations. The pipeline's bot-frame sink appends the events it
+        translates with :meth:`frames_to_events`; the audio-mode ``response`` is
+        appended when the user aggregator finishes the bot's turn.
+
+        Args:
+            event: The event dict, with at least a ``type``.
+        """
         self._events_seen.append(event)
         self._latest_event_times[event["type"]] = time.monotonic()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
@@ -1022,7 +1032,7 @@ class EvalSession(BaseObject):
         """Translate one RTVI server message into zero or more friendly events.
 
         .. note::
-            Superseded by :meth:`_frames_to_events` now that the harness consumes
+            Superseded by :meth:`frames_to_events` now that the harness consumes
             the transport's frames; kept (with ``TestTranslate``) as the reference
             for the message-name -> event mapping.
         """
@@ -1114,7 +1124,7 @@ class EvalSession(BaseObject):
             case _:
                 return []
 
-    def _frames_to_events(self, frame: Frame) -> list[dict]:
+    def frames_to_events(self, frame: Frame) -> list[dict]:
         """Translate one incoming pipeline frame into zero or more friendly events.
 
         The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
@@ -1129,6 +1139,12 @@ class EvalSession(BaseObject):
         ``response`` comes from the user aggregator's ``on_user_turn_stopped`` (it
         consumes the STT's ``TranscriptionFrame``s, so they never reach here), and
         the aggregator's own VAD/speaking frames are internal plumbing, ignored here.
+
+        Args:
+            frame: A frame the bot-facing transport produced.
+
+        Returns:
+            The events the frame maps to, in order (often none).
         """
         if isinstance(frame, InputTransportMessageFrame):
             return self._message_to_events(frame.message)

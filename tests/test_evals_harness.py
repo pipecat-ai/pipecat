@@ -73,13 +73,11 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_llm_lifecycle_aggregates_text(self):
         s = _session(bot_audio=False)
+        self.assertEqual(s.frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}])
+        self.assertEqual(s.frames_to_events(LLMTextFrame(text="Hello ")), [])
+        self.assertEqual(s.frames_to_events(LLMTextFrame(text="world")), [])
         self.assertEqual(
-            s._frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}]
-        )
-        self.assertEqual(s._frames_to_events(LLMTextFrame(text="Hello ")), [])
-        self.assertEqual(s._frames_to_events(LLMTextFrame(text="world")), [])
-        self.assertEqual(
-            self._one(s._frames_to_events(LLMFullResponseEndFrame())),
+            self._one(s.frames_to_events(LLMFullResponseEndFrame())),
             {"type": "llm_response", "text": "Hello world"},
         )
 
@@ -88,17 +86,17 @@ class TestFramesToEvents(unittest.TestCase):
         interrupt = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
         )
-        s._frames_to_events(LLMFullResponseStartFrame())
-        s._frames_to_events(LLMTextFrame(text="Tell me about Paris"))
-        self.assertEqual(s._frames_to_events(interrupt), [{"type": "bot_interrupted"}])
+        s.frames_to_events(LLMFullResponseStartFrame())
+        s.frames_to_events(LLMTextFrame(text="Tell me about Paris"))
+        self.assertEqual(s.frames_to_events(interrupt), [{"type": "bot_interrupted"}])
         # Straggler from the interrupted response is dropped.
-        self.assertEqual(s._frames_to_events(LLMTextFrame(text=" what would")), [])
-        self.assertEqual(s._frames_to_events(LLMFullResponseEndFrame()), [])
+        self.assertEqual(s.frames_to_events(LLMTextFrame(text=" what would")), [])
+        self.assertEqual(s.frames_to_events(LLMFullResponseEndFrame()), [])
         # The genuinely new response.
-        s._frames_to_events(LLMFullResponseStartFrame())
-        s._frames_to_events(LLMTextFrame(text="Tokyo"))
+        s.frames_to_events(LLMFullResponseStartFrame())
+        s.frames_to_events(LLMTextFrame(text="Tokyo"))
         self.assertEqual(
-            self._one(s._frames_to_events(LLMFullResponseEndFrame())),
+            self._one(s.frames_to_events(LLMFullResponseEndFrame())),
             {"type": "llm_response", "text": "Tokyo"},
         )
 
@@ -113,17 +111,17 @@ class TestFramesToEvents(unittest.TestCase):
             )
 
         self.assertEqual(
-            s._frames_to_events(msg({"text": "hello", "final": True})),
+            s.frames_to_events(msg({"text": "hello", "final": True})),
             [{"type": "user_transcription", "transcript": "hello"}],
         )
         # Interim transcriptions are ignored.
-        self.assertEqual(s._frames_to_events(msg({"text": "hel", "final": False})), [])
+        self.assertEqual(s.frames_to_events(msg({"text": "hel", "final": False})), [])
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn; the response is emitted from on_user_turn_stopped, not here.
         frame = TranscriptionFrame(text="Paris", user_id="bot", timestamp="t")
-        self.assertEqual(_session(bot_audio=True)._frames_to_events(frame), [])
+        self.assertEqual(_session(bot_audio=True).frames_to_events(frame), [])
 
     def test_reported_speaking_and_vad_events_from_messages(self):
         # The bot's reports about the harness (its raw VAD and turn-level speaking)
@@ -136,23 +134,23 @@ class TestFramesToEvents(unittest.TestCase):
             )
 
         self.assertEqual(
-            s._frames_to_events(msg("user-started-speaking")),
+            s.frames_to_events(msg("user-started-speaking")),
             [{"type": "user_started_speaking"}],
         )
         self.assertEqual(
-            s._frames_to_events(msg("user-stopped-speaking")),
+            s.frames_to_events(msg("user-stopped-speaking")),
             [{"type": "user_stopped_speaking"}],
         )
         self.assertEqual(
-            s._frames_to_events(msg("vad-user-started-speaking")),
+            s.frames_to_events(msg("vad-user-started-speaking")),
             [{"type": "vad_user_started_speaking"}],
         )
         self.assertEqual(
-            s._frames_to_events(msg("vad-user-stopped-speaking")),
+            s.frames_to_events(msg("vad-user-stopped-speaking")),
             [{"type": "vad_user_stopped_speaking"}],
         )
         self.assertEqual(
-            s._frames_to_events(msg("bot-interrupted")),
+            s.frames_to_events(msg("bot-interrupted")),
             [{"type": "bot_interrupted"}],
         )
 
@@ -167,7 +165,7 @@ class TestFramesToEvents(unittest.TestCase):
             UserStoppedSpeakingFrame(),
             InterruptionFrame(),
         ):
-            self.assertEqual(s._frames_to_events(frame), [])
+            self.assertEqual(s.frames_to_events(frame), [])
 
     def test_user_started_speaking_message_discards_interrupted_output(self):
         # A new user turn drops the bot's leftover output (but keeps a queued
@@ -179,7 +177,7 @@ class TestFramesToEvents(unittest.TestCase):
         msg = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
         )
-        self.assertEqual(s._frames_to_events(msg), [{"type": "user_started_speaking"}])
+        self.assertEqual(s.frames_to_events(msg), [{"type": "user_started_speaking"}])
         self.assertEqual(s._text_buffer, [])
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
@@ -187,7 +185,7 @@ class TestFramesToEvents(unittest.TestCase):
     def test_function_call(self):
         s = _session()
         event = self._one(
-            s._frames_to_events(
+            s.frames_to_events(
                 FunctionCallInProgressFrame(
                     function_name="get_weather", tool_call_id="c", arguments={"city": "Paris"}
                 )
@@ -201,9 +199,9 @@ class TestFramesToEvents(unittest.TestCase):
         def tts(text):
             return TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
 
-        self.assertEqual(_session(bot_audio=False)._frames_to_events(tts("x")), [])
+        self.assertEqual(_session(bot_audio=False).frames_to_events(tts("x")), [])
         self.assertEqual(
-            _session(bot_audio=True)._frames_to_events(tts("spoken")),
+            _session(bot_audio=True).frames_to_events(tts("spoken")),
             [{"type": "tts_response", "text": "spoken"}],
         )
 
