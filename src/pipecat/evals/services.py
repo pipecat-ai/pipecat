@@ -323,6 +323,45 @@ DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
 DEFAULT_OLLAMA_JUDGE_EXTRA = {"reasoning_effort": "none"}
 
 
+def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[Any]:
+    """Build an LLM service from a ``service:`` config block (the judge's, a persona's).
+
+    Honors a custom ``factory`` (dotted path to a callable taking ``(config)`` and
+    returning a pipecat LLM service); otherwise dispatches on the ``service``
+    name (default ``"ollama"``).
+
+    Args:
+        config: Mapping with keys ``service`` (default ``"ollama"``), ``model``,
+            optional ``endpoint``, and an optional ``extra`` mapping forwarded to
+            the model as top-level request parameters. ``None`` uses all defaults.
+        where: The config block's name in the file, for error messages
+            (``"judge.eval"``, ``"simulator"``).
+
+    Returns:
+        The configured LLM service.
+
+    Raises:
+        ValueError: If ``service`` is unknown or ``factory`` is not a dotted path.
+    """
+    config = config or {}
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"{where}.factory must be a dotted path: {custom!r}")
+        factory = getattr(importlib.import_module(module_name), attr)
+        return factory(config)
+    service_name = str(config.get("service", "ollama")).lower()
+    if service_name == "ollama":
+        return ollama_service(config)
+    if service_name == "openai":
+        return openai_service(config)
+    raise ValueError(
+        f"Unknown {where} service: {service_name!r}. Known: ollama, openai. "
+        f"Or set {where}.factory to a 'module.func' returning an LLM service."
+    )
+
+
 def ollama_service(config: dict) -> LLMService[Any]:
     """Build a local Ollama LLM service from the ``judge:`` config.
 

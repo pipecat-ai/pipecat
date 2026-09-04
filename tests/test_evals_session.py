@@ -31,7 +31,7 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client import EvalClient, _BotFrameSink
+from pipecat.evals.client import EvalClient, _BotFrameSink, _PersonaTurnRelay
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import EvalTrace
@@ -45,12 +45,16 @@ from pipecat.evals.scenario import (
 from pipecat.evals.session import EvalSession
 from pipecat.frames.frames import (
     AggregationType,
+    BotStartedSpeakingFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
     TTSTextFrame,
@@ -59,6 +63,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -82,8 +87,8 @@ def _client(
     scenario: EvalScenario | None = None, bot_audio: bool = False, bot_url: str = "ws://localhost:0"
 ) -> EvalClient:
     scenario = scenario or EvalScenario(name="t", turns=[], bot_audio=bot_audio)
-    return EvalClient(
-        scenario=scenario, bot_url=bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
+    return EvalClient.for_scenario(
+        scenario, bot_url=bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
     )
 
 
@@ -416,7 +421,7 @@ class TestRequiredReportLevel(unittest.TestCase):
         scenario = EvalScenario(
             name="t", bot_audio=False, turns=[EvalTurn(user="x", expect=list(expects))]
         )
-        return _client(scenario)._required_report_level()
+        return scenario.required_report_level()
 
     def test_none_without_function_call(self):
         self.assertIsNone(self._level(EvalExpectation(event="llm_response")))
@@ -450,7 +455,7 @@ class TestNeedsVadEvents(unittest.TestCase):
 
     def _needs(self, turn: EvalTurn) -> bool:
         scenario = EvalScenario(name="t", turns=[turn])
-        return _client(scenario)._needs_vad_events()
+        return scenario.needs_vad_events()
 
     def test_false_without_vad_events(self):
         self.assertFalse(
@@ -555,21 +560,132 @@ class TestTextContainsResolution(unittest.TestCase):
         self.assertIn("does not contain", failure.reason)
 
 
+class _Collector(FrameProcessor):
+    """Records what the processor before it pushes, without a running pipeline."""
+
+    def __init__(self):
+        super().__init__()
+        self.frames: list = []
+
+    async def queue_frame(self, frame, direction=FrameDirection.DOWNSTREAM, callback=None):
+        self.frames.append(frame)
+
+
+def _bot_response(*texts: str, skip_tts: bool = False) -> list:
+    """The frames of one LLM response, as the bot's (or the persona's) LLM emits them."""
+    frames = [LLMFullResponseStartFrame(), *[LLMTextFrame(text=t) for t in texts]]
+    frames.append(LLMFullResponseEndFrame())
+    for frame in frames:
+        frame.skip_tts = skip_tts
+    return frames
+
+
 class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
-    """The sink is where the user's turns enter the pipeline, on the user-audio side."""
+    """The sink is the boundary between the bot's side of the pipeline and the user's."""
+
+    def _sink(self, **kwargs) -> tuple[_BotFrameSink, _Collector]:
+        sink = _BotFrameSink(_stream(bot_audio=True), **kwargs)
+        nxt = _Collector()
+        sink.link(nxt)
+        return sink, nxt
+
+    async def _push(self, sink, *frames):
+        for frame in frames:
+            await sink.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def test_inject_pushes_downstream(self):
-        received: list = []
-
-        class _Next(FrameProcessor):
-            async def queue_frame(self, frame, direction=FrameDirection.DOWNSTREAM, callback=None):
-                received.append((frame, direction))
-
-        sink = _BotFrameSink(_stream(bot_audio=True))
-        sink.link(_Next())
+        sink, nxt = self._sink()
         frame = TTSSpeakFrame("hello")
         await sink.inject(frame)
-        self.assertEqual(received, [(frame, FrameDirection.DOWNSTREAM)])
+        self.assertEqual(nxt.frames, [frame])
+
+    async def test_the_bots_frames_stop_at_the_sink(self):
+        sink, nxt = self._sink()
+        await self._push(
+            sink,
+            *_bot_response("Hello"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.SENTENCE),
+            BotStartedSpeakingFrame(),
+            FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
+            InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
+        )
+        self.assertEqual(nxt.frames, [])
+        # ...while the aggregator's context frame goes on to the persona.
+        context = LLMContextFrame(LLMContext())
+        await self._push(sink, context)
+        self.assertEqual(nxt.frames, [context])
+
+    async def test_text_feed_hands_the_bots_response_to_the_persona(self):
+        context = LLMContext()
+        sink, nxt = self._sink(persona_feed=context)
+        await self._push(sink, *_bot_response("Hello ", "there"))
+        self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello there"}])
+        self.assertEqual(len(nxt.frames), 1)
+        self.assertIsInstance(nxt.frames[0], LLMContextFrame)
+        self.assertIs(nxt.frames[0].context, context)
+
+    async def test_text_feed_waits_for_the_bots_function_call(self):
+        context = LLMContext()
+        sink, nxt = self._sink(persona_feed=context)
+        await self._push(
+            sink,
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(text="Let me check."),
+            FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
+            LLMFullResponseEndFrame(),
+        )
+        self.assertEqual(context.get_messages(), [])  # held: the call is still running
+        await self._push(
+            sink,
+            FunctionCallResultFrame(function_name="f", tool_call_id="c", arguments={}, result=1),
+            *_bot_response("It's sunny."),
+        )
+        self.assertEqual(
+            context.get_messages(), [{"role": "user", "content": "Let me check. It's sunny."}]
+        )
+        self.assertEqual(len(nxt.frames), 1)
+
+    async def test_text_feed_ignores_an_empty_response(self):
+        context = LLMContext()
+        sink, nxt = self._sink(persona_feed=context)
+        await self._push(sink, *_bot_response())
+        self.assertEqual(context.get_messages(), [])
+        self.assertEqual(nxt.frames, [])
+
+
+class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
+    """The persona's text-mode responses become one send-text each."""
+
+    def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
+        trace = EvalTrace()
+        relay = _PersonaTurnRelay(lambda text: {"type": "send-text", "text": text}, trace)
+        nxt = _Collector()
+        relay.link(nxt)
+        return relay, nxt, trace
+
+    async def test_skip_tts_response_is_sent_as_one_text_turn(self):
+        relay, nxt, trace = self._relay()
+        frames = _bot_response("Hi ", "there.", skip_tts=True)
+        for frame in frames:
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        messages = [f for f in nxt.frames if isinstance(f, OutputTransportMessageUrgentFrame)]
+        self.assertEqual(
+            [m.message for m in messages], [{"type": "send-text", "text": "Hi there."}]
+        )
+        # The response's own frames go on, for the assistant aggregator.
+        self.assertEqual([f for f in nxt.frames if f in frames], frames)
+        self.assertTrue(any("'Hi there.' (persona, text)" in line for line in trace.lines))
+
+    async def test_spoken_response_is_only_traced(self):
+        relay, nxt, trace = self._relay()
+        for frame in _bot_response("Hi", skip_tts=False):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await relay.process_frame(
+            TTSTextFrame(text="Hi", aggregated_by=AggregationType.SENTENCE),
+            FrameDirection.DOWNSTREAM,
+        )
+        self.assertFalse(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in nxt.frames))
+        self.assertTrue(any("'Hi' (persona, audio)" in line for line in trace.lines))
 
 
 class TestAudioSender(unittest.IsolatedAsyncioTestCase):

@@ -37,7 +37,6 @@ Example::
 """
 
 import hashlib
-import importlib
 import json
 import re
 from dataclasses import dataclass
@@ -45,7 +44,7 @@ from typing import Any
 
 from loguru import logger
 
-from pipecat.evals.services import ollama_service, openai_service
+from pipecat.evals.services import llm_service_from_config
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 
@@ -84,6 +83,29 @@ JUDGE_ASK_TEMPLATE = (
     "Does the bot's most recent reply satisfy this criterion?\n\n"
     "Criterion: {criterion}\n\n"
     "Answer yes, no, or continue."
+)
+
+# The whole-conversation variants, for a simulation's goal and quality criteria:
+# the conversation is over, so there is nothing to wait for and no "continue".
+CONVERSATION_JUDGE_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair judge evaluating a complete conversation between a "
+    "user and a bot under test. The 'user' messages are the user; the 'assistant' "
+    "messages are the bot's replies. Judge the conversation as a whole against the "
+    "given criterion. "
+    "When the bot spoke its replies, the 'assistant' text is an automatic speech-to-text "
+    "transcription, so it may contain homophones, misspellings, split or merged words, and "
+    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
+    "spelling. "
+    "Respond ONLY with a JSON object on a single line containing two fields: "
+    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
+    'Use "yes" if the conversation satisfies the criterion and "no" otherwise. '
+    "Do not include any other text, explanation, or markdown."
+)
+
+CONVERSATION_JUDGE_ASK_TEMPLATE = (
+    "Does this conversation, taken as a whole, satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
 )
 
 
@@ -164,28 +186,7 @@ class EvalJudge:
             def make_judge_llm(config):
                 return TogetherLLMService(...)  # any service exposing run_inference()
         """
-        config = judge_config or {}
-
-        custom = config.get("factory")
-        if custom:
-            module_name, _, attr = custom.rpartition(".")
-            if not module_name:
-                raise ValueError(f"judge.eval.factory must be a dotted path: {custom!r}")
-            factory = getattr(importlib.import_module(module_name), attr)
-            return cls(factory(config))
-
-        service_name = str(config.get("service", "ollama")).lower()
-        if service_name == "ollama":
-            llm_service = ollama_service(config)
-        elif service_name == "openai":
-            llm_service = openai_service(config)
-        else:
-            raise ValueError(
-                f"Unknown judge service: {service_name!r}. Known: ollama, openai. "
-                "Or set judge.eval.factory to a 'module.func' returning an LLM service."
-            )
-
-        return cls(llm_service)
+        return cls(llm_service_from_config(judge_config, where="judge.eval"))
 
     def add_user_message(self, text: str | None) -> None:
         """Record a user turn in the conversation the judge evaluates against.
@@ -227,23 +228,42 @@ class EvalJudge:
             justification. Cached by ``(criterion, conversation)`` so the same
             assertion over the same conversation hits the judge only once.
         """
+        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, JUDGE_ASK_TEMPLATE)
+
+    async def evaluate_conversation(self, criterion: str) -> JudgeVerdict:
+        """Judge whether the whole conversation satisfies ``criterion``.
+
+        For a simulation's goal and quality criteria, once the conversation is
+        over: the verdict is yes or no, never ``continue``.
+
+        Args:
+            criterion: Natural-language description of what the conversation
+                should have achieved or exhibited.
+
+        Returns:
+            A :class:`JudgeVerdict`, cached like :meth:`evaluate`.
+        """
+        return await self._evaluate(
+            criterion, CONVERSATION_JUDGE_SYSTEM_INSTRUCTION, CONVERSATION_JUDGE_ASK_TEMPLATE
+        )
+
+    async def _evaluate(self, criterion: str, instruction: str, ask: str) -> JudgeVerdict:
         messages = self._context.get_messages()
-        key = _cache_key(criterion, messages)
+        key = _cache_key(ask + criterion, messages)
         if key in self._cache:
             return self._cache[key]
-
-        verdict = await self._call_judge(criterion, messages)
+        verdict = await self._call_judge(criterion, messages, instruction, ask)
         self._cache[key] = verdict
         return verdict
 
-    async def _call_judge(self, criterion: str, messages: list) -> JudgeVerdict:
+    async def _call_judge(
+        self, criterion: str, messages: list, instruction: str, ask: str
+    ) -> JudgeVerdict:
         """Single round-trip to the judge LLM over the conversation + a verdict ask."""
         # Copy the conversation and append a transient verdict ask, so neither the
         # ask nor the judge's answer ever lands in the persistent context.
         context = LLMContext(messages=list(messages))
-        context.add_message(
-            {"role": "user", "content": JUDGE_ASK_TEMPLATE.format(criterion=criterion)}
-        )
+        context.add_message({"role": "user", "content": ask.format(criterion=criterion)})
 
         # Log the conversation the judge is about to evaluate, before its verdict,
         # so the debug log shows exactly what the judge saw (handy when a terse or
@@ -257,7 +277,7 @@ class EvalJudge:
             response = await self._service.run_inference(
                 context=context,
                 max_tokens=self._max_tokens,
-                system_instruction=JUDGE_SYSTEM_INSTRUCTION,
+                system_instruction=instruction,
             )
         except Exception as e:
             logger.error(f"EvalJudge call failed: {e.__class__.__name__} ({e})")

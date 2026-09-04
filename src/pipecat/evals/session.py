@@ -151,8 +151,8 @@ class EvalSession(BaseObject):
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
         # The connection to the bot: the eval pipeline and the user's sends.
-        self._client = EvalClient(
-            scenario=scenario,
+        self._client = EvalClient.for_scenario(
+            scenario,
             bot_url=bot_url,
             stream=self._stream,
             trace=self._trace,

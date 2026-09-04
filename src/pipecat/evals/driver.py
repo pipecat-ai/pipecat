@@ -52,7 +52,6 @@ class EvalDriver(ABC):
         judge: EvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalTurnProgress], Awaitable[None]],
-        bot_audio: bool,
     ):
         """Initialize the driver.
 
@@ -65,14 +64,12 @@ class EvalDriver(ABC):
             trace: The run's trace.
             progress: Awaited with an :class:`EvalTurnProgress` as turns and
                 expectations resolve.
-            bot_audio: Whether the bot speaks its replies (audio mode).
         """
         self._client = client
         self._stream = stream
         self._judge = judge
         self._trace = trace
         self._progress = progress
-        self._bot_audio = bot_audio
         # One record per turn the driver scores, filled in as it runs. They start
         # as not_run and stay that way on every path that ends the run early, so
         # the result always says which turns were actually scored.
@@ -107,7 +104,7 @@ class EvalDriver(ABC):
         elif self._client.has_user_tts:
             await self._client.say(text)
         else:
-            await self._client.send_text(text, audio_response=self._bot_audio)
+            await self._client.send_text(text)
         if self._judge is not None:
             self._judge.add_user_message(text)
         # Only what the bot says in reply to this input is matched from here on.
@@ -167,7 +164,6 @@ class ScriptedDriver(EvalDriver):
             judge=judge,
             trace=trace,
             progress=progress,
-            bot_audio=scenario.bot_audio,
         )
         self._scenario = scenario
         self._default_timeout_ms = default_timeout_ms

@@ -12,13 +12,16 @@ listen, runs the eval pipeline whose bot-facing edge is
 handshake, sends the user's turns (text, synthesized speech, a recording, DTMF
 keys, an image), records the conversation, and tears everything down. The bot's
 output reaches the rest of the harness through the
-:class:`~pipecat.evals.events.EvalEventStream` the client is given.
+:class:`~pipecat.evals.events.EvalEventStream` the client is given. For a
+simulation the pipeline also carries the persona LLM, which answers the bot on
+its own; the client then relays its turns instead of being told what to send.
 """
 
 import asyncio
 import base64
 import mimetypes
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,7 +32,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.scenario import FUNCTION_CALL_EVENTS, EvalScenario
+from pipecat.evals.scenario import EvalScenario
 from pipecat.evals.serializer import (
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
@@ -38,16 +41,29 @@ from pipecat.evals.serializer import (
     HARNESS_STT_SAMPLE_RATE,
     RTVIHarnessSerializer,
 )
+from pipecat.evals.simulation import EvalSimulation
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
+    LLMConfigureOutputFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -57,6 +73,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.workers.runner import WorkerRunner
@@ -64,15 +81,33 @@ from pipecat.workers.runner import WorkerRunner
 BOT_READY_TIMEOUT_S = 10.0
 
 
-class _BotFrameSink(FrameProcessor):
-    """Pipeline tap that turns the bot's incoming frames into matcher events.
+# Frames the bot produced: the sink turns them into events and stops them here.
+# Everything downstream of the sink is the user's side (a persona LLM, the user
+# TTS, the output), which must never see the bot's text or reports as its own
+# input. The aggregator's context frame and lifecycle frames pass.
+_BOT_FRAMES = (
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    LLMFullResponseEndFrame,
+    TTSTextFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallCancelFrame,
+    InputTransportMessageFrame,
+)
 
-    Sits between the bot-audio side and the user-audio side of the eval pipeline;
-    for every frame it calls the stream's
+
+class _BotFrameSink(FrameProcessor):
+    """The boundary between the bot's side of the eval pipeline and the user's.
+
+    For every frame it calls the stream's
     :meth:`~pipecat.evals.events.EvalEventStream.frames_to_events` and appends
-    the results with :meth:`~pipecat.evals.events.EvalEventStream.append`, then
-    passes the frame on. Outgoing frames (the RTVI client messages the client
-    injects) flow through untouched — they don't map to events.
+    the results with :meth:`~pipecat.evals.events.EvalEventStream.append`. The
+    bot's own frames (its text, spoken text, speaking reports, function calls,
+    and the messages it reports about the harness) stop here; what passes is
+    the pipeline's lifecycle and the aggregator's context frame.
 
     It also stops the harness's *computed* interruptions here: the user aggregator
     runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts an
@@ -85,11 +120,29 @@ class _BotFrameSink(FrameProcessor):
     cross the bot-audio side, and every processor there (this sink included)
     resets its queue when the aggregator's interruption reaches it, dropping a
     turn still queued behind a slow transcription at that moment.
+
+    In a text-mode simulation the sink is also what hands the bot's turns to the
+    persona: with no audio there is no STT or aggregator to do it, so each
+    finished bot response is appended to the persona's context as a user message
+    and the context is pushed on for the persona LLM to answer. A response the
+    bot gives while one of its function calls is still running is held and
+    joined with the response that follows the call, so the persona answers the
+    bot's complete turn rather than its "let me check".
     """
 
-    def __init__(self, stream: EvalEventStream):
+    def __init__(self, stream: EvalEventStream, *, persona_feed: LLMContext | None = None):
+        """Initialize the sink.
+
+        Args:
+            stream: Where the bot's frames go as events.
+            persona_feed: In a text-mode simulation, the persona's context to
+                hand the bot's turns to; ``None`` otherwise.
+        """
         super().__init__()
         self._stream = stream
+        self._persona_feed = persona_feed
+        self._held_response: list[str] = []
+        self._calls_in_progress = 0
 
     async def inject(self, frame: Frame) -> None:
         """Push a user-turn frame downstream, into the user TTS and the output.
@@ -102,12 +155,78 @@ class _BotFrameSink(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        for event in self._stream.frames_to_events(frame):
+        events = self._stream.frames_to_events(frame)
+        for event in events:
             await self._stream.append(event)
+        if self._persona_feed is not None:
+            await self._feed_persona(events)
         # The bot-audio VAD's interruption must not propagate into the user-audio
         # path (user TTS + output); see the class docstring.
         if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
             return
+        if isinstance(frame, _BOT_FRAMES):
+            return
+        await self.push_frame(frame, direction)
+
+    async def _feed_persona(self, events: list[dict]) -> None:
+        """Hand a finished bot response to the persona, once its function calls are done."""
+        assert self._persona_feed is not None
+        for event in events:
+            match event["type"]:
+                case "function_call":
+                    self._calls_in_progress += 1
+                case "function_call_stopped":
+                    self._calls_in_progress = max(0, self._calls_in_progress - 1)
+                case "llm_response":
+                    if event["text"]:
+                        self._held_response.append(event["text"])
+                    if self._calls_in_progress or not self._held_response:
+                        continue
+                    text = " ".join(self._held_response)
+                    self._held_response = []
+                    self._persona_feed.add_message({"role": "user", "content": text})
+                    await self.push_frame(LLMContextFrame(self._persona_feed))
+
+
+class _PersonaTurnRelay(FrameProcessor):
+    """Relays the persona's turns to the bot and traces them.
+
+    In text mode the persona LLM's output carries ``skip_tts`` and reaches this
+    processor as text: one whole response is sent to the bot as a single RTVI
+    ``send-text``. In audio mode the user TTS has already turned the response
+    into audio and this only traces the spoken text as it passes. Either way
+    the frames go on to the assistant aggregator that records the persona's
+    side of the conversation.
+    """
+
+    def __init__(self, text_turn_message: Callable[[str], dict], trace: EvalTrace):
+        """Initialize the relay.
+
+        Args:
+            text_turn_message: Builds the RTVI ``send-text`` message for a turn.
+            trace: The run's trace.
+        """
+        super().__init__()
+        self._text_turn_message = text_turn_message
+        self._trace = trace
+        self._text: list[str] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMFullResponseStartFrame) and frame.skip_tts:
+            self._text = []
+        elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
+            self._text.append(frame.text)
+        elif isinstance(frame, LLMFullResponseEndFrame) and frame.skip_tts:
+            text = "".join(self._text).strip()
+            self._text = []
+            if text:
+                self._trace.log(f"send: {text!r} (persona, text)")
+                await self.push_frame(
+                    OutputTransportMessageUrgentFrame(message=self._text_turn_message(text))
+                )
+        elif isinstance(frame, TTSTextFrame):
+            self._trace.log(f"send: {frame.text!r} (persona, audio)")
         await self.push_frame(frame, direction)
 
 
@@ -117,72 +236,99 @@ class EvalClient:
     Built once per run: :meth:`wait_for_bot`, :meth:`start`, :meth:`handshake`,
     the turns (:meth:`send_text`, :meth:`say`, :meth:`play`, :meth:`send_dtmf`,
     :meth:`send_image`), then :meth:`stop`. The pipeline is the same for both
-    modalities::
+    modalities and both kinds of eval::
 
-        input -> [STT -> user aggregator] -> sink -> [user TTS] -> output
+        input -> [STT -> user aggregator] -> sink -> [persona LLM] -> [user TTS]
+              -> [persona relay] -> output -> [assistant aggregator]
 
     The STT + aggregator (with the aggregator's own VAD) transcribe the bot's
     audio into the ``response``; the user TTS turns spoken turns into the audio
     sent to the bot. Each bracketed stage is present only when its service was
     built (audio scenarios); in text mode they're simply absent and no audio
-    flows. The sink turns the bot's frames into events either way.
+    flows. The sink turns the bot's frames into events either way. A simulation
+    adds the persona LLM, which answers the bot's turns on its own: the
+    aggregator's context is the persona's, the relay turns text-mode replies
+    into ``send-text``, and the assistant aggregator records what the persona
+    said. Build with :meth:`for_scenario` or :meth:`for_simulation`.
     """
 
     def __init__(
         self,
         *,
-        scenario: EvalScenario,
         bot_url: str,
         stream: EvalEventStream,
         trace: EvalTrace,
+        bot_audio: bool,
+        user_audio: bool,
+        user_speech: dict | None = None,
+        capture_bot_audio: bool = False,
+        report_level: str | None = None,
+        vad_events: bool = False,
+        context: list[dict] | None = None,
+        trigger_disconnect: bool = False,
         connect_timeout_s: float = 5.0,
         record_path: str | None = None,
         stop_bot: bool = False,
-        trigger_disconnect: bool = False,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
+        persona_llm: LLMService | None = None,
+        persona_context: LLMContext | None = None,
     ):
         """Initialize the client.
 
         Args:
-            scenario: The scenario being run; its modality, context, and
-                assertions decide what the bot is asked to expose.
             bot_url: WebSocket URL of the bot's eval transport.
             stream: Where the bot's output is appended as events.
             trace: The run's trace.
+            bot_audio: Whether the bot speaks; in text mode it is asked to skip
+                TTS at connect.
+            user_audio: Whether the user's turns reach the bot as audio.
+            user_speech: TTS config the user's turns are synthesized with, or
+                ``None``; sets the user audio rate.
+            capture_bot_audio: Whether the bot forwards its synthesized audio,
+                for the ``response`` transcription or a persona that listens.
+            report_level: Function-call report level to ask of the bot, or
+                ``None`` for its default.
+            vad_events: Whether to ask the bot for its raw VAD events.
+            context: Messages the bot's context starts from, sent right after
+                the handshake; ``None`` or empty sends nothing.
+            trigger_disconnect: Whether to ask the eval transport to fire the
+                bot's ``on_client_disconnected`` handler when this connection
+                ends. Bots often cancel their pipeline there, so it is off by
+                default to avoid that between scenarios.
             connect_timeout_s: How long :meth:`wait_for_bot` waits for the bot
                 to accept connections.
-            record_path: When set (and the scenario is audio mode), the
-                conversation audio is recorded to this path on :meth:`stop`.
+            record_path: When set (and ``bot_audio``), the conversation audio is
+                recorded to this path on :meth:`stop`.
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 :meth:`stop` via ``eval-cancel``. The suite enables it to clean
                 up each spawned bot.
-            trigger_disconnect: When True (or when the scenario sets
-                ``trigger_disconnect``), ask the eval transport to fire the bot's
-                ``on_client_disconnected`` handler when this connection ends.
-                Bots often cancel their pipeline there, so it is off by default
-                to avoid that between scenarios.
             user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
-                synthesizes spoken user turns, or ``None`` for text-mode scenarios.
+                synthesizes spoken user turns, or ``None`` for text mode.
             bot_stt: The ``STTService`` that transcribes the bot's audio into the
                 ``response`` event, or ``None`` when unused.
+            persona_llm: A simulation's persona LLM service, or ``None``.
+            persona_context: The persona LLM's context; the aggregators keep it
+                up to date with both sides of the conversation.
         """
-        self._scenario = scenario
         self._bot_url = bot_url
         self._stream = stream
         self._trace = trace
+        self._bot_audio = bot_audio
+        self._user_audio = user_audio
+        self._user_speech = user_speech
+        self._capture_bot_audio = capture_bot_audio
+        self._report_level = report_level
+        self._vad_events = vad_events
+        self._context = list(context or [])
+        self._trigger_disconnect = trigger_disconnect
         self._connect_timeout_s = connect_timeout_s
         self._record_path = record_path
         self._stop_bot = stop_bot
-        # Either the run-wide flag or the scenario's own field opts in.
-        self._trigger_disconnect = trigger_disconnect or scenario.trigger_disconnect
         self._user_tts = user_tts
         self._bot_stt = bot_stt
-        # response (audio modality): the STT transcribes the bot's actual audio,
-        # which the bot forwards only when asked (see _connect_url).
-        self._wants_response = any(
-            exp.event == "response" for turn in scenario.turns for exp in turn.expect
-        )
+        self._persona_llm = persona_llm
+        self._persona_context = persona_context
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
@@ -197,6 +343,50 @@ class EvalClient:
         self._bot_ready_event = asyncio.Event()
         self._next_id = 0
 
+    @classmethod
+    def for_scenario(
+        cls, scenario: EvalScenario, *, trigger_disconnect: bool = False, **kwargs
+    ) -> "EvalClient":
+        """A client for a scripted scenario, asking the bot for what its assertions need.
+
+        Args:
+            scenario: The scenario being run.
+            trigger_disconnect: Run-wide opt-in; the scenario's own field also opts in.
+            **kwargs: The remaining :class:`EvalClient` arguments.
+        """
+        return cls(
+            bot_audio=scenario.bot_audio,
+            user_audio=scenario.user_audio,
+            user_speech=scenario.user_speech,
+            capture_bot_audio=scenario.wants_response(),
+            report_level=scenario.required_report_level(),
+            vad_events=scenario.needs_vad_events(),
+            context=scenario.context,
+            trigger_disconnect=trigger_disconnect or scenario.trigger_disconnect,
+            **kwargs,
+        )
+
+    @classmethod
+    def for_simulation(
+        cls, simulation: EvalSimulation, *, trigger_disconnect: bool = False, **kwargs
+    ) -> "EvalClient":
+        """A client for a simulation: the persona hears the bot, and no assertions apply.
+
+        Args:
+            simulation: The simulation being run.
+            trigger_disconnect: Run-wide opt-in; the simulation's own field also opts in.
+            **kwargs: The remaining :class:`EvalClient` arguments, including the
+                persona LLM and its context.
+        """
+        return cls(
+            bot_audio=simulation.bot_audio,
+            user_audio=simulation.user_audio,
+            user_speech=simulation.user_speech,
+            capture_bot_audio=simulation.bot_audio,
+            trigger_disconnect=trigger_disconnect or simulation.trigger_disconnect,
+            **kwargs,
+        )
+
     @property
     def has_user_tts(self) -> bool:
         """Whether text user turns are spoken to the bot rather than sent as text."""
@@ -204,8 +394,8 @@ class EvalClient:
 
     @property
     def sends_user_audio(self) -> bool:
-        """Whether any user turn reaches the bot as audio, synthesized or from a file."""
-        return self._user_tts is not None or any(t.audio for t in self._scenario.turns)
+        """Whether the user's side streams audio to the bot (the output is enabled)."""
+        return self._user_tts is not None or self._user_audio
 
     async def wait_for_bot(self) -> None:
         """Wait until the bot's server accepts connections.
@@ -244,13 +434,11 @@ class EvalClient:
 
     async def start(self) -> None:
         """Build the eval pipeline and start running it, which connects to the bot."""
-        user_audio_rate = (
-            tts_sample_rate(self._scenario.user_speech) if self._scenario.user_speech else 0
-        )
+        user_audio_rate = tts_sample_rate(self._user_speech) if self._user_speech else 0
         params = WebsocketClientParams(
-            audio_in_enabled=self._scenario.bot_audio,
+            audio_in_enabled=self._bot_audio,
             audio_out_enabled=self.sends_user_audio,
-            audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._scenario.bot_audio else 0,
+            audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._bot_audio else 0,
             audio_out_sample_rate=user_audio_rate,
             serializer=RTVIHarnessSerializer(),
         )
@@ -259,7 +447,7 @@ class EvalClient:
         # paced/filled pipeline frames: Python can't hold the 40ms pacing tick
         # precisely, and recording the paced streams stutters. The recorder
         # reconstructs gapless turns and pads only the real between-turn pauses.
-        if self._record_path and self._scenario.bot_audio:
+        if self._record_path and self._bot_audio:
             self._recorder = HarnessRecorder(user_audio_rate or HARNESS_STT_SAMPLE_RATE)
         # EvalHarnessTransport reshapes both audio edges into the continuous
         # real-time stream VAD/STT expect: its output paces the user TTS to the bot
@@ -318,8 +506,8 @@ class EvalClient:
         # transport understands this): raise the function-call report level if it
         # asserts on call name/args, and enable raw VAD speaking events if it uses
         # them.
-        level = self._required_report_level()
-        vad = self._needs_vad_events()
+        level = self._report_level
+        vad = self._vad_events
         if level is not None or vad:
             config: dict = {}
             if level is not None:
@@ -337,11 +525,11 @@ class EvalClient:
         # An implicit empty one would race with bot startup flows (e.g. a greeting
         # added in on_client_connected), wiping the bot's context right after it
         # set it up.
-        if self._scenario.context:
+        if self._context:
             context_message = RTVI.Message(
                 type="client-message",
                 id=self._message_id(),
-                data={"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {"messages": self._scenario.context}},
+                data={"t": EVAL_CONTEXT_MESSAGE_TYPE, "d": {"messages": self._context}},
             )
             await self.send(context_message)
 
@@ -381,23 +569,37 @@ class EvalClient:
             OutputTransportMessageUrgentFrame(message=message.model_dump())
         )
 
-    async def send_text(self, text: str, *, audio_response: bool) -> None:
+    async def send_text(self, text: str) -> None:
         """Send a text user turn via the RTVI ``send-text`` message.
 
         Args:
             text: The user's turn.
-            audio_response: Whether the bot should speak its reply; when False the
-                LLM bypasses TTS for this turn (content-only evals).
         """
-        message = RTVI.Message(
+        await self.send(RTVI.Message(**self._text_turn_message(text)))
+
+    def _text_turn_message(self, text: str) -> dict:
+        """The RTVI ``send-text`` message for a user turn, as a message dict.
+
+        The bot runs the LLM immediately and speaks its reply only in audio mode;
+        in text mode the LLM bypasses TTS for this turn (content-only evals).
+        """
+        return RTVI.Message(
             type="send-text",
             id=self._message_id(),
             data=RTVI.SendTextData(
                 content=text,
-                options=RTVI.SendTextOptions(run_immediately=True, audio_response=audio_response),
+                options=RTVI.SendTextOptions(run_immediately=True, audio_response=self._bot_audio),
             ).model_dump(),
-        )
-        await self.send(message)
+        ).model_dump()
+
+    async def configure_persona(self) -> None:
+        """Tell the persona LLM whether its replies are spoken or sent as text.
+
+        In text mode its output carries ``skip_tts`` so the relay sends each
+        response as one ``send-text``; in audio mode the user TTS speaks it.
+        """
+        assert self._sink is not None  # pipeline built before any send
+        await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._user_audio))
 
     async def send_dtmf(self, keys: str) -> None:
         """Send a DTMF keypress turn as one RTVI ``dtmf`` message.
@@ -479,19 +681,24 @@ class EvalClient:
     def _processors(self, transport: EvalHarnessTransport) -> list:
         """The eval pipeline's processors, in order (see the class docstring)."""
         processors: list = [transport.input()]
+        # The context both aggregators keep: the persona's in a simulation, else a
+        # throwaway that only gives the user aggregator somewhere to put turns.
+        context = self._persona_context or LLMContext()
+        aggregators: LLMContextAggregatorPair | None = None
         if self._bot_stt is not None:
-            user_aggregator = LLMContextAggregatorPair(
-                LLMContext(),
+            aggregators = LLMContextAggregatorPair(
+                context,
                 user_params=LLMUserAggregatorParams(
                     vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
                 ),
-            ).user()
+            )
+            user_aggregator = aggregators.user()
 
             # The aggregator consumes the STT's TranscriptionFrames to build the
             # bot's turn, so the response comes from the aggregated turn text here
-            # (not from a frame at the sink). This is also the judge hook for sims.
-            # The stream decides whether the finished turn is the bot's reply or
-            # an earlier turn finalized late (see EvalEventStream.bot_turn_stopped).
+            # (not from a frame at the sink). The stream decides whether the
+            # finished turn is the bot's reply or an earlier turn finalized late
+            # (see EvalEventStream.bot_turn_stopped).
             @user_aggregator.event_handler("on_user_turn_started")
             async def _on_user_turn_started(_aggregator, _strategy):
                 self._stream.bot_turn_started()
@@ -501,14 +708,22 @@ class EvalClient:
                 await self._stream.bot_turn_stopped(message.content or "")
 
             processors += [self._bot_stt, user_aggregator]
-        self._sink = _BotFrameSink(self._stream)
+        # With no STT there is no aggregator to hand the bot's turns to the
+        # persona; the sink does it from the bot's text.
+        feed = self._persona_context if self._persona_llm and self._bot_stt is None else None
+        self._sink = _BotFrameSink(self._stream, persona_feed=feed)
         processors.append(self._sink)
+        if self._persona_llm is not None:
+            processors.append(self._persona_llm)
         if self._user_tts is not None:
-            # The user TTS speaks only the harness's TTSSpeakFrames; the bot's text
-            # flowing past it is passed through unspoken (see CachingTTSService), so
-            # no echo and no gate needed.
             processors.append(self._user_tts)
+        if self._persona_llm is not None:
+            processors.append(_PersonaTurnRelay(self._text_turn_message, self._trace))
         processors.append(transport.output())
+        if self._persona_llm is not None:
+            if aggregators is None:
+                aggregators = LLMContextAggregatorPair(context)
+            processors.append(aggregators.assistant())
         return processors
 
     def _connect_url(self) -> str:
@@ -525,11 +740,11 @@ class EvalClient:
         default, since bots often cancel there).
         """
         flags = []
-        if not self._scenario.bot_audio:
+        if not self._bot_audio:
             flags.append("skip_tts=true")
-        # Forward the bot's audio when a scenario asserts on it (response) or when
-        # recording an audio scenario (the harness records the bot's side from it).
-        if self._wants_response or (self._record_path and self._scenario.bot_audio):
+        # Forward the bot's audio when something listens to it (the response
+        # transcription, a persona) or when recording an audio run.
+        if self._capture_bot_audio or (self._record_path and self._bot_audio):
             flags.append("capture_bot_audio=true")
         if self._trigger_disconnect:
             flags.append("trigger_disconnect=true")
@@ -541,42 +756,6 @@ class EvalClient:
     def _message_id(self) -> str:
         self._next_id += 1
         return str(self._next_id)
-
-    def _required_report_level(self) -> str | None:
-        """Minimal function-call report level the scenario's assertions need.
-
-        Returns ``"full"`` if any ``function_call`` expectation checks ``args``,
-        ``"name"`` if one checks ``name`` only, else ``None`` (no elevation —
-        the bot's default applies and a function_call event still arrives).
-        """
-        needs_name = False
-        for turn in self._scenario.turns:
-            for exp in turn.expect:
-                if exp.event not in FUNCTION_CALL_EVENTS:
-                    continue
-                # name/args live in exp.calls (the parser normalizes the single
-                # name:/args: shorthand into it too).
-                for call in exp.calls or []:
-                    if call.args is not None:
-                        return "full"
-                    if call.name is not None:
-                        needs_name = True
-        return "name" if needs_name else None
-
-    def _needs_vad_events(self) -> bool:
-        """Whether the scenario references raw VAD speaking events.
-
-        These (``vad_user_started_speaking`` / ``vad_user_stopped_speaking``) are
-        off by default; the harness asks the bot's RTVIObserver to emit them only
-        when a scenario asserts on or schedules from them.
-        """
-        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
-        for turn in self._scenario.turns:
-            if turn.send_after is not None and turn.send_after.event in vad_events:
-                return True
-            if any(exp.event in vad_events for exp in turn.expect):
-                return True
-        return False
 
     async def _send_cancel(self) -> None:
         """Ask the bot to cancel its pipeline so it shuts down gracefully.

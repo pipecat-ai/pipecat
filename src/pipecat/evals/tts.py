@@ -40,12 +40,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
-    TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import TTSService
 from pipecat.services.websocket_service import WebsocketService
 
@@ -160,21 +158,6 @@ class CachingTTSService(TTSService):
         self._cache_key = cache_key
         self._cache_dir_override = cache_dir
         self._use_cache = use_cache
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Synthesize only explicit ``TTSSpeakFrame``s; pass text through unspoken.
-
-        In the eval pipeline the bot's own text (``LLMTextFrame`` etc., deserialized
-        from ``bot-llm-text``) flows past toward this TTS. A ``TTSService`` would
-        aggregate and speak any ``TextFrame``, echoing the bot's words back to it,
-        so this skips text frames (forwarding them untouched) and lets the base
-        class handle everything else — including the ``TTSSpeakFrame`` the harness
-        pushes for the user's turn.
-        """
-        if isinstance(frame, TextFrame):
-            await self.push_frame(frame, direction)
-            return
-        await super().process_frame(frame, direction)
 
     async def setup(self, setup):
         """Set up this service and forward setup to the inner service."""
