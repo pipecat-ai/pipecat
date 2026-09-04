@@ -65,7 +65,7 @@ def _session(bot_audio: bool = False) -> EvalSession:
 
 
 class TestFramesToEvents(unittest.TestCase):
-    """Frame-based translation (the RTVIClientTransport path) mirrors _translate."""
+    """The bot's frames and reported messages map to the scenario's events."""
 
     def _one(self, result):
         self.assertEqual(len(result), 1)
@@ -205,142 +205,21 @@ class TestFramesToEvents(unittest.TestCase):
             [{"type": "tts_response", "text": "spoken"}],
         )
 
-
-class TestTranslate(unittest.TestCase):
-    def test_user_speaking_events(self):
-        s = _session()
-        self.assertEqual(
-            s._translate({"type": "user-started-speaking"}),
-            [{"type": "user_started_speaking"}],
-        )
-        self.assertEqual(
-            s._translate({"type": "user-stopped-speaking"}),
-            [{"type": "user_stopped_speaking"}],
-        )
-
-    def test_user_started_speaking_discards_interrupted_output(self):
-        # An interruption: the bot's in-flight output (buffers + queued events)
-        # is discarded so it can't be matched against this turn.
-        s = _session(bot_audio=True)
-        s._text_buffer = ["greeting"]
-        s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
-        self.assertEqual(
-            s._translate({"type": "user-started-speaking"}),
-            [{"type": "user_started_speaking"}],
-        )
-        self.assertEqual(s._text_buffer, [])
-        self.assertTrue(s._queue.empty())
-
-    def test_discard_preserves_user_transcription(self):
-        # A DTMF keypress emits its user_transcription right before the turn-start
-        # interruption. The discard must keep it (it's the turn's input) while
-        # still dropping the bot's interrupted output.
-        s = _session(bot_audio=True)
-        s._queue.put_nowait({"type": "llm_response", "text": "greeting"})
-        s._queue.put_nowait({"type": "user_transcription", "transcript": "DTMF: 1#"})
-        self.assertEqual(
-            s._translate({"type": "user-started-speaking"}),
-            [{"type": "user_started_speaking"}],
-        )
-        # The bot output is gone; the user transcription survives, still queued.
-        self.assertEqual(
-            s._queue.get_nowait(), {"type": "user_transcription", "transcript": "DTMF: 1#"}
-        )
-        self.assertTrue(s._queue.empty())
-
-    def test_user_transcription_final_only(self):
-        s = _session()
-        interim = {"type": "user-transcription", "data": {"text": "he", "final": False}}
-        final = {"type": "user-transcription", "data": {"text": "hello", "final": True}}
-        self.assertEqual(s._translate(interim), [])
-        self.assertEqual(
-            s._translate(final),
-            [{"type": "user_transcription", "transcript": "hello"}],
-        )
-
-    def _one_event(self, result: list[dict]) -> dict:
-        self.assertEqual(len(result), 1)
-        return result[0]
-
-    def test_text_mode_accumulates_bot_llm_text(self):
-        # Text mode (bot_audio=False): llm_response comes from bot-llm-text.
-        s = _session(bot_audio=False)
-        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
-        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Hello "}}), [])
-        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "world"}}), [])
-        # bot-tts-text is ignored in text mode.
-        self.assertEqual(s._translate({"type": "bot-tts-text", "data": {"text": "ignored"}}), [])
-        self.assertEqual(
-            self._one_event(s._translate({"type": "bot-llm-stopped"})),
-            {"type": "llm_response", "text": "Hello world"},
-        )
-
-    def test_interruption_suppresses_straggler_llm_response(self):
-        # After an interruption, the interrupted response can still flush a trailing
-        # token. It must be dropped (not attributed to the new turn); the new
-        # response begins at the next bot-llm-started.
-        s = _session(bot_audio=False)
-        s._translate({"type": "bot-llm-started"})
-        s._translate({"type": "bot-llm-text", "data": {"text": "Tell me about Paris"}})
-        # User barges in: the bot is interrupted.
-        self.assertEqual(s._translate({"type": "bot-interrupted"}), [{"type": "bot_interrupted"}])
-        # Straggler from the interrupted response arrives just after the interrupt.
-        self.assertEqual(
-            s._translate({"type": "bot-llm-text", "data": {"text": " what would"}}), []
-        )
-        self.assertEqual(s._translate({"type": "bot-llm-stopped"}), [])  # straggler dropped
-        # The genuinely new response.
-        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
-        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Tokyo"}}), [])
-        self.assertEqual(
-            self._one_event(s._translate({"type": "bot-llm-stopped"})),
-            {"type": "llm_response", "text": "Tokyo"},
-        )
-
-    def test_audio_mode_llm_text_and_tts_text(self):
-        # Audio mode (bot_audio=True): bot-llm-text -> llm_response (the LLM text),
-        # bot-tts-text -> tts_response (the TTS's spoken text, one per segment).
-        # The Whisper-transcription `response` event is exercised separately.
-        s = _session(bot_audio=True)
-        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
-        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Hello "}}), [])
-        self.assertEqual(
-            self._one_event(s._translate({"type": "bot-llm-stopped"})),
-            {"type": "llm_response", "text": "Hello "},
-        )
-        self.assertEqual(
-            self._one_event(s._translate({"type": "bot-tts-text", "data": {"text": "spoken "}})),
-            {"type": "tts_response", "text": "spoken "},
-        )
-        self.assertEqual(
-            self._one_event(s._translate({"type": "bot-tts-text", "data": {"text": "words"}})),
-            {"type": "tts_response", "text": "words"},
-        )
-        self.assertEqual(s._translate({"type": "bot-tts-stopped"}), [])
-
     def test_empty_response_still_emitted(self):
-        # An interrupted response (no text) emits an empty llm_response — the
+        # An interrupted response (no text) emits an empty llm_response; the
         # matcher's aggregation decides whether that should pass or fail.
         s = _session(bot_audio=False)
-        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
+        self.assertEqual(s.frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}])
         self.assertEqual(
-            self._one_event(s._translate({"type": "bot-llm-stopped"})),
+            self._one(s.frames_to_events(LLMFullResponseEndFrame())),
             {"type": "llm_response", "text": ""},
         )
 
-    def test_function_call(self):
-        s = _session()
-        msg = {
-            "type": "llm-function-call-in-progress",
-            "data": {"function_name": "get_weather", "arguments": {"city": "Paris"}},
-        }
-        self.assertEqual(
-            s._translate(msg),
-            [{"type": "function_call", "name": "get_weather", "args": {"city": "Paris"}}],
-        )
-
     def test_unmapped_message_ignored(self):
-        self.assertEqual(_session()._translate({"type": "metrics", "data": {}}), [])
+        msg = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": {}}
+        )
+        self.assertEqual(_session().frames_to_events(msg), [])
 
 
 class _FakeJudge:
