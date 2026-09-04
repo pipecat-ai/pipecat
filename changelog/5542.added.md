@@ -1,0 +1,1 @@
+- Added an `instruction` field to `InworldHttpTTSService.Settings`, which passes Inworld's plain-English steering for a request (e.g. `"speak loudly and urgently"`) through to `inworld-tts-2`. The WebSocket API takes steering as inline `[tags]` in the text instead, so `InworldTTSService` ignores the field.
