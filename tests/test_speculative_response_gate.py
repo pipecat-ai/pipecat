@@ -8,6 +8,7 @@ import unittest
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
+    FunctionCallResultFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -293,3 +294,78 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
             ],
         )
         assert [f.text for f in down if isinstance(f, LLMTextFrame)] == ["Something else entirely."]
+
+
+def tool_result(value: str = "booked") -> FunctionCallResultFrame:
+    return FunctionCallResultFrame(
+        function_name="book_flight",
+        tool_call_id="call-1",
+        arguments={},
+        result=value,
+    )
+
+
+class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
+    async def test_a_tool_result_survives_a_discarded_speculation(self):
+        # An async tool started in an earlier turn can return while a
+        # speculation is held. Its result belongs to that earlier work and is
+        # guaranteed delivery, so discarding the speculation around it keeps it.
+        gate = SpeculativeResponseGate()
+
+        down, _ = await run_test(
+            gate,
+            frames_to_send=[
+                *response("abc", "Booking.", end=False),
+                tool_result(),
+                SleepFrame(),
+                EagerEndOfTurnCancelFrame("abc"),
+            ],
+            expected_down_frames=[
+                EagerEndOfTurnCancelFrame,
+                FunctionCallResultFrame,
+            ],
+        )
+        assert [f.result for f in down if isinstance(f, FunctionCallResultFrame)] == ["booked"]
+
+    async def test_a_tool_result_is_held_in_order_with_the_response(self):
+        # Uninterruptible frames are ordered like any other, so one that arrives
+        # mid-response is released in the position it arrived in.
+        gate = SpeculativeResponseGate()
+
+        down, _ = await run_test(
+            gate,
+            frames_to_send=[
+                *response("abc", "Booking.", end=False),
+                tool_result(),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+            ],
+            expected_down_frames=[
+                UserStoppedSpeakingFrame,
+                LLMFullResponseStartFrame,
+                LLMTextFrame,
+                FunctionCallResultFrame,
+            ],
+        )
+
+    async def test_a_tool_result_is_not_dropped_with_a_response_being_dropped(self):
+        # Nothing is held back while dropping a withdrawn response's tail, so an
+        # uninterruptible frame passes on in order rather than being dropped.
+        gate = SpeculativeResponseGate()
+
+        await run_test(
+            gate,
+            frames_to_send=[
+                *response("abc", "Booking.", end=False),
+                SleepFrame(),
+                EagerEndOfTurnCancelFrame("abc"),
+                SleepFrame(),
+                # Still queued behind the withdrawal, which overtook it.
+                LLMTextFrame(" Done."),
+                tool_result(),
+            ],
+            expected_down_frames=[
+                EagerEndOfTurnCancelFrame,
+                FunctionCallResultFrame,
+            ],
+        )

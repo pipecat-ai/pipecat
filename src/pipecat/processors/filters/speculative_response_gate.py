@@ -19,9 +19,11 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     SystemFrame,
+    UninterruptibleFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.frame_queue import FrameQueue
 
 
 class SpeculationState(Enum):
@@ -71,7 +73,10 @@ class SpeculativeResponseGate(FrameProcessor):
 
     While holding, everything is held in arrival order except system frames,
     which are out-of-band throughout Pipecat — and which carry the verdicts the
-    gate is waiting for, so holding them would deadlock it.
+    gate is waiting for, so holding them would deadlock it. That includes
+    :class:`~pipecat.frames.frames.UninterruptibleFrame` ones, which are ordered
+    like any other frame; discarding a speculation keeps them and delivers them
+    on, since they can belong to work started before it.
     """
 
     def __init__(self, *, max_buffer_duration: float = 5.0, **kwargs):
@@ -88,7 +93,7 @@ class SpeculativeResponseGate(FrameProcessor):
         self._max_buffer_duration = max_buffer_duration
         self._state = SpeculationState.OPEN
         self._speculation_id: str | None = None
-        self._buffer: list[tuple[Frame, FrameDirection]] = []
+        self._buffer: FrameQueue = FrameQueue(frame_getter=lambda item: item[0])
         # A speculation confirmed before its response arrived. The confirmation
         # travels as a system frame, so it can pass the queued frames it
         # confirms, and nothing follows it to correct a response held by
@@ -133,7 +138,9 @@ class SpeculativeResponseGate(FrameProcessor):
             return
 
         if isinstance(frame, EndFrame):
-            # Uninterruptible and awaited by the runner: holding it hangs shutdown.
+            # Uninterruptible, and the runner awaits it: holding it hangs
+            # shutdown. Discarding first delivers whatever is held that has to
+            # outlive the speculation, ahead of it.
             await self._discard(None)
             await self.push_frame(frame, direction)
             return
@@ -142,9 +149,16 @@ class SpeculativeResponseGate(FrameProcessor):
             await self._begin(frame.speculation_id)
 
         if self._state == SpeculationState.HOLDING:
-            self._buffer.append((frame, direction))
+            # Held in arrival order, uninterruptible frames included: they are
+            # ordered like any other, and the buffer preserves them when the
+            # speculation around them is discarded.
+            self._buffer.put_nowait((frame, direction))
         elif self._state == SpeculationState.DROPPING:
-            if isinstance(frame, LLMFullResponseEndFrame):
+            if isinstance(frame, UninterruptibleFrame):
+                # Not part of the response being dropped, and nothing is being
+                # held back, so passing it on keeps it in order.
+                await self.push_frame(frame, direction)
+            elif isinstance(frame, LLMFullResponseEndFrame):
                 self._state = SpeculationState.OPEN
         else:
             await self.push_frame(frame, direction)
@@ -189,12 +203,10 @@ class SpeculativeResponseGate(FrameProcessor):
             return
 
         await self._cancel_timeout()
-        logger.debug(f"{self}: releasing speculative response ({len(self._buffer)} frames)")
-        buffered, self._buffer = self._buffer, []
+        logger.debug(f"{self}: releasing speculative response ({self._buffer.qsize()} frames)")
         self._state = SpeculationState.OPEN
         self._speculation_id = None
-        for frame, direction in buffered:
-            await self.push_frame(frame, direction)
+        await self._flush()
 
     async def _discard(self, speculation_id: str | None):
         """Discard the response a withdrawal or an interruption voids.
@@ -228,14 +240,25 @@ class SpeculativeResponseGate(FrameProcessor):
 
         await self._cancel_timeout()
         logger.debug(
-            f"{self}: discarding speculative response ({len(self._buffer)} frames, {reason})"
+            f"{self}: discarding speculative response ({self._buffer.qsize()} frames, {reason})"
         )
-        complete = any(isinstance(f, LLMFullResponseEndFrame) for f, _ in self._buffer)
-        self._buffer.clear()
+        # A response that already ended has no tail left to drop.
+        complete = self._buffer.has_frame(LLMFullResponseEndFrame)
+        # Drops the speculative response and keeps anything that must always be
+        # delivered, which is then pushed on rather than discarded with it.
+        self._buffer.reset()
         self._speculation_id = None
         self._state = (
             SpeculationState.DROPPING if keep_dropping and not complete else SpeculationState.OPEN
         )
+        await self._flush()
+
+    async def _flush(self):
+        """Push everything the buffer still holds, in the order it arrived."""
+        while not self._buffer.empty():
+            frame, direction = self._buffer.get_nowait()
+            self._buffer.task_done()
+            await self.push_frame(frame, direction)
 
     async def _start_timeout(self):
         await self._cancel_timeout()
