@@ -367,15 +367,19 @@ class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
-    async def test_deferring_forwards_the_speculation(self):
-        # The wrapper is transparent apart from the event it suppresses, so a
-        # speculation started by the inner strategy stays visible. Without it
-        # the aggregator would see none and write the eager transcript to the
-        # real context.
+    async def test_deferring_carries_the_speculation_to_the_subscriber(self):
+        # The wrapper is transparent apart from the event it suppresses, so the
+        # speculation reaches the subscriber on the event that starts it.
+        triggered = []
+
         inner = EagerUserTurnStopStrategy()
         wrapper = deferred(inner)
+        wrapper.add_event_handler(
+            "on_user_turn_inference_triggered",
+            lambda strategy, speculation: triggered.append(speculation),
+        )
 
         await wrapper.process_frame(eager("book a flight"))
 
-        assert inner.speculation is not None
-        assert wrapper.speculation is inner.speculation
+        assert [s.text for s in triggered] == ["book a flight"]
+        assert triggered[0].id == "abc"

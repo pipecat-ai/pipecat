@@ -8,7 +8,7 @@
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
 
@@ -45,15 +45,6 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def inner(self) -> BaseUserTurnStopStrategy:
         """Return the wrapped strategy."""
         return self._inner
-
-    @property
-    def speculation(self) -> UserTurnSpeculation | None:
-        """Report the speculation the inner strategy has in flight.
-
-        Frame processing is forwarded, so a speculation starts there. Deferring
-        finalization changes when the turn ends, not what the turn is answering.
-        """
-        return self._inner.speculation
 
     @property
     def resolves_proposed_turn_stop_frames(self) -> bool:

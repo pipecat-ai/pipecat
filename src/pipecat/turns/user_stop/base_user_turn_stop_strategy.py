@@ -50,8 +50,10 @@ class BaseUserTurnStopStrategy(BaseObject):
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
       - `on_user_turn_inference_triggered`: Signals that enough evidence
-        exists to start LLM inference for the current user turn. In most
-        cases this fires together with `on_user_turn_stopped`. Strategies
+        exists to start LLM inference for the current user turn, carrying a
+        :class:`~pipecat.turns.types.UserTurnSpeculation` when the turn it
+        answers hasn't ended yet. In most cases this fires together with
+        `on_user_turn_stopped`. Strategies
         that gate finalization on the LLM (e.g.
         ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
         upstream and a separate strategy fires `on_user_turn_stopped` once
@@ -108,16 +110,6 @@ class BaseUserTurnStopStrategy(BaseObject):
                 DeprecationWarning,
                 stacklevel=2,
             )
-
-    @property
-    def speculation(self) -> UserTurnSpeculation | None:
-        """The speculative inference this strategy has in flight, if any.
-
-        Non-None between an eager end of turn and its resolution. The user
-        aggregator reads it to run that inference against a provisional context
-        instead of writing the turn to the real one.
-        """
-        return None
 
     @property
     def resolves_proposed_turn_stop_frames(self) -> bool:
@@ -235,9 +227,19 @@ class BaseUserTurnStopStrategy(BaseObject):
             enable_user_speaking_frames=enable_user_speaking_frames
         )
 
-    async def trigger_user_turn_inference_triggered(self):
-        """Trigger only the `on_user_turn_inference_triggered` event."""
-        await self._call_event_handler("on_user_turn_inference_triggered")
+    async def trigger_user_turn_inference_triggered(
+        self, *, speculation: UserTurnSpeculation | None = None
+    ):
+        """Trigger only the `on_user_turn_inference_triggered` event.
+
+        Args:
+            speculation: Set to run this inference speculatively, against a
+                provisional context carrying the turn text it names, for a turn
+                that hasn't ended yet. The response it produces is held back
+                until the turn is confirmed. Leave None to run the inference
+                against the conversation as it stands.
+        """
+        await self._call_event_handler("on_user_turn_inference_triggered", speculation)
 
     async def trigger_user_turn_finalized(
         self,

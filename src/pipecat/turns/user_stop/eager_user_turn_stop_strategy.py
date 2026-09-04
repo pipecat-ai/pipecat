@@ -143,7 +143,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             id=frame.speculation_id, text=self._text + frame.text
         )
         logger.debug(f"{self}: speculating on eager end of turn: [{self._speculation.text}]")
-        await self.trigger_user_turn_inference_triggered()
+        await self.trigger_user_turn_inference_triggered(speculation=self._speculation)
 
     def _forget(self, speculation_id: str):
         """Drop a speculation the service withdrew."""

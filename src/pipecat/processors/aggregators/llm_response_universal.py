@@ -1324,6 +1324,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self,
         controller: UserTurnController,
         strategy: BaseUserTurnStopStrategy,
+        speculation: UserTurnSpeculation | None = None,
     ):
         if self._realtime_service_mode:
             # Realtime mode: the assistant response start, not turn
@@ -1337,7 +1338,6 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._call_event_handler("on_user_turn_inference_triggered", strategy)
             return
 
-        speculation = strategy.speculation if strategy else None
         if speculation:
             logger.debug(
                 f"{self}: User turn inference triggered speculatively (strategy: {strategy})"
