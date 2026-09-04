@@ -32,6 +32,7 @@ from pipecat.flows.types import (
     ConsolidatedFunctionResult,
     ContextStrategyConfig,
     FlowArgs,
+    FlowsDirectFunction,
     FlowsDirectFunctionWrapper,
     FlowsFunctionSchema,
     NodeConfig,
@@ -100,8 +101,11 @@ class Flow:
         return self._nodes[self._config.initial_node]
 
     @property
-    def global_functions(self) -> list[FlowsFunctionSchema]:
-        """Tools available at every node, for ``FlowManager(global_functions=...)``."""
+    def global_functions(self) -> list[FlowsFunctionSchema | FlowsDirectFunction]:
+        """Tools available at every node, for ``FlowManager(global_functions=...)``.
+
+        A fresh list each time, so the caller may extend it.
+        """
         return list(self._global_functions)
 
     def node(self, name: str) -> NodeConfig:
