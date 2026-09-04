@@ -110,17 +110,38 @@ async def get_weather(params: FunctionCallParams, location: str):
     await params.result_callback({"temp": 62, "conditions": "rain"})
 
 
+async def check_flight_status(params: FunctionCallParams, flight_number: str):
+    """Check a flight's status.
+
+    Args:
+        flight_number: The flight number.
+    """
+    await params.result_callback({"status": "delayed", "departure_time": "14:30"})
+
+
+async def book_taxi(params: FunctionCallParams, time: str):
+    """Book a taxi.
+
+    Args:
+        time: The time to book it for.
+    """
+    await params.result_callback({"status": "done"})
+
+
 async def _run_backend(
     llm: _ScriptedLLM,
     *,
     request: str = "Do it",
     transform_output=None,
+    tools: list | None = None,
 ) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
     """Run one delegation against ``llm`` under a WorkerRunner."""
     backend = BackendLLMWorker(
         llm=llm,
         name="backend",
-        context=LLMContext([{"role": "system", "content": "You are the backend."}], [get_weather]),
+        context=LLMContext(
+            [{"role": "system", "content": "You are the backend."}], tools or [get_weather]
+        ),
         transform_output=transform_output,
     )
     requester = BaseWorker("requester")
@@ -203,6 +224,34 @@ async def test_fast_tool_result_before_response_end_does_not_finish_the_run_earl
     assert [(u.text, u.is_final) for u in updates] == [
         ("Checking.", False),
         ("Rain, 62 degrees.", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_chained_request_finishes_on_the_last_round_not_an_earlier_one():
+    llm = _ScriptedLLM(
+        [
+            [
+                ("thought", "Check the flight first."),
+                ("call", "check_flight_status", "call_1", {"flight_number": "AA100"}),
+            ],
+            [
+                ("text", "It's delayed, so I'm booking a taxi for 12:30."),
+                ("call", "book_taxi", "call_2", {"time": "12:30"}),
+            ],
+            [("text", "Taxi booked for 12:30.")],
+        ]
+    )
+
+    text, updates, _ = await _run_backend(llm, tools=[check_flight_status, book_taxi])
+
+    assert text == "Taxi booked for 12:30."
+    assert len(llm.contexts_seen) == 3
+    # What the backend says between rounds is progress; only the last round answers.
+    assert [(u.text, u.is_thought, u.is_final) for u in updates] == [
+        ("Check the flight first.", True, False),
+        ("It's delayed, so I'm booking a taxi for 12:30.", False, False),
+        ("Taxi booked for 12:30.", False, True),
     ]
 
 
