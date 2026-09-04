@@ -49,10 +49,13 @@ from pipecat.audio.utils import create_stream_resampler, mix_audio
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.websocket.client import (
     WebsocketClientInputTransport,
     WebsocketClientOutputTransport,
@@ -91,7 +94,8 @@ class HarnessRecorder:
     the bot's chunks as received (both gapless within a turn) -- and lays each side
     out contiguously on its playout timeline, inserting silence only for a real
     between-turn pause (see :class:`_RecorderTrack`). Pacing jitter never reaches
-    the recording.
+    the recording, and audio the bot sent past its interruption is dropped
+    (:meth:`drop_bot_tail`) as a client's playout would drop it.
 
     Each side is captured on its own timeline (monotonic clock); :meth:`write`
     resamples to a common rate, aligns the two by their first-audio offset, and
@@ -111,9 +115,7 @@ class HarnessRecorder:
         """
         self._rate = sample_rate
         self._user = _RecorderTrack()
-        # The bot's output transport paces its audio in real time, so a late chunk
-        # followed by a burst is transit delay on this side, not a pause.
-        self._bot = _RecorderTrack(paced=True)
+        self._bot = _RecorderTrack()
 
     def add_user(self, audio: bytes, in_rate: int) -> None:
         """Record a chunk of the user's TTS audio (raw, before pacing to the bot)."""
@@ -122,6 +124,10 @@ class HarnessRecorder:
     def add_bot(self, audio: bytes, in_rate: int) -> None:
         """Record a chunk of the bot's audio (raw, before the gap-fill loop)."""
         self._bot.add(audio, in_rate)
+
+    def drop_bot_tail(self, num_bytes: int) -> None:
+        """Drop the last ``num_bytes`` of the bot's audio: sent, but never played."""
+        self._bot.drop_tail(num_bytes)
 
     def has_audio(self) -> bool:
         """Whether any audio has been recorded on either side."""
@@ -156,19 +162,14 @@ class _RecorderTrack:
     :meth:`rendered` lays the chunks out contiguously on a playout timeline: each
     starts where the previous one ends, and silence is inserted only for a real
     pause -- a chunk arriving later than the playout position by more than
-    ``HarnessRecorder.GAP_S``. Arriving ahead of the position (the user TTS
-    produces faster than real time) or within the threshold is jitter and stays
-    gapless.
-
-    A ``paced`` track's source sends its audio in real time (the bot's output
-    transport), so a chunk is late only because it was held up on the way here,
-    and the chunks queued behind it then arrive in a burst that catches the
-    playout position back up. What that burst pays back was transit delay, not a
-    pause; only the lateness it leaves becomes silence.
+    ``HarnessRecorder.GAP_S``. Both sources run ahead of real time (the bot's
+    transport sends up to twice real time, the user TTS synthesizes faster than
+    it plays), so within a turn chunks arrive before the position and a hiccup
+    on the receiving side is absorbed by that lead; a small late arrival is
+    jitter and shifts the timeline rather than accumulating toward a pause.
     """
 
-    def __init__(self, *, paced: bool = False):
-        self._paced = paced
+    def __init__(self):
         self._chunks: list[tuple[float, bytes]] = []
         self._rate: int | None = None
 
@@ -183,6 +184,17 @@ class _RecorderTrack:
             return
         self._rate = in_rate
         self._chunks.append((time.monotonic(), audio))
+
+    def drop_tail(self, num_bytes: int) -> None:
+        """Remove the last ``num_bytes`` of audio, across as many chunks as it spans."""
+        while num_bytes > 0 and self._chunks:
+            arrived, chunk = self._chunks[-1]
+            if len(chunk) <= num_bytes:
+                self._chunks.pop()
+                num_bytes -= len(chunk)
+            else:
+                self._chunks[-1] = (arrived, chunk[: len(chunk) - num_bytes])
+                num_bytes = 0
 
     async def rendered(self, out_rate: int, start: float) -> bytes:
         """Lay the track out, resample to ``out_rate``, and prepend its silence since ``start``."""
@@ -199,41 +211,16 @@ class _RecorderTrack:
         assert self._rate is not None
         out = bytearray()
         position = self._chunks[0][0]  # playout position, as a wall-clock time
-        for index, (arrived, chunk) in enumerate(self._chunks):
+        for arrived, chunk in self._chunks:
             late = arrived - position
             if late > HarnessRecorder.GAP_S:
-                pause = self._unrecovered(index, position) if self._paced else late
-                if pause > HarnessRecorder.GAP_S:
-                    out.extend(b"\x00" * (int(pause * self._rate * 2) & ~1))
-                    position += pause
+                out.extend(b"\x00" * (int(late * self._rate * 2) & ~1))
+                position = arrived
             elif late > 0:
-                # A small hiccup shifts the timeline (as the source's own pacing
-                # would) rather than accumulating toward a spurious pause.
                 position = arrived
             out.extend(chunk)
-            position += self._duration(chunk)
+            position += len(chunk) / (self._rate * 2)
         return bytes(out)
-
-    def _unrecovered(self, index: int, position: float) -> float:
-        """The lateness of chunk ``index`` that the chunks after it don't pay back.
-
-        Walks forward while the audio laid out since ``index`` is short of the
-        lateness; the smallest lateness seen is the part that persists. Stops
-        early once it drops within the threshold (a transit delay fully caught up).
-        """
-        late = self._chunks[index][0] - position
-        floor = late
-        laid = 0.0
-        for arrived, chunk in self._chunks[index:]:
-            floor = min(floor, arrived - (position + laid))
-            if floor <= HarnessRecorder.GAP_S or laid > late:
-                break
-            laid += self._duration(chunk)
-        return floor
-
-    def _duration(self, chunk: bytes) -> float:
-        assert self._rate is not None
-        return len(chunk) / (self._rate * 2)
 
 
 class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
@@ -367,6 +354,25 @@ class EvalHarnessInputTransport(WebsocketClientInputTransport):
         """Cancel the fill stream, then the transport."""
         await self._cancel_fill_task()
         await super().cancel(frame)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame on, dropping the bot's unplayed audio when it reports an interruption.
+
+        The bot's transport sends audio up to twice real time, so at an
+        interruption the buffer here can hold seconds the bot sent but a client
+        never plays; what the harness hears must stop where the bot stopped. The
+        recorder drops the same bytes.
+        """
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, InputTransportMessageFrame)
+            and isinstance(frame.message, dict)
+            and frame.message.get("type") == "bot-interrupted"
+        ):
+            if self._recorder is not None:
+                self._recorder.drop_bot_tail(len(self._bot_pcm))
+            self._bot_pcm.clear()
+        await super().push_frame(frame, direction)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         """Buffer the bot's audio; the fill task re-emits it at a steady cadence.
