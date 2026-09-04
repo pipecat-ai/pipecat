@@ -6,10 +6,11 @@
 
 """OpenAI image generation service implementation.
 
-This module provides integration with OpenAI's DALL-E image generation API
-for creating images from text prompts.
+This module provides integration with OpenAI's image generation API for
+creating images from text prompts.
 """
 
+import base64
 import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -57,7 +58,7 @@ class OpenAIImageGenSettings(ImageGenSettings):
     """Settings for the OpenAI image generation service.
 
     Parameters:
-        model: DALL-E model identifier.
+        model: Image generation model identifier.
         image_size: Target size for generated images.
     """
 
@@ -65,11 +66,10 @@ class OpenAIImageGenSettings(ImageGenSettings):
 
 
 class OpenAIImageGenService(ImageGenService):
-    """OpenAI DALL-E image generation service.
+    """OpenAI image generation service.
 
-    Provides image generation capabilities using OpenAI's DALL-E models.
-    Supports various image sizes and can generate images from text prompts
-    with configurable quality and style parameters.
+    Provides image generation capabilities using OpenAI's GPT Image models.
+    Supports various image sizes and can generate images from text prompts.
     """
 
     Settings = OpenAIImageGenSettings
@@ -98,7 +98,7 @@ class OpenAIImageGenService(ImageGenService):
                     Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: DALL-E model to use for generation. Defaults to "dall-e-3".
+            model: Image generation model to use. Defaults to "gpt-image-2".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
@@ -109,7 +109,7 @@ class OpenAIImageGenService(ImageGenService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="dall-e-3",
+            model="gpt-image-2",
             image_size=None,
         )
 
@@ -131,7 +131,7 @@ class OpenAIImageGenService(ImageGenService):
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
-        """Generate an image from a text prompt using OpenAI's DALL-E.
+        """Generate an image from a text prompt using OpenAI's Images API.
 
         Args:
             prompt: Text description of the image to generate.
@@ -153,19 +153,24 @@ class OpenAIImageGenService(ImageGenService):
             yield ErrorFrame("Image generation failed: no data returned")
             return
 
+        # The GPT Image models always return the bytes inline; the response
+        # carries a URL only when the model supports hosted results.
         image_url = image.data[0].url
-        if not image_url:
+        b64_data = image.data[0].b64_json
+
+        if image_url:
+            async with self._aiohttp_session.get(image_url) as response:
+                image_bytes = await response.content.read()
+        elif b64_data:
+            image_bytes = base64.b64decode(b64_data)
+        else:
             yield ErrorFrame("Image generation failed")
             return
 
-        # Load the image from the url
-        async with self._aiohttp_session.get(image_url) as response:
-            image_stream = io.BytesIO(await response.content.read())
-            image = Image.open(image_stream)
-            frame = URLImageRawFrame(
-                image=image.tobytes(),
-                size=image.size,
-                format=image.mode,
-                url=image_url,
-            )
-            yield frame
+        generated = Image.open(io.BytesIO(image_bytes))
+        yield URLImageRawFrame(
+            image=generated.tobytes(),
+            size=generated.size,
+            format=generated.mode,
+            url=image_url,
+        )
