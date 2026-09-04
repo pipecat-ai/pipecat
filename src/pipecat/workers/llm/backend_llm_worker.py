@@ -165,7 +165,9 @@ def render_transcript_request(
         instruction: What the backend should do with the transcript, placed
             after it.
         first: Whether this is the backend's first request in the
-            conversation, which decides how the transcript is introduced.
+            conversation. It decides how the transcript is introduced: as the
+            conversation so far, or as what has been said since the previous
+            delegation.
 
     Returns:
         The rendered request.
@@ -173,7 +175,9 @@ def render_transcript_request(
     lines: list[str] = []
     if conversation:
         lines.append(
-            "Voice conversation so far:" if first else "Voice conversation since your last task:"
+            "Voice conversation so far:"
+            if first
+            else "Voice conversation since the previous delegation:"
         )
         for message in conversation:
             role = message.get("role")  # type: ignore[attr-defined]

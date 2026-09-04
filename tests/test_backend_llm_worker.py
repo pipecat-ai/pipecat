@@ -273,7 +273,7 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
 
     requests = [m["content"] for m in llm.contexts_seen[1] if m.get("role") == "user"]
     assert requests[0].startswith("Voice conversation so far:\nUSER: one")
-    assert requests[1].startswith("Voice conversation since your last task:\nUSER: two")
+    assert requests[1].startswith("Voice conversation since the previous delegation:\nUSER: two")
 
 
 def test_render_transcript_request_is_the_instruction_alone_when_nothing_was_said():
