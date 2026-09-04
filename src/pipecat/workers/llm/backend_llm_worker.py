@@ -141,23 +141,14 @@ def render_transcript_request(
 ) -> str:
     """Render a conversation as a labelled transcript for the backend to act on.
 
-    The conversation is flattened into transcript text rather than carried
-    over as context messages of their own. That keeps the two conversations
+    Flattening the conversation into one message keeps the two conversations
     apart: the backend's context holds only what the backend itself said as
     assistant messages, so it never mistakes the frontend's speech for its
     own.
 
     Only user and assistant text crosses today: tool calls, tool results,
     images and other non-text content are skipped, and say so at debug level.
-    Carrying more is a question of how to render it, not something the
-    contract rules out.
-
-    A frontend whose model words its own request passes that as the
-    ``instruction``::
-
-        render_transcript_request(
-            conversation, instruction=f"Task from the voice assistant: {task}"
-        )
+    Carrying more is a question of how to render it.
 
     Args:
         conversation: The conversation the user is having with the frontend,
@@ -378,9 +369,11 @@ async def run_backend_job(
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
             :func:`render_transcript_request` composes one from a
-            conversation; a frontend whose model words its own request can
-            pass that instead, and an application with its own frontend to
-            backend protocol can pass whatever that protocol says.
+            conversation, which is what a frontend hands over when its model
+            signals a handoff without wording a request. A frontend whose
+            model does word one can send it as it stands::
+
+                await run_backend_job(worker, "backend", request=task)
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling

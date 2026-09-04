@@ -291,8 +291,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             if not is_given(backend_model) or not backend_model:
                 raise ValueError("ResponsesDelegation.settings.model is required")
 
-        # The live model is fixed for the session's lifetime, so it is resolved
-        # once here rather than read back out of the settings at start time.
+        # The live model is fixed for the session's lifetime, so it is
+        # resolved once, here.
         session_model = assert_given(default_settings.model)
         if not session_model:
             raise ValueError("settings.model is required")
@@ -846,11 +846,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     def _remember_fragment(self, role: Literal["user", "assistant"], delta: str):
         """Keep a transcript fragment for the next client delegation.
 
-        Fragments land on frame boundaries rather than word or turn ones, so
-        consecutive ones from the same speaker are joined back up as they
-        arrive: the backend should read a conversation, not a column of 200 ms
-        slices. Deltas carry their own leading spaces, so they concatenate
-        into the original text unaltered.
+        Fragments land on frame boundaries, so consecutive ones from the same
+        speaker are joined back up as they arrive, giving the backend whole
+        utterances to read. Deltas carry their own leading spaces, so they
+        concatenate into the original text unaltered.
         """
         if not isinstance(self._delegation, ClientDelegation):
             return
@@ -923,8 +922,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     async def _run_client_delegation(self, delegation: events.DelegationMetadata):
         config = self._delegation
         assert isinstance(config, ClientDelegation)
-        # The delegation carries no task text: the backend is handed the
-        # conversation since the last one and works out the request itself.
+        # The backend is handed the conversation since the last delegation
+        # and works out the request from it.
         request = render_transcript_request(
             self._take_transcript(), first=not self._delegated_before
         )

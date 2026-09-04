@@ -146,10 +146,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # The backend is handed the conversation rather than a request worded by
-    # the frontend, so it can read a short reply or a correction for itself.
-    # Only what it hasn't seen: its own context keeps the rest, and the count
-    # is per session, so it lives here rather than at module level.
+    # The backend is handed the conversation and works out the request from
+    # it, so it can read a short reply or a correction for itself. Only what
+    # it hasn't seen: its own context keeps the rest. The count belongs to
+    # this session.
     delegated_through = 0
 
     @tool_options(cancel_on_interruption=False)
