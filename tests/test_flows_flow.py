@@ -6,7 +6,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock
 
 from loguru import logger
 
@@ -170,14 +170,14 @@ def single_node(function: dict, **node_extras) -> FlowConfig:
 VARIABLES = {"restaurant": "Luigi's", "caller": "friend"}
 
 
-def bind(cfg: FlowConfig, tools=TOOLS, variables=VARIABLES) -> Flow:
+def make_flow(cfg: FlowConfig, tools=TOOLS, variables=VARIABLES) -> Flow:
     return Flow(cfg, tools=tools, variables=variables)
 
 
-class TestBinding(unittest.TestCase):
+class TestConstruction(unittest.TestCase):
     def test_flow_keeps_its_config(self):
         cfg = config()
-        flow = bind(cfg)
+        flow = make_flow(cfg)
         self.assertIsInstance(flow, Flow)
         self.assertIs(flow.config, cfg)
 
@@ -189,19 +189,19 @@ class TestBinding(unittest.TestCase):
             "check_kitchen_status": check_kitchen_status,
             "unrelated": 42,
         }
-        flow = bind(config(), tools=mapping)
+        flow = make_flow(config(), tools=mapping)
         self.assertEqual(flow.initial_node["functions"][0].name, "choose_pizza")
 
     def test_missing_tool(self):
         cfg = single_node({"name": "no_such_tool"})
         with self.assertRaises(FlowError) as cm:
-            bind(cfg)
+            make_flow(cfg)
         self.assertIn("node 'a' references tool 'no_such_tool'", str(cm.exception))
 
     def test_missing_global_tool(self):
         cfg = config(global_functions=[{"name": "no_such_tool"}])
         with self.assertRaises(FlowError) as cm:
-            bind(cfg)
+            make_flow(cfg)
         self.assertIn("global_functions references tool 'no_such_tool'", str(cm.exception))
 
     def test_missing_action_handler(self):
@@ -210,45 +210,45 @@ class TestBinding(unittest.TestCase):
             pre_actions=[{"type": "function", "handler": "no_such_handler"}],
         )
         with self.assertRaises(FlowError) as cm:
-            bind(cfg)
+            make_flow(cfg)
         self.assertIn("pre_actions references action handler 'no_such_handler'", str(cm.exception))
 
     def test_non_callable_reference(self):
         with self.assertRaises(FlowError) as cm:
-            bind(single_node({"name": "NOT_A_TOOL"}))
+            make_flow(single_node({"name": "NOT_A_TOOL"}))
         self.assertIn("is not callable", str(cm.exception))
 
     def test_invalid_direct_function_not_async(self):
         with self.assertRaises(FlowError) as cm:
-            bind(single_node({"name": "not_async"}))
+            make_flow(single_node({"name": "not_async"}))
         self.assertIn("not a valid direct function", str(cm.exception))
         self.assertIn("must be async", str(cm.exception))
 
     def test_invalid_direct_function_first_param(self):
         with self.assertRaises(FlowError) as cm:
-            bind(single_node({"name": "wrong_first_param"}))
+            make_flow(single_node({"name": "wrong_first_param"}))
         self.assertIn("flow_manager", str(cm.exception))
 
     def test_missing_variable(self):
         with self.assertRaises(FlowError) as cm:
-            bind(config(), variables={"restaurant": "Luigi's"})
+            make_flow(config(), variables={"restaurant": "Luigi's"})
         self.assertIn("node 'initial' task_messages uses variable 'caller'", str(cm.exception))
 
     def test_variables_render_everywhere(self):
-        flow = bind(config(), variables={"restaurant": "Luigi's", "caller": 7})
+        flow = make_flow(config(), variables={"restaurant": "Luigi's", "caller": 7})
         initial, pizza = flow.node("initial"), flow.node("pizza")
         self.assertEqual(initial["role_message"], "You work for Luigi's.")
         self.assertEqual(initial["task_messages"][0]["content"], "Greet the 7.")
         self.assertEqual(pizza["post_actions"][0]["text"], "Thanks, 7!")
 
     def test_unused_variables_are_fine(self):
-        bind(config(), variables={**VARIABLES, "extra": "unused"})
+        make_flow(config(), variables={**VARIABLES, "extra": "unused"})
 
     def test_annotation_warning(self):
         records = []
         sink = logger.add(lambda m: records.append(m.record["message"]), level="WARNING")
         try:
-            bind(single_node({"name": "annotated_for_hand_built"}))
+            make_flow(single_node({"name": "annotated_for_hand_built"}))
         finally:
             logger.remove(sink)
         self.assertTrue(any("annotated as returning a NodeConfig" in r for r in records))
@@ -256,7 +256,7 @@ class TestBinding(unittest.TestCase):
 
 class TestNodeConfigs(unittest.TestCase):
     def setUp(self):
-        self.flow = bind(config())
+        self.flow = make_flow(config())
 
     def test_initial_node(self):
         self.assertIs(self.flow.initial_node, self.flow.node("initial"))
@@ -324,32 +324,32 @@ class TestCallTimeContract(unittest.IsolatedAsyncioTestCase):
         return await schema.handler(args or {}, self.flow_manager)
 
     async def test_none_with_transition_uses_config_edge(self):
-        flow = bind(single_node({"name": "choose_pizza", "transition_to": "next"}))
+        flow = make_flow(single_node({"name": "choose_pizza", "transition_to": "next"}))
         result, next_node = await self.call(flow)
         self.assertIsNone(result)
         self.assertIs(next_node, flow.node("next"))
 
     async def test_none_without_transition_stays(self):
-        flow = bind(single_node({"name": "get_delivery_estimate"}))
+        flow = make_flow(single_node({"name": "get_delivery_estimate"}))
         result, next_node = await self.call(flow)
         self.assertEqual(result, {"time": "30 minutes"})
         self.assertIsNone(next_node)
 
     async def test_arguments_reach_the_tool(self):
-        flow = bind(single_node({"name": "select_pizza_order", "transition_to": "next"}))
+        flow = make_flow(single_node({"name": "select_pizza_order", "transition_to": "next"}))
         result, next_node = await self.call(flow, args={"size": "large", "pizza_type": "cheese"})
         self.assertEqual(result["size"], "large")
         self.assertEqual(self.flow_manager.state["order"]["pizza_type"], "cheese")
         self.assertIs(next_node, flow.node("next"))
 
     async def test_no_response_passes_through(self):
-        flow = bind(single_node({"name": "stay_quiet", "transition_to": "next"}))
+        flow = make_flow(single_node({"name": "stay_quiet", "transition_to": "next"}))
         result, next_node = await self.call(flow)
         self.assertEqual(result, {"ok": True})
         self.assertIs(next_node, NO_RESPONSE)
 
     async def test_bare_result_is_rejected(self):
-        flow = bind(single_node({"name": "returns_bare"}))
+        flow = make_flow(single_node({"name": "returns_bare"}))
         with self.assertRaises(FlowError) as cm:
             await self.call(flow)
         self.assertIn("must return a (result, None) tuple", str(cm.exception))
@@ -359,13 +359,13 @@ class TestCallTimeContract(unittest.IsolatedAsyncioTestCase):
             {"name": "returns_node"},
             {"name": "returns_node", "transition_to": "next"},
         ):
-            flow = bind(single_node(function))
+            flow = make_flow(single_node(function))
             with self.assertRaises(FlowError) as cm:
                 await self.call(flow)
             self.assertIn("config owns transitions", str(cm.exception))
 
     async def test_name_return_is_rejected(self):
-        flow = bind(single_node({"name": "returns_name"}))
+        flow = make_flow(single_node({"name": "returns_name"}))
         with self.assertRaises(FlowError) as cm:
             await self.call(flow)
         self.assertIn("returned node name 'confirm'", str(cm.exception))
@@ -378,7 +378,7 @@ class TestBranches(unittest.IsolatedAsyncioTestCase):
         self.flow_manager = SimpleNamespace(state={})
 
     async def branch(self, tool: str, transition_to: dict, args: dict):
-        flow = bind(single_node({"name": tool, "transition_to": transition_to}))
+        flow = make_flow(single_node({"name": tool, "transition_to": transition_to}))
         schema = flow.node("a")["functions"][0]
         _, next_node = await schema.handler(args, self.flow_manager)
         return flow, next_node
@@ -417,7 +417,7 @@ class TestBranches(unittest.IsolatedAsyncioTestCase):
 
 
 class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
-    """A bound flow driven through the real FlowManager."""
+    """A configured flow driven through the real FlowManager."""
 
     async def asyncSetUp(self):
         self.mock_worker = make_mock_worker()
@@ -462,7 +462,7 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         return results[0]
 
     async def test_configured_flow_end_to_end(self):
-        flow = bind(config())
+        flow = make_flow(config())
         flow_manager = self.make_manager(flow)
         await flow_manager.initialize(flow.initial_node)
 
@@ -491,7 +491,7 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flow_manager.current_node, "confirm")
 
     async def test_contract_violation_reaches_llm_as_error(self):
-        flow = bind(single_node({"name": "returns_bare"}))
+        flow = make_flow(single_node({"name": "returns_bare"}))
         flow_manager = self.make_manager(flow)
         await flow_manager.initialize(flow.initial_node)
 
