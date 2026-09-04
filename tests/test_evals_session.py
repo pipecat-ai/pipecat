@@ -279,6 +279,53 @@ class _FakeJudge:
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
 
 
+class TestBotTurn(unittest.IsolatedAsyncioTestCase):
+    """The bot's finished spoken turn is the reply only if it began after the input."""
+
+    async def _responses(self, s: EvalEventStream) -> list[str]:
+        out = []
+        while not s._queue.empty():
+            out.append(s._queue.get_nowait()["text"])
+        return out
+
+    async def test_turn_after_input_and_llm_restart_is_the_reply(self):
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        s.frames_to_events(LLMFullResponseStartFrame())  # the bot's new response
+        s.bot_turn_started()
+        await s.bot_turn_stopped("Tokyo.")
+        self.assertEqual(await self._responses(s), ["Tokyo."])
+
+    async def test_turn_begun_before_input_is_dropped_even_after_llm_restart(self):
+        # The interrupted turn finalizes late, after the bot has already started
+        # its real reply: still not the reply.
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        s.input_sent()
+        s.frames_to_events(LLMFullResponseStartFrame())
+        await s.bot_turn_stopped("Let's take a journey")
+        self.assertEqual(await self._responses(s), [])
+
+    async def test_turn_before_llm_restart_is_dropped(self):
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        s.bot_turn_started()
+        await s.bot_turn_stopped("straggler")
+        self.assertEqual(await self._responses(s), [])
+
+    async def test_bot_first_turn_needs_no_input(self):
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        await s.bot_turn_stopped("Hello there!")
+        self.assertEqual(await self._responses(s), ["Hello there!"])
+
+    async def test_empty_turn_is_not_a_response(self):
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        await s.bot_turn_stopped("")
+        self.assertEqual(await self._responses(s), [])
+
+
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
 

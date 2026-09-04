@@ -110,10 +110,8 @@ class EvalDriver(ABC):
             await self._client.send_text(text, audio_response=self._bot_audio)
         if self._judge is not None:
             self._judge.add_user_message(text)
-        # Suppress in-flight stragglers until the bot's fresh response begins
-        # (llm-started clears the flag), so only what the bot says in reply to
-        # this input is matched.
-        self._stream.awaiting_llm_restart = True
+        # Only what the bot says in reply to this input is matched from here on.
+        self._stream.input_sent()
 
     async def _press(self, keys: str) -> None:
         """Send DTMF keypresses as the user's turn (see :meth:`_say` for the drop).
@@ -127,7 +125,7 @@ class EvalDriver(ABC):
         await self._client.send_dtmf(keys)
         if self._judge is not None:
             self._judge.add_user_message(f"(DTMF keypad input: {keys})")
-        self._stream.awaiting_llm_restart = True
+        self._stream.input_sent()
 
 
 class ScriptedDriver(EvalDriver):

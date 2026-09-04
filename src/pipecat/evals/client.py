@@ -490,13 +490,15 @@ class EvalClient:
             # The aggregator consumes the STT's TranscriptionFrames to build the
             # bot's turn, so the response comes from the aggregated turn text here
             # (not from a frame at the sink). This is also the judge hook for sims.
-            # Skip while awaiting an LLM restart: an interrupted turn finalizes
-            # *after* the interruption, and that straggler must not be matched
-            # against the next turn (mirrors the llm_response suppression).
+            # The stream decides whether the finished turn is the bot's reply or
+            # an earlier turn finalized late (see EvalEventStream.bot_turn_stopped).
+            @user_aggregator.event_handler("on_user_turn_started")
+            async def _on_user_turn_started(_aggregator, _strategy):
+                self._stream.bot_turn_started()
+
             @user_aggregator.event_handler("on_user_turn_stopped")
             async def _on_user_turn_stopped(_aggregator, _strategy, message):
-                if message.content and not self._stream.awaiting_llm_restart:
-                    await self._stream.append({"type": "response", "text": message.content})
+                await self._stream.bot_turn_stopped(message.content or "")
 
             processors += [self._bot_stt, user_aggregator]
         self._sink = _BotFrameSink(self._stream)

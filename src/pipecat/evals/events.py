@@ -88,6 +88,48 @@ class EvalEventStream:
         # and that straggler must not be attributed to the new turn. The genuinely
         # new response begins at the next llm-started.
         self.awaiting_llm_restart: bool = False
+        # When the driver last sent user input, and when the bot's spoken turn
+        # in progress began (audio mode). A spoken turn that began before the
+        # input is the bot's earlier output, not its reply, however late the
+        # harness's turn analyzer finalizes it.
+        self._input_sent_at: float = 0.0
+        self._bot_turn_started_at: float | None = None
+
+    def input_sent(self) -> None:
+        """Mark the user's input as sent: the bot's reply is what it says from now on.
+
+        Output the bot produced before this point can't be the reply, so an LLM
+        response still streaming is dropped until the bot's next llm-started,
+        and a spoken turn that began before now is dropped when it ends.
+        """
+        self.awaiting_llm_restart = True
+        self._input_sent_at = time.monotonic()
+
+    def bot_turn_started(self) -> None:
+        """Note that the bot began a spoken turn (the user aggregator's turn start)."""
+        self._bot_turn_started_at = time.monotonic()
+
+    async def bot_turn_stopped(self, text: str) -> None:
+        """Append the bot's finished spoken turn as a ``response``, unless it is stale.
+
+        The turn is stale when it began before the user's latest input, or when
+        the bot's LLM hasn't restarted since that input. An interrupted turn
+        finalizes only after the interruption, once the harness's turn analyzer
+        stops waiting for its continuation, which can be after the bot has
+        already begun its real reply; matched then, it would be judged as that
+        reply.
+
+        Args:
+            text: The turn's transcription; nothing is appended when empty.
+        """
+        started = self._bot_turn_started_at
+        self._bot_turn_started_at = None
+        if not text:
+            return
+        if self.awaiting_llm_restart or (started is not None and started < self._input_sent_at):
+            self._trace.log(f"discard: bot turn from before the send {text!r}")
+            return
+        await self.append({"type": "response", "text": text})
 
     async def append(self, event: dict) -> None:
         """Append an event for the matcher.
