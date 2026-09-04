@@ -202,6 +202,7 @@ from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.evals.services import DEFAULT_OLLAMA_JUDGE_EXTRA, DEFAULT_OLLAMA_JUDGE_MODEL
+from pipecat.utils.yaml import include_loader
 
 
 class _ScenarioLoader(yaml.SafeLoader):
@@ -233,26 +234,6 @@ yaml.add_implicit_resolver(
     list("-+0123456789"),
     Loader=_ScenarioLoader,
 )
-
-
-def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
-    """Register an ``!include <relative-path>`` constructor on ``loader_class``.
-
-    Included files load with the same loader class, so nested includes work and
-    scalars get the same resolver treatment as the top-level document. Paths
-    resolve against ``base_dir`` (the scenario file's directory).
-    """
-
-    def _include(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
-        if not isinstance(node, yaml.ScalarNode):
-            raise yaml.constructor.ConstructorError(
-                None, None, "!include expects a file path", node.start_mark
-            )
-        include_path = base_dir / str(loader.construct_scalar(node))
-        with include_path.open() as f:
-            return yaml.load(f, loader_class)
-
-    loader_class.add_constructor("!include", _include)
 
 
 # Events whose payloads carry bot-generated text the judge can sensibly
@@ -489,15 +470,9 @@ class EvalScenario:
 
         # Support `judge: !include judge_audio.yaml` (and `user:`, etc.) so
         # scenarios can share judge/user config. Includes resolve relative to the
-        # scenario file's directory. Register the constructor on a private loader
-        # subclass (not the global SafeLoader) so it has no global side effects.
-        class _Loader(_ScenarioLoader):
-            pass
-
-        _add_include_constructor(_Loader, path.parent)
-
+        # scenario file's directory.
         with path.open() as f:
-            data = yaml.load(f, _Loader)
+            data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
 
         if not isinstance(data, dict):
             raise ValueError(f"{path}: top level must be a mapping")
