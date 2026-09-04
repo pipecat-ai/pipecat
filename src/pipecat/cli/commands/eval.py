@@ -28,9 +28,9 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.harness import EvalSession
 from pipecat.evals.results import EvalTurnProgress
 from pipecat.evals.scenario import EvalScenario, describe_config
+from pipecat.evals.session import EvalSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,

@@ -122,7 +122,7 @@ overwrites anything.
 
 The tally becomes a pass rate per (bot, scenario), and failures are grouped by
 *kind* — `timeout`, `judge_no`, `missing_function_call`, ... (see `FAILURE_KINDS`
-in `pipecat.evals.harness`) — rather than listed one line per failing run:
+in `pipecat.evals.results`) — rather than listed one line per failing run:
 
 ```
   Failures (35 of 150):

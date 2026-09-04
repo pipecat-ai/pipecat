@@ -17,7 +17,7 @@ events expected to flow back from the bot. Simple example::
           - event: user_transcription
             text_contains: "hello world"
 
-The runner (see :mod:`pipecat.evals.harness`) loads the scenario, connects to
+The runner (see :mod:`pipecat.evals.session`) loads the scenario, connects to
 the bot's eval transport over RTVI, drives each turn, collects the RTVI events
 the bot emits, and asserts on them in order.
 

@@ -33,7 +33,6 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client import EvalClient, _BotFrameSink
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.harness import EvalSession
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.scenario import (
@@ -43,6 +42,7 @@ from pipecat.evals.scenario import (
     EvalSendAfter,
     EvalTurn,
 )
+from pipecat.evals.session import EvalSession
 from pipecat.frames.frames import (
     AggregationType,
     FunctionCallInProgressFrame,

@@ -30,9 +30,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from pipecat.evals.harness import EvalSession
 from pipecat.evals.results import EvalResult
 from pipecat.evals.scenario import EvalScenario
+from pipecat.evals.session import EvalSession
 from pipecat.evals.suite import capture_pipeline_logs
 
 
