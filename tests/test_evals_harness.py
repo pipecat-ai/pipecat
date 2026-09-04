@@ -33,6 +33,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.harness import EvalSession
+from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.scenario import (
     EvalExpectation,
@@ -68,6 +69,10 @@ def _session(bot_audio: bool = False) -> EvalSession:
 
 def _stream(bot_audio: bool = False) -> EvalEventStream:
     return EvalEventStream(bot_audio=bot_audio, trace=EvalTrace())
+
+
+def _matcher(judge=None, bot_audio: bool = False) -> ExpectationMatcher:
+    return ExpectationMatcher(stream=_stream(bot_audio), judge=judge, trace=EvalTrace())
 
 
 class TestFramesToEvents(unittest.TestCase):
@@ -256,19 +261,19 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     async def test_absent_passes_when_no_event_arrives(self):
         import time
 
-        s = _session()
+        s = _matcher()
         expectation = EvalExpectation(event="llm_response", absent=True)
-        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 0)
         self.assertIsNone(failure)
-        self.assertIn("no 'llm_response'", s._last_match_text)
+        self.assertIn("no 'llm_response'", s.last_match_text)
 
     async def test_absent_fails_when_event_arrives(self):
         import time
 
-        s = _session()
+        s = _matcher()
         s._stream._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
         expectation = EvalExpectation(event="llm_response", absent=True)
-        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 3, 2)
+        failure = await s.match(expectation, time.monotonic(), 100, 3, 2)
         self.assertIsNotNone(failure)
         self.assertEqual(failure.turn_index, 3)
         self.assertEqual(failure.expectation_index, 2)
@@ -277,12 +282,12 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     async def test_absent_ignores_other_event_types(self):
         import time
 
-        s = _session()
+        s = _matcher()
         # Unrelated events in the window must not trip the absence check.
         s._stream._queue.put_nowait({"type": "user_stopped_speaking"})
         s._stream._queue.put_nowait({"type": "tts_response", "text": "spoken"})
         expectation = EvalExpectation(event="llm_response", absent=True)
-        failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 0)
         self.assertIsNone(failure)
 
 
@@ -290,18 +295,18 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     """The pass/fail/continue decision over accumulated response text."""
 
     async def test_text_contains_present_passes(self):
-        s = _session(bot_audio=False)
+        s = _matcher(bot_audio=False)
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
         self.assertEqual(await s._evaluate_aggregate("The capital is Paris.", exp), ("pass", ""))
 
     async def test_text_contains_absent_continues(self):
-        s = _session()
+        s = _matcher()
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
     async def test_eval_yes_passes(self):
-        s = _session()
+        s = _matcher()
         s._judge = _FakeJudge(["yes"])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, reason = await s._evaluate_aggregate("It's 75 and sunny.", exp)
@@ -309,7 +314,7 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         self.assertIn("judge said yes", reason)
 
     async def test_eval_no_fails(self):
-        s = _session()
+        s = _matcher()
         s._judge = _FakeJudge(["no"])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, reason = await s._evaluate_aggregate("I like turtles.", exp)
@@ -317,14 +322,14 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         self.assertIn("judge said no", reason)
 
     async def test_eval_continue_waits_for_more(self):
-        s = _session()
+        s = _matcher()
         s._judge = _FakeJudge(["continue"])
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
     async def test_eval_empty_aggregate_skips_judge(self):
-        s = _session()
+        s = _matcher()
         judge = _FakeJudge([])  # would IndexError if the judge were called
         s._judge = judge
         exp = EvalExpectation(event="llm_response", eval="describes the weather")
@@ -458,7 +463,7 @@ class TestTextContainsResolution(unittest.TestCase):
     """text_contains resolves against whichever event carries the text."""
 
     def _check(self, event: dict, exp: EvalExpectation):
-        return EvalSession._check_payload(event, exp, 0, 0)
+        return ExpectationMatcher._check_payload(event, exp, 0, 0)
 
     def test_on_one_event_text(self):
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
@@ -689,13 +694,13 @@ def _capture_deadlines(session: EvalSession) -> list[float]:
     produce one identical float rather than a float per expectation.
     """
     deadlines: list[float] = []
-    match_and_verify = session._match_and_verify
+    match = session._matcher.match
 
     async def capture(expectation, anchor, budget_ms, turn_idx, exp_idx):
         deadlines.append(anchor + budget_ms / 1000.0)
-        return await match_and_verify(expectation, anchor, budget_ms, turn_idx, exp_idx)
+        return await match(expectation, anchor, budget_ms, turn_idx, exp_idx)
 
-    session._match_and_verify = capture
+    session._matcher.match = capture
     return deadlines
 
 

@@ -96,6 +96,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
+from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
     EvalResult,
@@ -105,7 +106,6 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import (
     FUNCTION_CALL_EVENTS,
-    EvalExpectation,
     EvalScenario,
     EvalSendAfter,
     EvalTurn,
@@ -281,9 +281,6 @@ class EvalSession(BaseObject):
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; _handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
-        # function_call events popped while matching another expectation, held so
-        # the turn's calls can be matched by name in any order (reset per turn).
-        self._pending_function_calls: list[dict] = []
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._trace = EvalTrace()
         self._next_id = 0
@@ -296,10 +293,7 @@ class EvalSession(BaseObject):
         # The bot's output as events: fed by the pipeline's sink, read by the matcher.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
 
-        # Text content of the most recently matched event (the bot's response, or
-        # a user transcript), surfaced to verbose progress. Empty for events with
-        # no text (llm_started, function_call, speaking events).
-        self._last_match_text: str = ""
+        self._matcher = ExpectationMatcher(stream=self._stream, judge=judge, trace=self._trace)
 
         # response (audio modality): an STT in the eval pipeline transcribes the
         # bot's actual audio. Only built when a scenario asserts `response`.
@@ -821,19 +815,6 @@ class EvalSession(BaseObject):
         except Exception:
             pass
 
-    @staticmethod
-    def _match_summary(event: dict) -> str:
-        """A short human label for a matched event, for verbose progress.
-
-        For ``function_call`` it's the call signature (``name(arg=value, ...)``);
-        for everything else it's the event's text content (or empty).
-        """
-        if event.get("type") == "function_call":
-            args = event.get("args") or {}
-            sig = ", ".join(f"{k}={v}" for k, v in args.items())
-            return f"{event.get('name') or '?'}({sig})"
-        return _event_text(event)
-
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
     ) -> None:
@@ -865,7 +846,7 @@ class EvalSession(BaseObject):
         failures: list[EvalAssertionFailure] = []
         # The turn's function calls match by name in any order; start each turn
         # with an empty buffer so a prior turn's calls can't carry over.
-        self._pending_function_calls = []
+        self._matcher.reset_turn()
 
         if turn.send_after is not None:
             try:
@@ -947,7 +928,7 @@ class EvalSession(BaseObject):
             budget_ms = expectation.within_ms or self._default_timeout_ms
 
             try:
-                failure = await self._match_and_verify(
+                failure = await self._matcher.match(
                     expectation, anchor, budget_ms, turn_idx, exp_idx
                 )
             except TimeoutError:
@@ -976,7 +957,11 @@ class EvalSession(BaseObject):
             else:
                 await self._progress(
                     EvalTurnProgress(
-                        turn_idx, exp_idx, expectation.event, "matched", self._last_match_text
+                        turn_idx,
+                        exp_idx,
+                        expectation.event,
+                        "matched",
+                        self._matcher.last_match_text,
                     )
                 )
 
@@ -1095,361 +1080,3 @@ class EvalSession(BaseObject):
                 )
 
             await asyncio.sleep(SEND_AFTER_POLL_S)
-
-    async def _match_and_verify(
-        self,
-        expectation: EvalExpectation,
-        anchor: float,
-        budget_ms: int,
-        turn_idx: int,
-        exp_idx: int,
-    ) -> EvalAssertionFailure | None:
-        """Wait for the expected event and verify it. Returns a failure or None.
-
-        Most events match a single event and are checked once. An ``llm_response``
-        carrying a content check (``text_contains`` / ``eval:``) instead
-        *aggregates*: it accumulates the text of successive response segments and
-        re-checks on each new segment until the check passes, the judge
-        affirmatively rejects, or the ``within_ms`` budget expires. A
-        ``user_transcription`` with ``text_contains`` aggregates the same way,
-        since an STT may finalize one utterance in several pieces.
-
-        Output that predates this turn (the greeting, or a turn that was
-        interrupted) isn't specially filtered: in audio mode the reader already
-        drops it from the queue when ``user-started-speaking`` fires, and anything
-        that slips through (e.g. a text-mode greeting) is harmless — the judge
-        returns "continue" until the turn's real answer is aggregated in.
-
-        Raises:
-            TimeoutError: when no matching event arrives at all (so the caller can
-                report "no matching event arrived"). A response that arrives but
-                never satisfies the content check returns a failure instead.
-        """
-        deadline = anchor + (budget_ms / 1000.0)
-        self._last_match_text = ""
-
-        if expectation.absent:
-            return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
-
-        aggregates = (
-            expectation.event in ("response", "llm_response", "tts_response")
-            and (expectation.text_contains is not None or expectation.eval is not None)
-        ) or (
-            expectation.event == "user_transcription"
-            and expectation.text_contains is not None
-            and expectation.eval is None
-        )
-        if not aggregates:
-            if expectation.event in FUNCTION_CALL_EVENTS:
-                # A call expectation holds the set of calls the turn should make;
-                # it completes only when all are found, in any order (a response
-                # arriving doesn't short-circuit it).
-                return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
-            self._trace.log(f"match: waiting for {expectation.event!r}")
-            event = await self._stream.next_event(expectation.event, deadline)
-            payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
-            if payload_failure:
-                return payload_failure
-            judge_failure = await self._check_judge(event, expectation, turn_idx, exp_idx)
-            if judge_failure is None:
-                self._last_match_text = self._match_summary(event)
-            return judge_failure
-
-        def fail(reason: str, kind: str) -> EvalAssertionFailure:
-            return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind)
-
-        if expectation.eval is not None and self._judge is None:
-            return fail("scenario uses 'eval:' but no judge could be built", "no_judge")
-
-        check = "+".join(
-            name
-            for name, val in (
-                ("text_contains", expectation.text_contains),
-                ("eval", expectation.eval),
-            )
-            if val is not None
-        )
-        self._trace.log(f"match: waiting for {expectation.event!r} ({check})")
-        aggregate = ""
-        last_reason = ""
-        seen_any = False
-        while True:
-            try:
-                event = await self._stream.next_event(expectation.event, deadline)
-            except TimeoutError:
-                if not seen_any:
-                    raise  # no response at all → caller logs "no matching event arrived"
-                self._trace.log(f"eval: timeout, not satisfied: {last_reason}")
-                # Without `eval:` the only way to be unsatisfied is a missing
-                # substring: `text_contains` is monotonic, so it holds out for more
-                # text rather than failing outright.
-                return fail(
-                    f"not satisfied within {budget_ms}ms: {last_reason}",
-                    "judge_continue" if expectation.eval is not None else "text_mismatch",
-                )
-
-            seen_any = True
-            delta = _event_text(event)
-            aggregate += delta
-            # Feed each segment to the judge as its own assistant message, so it
-            # judges the bot's reply in the conversation's context (the cumulative
-            # `aggregate` is kept only for text_contains and the match summary).
-            if expectation.eval is not None and self._judge is not None:
-                self._judge.add_assistant_message(delta)
-            status, reason = await self._evaluate_aggregate(aggregate, expectation)
-            self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
-            if status == "pass":
-                self._last_match_text = aggregate
-                return None
-            if status == "fail":
-                # Only the judge can affirmatively fail an aggregate.
-                return fail(reason, "judge_no")
-            # "continue": wait for the next segment, separated by a space so
-            # sentences don't run together (e.g. "...that. The weather...").
-            aggregate += " "
-            last_reason = reason
-
-    async def _match_absent(
-        self,
-        expectation: EvalExpectation,
-        deadline: float,
-        budget_ms: int,
-        turn_idx: int,
-        exp_idx: int,
-    ) -> EvalAssertionFailure | None:
-        """Inverted match: pass when NO event of this type arrives before the deadline.
-
-        The budget is the whole point here — the expectation holds the turn open
-        for ``within_ms`` and succeeds only if the event type stays absent for
-        that entire window. An arriving event fails immediately with its content
-        in the reason, so a duplicate-output regression shows what the bot said.
-        """
-        self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
-        try:
-            event = await self._stream.next_event(expectation.event, deadline)
-        except TimeoutError:
-            # The quiet window held: absence confirmed.
-            self._last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
-            return None
-        return EvalAssertionFailure(
-            turn_index=turn_idx,
-            expectation_index=exp_idx,
-            event_name=expectation.event,
-            reason=(
-                f"expected no {expectation.event!r} within {budget_ms}ms, "
-                f"but one arrived: {self._match_summary(event)}"
-            ),
-            kind="unexpected_event",
-        )
-
-    async def _match_function_calls(
-        self,
-        expectation: EvalExpectation,
-        deadline: float,
-        turn_idx: int,
-        exp_idx: int,
-    ) -> EvalAssertionFailure | None:
-        """Match every call in a ``function_call`` expectation, in any order.
-
-        Iterates the expectation's ``calls`` (each a name + optional args), claiming
-        a matching call for each from the turn's calls (buffered + still arriving).
-        Passes only when all are claimed within the budget; otherwise returns a
-        failure naming the call that was missing or whose args didn't match.
-        """
-
-        def fail(reason: str, kind: str) -> EvalAssertionFailure:
-            return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind)
-
-        def spec_sig(spec) -> str:
-            name = spec.name or "any function"
-            if not spec.args:
-                return name
-            args = ", ".join(f"{k}={v!r}" for k, v in spec.args.items())
-            return f"{name}({args})"
-
-        matched: list[str] = []
-        for spec in expectation.calls or []:
-            want = spec.args or None
-            self._trace.log(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
-            try:
-                event = await self._next_function_call(spec.name, deadline, want, expectation.event)
-            except TimeoutError:
-                # A call of the right name with the wrong arguments is a different
-                # failure from the call never being made, and the bot's arguments
-                # are what the reader needs to see.
-                near = [
-                    ev.get("args")
-                    for ev in self._pending_function_calls
-                    if ev.get("type") == expectation.event
-                    and (spec.name is None or ev.get("name") == spec.name)
-                ]
-                if want is not None and near:
-                    return fail(
-                        f"no {spec.name!r} call had args {want!r} (saw {near!r})",
-                        "function_args_mismatch",
-                    )
-                missing = spec.name or "any function"
-                seen = ", ".join(matched) if matched else "none"
-                return fail(
-                    f"function call {missing!r} not seen (matched: {seen})",
-                    "missing_function_call",
-                )
-            matched.append(str(event.get("name")))
-
-        self._last_match_text = ", ".join(matched) or "function call"
-        return None
-
-    async def _next_function_call(
-        self,
-        name: str | None,
-        deadline: float,
-        args: dict | None = None,
-        event_type: str = "function_call",
-    ) -> dict:
-        """Return a call event of ``event_type`` matching ``name`` (``None`` = any) and ``args``.
-
-        A turn's function calls can arrive in any order, so match against the
-        per-turn buffer of calls seen but not yet claimed, plus newly arriving
-        ones; a call that doesn't match is buffered so another expected call can
-        claim it. ``args`` is a subset check and participates in matching, so the
-        turn is satisfied by any call matching both name and arguments rather
-        than by the first to share the name — which is what lets a call the LLM
-        corrects and repeats satisfy it. Other event types are dropped, as in
-        :meth:`~pipecat.evals.events.EvalEventStream.next_event`. Raises
-        TimeoutError once ``deadline`` passes.
-        """
-
-        def matches(ev: dict) -> bool:
-            if ev.get("type") != event_type:
-                return False
-            if name is not None and ev.get("name") != name:
-                return False
-            if args is None:
-                return True
-            actual = ev.get("args") or {}
-            return all(actual.get(k) == v for k, v in args.items())
-
-        for i, ev in enumerate(self._pending_function_calls):
-            if matches(ev):
-                return self._pending_function_calls.pop(i)
-
-        while True:
-            event = await self._stream.next_any(deadline)
-            if event.get("type") not in FUNCTION_CALL_EVENTS:
-                continue
-            if matches(event):
-                return event
-            self._pending_function_calls.append(event)
-
-    async def _evaluate_aggregate(
-        self, aggregate: str, expectation: EvalExpectation
-    ) -> tuple[str, str]:
-        """Evaluate the accumulated response text. Returns ``(status, reason)``.
-
-        ``status`` is ``"pass"``, ``"fail"``, or ``"continue"``. ``text_contains``
-        is monotonic, so a missing substring is ``"continue"`` (more text may
-        arrive); only the judge can affirmatively ``"fail"``.
-        """
-        if expectation.text_contains is not None and not _text_contains(
-            aggregate, expectation.text_contains
-        ):
-            return ("continue", f"does not contain {expectation.text_contains!r}")
-
-        if expectation.eval is not None:
-            if not aggregate.strip():
-                return ("continue", "no response text yet")
-            # _match_and_verify guarantees a judge exists before aggregating eval:.
-            assert self._judge is not None
-            with logger.contextualize(eval_pipeline="judge"):
-                # The reply segments were added to the judge's conversation in the
-                # aggregation loop; the judge evaluates that context, not `aggregate`.
-                verdict = await self._judge.evaluate(expectation.eval)
-            if verdict.verdict == "no":
-                return ("fail", f"judge said no: {verdict.reason}")
-            if verdict.verdict == "continue":
-                return ("continue", f"judge said continue: {verdict.reason}")
-            return ("pass", f"judge said yes: {verdict.reason}")
-
-        return ("pass", "")
-
-    @staticmethod
-    def _check_payload(
-        event: dict,
-        expectation: EvalExpectation,
-        turn_idx: int,
-        exp_idx: int,
-    ) -> EvalAssertionFailure | None:
-        """Apply payload-level checks to a matched event. Returns the first failure or None."""
-
-        def fail(reason: str) -> EvalAssertionFailure:
-            return EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason=reason,
-                kind="text_mismatch",
-            )
-
-        if expectation.text_contains is not None:
-            content = _event_text(event)
-            if not _text_contains(content, expectation.text_contains):
-                return fail(f"text {content!r} does not contain {expectation.text_contains!r}")
-
-        return None
-
-    async def _check_judge(
-        self,
-        event: dict,
-        expectation: EvalExpectation,
-        turn_idx: int,
-        exp_idx: int,
-    ) -> EvalAssertionFailure | None:
-        """Run the judge assertion if ``eval:`` was set on this expectation."""
-        if expectation.eval is None:
-            return None
-
-        if self._judge is None:
-            return EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason="scenario uses 'eval:' but no judge could be built",
-                kind="no_judge",
-            )
-
-        content = event.get("text") or event.get("transcript")
-        if not content:
-            return EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason=f"event has no text/transcript to judge: {event!r}",
-                kind="no_content",
-            )
-
-        self._judge.add_assistant_message(content)
-        verdict = await self._judge.evaluate(expectation.eval)
-        if not verdict.passed:
-            return EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason=f"eval {expectation.eval!r}: judge said no — {verdict.reason}",
-                kind="judge_no",
-            )
-
-        return None
-
-
-def _event_text(event: dict) -> str:
-    """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
-    return event.get("text") or event.get("transcript") or ""
-
-
-def _text_contains(content: str, needle: str) -> bool:
-    """Whether ``needle`` occurs in ``content``, ignoring how either is spaced.
-
-    Aggregated text joins segments with spaces and an STT's pieces may carry
-    their own, so a phrase is matched on collapsed whitespace.
-    """
-    return " ".join(needle.split()) in " ".join(content.split())
