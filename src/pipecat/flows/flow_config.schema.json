@@ -3,7 +3,7 @@
   "$defs": {
     "Action": {
       "additionalProperties": true,
-      "description": "A pre- or post-action on a node.\n\nBuilt-in action types (``tts_say``, ``end_conversation``) need nothing\nelse. The ``function`` type names a handler in the bound tools. Custom\ntypes registered with ``FlowManager.register_action`` are referenced by\ntype alone. Any additional keys pass through to the action handler.\n\nParameters:\n    type: Action type identifier.\n    handler: For the ``function`` type, the name of the handler.",
+      "description": "A pre- or post-action on a node.\n\nBuilt-in action types (``tts_say``, ``end_conversation``) need nothing\nelse. The ``function`` type names a handler in the tools a\n:class:`~pipecat.flows.Flow` is constructed with. Custom\ntypes registered with ``FlowManager.register_action`` are referenced by\ntype alone. Any additional keys pass through to the action handler.\n\nParameters:\n    type: Action type identifier.\n    handler: For the ``function`` type, the name of the handler.",
       "properties": {
         "type": {
           "title": "Type",
@@ -66,7 +66,7 @@
     },
     "Function": {
       "additionalProperties": false,
-      "description": "A tool offered at a node, referenced by name.\n\nParameters:\n    name: Name of a Flows direct function in the bound tools. The\n        tool's description and parameters come from that function.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node.",
+      "description": "A tool offered at a node, referenced by name.\n\nParameters:\n    name: Name of a Flows direct function in the tools a\n        :class:`~pipecat.flows.Flow` is constructed with. The\n        tool's description and parameters come from that function.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node.",
       "properties": {
         "name": {
           "title": "Name",

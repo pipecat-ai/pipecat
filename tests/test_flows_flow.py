@@ -12,6 +12,7 @@ from loguru import logger
 
 from pipecat.flows import (
     NO_RESPONSE,
+    ConsolidatedFunctionResult,
     ContextStrategy,
     ContextStrategyConfig,
     Flow,
@@ -96,6 +97,16 @@ async def returns_non_mapping(flow_manager):
 
 async def annotated_for_hand_built(flow_manager) -> tuple[None, NodeConfig]:
     """A tool annotated as choosing its own node."""
+    return None, None
+
+
+async def annotated_optional_node(flow_manager) -> tuple[None, NodeConfig | None]:
+    """A tool whose annotation admits None as the next node."""
+    return None, None
+
+
+async def annotated_consolidated(flow_manager) -> ConsolidatedFunctionResult:
+    """A tool annotated with the consolidated-result alias."""
     return None, None
 
 
@@ -252,6 +263,16 @@ class TestConstruction(unittest.TestCase):
         finally:
             logger.remove(sink)
         self.assertTrue(any("annotated as returning a NodeConfig" in r for r in records))
+
+    def test_no_annotation_warning_when_none_is_admitted(self):
+        records = []
+        sink = logger.add(lambda m: records.append(m.record["message"]), level="WARNING")
+        try:
+            make_flow(single_node({"name": "annotated_optional_node"}))
+            make_flow(single_node({"name": "annotated_consolidated"}))
+        finally:
+            logger.remove(sink)
+        self.assertFalse(any("annotated as returning" in r for r in records))
 
 
 class TestNodeConfigs(unittest.TestCase):

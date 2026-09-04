@@ -111,7 +111,8 @@ class FlowConfig(BaseModel):
         """A tool offered at a node, referenced by name.
 
         Parameters:
-            name: Name of a Flows direct function in the bound tools. The
+            name: Name of a Flows direct function in the tools a
+                :class:`~pipecat.flows.Flow` is constructed with. The
                 tool's description and parameters come from that function.
             transition_to: Node to transition to after the tool completes,
                 or a :class:`FlowConfig.Branch`. Omitted for tools that stay
@@ -135,7 +136,8 @@ class FlowConfig(BaseModel):
         """A pre- or post-action on a node.
 
         Built-in action types (``tts_say``, ``end_conversation``) need nothing
-        else. The ``function`` type names a handler in the bound tools. Custom
+        else. The ``function`` type names a handler in the tools a
+        :class:`~pipecat.flows.Flow` is constructed with. Custom
         types registered with ``FlowManager.register_action`` are referenced by
         type alone. Any additional keys pass through to the action handler.
 

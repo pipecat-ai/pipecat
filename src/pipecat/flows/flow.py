@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A flow config bound to the application's tools.
+"""A flow config joined to the application's tools.
 
 A :class:`Flow` is a :class:`~pipecat.flows.FlowConfig` joined to the code it
 names: the config's nodes turned into runnable :data:`~pipecat.flows.NodeConfig` dicts, with every tool
@@ -20,6 +20,7 @@ checked at call time against the configured-flow contract: a tool returns
 
 import inspect
 import re
+import typing
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -46,7 +47,7 @@ _VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 
 class Flow:
-    """A :class:`~pipecat.flows.FlowConfig` bound to tools and variables.
+    """A :class:`~pipecat.flows.FlowConfig` joined to tools and variables.
 
     The flow hands ready-made node configs to
     :class:`~pipecat.flows.FlowManager`::
@@ -93,7 +94,7 @@ class Flow:
 
     @property
     def config(self) -> "FlowConfig":
-        """The config this flow was bound from."""
+        """The config this flow was constructed from."""
         return self._config
 
     @property
@@ -187,7 +188,7 @@ class Flow:
         else:
             target = getattr(self._tools, name, None)
         if target is None:
-            raise FlowError(f"{where} references {kind} '{name}', which is not in the bound tools")
+            raise FlowError(f"{where} references {kind} '{name}', which is not in the tools")
         if not callable(target):
             raise FlowError(f"{where} {kind} '{name}' is not callable")
         return target
@@ -263,15 +264,22 @@ def _check_contract(response: Any, name: str, where: str) -> tuple[Any, Any]:
 
 
 def _warn_if_annotated_with_node(function: Callable, name: str, where: str) -> None:
-    """Log when a tool's return annotation says it picks its own node."""
+    """Log when a tool's return annotation says it always picks its own node.
+
+    Only a second tuple element of exactly ``NodeConfig`` triggers the warning.
+    ``NodeConfig | None`` and the ``ConsolidatedFunctionResult`` alias admit
+    ``None``, so a tool annotated with either may still honor the contract.
+    """
     try:
         annotation = inspect.signature(function).return_annotation
     except (TypeError, ValueError):
         return
-    if annotation is inspect.Signature.empty:
-        return
-    text = annotation if isinstance(annotation, str) else repr(annotation)
-    if "NodeConfig" in text:
+    if isinstance(annotation, str):
+        picks_node = re.search(r",\s*NodeConfig\s*\]$", annotation) is not None
+    else:
+        args = typing.get_args(annotation)
+        picks_node = len(args) == 2 and args[1] is NodeConfig
+    if picks_node:
         logger.warning(
             f"{where} tool '{name}' is annotated as returning a NodeConfig; "
             "in a configured flow it must return (result, None)"
