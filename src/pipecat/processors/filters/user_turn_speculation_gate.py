@@ -161,7 +161,19 @@ class UserTurnSpeculationGate(FrameProcessor):
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._state = SpeculationState.OPEN
         else:
-            await self.push_frame(frame, direction)
+            await self._forward(frame, direction)
+
+    async def _forward(self, frame: Frame, direction: FrameDirection):
+        """Push a frame the gate has resolved.
+
+        A response that gets past the gate has been confirmed, or never belonged
+        to a speculation, so it carries no speculation id onward. That keeps the
+        id meaning exactly one thing downstream: this response answers a turn
+        that may not have ended.
+        """
+        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            frame.speculation_id = None
+        await self.push_frame(frame, direction)
 
     async def _begin(self, speculation_id: str | None):
         """Decide what to do with the response this id opens."""
@@ -258,7 +270,7 @@ class UserTurnSpeculationGate(FrameProcessor):
         while not self._buffer.empty():
             frame, direction = self._buffer.get_nowait()
             self._buffer.task_done()
-            await self.push_frame(frame, direction)
+            await self._forward(frame, direction)
 
     async def _start_timeout(self):
         await self._cancel_timeout()

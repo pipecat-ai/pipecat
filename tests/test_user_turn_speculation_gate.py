@@ -11,22 +11,35 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
+    EagerEndOfTurnTranscriptionFrame,
+    Frame,
     FunctionCallResultFrame,
     InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
 )
 from pipecat.processors.filters.user_turn_speculation_gate import (
     SpeculationState,
     UserTurnSpeculationGate,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
+from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 
 
 def response(speculation_id: str | None, *texts: str, end: bool = True):
@@ -405,3 +418,104 @@ class TestUnheldSpeculationWarning(unittest.IsolatedAsyncioTestCase):
             await transport.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
 
         assert error.call_count == 0
+
+
+class TestResolvedResponsesCarryNoSpeculationId(unittest.IsolatedAsyncioTestCase):
+    async def test_a_released_response_is_no_longer_marked_speculative(self):
+        # Past the gate the response is confirmed, so the id is cleared: an id
+        # downstream means nothing held the response back.
+        gate = UserTurnSpeculationGate()
+
+        down, _ = await run_test(
+            gate,
+            frames_to_send=[
+                *response("abc", "Booking."),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+            ],
+            expected_down_frames=[
+                UserStoppedSpeakingFrame,
+                LLMFullResponseStartFrame,
+                LLMTextFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        assert [
+            f.speculation_id
+            for f in down
+            if isinstance(f, (LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+        ] == [None, None]
+
+    async def test_a_response_confirmed_before_it_arrives_is_unmarked_too(self):
+        gate = UserTurnSpeculationGate()
+
+        down, _ = await run_test(
+            gate,
+            frames_to_send=[
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+                SleepFrame(),
+                *response("abc", "Booking."),
+            ],
+            expected_down_frames=[
+                UserStoppedSpeakingFrame,
+                LLMFullResponseStartFrame,
+                LLMTextFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        assert [
+            f.speculation_id
+            for f in down
+            if isinstance(f, (LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+        ] == [None, None]
+
+
+class GatedLLM(FrameProcessor):
+    """Answers every context frame, stamping ids the way `LLMService` does."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+
+        start = LLMFullResponseStartFrame()
+        start.speculation_id = frame.speculation_id
+        await self.push_frame(start)
+        await self.push_frame(LLMTextFrame("Booking your flight."))
+        end = LLMFullResponseEndFrame()
+        end.speculation_id = frame.speculation_id
+        await self.push_frame(end)
+
+
+class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
+    async def test_a_gated_speculation_is_not_reported_to_the_output_transport(self):
+        # The whole path, which is where a released response and an ungated one
+        # have to look different: aggregator, LLM, gate, output transport.
+        context = LLMContext()
+        aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(user_turn_strategies=EagerUserTurnStrategies()),
+        )
+        transport = BaseOutputTransport(TransportParams())
+        transport._handle_frame = AsyncMock()
+
+        with patch.object(logger, "error") as error:
+            await run_test(
+                Pipeline([aggregator, GatedLLM(), UserTurnSpeculationGate(), transport]),
+                frames_to_send=[
+                    ProposedUserStartedSpeakingFrame(),
+                    SleepFrame(),
+                    EagerEndOfTurnTranscriptionFrame("book a flight", "user", "t", "abc"),
+                    SleepFrame(),
+                    TranscriptionFrame("Book a flight.", "user", "t"),
+                    SleepFrame(),
+                    ProposedUserStoppedSpeakingFrame(),
+                    SleepFrame(sleep=1.0),
+                ],
+            )
+
+        assert error.call_count == 0
+        assert context.messages == [{"role": "user", "content": "Book a flight."}]
