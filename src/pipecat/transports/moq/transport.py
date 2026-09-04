@@ -22,8 +22,11 @@ subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
 both peers agree on a namespace up front; when the paths are instead
 assigned externally, ``response_path``/``request_path`` set them
 directly and the namespace is unused. Audio rides on a
-single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
-track carried by moq's JSON stream helper (``publish_json_stream`` /
+single Opus track, replaced by a fresh one when an interruption catches
+audio still in flight, so that audio is discarded along with the track
+that carried it (see :meth:`MOQTransportClient.restart_audio_track`);
+RTVI JSON rides on a fixed-name ``transcript.json.z`` track carried by
+moq's JSON stream helper (``publish_json_stream`` /
 ``subscribe_json_stream``). The stream is an ordered, lossless append-log
 of records — every message is delivered in order, unlike the JSON
 *snapshot* helper (``publish_json_snapshot`` / ``subscribe_json_snapshot``)
@@ -223,6 +226,12 @@ DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z"
 # pipeline rate up to this for us.
 OPUS_SAMPLE_RATE = 48000
 
+# Unplayed audio below this doesn't justify retiring the audio track. A
+# lead this small is the client's own jitter buffer, or a mixer writing
+# at real-time pace, rather than the write-ahead frontier of an
+# abandoned utterance. See :meth:`MOQTransportClient.restart_audio_track`.
+AUDIO_IN_FLIGHT_FLOOR_S = 0.3
+
 
 def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
     """Downmix interleaved S16 PCM to mono by averaging channels.
@@ -291,7 +300,11 @@ class MOQParams(TransportParams):
         request_path: Full broadcast path the bot subscribes to (incoming
             requests), overriding ``<namespace>/<peer_id>``. See
             :attr:`response_path`.
-        audio_out_track: Name of the bot's outgoing audio track.
+        audio_out_track: Name of the bot's outgoing audio track. An
+            interruption that catches audio still to be played retires
+            the track and publishes a successor named
+            ``<audio_out_track>-<n>``; subscribers discover the current
+            one through the catalog rather than by this name.
         transcript_track: Name of the bot's outgoing transcript track. A
             fixed-name JSON stream track carrying RTVI messages as a
             lossless, ordered append-log (moq's ``publish_json_stream`` /
@@ -360,9 +373,7 @@ class MOQParams(TransportParams):
             past this many milliseconds. Keep it a little under the
             player's buffer ceiling (``MoqTransportOptions.audioBufferMaxMs``,
             30s) so the producer self-limits below the player's drop
-            ceiling and the player never has to drop. On interruption the
-            pacing clock is re-anchored (see :meth:`reset_audio_pacing`) so
-            the next utterance isn't delayed by the previous buffer.
+            ceiling and the player never has to drop.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -524,12 +535,24 @@ class MOQTransportClient:
         # Wall-clock target for the next publish_audio write. ``None``
         # means "reset" — the next write anchors to ``time.monotonic()``.
         self._publish_audio_clock: float | None = None
-        # Monotonic presentation timestamp (microseconds) for the next
-        # audio chunk, advanced by each chunk's duration. The browser
-        # player uses these future-dated timestamps to buffer and pace
-        # playback. Not reset on interruption — the player re-anchors on
-        # its own (reset() on user-started-speaking).
-        self._publish_pts_us: int = 0
+        # Origin of the broadcast's presentation timeline. Every track the
+        # bot publishes stamps against this one clock, so they stay
+        # mutually synchronizable — the audio track being replaced on
+        # interruption doesn't restart the timescale, it just re-anchors
+        # into it. Monotonic and publisher-local, matching the browser
+        # side's ``performance.now()`` convention.
+        self._clock_origin: float = time.monotonic()
+        # Presentation timestamp (microseconds) for the next audio chunk,
+        # advanced by each chunk's duration. The browser player uses these
+        # future-dated timestamps to buffer and pace playback. Only the
+        # first stamp of a track reaches the wire as given: the encoder
+        # takes it as that track's epoch and derives every later PTS from
+        # the running sample count. ``None`` means the current track has
+        # no epoch yet — the next write takes one from the timeline.
+        self._publish_pts_us: int | None = None
+        # Counter distinguishing successive audio tracks. Bumped per
+        # interruption; the name of track 0 is `audio_out_track` itself.
+        self._audio_track_epoch: int = 0
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -588,8 +611,31 @@ class MOQTransportClient:
             return
 
         self._audio_out_sample_rate = sample_rate
+        self._open_audio_track(sample_rate)
+
+    @property
+    def _audio_track_name(self) -> str:
+        """Name of the audio track for the current epoch."""
+        if self._audio_track_epoch == 0:
+            return self._params.audio_out_track
+        return f"{self._params.audio_out_track}-{self._audio_track_epoch}"
+
+    def _elapsed_us(self) -> int:
+        """Microseconds elapsed on the broadcast's presentation timeline."""
+        return int((time.monotonic() - self._clock_origin) * 1_000_000)
+
+    def _open_audio_track(self, sample_rate: int):
+        """Publish an audio track for the current epoch.
+
+        The epoch is left unset for the first write to fill in, so the
+        track anchors at the timeline position it starts playing from
+        rather than where it was opened. The two are seconds apart
+        whenever an utterance waits on the LLM, and the encoder takes
+        that first stamp as the track's epoch.
+        """
+        self._publish_pts_us = None
         self._audio_out = self._publish_broadcast.publish_audio(
-            self._params.audio_out_track,
+            self._audio_track_name,
             moq.AudioEncoderInput(
                 format=moq.AudioFormat.S16,
                 sample_rate=sample_rate,
@@ -607,22 +653,61 @@ class MOQTransportClient:
             f"MOQ: publishing audio as Opus "
             f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
             f"frame={self._params.audio_out_frame_ms}ms, "
-            f"track={self._params.audio_out_track!r})"
+            f"track={self._audio_track_name!r})"
         )
 
-    def reset_audio_pacing(self):
-        """Re-anchor the publish_audio pacing clock to wall-clock now.
+    def restart_audio_track(self):
+        """Retire the current audio track and publish a fresh one.
 
-        Called from :class:`MOQOutputTransport.process_frame` on
-        InterruptionFrame so the next utterance plays immediately
-        instead of waiting for the (now-cancelled) previous one to
-        finish in pacing time.
+        The bot writes TTS faster than real-time, so when an interruption
+        arrives the previous utterance is already encoded and in flight —
+        seconds of it. Retiring the track is what discards it: the track
+        name identifies the utterance it carries, so anything still
+        arriving on the old one is recognizably stale rather than
+        indistinguishable from the new utterance's first frame.
 
-        Part of the publish_audio pacing workaround; goes away once
-        moq-rs exposes a flush primitive on ``AudioProducer``. See
-        :meth:`publish_audio`.
+        ``finish()`` drops the producer's catalog rendition, and the new
+        track publishes its own, so the catalog always advertises exactly
+        one audio track and subscribers follow the swap through normal
+        rendition selection.
+
+        The successor anchors at its own first write rather than
+        continuing from where the abandoned utterance had written to, so
+        the next utterance plays immediately instead of waiting out the
+        buffer it replaced. The pacing clock re-anchors with it.
+
+        Interruptions are broadcast on every user turn, not only on
+        barge-in, so a swap is worth its cost — a catalog update and a
+        resubscribe for every subscriber — only when the track actually
+        carries audio nobody has heard yet. ``_publish_audio_clock`` is
+        the presentation deadline of the last chunk written, so its lead
+        over wall-clock is exactly what is still to be played.
         """
+        if self._audio_out is None or not self._audio_out_sample_rate:
+            return
+
+        in_flight_s = (
+            0.0
+            if self._publish_audio_clock is None
+            else self._publish_audio_clock - time.monotonic()
+        )
+        if in_flight_s <= AUDIO_IN_FLIGHT_FLOOR_S:
+            return
+
+        old = self._audio_out
+        # Cleared before finishing so a chunk still paced against the old
+        # track can tell its write is no longer wanted (see publish_audio).
+        self._audio_out = None
+        try:
+            old.finish()
+        except Exception as e:
+            # A peer that already went away fails the flush; the rendition
+            # is gone either way, so the new track is still worth opening.
+            logger.debug(f"MOQ: finishing audio track {self._audio_track_name!r} failed: {e}")
+
+        self._audio_track_epoch += 1
         self._publish_audio_clock = None
+        self._open_audio_track(self._audio_out_sample_rate)
 
     async def publish_audio(self, audio: bytes):
         """Push a PCM chunk to the bot's audio track with real PTS, paced to a cap.
@@ -630,21 +715,20 @@ class MOQTransportClient:
         The library does the Opus encode + resample inside the FFI, so we
         just write S16 PCM bytes.
 
-        Each chunk is stamped with a monotonic presentation timestamp so
-        the browser player (``@moq/watch``) can buffer the future-dated
-        frames and play them at the encoded pace. ``AudioProducer.write()``
-        is fire-and-forget, so to bound how far ahead the bot runs we pace
-        the writes against a virtual clock: each call advances the clock by
-        the chunk's audio duration, and we sleep until wall-clock is within
-        ``audio_out_max_buffer_ms`` (25s) of it. That keeps the in-flight
-        buffer a little under the player's drop ceiling
-        (``MoqTransportOptions.audioBufferMaxMs``, 30s), so the producer
-        self-limits below the consumer's cap. Interruptions are flushed on
-        the browser side (``reset()`` on ``user-started-speaking``); the
-        pacing clock is re-anchored here (see :meth:`reset_audio_pacing`)
-        so the next utterance isn't delayed by the previous buffer.
+        Each chunk is stamped with a presentation timestamp so the browser
+        player (``@moq/watch``) can buffer the future-dated frames and play
+        them at the encoded pace. ``AudioProducer.write()`` is
+        fire-and-forget, so to bound how far ahead the bot runs we pace the
+        writes against a virtual clock: each call advances the clock by the
+        chunk's audio duration, and we sleep until wall-clock is within
+        ``audio_out_max_buffer_ms`` of it. Interruptions retire the whole
+        track (see :meth:`restart_audio_track`), so the cap bounds how much
+        encoded audio a retired track can strand rather than how much can
+        still reach the player. It also bounds how long the lead stays
+        above the floor a retirement needs to be worth making.
         """
-        if self._audio_out is None or not self._audio_out_sample_rate:
+        producer = self._audio_out
+        if producer is None or not self._audio_out_sample_rate:
             return
 
         now = time.monotonic()
@@ -659,12 +743,25 @@ class MOQTransportClient:
         if wait > 0:
             await asyncio.sleep(wait)
 
+        # Pacing can sleep for seconds, long enough for an interruption to
+        # retire the track this chunk was destined for. It belongs to the
+        # utterance that was just discarded, so drop it rather than letting
+        # it anchor the successor track's epoch.
+        if producer is not self._audio_out:
+            return
+
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.
         duration_s = len(audio) / (self._audio_out_sample_rate * 2)
         self._publish_audio_clock += duration_s
 
-        self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
+        # First write on this track: it decides where the track sits on the
+        # broadcast timeline, so take the position now that audio is
+        # actually going out.
+        if self._publish_pts_us is None:
+            self._publish_pts_us = self._elapsed_us()
+
+        producer.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
 
     async def wait_for_audio_drain(self, jitter_buffer_margin_s: float = 0.3) -> None:
@@ -1348,20 +1445,20 @@ class MOQOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Reset the publish_audio pacing clock on interruption.
+        """Retire the audio track when an interruption strands audio on it.
 
-        The pacing in ``write_audio_frame`` keeps moq's in-flight buffer
-        bounded so InterruptionFrame can actually stop playback in the
-        browser — but the pacing clock needs to be re-anchored to ``now``
-        so the next utterance plays immediately instead of catching up.
+        The base class drains the queued audio and stops the writer first,
+        so the track is retired with no writes still racing it. Everything
+        the retired track carried is discarded with it; the next utterance
+        goes out on the new one.
 
         Args:
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        if isinstance(frame, InterruptionFrame):
-            self._client.reset_audio_pacing()
         await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame):
+            self._client.restart_audio_track()
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
