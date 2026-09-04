@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+import pipecat.flows
 from pipecat.flows import ContextStrategy, FlowConfig
 
 FOOD_ORDERING = """
@@ -174,6 +175,18 @@ class TestFlowConfigLoading(unittest.TestCase):
         schema = FlowConfig.model_json_schema()
         self.assertEqual(schema["required"], ["initial_node", "nodes"])
         self.assertIn("Branch", schema["$defs"])
+
+    def test_shipped_schema_file_is_current(self):
+        # The package ships the schema for editors and flow builders. Regenerate
+        # it with `uv run python scripts/flows/write_flow_config_schema.py`.
+        path = Path(pipecat.flows.__file__).parent / "flow_config.schema.json"
+        expected = json.dumps(FlowConfig.model_json_schema(), indent=2) + "\n"
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            expected,
+            "flow_config.schema.json is out of date; run "
+            "`uv run python scripts/flows/write_flow_config_schema.py`",
+        )
 
 
 class TestFlowConfigValidation(unittest.TestCase):
