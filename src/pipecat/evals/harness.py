@@ -84,7 +84,6 @@ import time
 import traceback
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -96,6 +95,13 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
 from pipecat.evals.judge import EvalJudge
+from pipecat.evals.results import (
+    EvalAssertionFailure,
+    EvalResult,
+    EvalTrace,
+    EvalTurnProgress,
+    EvalTurnResult,
+)
 from pipecat.evals.scenario import (
     FUNCTION_CALL_EVENTS,
     EvalExpectation,
@@ -152,137 +158,6 @@ DEFAULT_EVENT_TIMEOUT_MS = 60000
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 BOT_READY_TIMEOUT_S = 10.0
-
-# Categories for :attr:`EvalAssertionFailure.kind`, the stable key for grouping
-# failures across runs. Each says how an assertion failed, so a repeated suite can
-# report "10x timeout on turn 3" without parsing free-text reasons.
-FAILURE_KINDS = (
-    "timeout",  # no event of the expected type arrived within the budget
-    "judge_no",  # the judge rejected the reply
-    "judge_continue",  # the judge never accepted the reply before the budget ran out
-    "no_judge",  # the scenario uses `eval:` but no judge could be built
-    "no_content",  # the matched event carried no text to judge
-    "text_mismatch",  # `text_contains` not present in the event's text
-    "missing_function_call",  # an expected function call never arrived
-    "function_args_mismatch",  # the call arrived with unexpected arguments
-    "unexpected_event",  # an `absent:` expectation saw the event it forbade
-    "send_after_timeout",  # a turn's `send_after` event never fired
-    "connect_failed",  # never connected to the bot's eval transport
-    "handshake_timeout",  # connected, but the bot never sent bot-ready
-    "harness_error",  # the harness itself raised (sub-pipeline, judge, ...)
-)
-
-# Statuses for :attr:`EvalTurnResult.status`. ``not_run`` is distinct from a pass:
-# a run that stops at the first failure leaves its later turns undriven, and
-# counting those as passes would inflate any rate computed from the result.
-TURN_STATUSES = ("passed", "failed", "not_run")
-
-
-@dataclass
-class EvalAssertionFailure:
-    """A single failed assertion within an eval.
-
-    Parameters:
-        turn_index: Index of the turn that failed.
-        expectation_index: Index of the expectation within the turn, or -1 for a
-            turn-level failure (e.g. a ``send_after`` that never fired).
-        event_name: The expectation's event name.
-        reason: Human-readable explanation of the failure.
-        kind: Machine-readable failure category, one of ``FAILURE_KINDS``. Says
-            *how* the assertion failed (the judge rejected the reply, no event
-            arrived, a function call was missing, ...), not what it means about
-            the bot. ``reason`` is free text and differs on every run — often
-            judge prose — so grouping failures across many runs keys on this.
-    """
-
-    turn_index: int
-    expectation_index: int
-    event_name: str
-    reason: str
-    kind: str
-
-    def __str__(self) -> str:
-        return (
-            f"turn {self.turn_index} expectation {self.expectation_index} "
-            f"({self.event_name}): {self.reason}"
-        )
-
-
-@dataclass
-class EvalTurnResult:
-    """Outcome of one turn within a scenario run.
-
-    The turn is the unit a run is scored by: a turn's expectations share a single
-    deadline anchored at the send and stop at the first one to time out, so they
-    are not scored independently of each other.
-
-    Parameters:
-        turn_index: Index of the turn in the scenario.
-        status: One of ``TURN_STATUSES``. ``not_run`` means the run ended before
-            reaching this turn — see
-            :attr:`~pipecat.evals.scenario.EvalScenario.stop_on_failure`.
-        failures: The turn's failed assertions, in order; empty unless ``status``
-            is ``failed``.
-        duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the
-            turn was not run.
-    """
-
-    turn_index: int
-    status: str = "not_run"
-    failures: list[EvalAssertionFailure] = field(default_factory=list)
-    duration_ms: int = 0
-
-
-@dataclass
-class EvalResult:
-    """Outcome of running a scenario in an :class:`EvalSession`.
-
-    Parameters:
-        scenario_name: Name of the scenario that was run.
-        passed: Whether every assertion passed.
-        failures: The assertions that failed, in order.
-        turns: One :class:`EvalTurnResult` per scenario turn, in order — what a
-            per-turn pass rate is computed from, without needing the scenario
-            file for a denominator. ``failures`` is these turns' failures
-            flattened, plus any that belong to no turn (a failed connect).
-        duration_ms: Wall-clock time the run took, in milliseconds.
-        events_seen: Every friendly event observed, for diagnostics.
-        debug_log: Timestamped trace of the harness's own decisions (events
-            received, audio transcribed, matcher progress), for diagnosing flaky
-            runs. Saved per-scenario by the orchestrator alongside the bot log.
-        skipped: When set, the scenario was not run (e.g. a ``tts_response``
-            assertion without audio mode); the string is the reason. Such a result
-            is neither passed nor failed.
-    """
-
-    scenario_name: str
-    passed: bool
-    failures: list[EvalAssertionFailure] = field(default_factory=list)
-    turns: list[EvalTurnResult] = field(default_factory=list)
-    duration_ms: int = 0
-    events_seen: list[dict] = field(default_factory=list)
-    debug_log: list[str] = field(default_factory=list)
-    skipped: str | None = None
-
-
-@dataclass
-class EvalTurnProgress:
-    """A real-time progress record emitted while a turn runs (for verbose output).
-
-    Parameters:
-        turn_index: The turn being run.
-        expectation_index: Index of the expectation, or -1 for turn-level records
-            (the turn header, or a ``send_after`` that never fired).
-        event_name: The expectation's event (or the user text for a turn header).
-        status: ``turn`` (header), ``matched``, ``failed``, or ``timeout``.
-        detail: Optional extra text (failure reason, user utterance, ...).
-    """
-
-    turn_index: int
-    expectation_index: int
-    event_name: str
-    status: str
-    detail: str = ""
 
 
 class _BotFrameSink(FrameProcessor):
@@ -419,9 +294,7 @@ class EvalSession(BaseObject):
         self._latest_event_times: dict[str, float] = {}
         self._events_seen: list[dict] = []
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
-        self._debug_log: list[str] = []
-        self._debug_t0: float = 0.0
-        self._current_turn: int = -1
+        self._trace = EvalTrace()
         self._next_id = 0
         self._judge: EvalJudge | None = judge
 
@@ -554,12 +427,12 @@ class EvalSession(BaseObject):
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
         started = time.monotonic()
-        self._debug_t0 = started
-        self._debug(f"run: scenario {self._scenario.name!r} -> {self._bot_url}")
+        self._trace.start()
+        self._trace.log(f"run: scenario {self._scenario.name!r} -> {self._bot_url}")
         # Record which speech / transcription / judge services and models were used,
         # so a saved eval.log is self-describing (no need to cross-reference config).
         for line in describe_config(self._scenario).splitlines():
-            self._debug(line)
+            self._trace.log(line)
 
         # One record per scenario turn, filled in as the turns are driven. They
         # start as not_run and stay that way on every path that ends the run
@@ -716,12 +589,12 @@ class EvalSession(BaseObject):
             # above); the judge runs out-of-band during matching. Everything below
             # is under this `try` so a service that fails to start (e.g. a local
             # model under load) surfaces as a failure rather than propagating raw.
-            self._debug("connected")
+            self._trace.log("connected")
             try:
                 await self._handshake()
-                self._debug("handshake: ok (bot-ready)")
+                self._trace.log("handshake: ok (bot-ready)")
             except TimeoutError:
-                self._debug("handshake: failed (bot-ready not received)")
+                self._trace.log("handshake: failed (bot-ready not received)")
                 failures.append(
                     EvalAssertionFailure(
                         turn_index=-1,
@@ -733,8 +606,8 @@ class EvalSession(BaseObject):
                 )
             else:
                 for turn_idx, turn in enumerate(self._scenario.turns):
-                    self._current_turn = turn_idx
-                    self._debug(f"--- turn {turn_idx}: {turn.user!r}")
+                    self._trace.turn = turn_idx
+                    self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
                     turn_started = time.monotonic()
                     turn_failures = await self._run_turn(turn, turn_idx)
                     record = turns[turn_idx]
@@ -750,11 +623,13 @@ class EvalSession(BaseObject):
                         # question). A scenario whose turns are scored independently
                         # sets stop_on_failure: false and drives all of them.
                         if self._scenario.stop_on_failure:
-                            self._debug(
+                            self._trace.log(
                                 f"turn {turn_idx} failed; stopping scenario (stop_on_failure)"
                             )
                             break
-                        self._debug(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
+                        self._trace.log(
+                            f"turn {turn_idx} failed; continuing (stop_on_failure: false)"
+                        )
         except Exception as e:
             # An unexpected harness-side error (a sub-pipeline failing to start
             # under load, a judge/transcriber raising mid-turn, ...) would
@@ -762,11 +637,11 @@ class EvalSession(BaseObject):
             # "error: <str>" with no eval.log. Capture it as a failure so the
             # reason and full traceback land in the result's debug trace (saved
             # to <bot>.eval.log) and the run still reports a structured outcome.
-            self._debug(f"error: {type(e).__name__}: {e}")
+            self._trace.log(f"error: {type(e).__name__}: {e}")
             for line in traceback.format_exc().rstrip().splitlines():
-                self._debug(line)
+                self._trace.log(line)
             failure = EvalAssertionFailure(
-                turn_index=self._current_turn,
+                turn_index=self._trace.turn,
                 expectation_index=-1,
                 event_name="<error>",
                 reason=f"{type(e).__name__}: {e}",
@@ -775,9 +650,9 @@ class EvalSession(BaseObject):
             failures.append(failure)
             # The raise happened either inside a turn — which is that turn's
             # failure — or before any of them started (a sub-pipeline that never
-            # came up), where _current_turn is still -1 and every turn is not_run.
-            if 0 <= self._current_turn < len(turns):
-                record = turns[self._current_turn]
+            # came up), where the trace's turn is still -1 and every turn is not_run.
+            if 0 <= self._trace.turn < len(turns):
+                record = turns[self._trace.turn]
                 record.status = "failed"
                 record.failures.append(failure)
         finally:
@@ -805,7 +680,7 @@ class EvalSession(BaseObject):
             # delivered before the caller has the result in hand.
             await self.cleanup()
 
-        self._debug(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
+        self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
         return EvalResult(
             scenario_name=self._scenario.name,
             passed=not failures,
@@ -813,7 +688,7 @@ class EvalSession(BaseObject):
             turns=turns,
             duration_ms=int((time.monotonic() - started) * 1000),
             events_seen=self._events_seen,
-            debug_log=self._debug_log,
+            debug_log=self._trace.lines,
         )
 
     @property
@@ -826,7 +701,7 @@ class EvalSession(BaseObject):
         if self._recorder is None or not self._record_path or not self._recorder.has_audio():
             return
         if await self._recorder.write(self._record_path):
-            self._debug(f"recording saved: {self._record_path}")
+            self._trace.log(f"recording saved: {self._record_path}")
 
     def _connect_url(self) -> str:
         """Bot URL with the per-connection eval query flags.
@@ -965,19 +840,6 @@ class EvalSession(BaseObject):
         except Exception:
             pass
 
-    def _debug(self, msg: str) -> None:
-        """Append a timestamped, turn-tagged line to the per-scenario debug trace.
-
-        The tag is the turn the harness is currently *processing* (``[--]`` before
-        the first turn). Because events are logged the moment they arrive, an event
-        that lands while a turn is still waiting on ``send_after`` is tagged with
-        that waiting turn even though it's the previous turn's output — the
-        ``send_after: waiting`` / ``send:`` lines make that boundary visible.
-        """
-        t = time.monotonic() - self._debug_t0 if self._debug_t0 else 0.0
-        tag = f"t{self._current_turn}" if self._current_turn >= 0 else "--"
-        self._debug_log.append(f"{t:8.3f}  [{tag:>3}]  {msg}")
-
     async def append_event(self, event: dict) -> None:
         """Append a bot event for the matcher.
 
@@ -993,7 +855,7 @@ class EvalSession(BaseObject):
         self._events_seen.append(event)
         self._latest_event_times[event["type"]] = time.monotonic()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
-        self._debug(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
+        self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
     def _drop_pending_bot_output(self, why: str) -> None:
@@ -1026,7 +888,7 @@ class EvalSession(BaseObject):
         for event in preserved:
             self._queue.put_nowait(event)
         if dropped:
-            self._debug(f"discard: dropped {dropped} queued event(s) {why}")
+            self._trace.log(f"discard: dropped {dropped} queued event(s) {why}")
 
     def _translate(self, message: dict) -> list[dict]:
         """Translate one RTVI server message into zero or more friendly events.
@@ -1295,7 +1157,7 @@ class EvalSession(BaseObject):
                         kind="send_after_timeout",
                     )
                 )
-                self._debug(f"FAIL: {event_name}: {failures[-1].reason}")
+                self._trace.log(f"FAIL: {event_name}: {failures[-1].reason}")
                 await self._progress(
                     EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
                 )
@@ -1323,7 +1185,7 @@ class EvalSession(BaseObject):
 
         if turn.user is not None:
             how = turn.audio or ("audio" if self._user_tts is not None else "text")
-            self._debug(f"send: {turn.user!r} ({how})")
+            self._trace.log(f"send: {turn.user!r} ({how})")
             if turn.audio is not None:
                 await self._send_audio_file(turn.audio)
             elif self._user_tts is not None:
@@ -1335,7 +1197,7 @@ class EvalSession(BaseObject):
             if self._judge is not None:
                 self._judge.add_user_message(turn.user)
         elif turn.dtmf is not None:
-            self._debug(f"send: dtmf {turn.dtmf!r}")
+            self._trace.log(f"send: dtmf {turn.dtmf!r}")
             await self._send_user_dtmf(turn.dtmf)
             # Record the keypresses for judge context, so the bot's reply is judged
             # knowing what was pressed.
@@ -1373,7 +1235,7 @@ class EvalSession(BaseObject):
                         kind="timeout",
                     )
                 )
-                self._debug(f"FAIL: {expectation.event}: {reason}")
+                self._trace.log(f"FAIL: {expectation.event}: {reason}")
                 await self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
@@ -1381,7 +1243,7 @@ class EvalSession(BaseObject):
 
             if failure:
                 failures.append(failure)
-                self._debug(f"FAIL: {expectation.event}: {failure.reason}")
+                self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
                     EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
                 )
@@ -1436,7 +1298,7 @@ class EvalSession(BaseObject):
         path = Path(image_path)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-        self._debug(f"send: image {path.name} ({mime})")
+        self._trace.log(f"send: image {path.name} ({mime})")
         message = RTVI.Message(
             type="client-message",
             id=self._message_id(),
@@ -1486,12 +1348,12 @@ class EvalSession(BaseObject):
         target_delay_s = send_after.delay_ms / 1000.0
 
         if send_after.event is None:
-            self._debug(f"send_after: waiting {send_after.delay_ms}ms")
+            self._trace.log(f"send_after: waiting {send_after.delay_ms}ms")
             await asyncio.sleep(target_delay_s)
             return
 
         deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
-        self._debug(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
+        self._trace.log(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 
         while True:
             seen_at = self._latest_event_times.get(send_after.event)
@@ -1557,7 +1419,7 @@ class EvalSession(BaseObject):
                 # it completes only when all are found, in any order (a response
                 # arriving doesn't short-circuit it).
                 return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
-            self._debug(f"match: waiting for {expectation.event!r}")
+            self._trace.log(f"match: waiting for {expectation.event!r}")
             event = await self._next_matching_event(expectation.event, deadline)
             payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
             if payload_failure:
@@ -1581,7 +1443,7 @@ class EvalSession(BaseObject):
             )
             if val is not None
         )
-        self._debug(f"match: waiting for {expectation.event!r} ({check})")
+        self._trace.log(f"match: waiting for {expectation.event!r} ({check})")
         aggregate = ""
         last_reason = ""
         seen_any = False
@@ -1591,7 +1453,7 @@ class EvalSession(BaseObject):
             except TimeoutError:
                 if not seen_any:
                     raise  # no response at all → caller logs "no matching event arrived"
-                self._debug(f"eval: timeout, not satisfied: {last_reason}")
+                self._trace.log(f"eval: timeout, not satisfied: {last_reason}")
                 # Without `eval:` the only way to be unsatisfied is a missing
                 # substring: `text_contains` is monotonic, so it holds out for more
                 # text rather than failing outright.
@@ -1609,7 +1471,7 @@ class EvalSession(BaseObject):
             if expectation.eval is not None and self._judge is not None:
                 self._judge.add_assistant_message(delta)
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
-            self._debug(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
+            self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
                 self._last_match_text = aggregate
                 return None
@@ -1636,7 +1498,7 @@ class EvalSession(BaseObject):
         that entire window. An arriving event fails immediately with its content
         in the reason, so a duplicate-output regression shows what the bot said.
         """
-        self._debug(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
+        self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
         try:
             event = await self._next_matching_event(expectation.event, deadline)
         except TimeoutError:
@@ -1701,7 +1563,7 @@ class EvalSession(BaseObject):
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
-            self._debug(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
+            self._trace.log(f"match: waiting for {expectation.event!r} ({spec_sig(spec)})")
             try:
                 event = await self._next_function_call(spec.name, deadline, want, expectation.event)
             except TimeoutError:

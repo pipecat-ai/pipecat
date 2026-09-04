@@ -16,7 +16,7 @@ its own GIL.
 
 Invoked as ``python -m pipecat.evals._session_subprocess <config.json>``. The
 config (written by the suite) carries the scenario path, bot URL, and run
-options; the worker writes the :class:`~pipecat.evals.harness.EvalResult` back as
+options; the worker writes the :class:`~pipecat.evals.results.EvalResult` back as
 JSON to the ``result_path`` named in the config. The worker silences the console
 and (under ``debug``) writes the harness's per-pipeline logs itself, so the suite
 only has to read back the result.
@@ -30,7 +30,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from pipecat.evals.harness import EvalResult, EvalSession
+from pipecat.evals.harness import EvalSession
+from pipecat.evals.results import EvalResult
 from pipecat.evals.scenario import EvalScenario
 from pipecat.evals.suite import capture_pipeline_logs
 

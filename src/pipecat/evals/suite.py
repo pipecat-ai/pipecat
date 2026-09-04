@@ -68,12 +68,8 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from pipecat.evals.harness import (
-    DEFAULT_EVENT_TIMEOUT_MS,
-    EvalAssertionFailure,
-    EvalResult,
-    EvalTurnResult,
-)
+from pipecat.evals.harness import DEFAULT_EVENT_TIMEOUT_MS
+from pipecat.evals.results import EvalAssertionFailure, EvalResult, EvalTurnResult
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900

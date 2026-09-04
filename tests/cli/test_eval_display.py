@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from pipecat.cli.commands.eval import _expand_scenario_paths, _turn_tally
-from pipecat.evals.harness import EvalResult, EvalTurnResult
+from pipecat.evals.results import EvalResult, EvalTurnResult
 from pipecat.evals.suite import EvalRun
 
 

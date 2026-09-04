@@ -452,7 +452,7 @@ class EvalScenario:
             Set False for a scenario whose turns are scored independently, where
             the turns after a failure are still worth driving; each turn's
             outcome is reported in
-            :attr:`~pipecat.evals.harness.EvalResult.turns`. This governs
+            :attr:`~pipecat.evals.results.EvalResult.turns`. This governs
             turn-to-turn progression only: within a turn, an expectation that
             times out still ends that turn's matching, because a turn's
             expectations share one deadline anchored at the send.
