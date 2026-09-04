@@ -724,7 +724,13 @@ _CFG_LABEL = "1"  # bold — the "user" / "judge" section labels
 _CFG_SEP = "2"  # dim — the "->" arrow and "|" separators
 _CFG_MODALITY = "33"  # yellow — modality keyword
 _CFG_SERVICE = "32"  # green — speech (TTS) / transcription (STT) keywords
-_CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
+_CFG_EVAL = "35"  # magenta — LLM keywords: the judge's eval, a simulation's persona
+_CFG_LIMIT = "36"  # cyan — a simulation's run caps
+
+# A config line's segment: keyword, value, and the ANSI code the keyword is painted with.
+_ConfigSegment = tuple[str, str, str]
+# A labeled config line: its label, then its segments or plain text.
+_ConfigLine = tuple[str, list[_ConfigSegment] | str]
 
 
 class EvalConfigured(Protocol):
@@ -737,11 +743,62 @@ class EvalConfigured(Protocol):
     judge: dict
 
 
+def _svc_model(cfg: dict, default_service: str, model_key: str) -> str:
+    """``service/model`` for a service config block, or the service alone without a model."""
+    service = cfg.get("service", default_service)
+    model = cfg.get(model_key)
+    return f"{service}/{model}" if model else str(service)
+
+
+def _user_segments(scenario: EvalConfigured) -> list[_ConfigSegment]:
+    """The ``user`` line's segments: modality, and the TTS the user's turns are spoken with."""
+    segs = [("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
+    if scenario.user_speech:
+        # The TTS "voice" is the speech config's model-equivalent.
+        segs.append(("speech", _svc_model(scenario.user_speech, "?", "voice"), _CFG_SERVICE))
+    return segs
+
+
+def _judge_segments(scenario: EvalConfigured) -> list[_ConfigSegment]:
+    """The ``judge`` line's segments: modality, the bot-speech STT, and the judge LLM."""
+    segs = [("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
+    if scenario.bot_audio:
+        transcription = _svc_model(scenario.transcriber or {}, "whisper", "model")
+        segs.append(("transcription", transcription, _CFG_SERVICE))
+    eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
+    segs.append(("eval", eval_svc, _CFG_EVAL))
+    return segs
+
+
+def _config_lines(lines: list[_ConfigLine], *, color: bool) -> str:
+    """Render labeled config lines, ``label -> key: value | key: value``, one per entry.
+
+    A line's body is a list of segments, or plain text printed as is. With
+    ``color``, the label is bold, the separators dim, and each keyword takes its
+    segment's ANSI code.
+    """
+
+    def paint(text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if color else text
+
+    arrow = paint(" -> ", _CFG_SEP)
+    sep = paint(" | ", _CFG_SEP)
+
+    def body(segs: list[_ConfigSegment] | str) -> str:
+        if isinstance(segs, str):
+            return segs
+        return sep.join(f"{paint(key + ':', code)} {value}" for key, value, code in segs)
+
+    return "\n".join(
+        f"{paint(label.ljust(5), _CFG_LABEL)}{arrow}{body(segs)}" for label, segs in lines
+    )
+
+
 def describe_config(scenario: EvalConfigured, *, color: bool = False) -> str:
-    """Two-line summary of a scenario's (or simulation's) user + judge config, for pre-run logs.
+    """Two-line summary of a scenario's user + judge config, for pre-run logs.
 
     Args:
-        scenario: The parsed scenario or simulation to summarize.
+        scenario: The parsed scenario to summarize.
         color: When True, ANSI-color each segment's keyword by category (modality,
             service, judge LLM) so they're easy to tell apart.
 
@@ -752,42 +809,11 @@ def describe_config(scenario: EvalConfigured, *, color: bool = False) -> str:
             user  -> modality: audio | speech: kokoro/af_heart
             judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma4:12b
     """
-
-    def paint(text: str, code: str) -> str:
-        return f"\033[{code}m{text}\033[0m" if color else text
-
-    def seg(key: str, value: str, code: str) -> str:
-        return f"{paint(key + ':', code)} {value}"
-
-    arrow = paint(" -> ", _CFG_SEP)
-    sep = paint(" | ", _CFG_SEP)
-
-    def svc_model(cfg: dict, default_service: str, model_key: str) -> str:
-        service = cfg.get("service", default_service)
-        model = cfg.get(model_key)
-        return f"{service}/{model}" if model else str(service)
-
-    user_segs = [seg("modality", "audio" if scenario.user_audio else "text", _CFG_MODALITY)]
-    if scenario.user_speech:
-        # The TTS "voice" is the speech config's model-equivalent.
-        user_segs.append(seg("speech", svc_model(scenario.user_speech, "?", "voice"), _CFG_SERVICE))
-
-    eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
-    judge_segs = [seg("modality", "audio" if scenario.bot_audio else "text", _CFG_MODALITY)]
-    if scenario.bot_audio:
-        judge_segs.append(
-            seg(
-                "transcription",
-                svc_model(scenario.transcriber or {}, "whisper", "model"),
-                _CFG_SERVICE,
-            )
-        )
-    judge_segs.append(seg("eval", eval_svc, _CFG_EVAL))
-
-    return (
-        f"{paint('user'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(user_segs)}\n"
-        f"{paint('judge'.ljust(5), _CFG_LABEL)}{arrow}{sep.join(judge_segs)}"
-    )
+    lines: list[_ConfigLine] = [
+        ("user", _user_segments(scenario)),
+        ("judge", _judge_segments(scenario)),
+    ]
+    return _config_lines(lines, color=color)
 
 
 def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:

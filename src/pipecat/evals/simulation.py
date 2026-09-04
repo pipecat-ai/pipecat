@@ -71,12 +71,17 @@ from pathlib import Path
 from typing import Any
 
 from pipecat.evals.scenario import (
+    _CFG_EVAL,
+    _CFG_LIMIT,
     _DEFAULT_JUDGE,
     EvalScenario,
+    _config_lines,
+    _ConfigLine,
+    _judge_segments,
     _load_mapping,
     _parse_judge_block,
     _parse_user_block,
-    describe_config,
+    _user_segments,
 )
 
 DEFAULT_MAX_TURNS = 20
@@ -275,10 +280,15 @@ def _positive_number(data: dict, key: str, default: float, path: Path) -> float:
 
 
 def describe_simulation(simulation: EvalSimulation, *, color: bool = False) -> str:
-    """Three-line summary of a simulation's user, judge, and persona LLM config.
+    """Three-line summary of a simulation's user config, judge config, and goal, for pre-run logs.
 
-    The ``user`` and ``judge`` lines are :func:`~pipecat.evals.scenario.describe_config`'s;
-    the ``llm`` line names the persona LLM and the run's caps.
+    The lines of :func:`~pipecat.evals.scenario.describe_config`, the ``user`` line
+    also naming the persona LLM that plays the user and the run's caps, then the
+    caller's goal, e.g.::
+
+        user  -> modality: text | persona: openai/gpt-4o-mini | max_turns: 8 | max_duration_s: 120
+        judge -> modality: text | eval: ollama/gemma4:12b
+        goal  -> Book a table for two at 6 PM, then end the call.
 
     Args:
         simulation: The parsed simulation to summarize.
@@ -287,6 +297,16 @@ def describe_simulation(simulation: EvalSimulation, *, color: bool = False) -> s
     Returns:
         The summary, one line per section.
     """
-    llm = f"{simulation.simulator.get('service', '?')}/{simulation.simulator.get('model', '?')}"
-    caps = f"max_turns: {simulation.max_turns} | max_duration_s: {simulation.max_duration_s:g}"
-    return f"{describe_config(simulation, color=color)}\nllm   -> service: {llm} | {caps}"
+    persona = f"{simulation.simulator.get('service', '?')}/{simulation.simulator.get('model', '?')}"
+    user = _user_segments(simulation) + [
+        ("persona", persona, _CFG_EVAL),
+        ("max_turns", str(simulation.max_turns), _CFG_LIMIT),
+        ("max_duration_s", f"{simulation.max_duration_s:g}", _CFG_LIMIT),
+    ]
+    goal = " ".join(simulation.goal.split())
+    lines: list[_ConfigLine] = [
+        ("user", user),
+        ("judge", _judge_segments(simulation)),
+        ("goal", goal),
+    ]
+    return _config_lines(lines, color=color)

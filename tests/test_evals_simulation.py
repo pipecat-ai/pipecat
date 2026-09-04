@@ -115,9 +115,14 @@ judge:
 
     def test_describe(self):
         text = describe_simulation(EvalSimulation.load(_write(MINIMAL)))
-        self.assertIn("user  -> modality: text", text)
+        self.assertIn(
+            "user  -> modality: text | persona: openai/gpt-4o-mini | max_turns: 20 | "
+            "max_duration_s: 300",
+            text,
+        )
         self.assertIn("judge -> modality: text | eval: ollama/", text)
-        self.assertIn("llm   -> service: openai/gpt-4o-mini | max_turns: 20", text)
+        self.assertIn("goal  -> Learn the capital of Germany.", text)
+        self.assertEqual(len(text.splitlines()), 3)
 
 
 class TestLoadScenarioFile(unittest.TestCase):
