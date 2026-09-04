@@ -91,6 +91,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
+from pipecat.turns.types import Speculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -1341,21 +1342,7 @@ class LLMUserAggregator(LLMContextAggregator):
             logger.debug(
                 f"{self}: User turn inference triggered speculatively (strategy: {strategy})"
             )
-            # The turn isn't over, so the context must not record it. Run against
-            # a provisional copy instead: nothing here mutates the real context,
-            # and `_aggregation` keeps accumulating for whenever the turn does
-            # end. The response is held downstream until the turn is confirmed.
-            provisional = LLMContext(
-                messages=[
-                    *self._context.messages,
-                    {"role": "user", "content": speculation.text},
-                ],
-                tools=self._context.tools,
-                tool_choice=self._context.tool_choice,
-            )
-            await self.push_frame(
-                LLMContextFrame(context=provisional, speculation_id=speculation.id)
-            )
+            await self._run_speculative_inference(speculation)
             await self._call_event_handler("on_user_turn_inference_triggered", strategy)
             return
 
@@ -1377,6 +1364,29 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._full_user_turn_aggregation = segment
 
         await self._call_event_handler("on_user_turn_inference_triggered", strategy)
+
+    async def _run_speculative_inference(self, speculation: Speculation):
+        """Run an inference for a turn that hasn't ended yet.
+
+        The turn is still open, so the context must not record it. The inference
+        runs against a provisional copy carrying the speculated turn text:
+        nothing here mutates the real context, and ``_aggregation`` keeps
+        accumulating for whenever the turn does end. The response is held
+        downstream until the turn is confirmed, and discarded if it isn't.
+
+        Args:
+            speculation: The speculation to run, from the stop strategy that
+                started it.
+        """
+        provisional = LLMContext(
+            messages=[
+                *self._context.messages,
+                cast(LLMContextMessage, {"role": self.role, "content": speculation.text}),
+            ],
+            tools=self._context.tools,
+            tool_choice=self._context.tool_choice,
+        )
+        await self.push_frame(LLMContextFrame(context=provisional, speculation_id=speculation.id))
 
     async def _on_user_turn_stopped(
         self,
