@@ -11,6 +11,8 @@ for better error handling and debugging. All exceptions inherit from FlowError
 to provide a common base for flow-related errors.
 """
 
+from dataclasses import dataclass
+
 
 class FlowError(Exception):
     """Base exception for all flow-related errors.
@@ -60,3 +62,42 @@ class ActionError(FlowError):
     """
 
     pass
+
+
+@dataclass
+class FlowProblem:
+    """One reference a flow config makes that its tools or variables do not satisfy.
+
+    Parameters:
+        code: Stable identifier for the kind of problem: ``missing_tool``,
+            ``invalid_tool``, ``missing_handler``, or ``missing_variable``.
+        message: Human-readable description naming the node, function, or
+            variable involved.
+        node: The node the problem is about, when there is one.
+        function: The function entry the problem is about, when there is one.
+    """
+
+    code: str
+    message: str
+    node: str | None = None
+    function: str | None = None
+
+
+class FlowReferenceError(FlowError):
+    """Raised when a flow config's references cannot all be resolved.
+
+    Constructing a :class:`~pipecat.flows.Flow` checks every tool, action
+    handler, and template variable the config names and raises this once,
+    with every unresolved reference, rather than stopping at the first.
+    """
+
+    def __init__(self, problems: list[FlowProblem]):
+        """Initialize with the unresolved references.
+
+        Args:
+            problems: Every unresolved reference, in the order found.
+        """
+        self.problems = problems
+        lines = "\n".join(f"- {p.message}" for p in problems)
+        count = f"{len(problems)} problem{'' if len(problems) == 1 else 's'}"
+        super().__init__(f"flow config has {count}:\n{lines}")

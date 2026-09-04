@@ -18,6 +18,8 @@ from .exceptions import (
     ActionError,
     FlowError,
     FlowInitializationError,
+    FlowProblem,
+    FlowReferenceError,
     FlowTransitionError,
     InvalidFunctionError,
 )
@@ -72,6 +74,8 @@ __all__ = [
     # Exceptions
     "FlowError",
     "FlowInitializationError",
+    "FlowProblem",
+    "FlowReferenceError",
     "FlowTransitionError",
     "InvalidFunctionError",
     "ActionError",
