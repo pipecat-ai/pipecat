@@ -1,0 +1,32 @@
+{
+ "FUSED  tag touches the price": {
+  "user_facing": "Your balance is <emotion value=\"calm\"/>$42.50 today.",
+  "tts": "Your balance is <emotion value=\"calm\"/>forty-two dollars and fifty cents today.",
+  "words": [
+   "Your",
+   "balance",
+   "is",
+   "forty-two",
+   "dollars",
+   "and",
+   "fifty",
+   "cents",
+   "today."
+  ]
+ },
+ "SPACED tag stands alone": {
+  "user_facing": "Your balance is <emotion value=\"calm\"/> $42.50 today.",
+  "tts": "Your balance is <emotion value=\"calm\"/> forty-two dollars and fifty cents today.",
+  "words": [
+   "Your",
+   "balance",
+   "is",
+   "forty-two",
+   "dollars",
+   "and",
+   "fifty",
+   "cents",
+   "today."
+  ]
+ }
+}
