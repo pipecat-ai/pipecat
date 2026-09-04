@@ -144,3 +144,223 @@ class TestSimulationRunResult(unittest.TestCase):
         self.assertTrue(SimulationRunResult("s", succeeded=True).passed)
         self.assertFalse(SimulationRunResult("s", succeeded=False).passed)
         self.assertFalse(SimulationRunResult("s", succeeded=True, error="boom").passed)
+
+
+# ---------------------------------------------------------------------------
+# The simulation driver, over fakes.
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from pipecat.evals.driver import END_CALL_EVENT, SimulationDriver  # noqa: E402
+from pipecat.evals.events import EvalEventStream  # noqa: E402
+from pipecat.evals.judge import JudgeVerdict  # noqa: E402
+from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
+from pipecat.evals.simulation import EvalSimulationMetric  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
+
+
+class _FakeConversationJudge:
+    """Answers evaluate_conversation from a script and records the conversation it saw."""
+
+    def __init__(self, verdicts: list[str]):
+        self.verdicts = list(verdicts)
+        self.messages: list[dict] = []
+        self.criteria: list[str] = []
+
+    def add_user_message(self, text):
+        self.messages.append({"role": "user", "content": text})
+
+    def add_assistant_message(self, text):
+        self.messages.append({"role": "assistant", "content": text})
+
+    async def evaluate_conversation(self, criterion: str) -> JudgeVerdict:
+        self.criteria.append(criterion)
+        verdict = self.verdicts.pop(0)
+        return JudgeVerdict(verdict=verdict, reason=f"because {criterion}", raw_response="")
+
+
+class _FakePersonaLLM:
+    def __init__(self):
+        self.handlers: dict = {}
+
+    def register_function(self, name, handler, **kwargs):
+        self.handlers[name] = handler
+
+
+class _FakeClient:
+    def __init__(self):
+        self.configured = False
+
+    async def configure_persona(self):
+        self.configured = True
+
+
+def _simulation(**overrides) -> EvalSimulation:
+    fields = dict(
+        name="capital",
+        persona="A traveler.",
+        goal="Learn the capital of Germany.",
+        simulator={"service": "openai"},
+        success="the bot said Berlin",
+        max_turns=10,
+        max_duration_s=5.0,
+    )
+    fields.update(overrides)
+    return EvalSimulation(**fields)
+
+
+def _driver(simulation: EvalSimulation, judge, context: LLMContext | None = None):
+    trace = EvalTrace()
+    stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=trace)
+    llm = _FakePersonaLLM()
+    client = _FakeClient()
+
+    async def progress(_record):
+        pass
+
+    driver = SimulationDriver(
+        simulation=simulation,
+        persona_llm=llm,  # type: ignore[arg-type]
+        persona_context=context or LLMContext(),
+        client=client,  # type: ignore[arg-type]
+        stream=stream,
+        judge=judge,
+        trace=trace,
+        progress=progress,
+    )
+    return driver, stream, llm, client
+
+
+async def _end_call(llm: _FakePersonaLLM, **arguments):
+    """Invoke the registered end_call the way the LLM service would."""
+    results: list = []
+
+    async def result_callback(result, *, properties=None):
+        results.append((result, properties))
+
+    params = FunctionCallParams(
+        function_name="end_call",
+        tool_call_id="c1",
+        arguments=arguments,
+        llm=llm,  # type: ignore[arg-type]
+        pipeline_worker=SimpleNamespace(),  # type: ignore[arg-type]
+        context=LLMContext(),
+        result_callback=result_callback,
+    )
+    await llm.handlers["end_call"](params)
+    return results
+
+
+class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
+    async def test_end_call_ends_the_run_and_the_judge_sees_the_swapped_conversation(self):
+        # The persona's context: the bot is its "user", the persona the "assistant".
+        context = LLMContext(
+            messages=[
+                {"role": "system", "content": "instructions"},
+                {"role": "user", "content": "Hi! How can I help?"},
+                {"role": "assistant", "content": "What is the capital of Germany?"},
+                {"role": "user", "content": "Berlin."},
+            ]
+        )
+        judge = _FakeConversationJudge(["yes", "yes", "no"])
+        metrics = [
+            EvalSimulationMetric("politeness", "stayed polite", weight=1.0),
+            EvalSimulationMetric("brevity", "kept it short", weight=3.0),
+        ]
+        driver, stream, llm, client = _driver(_simulation(metrics=metrics), judge, context)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+            results = await _end_call(llm, success=True, reason="I got my answer")
+            self.assertEqual(results[0][0], {"status": "call ended"})
+            self.assertFalse(results[0][1].run_llm)
+
+        task = asyncio.create_task(conversation())
+        failures = await driver.run()
+        await task
+
+        self.assertEqual(failures, [])
+        self.assertTrue(client.configured)
+        self.assertEqual(
+            judge.messages,
+            [
+                {"role": "assistant", "content": "Hi! How can I help?"},
+                {"role": "user", "content": "What is the capital of Germany?"},
+                {"role": "assistant", "content": "Berlin."},
+            ],
+        )
+        self.assertEqual(judge.criteria, ["the bot said Berlin", "stayed polite", "kept it short"])
+
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        self.assertTrue(result.succeeded)
+        self.assertTrue(result.passed)
+        self.assertEqual(result.reason, "because the bot said Berlin")
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
+        self.assertEqual([m.score for m in result.metrics], [1.0, 0.0])
+        self.assertAlmostEqual(result.quality or -1, 1.0 / 4.0)
+        self.assertEqual(result.messages, judge.messages)
+        self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
+
+    async def test_bot_turn_cap_ends_the_run(self):
+        driver, stream, _, _ = _driver(_simulation(max_turns=2), _FakeConversationJudge(["no"]))
+
+        async def conversation():
+            for text in ("one", "", "two", "three"):  # an empty response is not a turn
+                await stream.append({"type": "llm_response", "text": text})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "max_turns")
+        self.assertEqual(result.turns, 2)
+        self.assertFalse(result.succeeded)
+        self.assertIsNone(result.quality)  # no metrics
+
+    async def test_wall_clock_cap_ends_the_run(self):
+        driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))
+        await driver.run()
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "max_duration")
+
+    async def test_audio_mode_counts_the_transcribed_turns(self):
+        driver, stream, llm, _ = _driver(
+            _simulation(bot_audio=True, transcriber={"service": "moonshine"}),
+            _FakeConversationJudge(["yes"]),
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "not counted in audio mode"})
+            await stream.append({"type": "response", "text": "counted"})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        self.assertEqual(
+            driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[]).turns, 1
+        )
+
+    async def test_a_run_level_failure_is_an_error_not_a_goal_failure(self):
+        driver, _, _, _ = _driver(_simulation(), _FakeConversationJudge([]))
+        failure = EvalAssertionFailure(
+            turn_index=-1,
+            expectation_index=-1,
+            event_name="<connect>",
+            reason="refused",
+            kind="connect_failed",
+        )
+        result = driver.result(failures=[failure], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.error, "refused")
+        self.assertFalse(result.succeeded)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.ended_by, "error")
+        self.assertEqual(result.reason, "refused")

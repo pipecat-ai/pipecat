@@ -831,6 +831,8 @@ class _FakeRTVIServer:
         self.port = port
         self.received: list[dict] = []
         self.script: dict[str, list[str]] = {}
+        # Sent right after bot-ready, like a bot that greets on connect.
+        self.greeting: list[str] = []
         self._server: websockets.WebSocketServer | None = None
 
     def on_text(self, content: str, *messages: str):
@@ -844,6 +846,8 @@ class _FakeRTVIServer:
             match msg.get("type"):
                 case "client-ready":
                     await ws.send(_rtvi("bot-ready", {"version": RTVI.PROTOCOL_VERSION}))
+                    for out in self.greeting:
+                        await ws.send(out)
                 case "send-text":
                     for out in self.script.get(msg["data"]["content"], []):
                         await ws.send(out)
@@ -1574,3 +1578,140 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# A simulation end to end: the persona LLM in the pipeline talks to the fake bot.
+# ---------------------------------------------------------------------------
+
+from pipecat.evals.judge import JudgeVerdict  # noqa: E402
+from pipecat.evals.session import SimulationSession  # noqa: E402
+from pipecat.evals.simulation import EvalSimulation, EvalSimulationMetric  # noqa: E402
+from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
+from pipecat.services.llm_service import LLMService  # noqa: E402
+from pipecat.services.settings import LLMSettings  # noqa: E402
+
+
+class _ScriptedPersonaLLM(LLMService):
+    """A persona LLM that answers the bot's last message from a script.
+
+    A script entry is the persona's reply text, or ``("end_call", arguments)``
+    to call the tool the way a real model would.
+    """
+
+    def __init__(self, script: dict):
+        super().__init__(settings=LLMSettings(model="scripted"))
+        self._script = script
+        self.seen: list[str] = []
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+        last = [
+            m
+            for m in frame.context.get_messages()
+            if isinstance(m, dict) and m.get("role") == "user"
+        ][-1]["content"]
+        self.seen.append(last)
+        reply = self._script[last]
+        if isinstance(reply, tuple):
+            _, arguments = reply
+            await self.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="end_call",
+                        tool_call_id="c1",
+                        arguments=arguments,
+                        context=frame.context,
+                    )
+                ]
+            )
+            return
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMTextFrame(text=reply))
+        await self.push_frame(LLMFullResponseEndFrame())
+
+
+class _YesJudge:
+    def __init__(self):
+        self.messages: list[dict] = []
+        self.criteria: list[str] = []
+
+    def add_user_message(self, text):
+        self.messages.append({"role": "user", "content": text})
+
+    def add_assistant_message(self, text):
+        self.messages.append({"role": "assistant", "content": text})
+
+    async def evaluate_conversation(self, criterion):
+        self.criteria.append(criterion)
+        return JudgeVerdict(verdict="yes", reason="fine", raw_response="")
+
+
+class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.server = _FakeRTVIServer(_free_port())
+        await self.server.start()
+
+    async def asyncTearDown(self):
+        await self.server.stop()
+
+    async def test_text_simulation_runs_to_end_call(self):
+        self.server.greeting = [
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hello! How can I help?"}),
+            _rtvi("bot-llm-stopped"),
+        ]
+        self.server.on_text(
+            "What is the capital of Germany?",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "The capital of Germany is Berlin."}),
+            _rtvi("bot-llm-stopped"),
+        )
+        persona = _ScriptedPersonaLLM(
+            {
+                "Hello! How can I help?": "What is the capital of Germany?",
+                "The capital of Germany is Berlin.": (
+                    "end_call",
+                    {"success": True, "reason": "I learned it"},
+                ),
+            }
+        )
+        simulation = EvalSimulation(
+            name="capital",
+            persona="A curious traveler.",
+            goal="Learn the capital of Germany.",
+            simulator={"service": "scripted"},
+            success="the bot named Berlin",
+            metrics=[EvalSimulationMetric("politeness", "stayed polite")],
+            max_turns=5,
+            max_duration_s=10.0,
+        )
+        judge = _YesJudge()
+
+        result = await SimulationSession(
+            simulation, self.server.url, persona_llm=persona, judge=judge
+        ).run()
+
+        self.assertIsNone(result.error, result.debug_log)
+        self.assertTrue(result.succeeded)
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.end_call, {"success": True, "reason": "I learned it"})
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.quality, 1.0)
+        # The persona's question went to the bot as one text turn, not spoken.
+        sent = [m for m in self.server.received if m.get("type") == "send-text"]
+        self.assertEqual([m["data"]["content"] for m in sent], ["What is the capital of Germany?"])
+        self.assertFalse(sent[0]["data"]["options"]["audio_response"])
+        # The judge saw the whole conversation, persona as the user.
+        self.assertEqual(
+            result.messages,
+            [
+                {"role": "assistant", "content": "Hello! How can I help?"},
+                {"role": "user", "content": "What is the capital of Germany?"},
+                {"role": "assistant", "content": "The capital of Germany is Berlin."},
+            ],
+        )
+        self.assertEqual(judge.criteria, ["the bot named Berlin", "stayed polite"])
