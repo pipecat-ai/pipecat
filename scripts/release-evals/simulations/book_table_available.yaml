@@ -1,4 +1,4 @@
-name: restaurant_reservation
+name: book_table_available
 
 # Text modality, against flows/restaurant_reservation.py: an autonomous caller
 # books a table. The bot collects the party size and the time, checks

@@ -1,0 +1,28 @@
+name: order_pizza
+
+# Text modality, against flows/food_ordering.py: the caller orders a pizza and
+# asks how long delivery takes. The judge reads the choose_pizza,
+# select_pizza_order, get_delivery_estimate, and complete_order calls along
+# with the conversation.
+
+simulator: !include ../scenarios/simulator.yaml
+
+judge: !include ../scenarios/judge_text.yaml
+
+persona: |
+  Alex, ordering dinner. Casual and quick: wants a large pepperoni pizza, asks
+  how long delivery will take once the order is read back, and then confirms
+  the order.
+
+goal: "Order a large pepperoni pizza, find out the delivery time, and confirm the order."
+
+success: "the bot took an order for a large pepperoni pizza, gave a delivery estimate, and completed the order"
+
+metrics:
+  - name: accuracy
+    criterion: "the order the bot read back was a large pepperoni pizza"
+  - name: politeness
+    criterion: "the bot stayed friendly and helpful throughout"
+
+max_turns: 8
+max_duration_s: 120

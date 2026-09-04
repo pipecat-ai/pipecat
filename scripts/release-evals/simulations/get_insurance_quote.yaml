@@ -1,0 +1,28 @@
+name: get_insurance_quote
+
+# Text modality, against flows/insurance_quote.py: the caller gets a quote,
+# then changes the coverage and gets an updated one. The judge reads the
+# collect_age, collect_marital_status, calculate_quote, update_coverage, and
+# end_quote calls along with the conversation.
+
+simulator: !include ../scenarios/simulator.yaml
+
+judge: !include ../scenarios/judge_text.yaml
+
+persona: |
+  Morgan, shopping for insurance. Direct and organized: 30 years old, married.
+  Once quoted, asks for the coverage raised to 500,000 dollars with a 2,000
+  dollar deductible, and is done after hearing the updated premium.
+
+goal: "Get an insurance quote, then an updated quote for 500,000 dollars of coverage with a 2,000 dollar deductible."
+
+success: "the bot gave a quote with a monthly premium, and then an updated quote after the coverage was changed to 500,000 dollars with a 2,000 dollar deductible"
+
+metrics:
+  - name: clarity
+    criterion: "the bot stated the premium amounts plainly, both for the first quote and the updated one"
+  - name: politeness
+    criterion: "the bot stayed courteous and helpful throughout"
+
+max_turns: 8
+max_duration_s: 120
