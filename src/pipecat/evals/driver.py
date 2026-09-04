@@ -7,41 +7,54 @@
 """Drivers: what the user says next, and how the outcome is judged.
 
 An :class:`EvalDriver` runs the conversation with the bot over the session's
-runtime (the client's pipeline, the event stream, the trace) and produces the
-run's failures. :class:`ScriptedDriver` plays a scenario's ``turns:`` and matches
-each turn's expectations; a simulation driver generates the user's turns from a
-persona and judges the whole conversation instead.
+runtime (the client's pipeline, the event stream, the trace) and assembles the
+run's result. :class:`ScriptedDriver` plays a scenario's ``turns:`` and matches
+each turn's expectations; :class:`SimulationDriver` lets the persona LLM in the
+pipeline hold the conversation and judges the whole of it.
 """
 
 import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from typing import Generic, TypeVar
 
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
+from pipecat.evals.persona import END_CALL_FUNCTION
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalResult,
     EvalTrace,
     EvalTurnProgress,
     EvalTurnResult,
+    SimulationMetric,
+    SimulationRunResult,
 )
 from pipecat.evals.scenario import EvalScenario, EvalSendAfter, EvalTurn
+from pipecat.evals.simulation import EvalSimulation
+from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
+# The event the simulation driver appends when the persona calls end_call.
+END_CALL_EVENT = "end_call"
+
+R = TypeVar("R")
 
 
-class EvalDriver(ABC):
+class EvalDriver(ABC, Generic[R]):
     """Base class for the drivers: drives the conversation and scores it.
 
     The runtime is shared, the client sends and the stream receives, and a
     driver decides what to send next and what counts as success. Subclasses
-    implement :meth:`run`. The user-turn primitives here, :meth:`_say` and
-    :meth:`_press`, keep the judge's transcript and the stream's turn
-    bookkeeping consistent whichever driver sends.
+    implement :meth:`run` and :meth:`result`. The user-turn primitives here,
+    :meth:`_say` and :meth:`_press`, keep the judge's transcript and the
+    stream's turn bookkeeping consistent whichever driver sends.
     """
 
     def __init__(
@@ -70,14 +83,38 @@ class EvalDriver(ABC):
         self._judge = judge
         self._trace = trace
         self._progress = progress
-        # One record per turn the driver scores, filled in as it runs. They start
-        # as not_run and stay that way on every path that ends the run early, so
-        # the result always says which turns were actually scored.
-        self.turns: list[EvalTurnResult] = []
 
     @abstractmethod
     async def run(self) -> list[EvalAssertionFailure]:
         """Drive the conversation to its end and return the failures."""
+
+    @abstractmethod
+    def result(
+        self,
+        *,
+        failures: list[EvalAssertionFailure],
+        duration_ms: int,
+        events_seen: list[dict],
+        debug_log: list[str],
+        skipped: str | None = None,
+    ) -> R:
+        """Assemble the run's result from what the driver scored and the session saw.
+
+        Args:
+            failures: The run's failures: the driver's own, plus the session's
+                (a failed connect or handshake, a harness error).
+            duration_ms: Wall-clock time the run took.
+            events_seen: Every event observed, for diagnostics.
+            debug_log: The run's trace.
+            skipped: Why the run was not driven at all, or ``None``.
+        """
+
+    def record_failure(self, failure: EvalAssertionFailure) -> None:
+        """Note a run-level failure the session raised while the driver was running.
+
+        Args:
+            failure: The failure, scored against the trace's current turn.
+        """
 
     async def _say(self, text: str, *, audio_file: str | None = None) -> None:
         """Send one user utterance to the bot.
@@ -125,7 +162,7 @@ class EvalDriver(ABC):
         self._stream.input_sent()
 
 
-class ScriptedDriver(EvalDriver):
+class ScriptedDriver(EvalDriver[EvalResult]):
     """Plays a scenario's ``turns:`` in order and matches each turn's expectations.
 
     A turn with a failed assertion ends the scenario, since the conversation is
@@ -168,7 +205,42 @@ class ScriptedDriver(EvalDriver):
         self._scenario = scenario
         self._default_timeout_ms = default_timeout_ms
         self._matcher = ExpectationMatcher(stream=stream, judge=judge, trace=trace)
+        # One record per turn, filled in as the driver runs. They start as
+        # not_run and stay that way on every path that ends the run early, so
+        # the result always says which turns were actually scored.
         self.turns = [EvalTurnResult(turn_index=i) for i in range(len(scenario.turns))]
+
+    def result(
+        self,
+        *,
+        failures: list[EvalAssertionFailure],
+        duration_ms: int,
+        events_seen: list[dict],
+        debug_log: list[str],
+        skipped: str | None = None,
+    ) -> EvalResult:
+        """The scenario's result: passed only if nothing failed and nothing was skipped."""
+        return EvalResult(
+            scenario_name=self._scenario.name,
+            passed=not failures and skipped is None,
+            failures=failures,
+            turns=self.turns,
+            duration_ms=duration_ms,
+            events_seen=events_seen,
+            debug_log=debug_log,
+            skipped=skipped,
+        )
+
+    def record_failure(self, failure: EvalAssertionFailure) -> None:
+        """Score a run-level failure against the turn it interrupted, if any.
+
+        Before any turn started (a sub-pipeline that never came up) the failure's
+        turn is -1 and every turn stays not_run.
+        """
+        if 0 <= failure.turn_index < len(self.turns):
+            record = self.turns[failure.turn_index]
+            record.status = "failed"
+            record.failures.append(failure)
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Drive the scenario's turns in order, filling in their records."""
@@ -340,3 +412,166 @@ class ScriptedDriver(EvalDriver):
                     )
                 )
         return failures
+
+
+class SimulationDriver(EvalDriver[SimulationRunResult]):
+    """Lets the persona LLM hold the conversation, then judges the whole of it.
+
+    The persona runs inside the client's pipeline and answers the bot on its
+    own. This driver only watches the conversation for its end: the persona's
+    ``end_call``, the turn cap, or the wall-clock cap. Then it asks the judge
+    whether the goal was achieved and how the conversation scored on each
+    quality criterion.
+    """
+
+    def __init__(
+        self,
+        *,
+        simulation: EvalSimulation,
+        persona_llm: LLMService,
+        persona_context: LLMContext,
+        client: EvalClient,
+        stream: EvalEventStream,
+        judge: EvalJudge | None,
+        trace: EvalTrace,
+        progress: Callable[[EvalTurnProgress], Awaitable[None]],
+    ):
+        """Initialize the driver.
+
+        Args:
+            simulation: The simulation being run.
+            persona_llm: The persona LLM service in the pipeline; ``end_call``
+                is registered on it.
+            persona_context: The persona's context, kept up to date with both
+                sides of the conversation by the pipeline's aggregators.
+            client: The connection to the bot.
+            stream: The bot's output as events.
+            judge: The judge for the goal and the quality criteria.
+            trace: The run's trace.
+            progress: Awaited with an :class:`EvalTurnProgress` as turns resolve.
+        """
+        super().__init__(client=client, stream=stream, judge=judge, trace=trace, progress=progress)
+        self._simulation = simulation
+        self._persona_llm = persona_llm
+        self._context = persona_context
+        self._turns = 0
+        self._ended_by: str | None = None
+        self._end_call: dict | None = None
+        self._succeeded = False
+        self._reason = ""
+        self._metrics: list[SimulationMetric] = []
+
+    async def run(self) -> list[EvalAssertionFailure]:
+        """Watch the conversation until it ends, then judge it."""
+        self._persona_llm.register_function(END_CALL_FUNCTION, self._on_end_call)
+        await self._client.configure_persona()
+        simulation = self._simulation
+        # The bot's finished turns; in audio mode the transcription of what it said.
+        turn_event = "response" if simulation.bot_audio else "llm_response"
+        deadline = time.monotonic() + simulation.max_duration_s
+        self._trace.log(
+            f"persona: listening (up to {simulation.max_turns} bot turn(s), "
+            f"{simulation.max_duration_s:g}s)"
+        )
+        while self._ended_by is None:
+            try:
+                event = await self._stream.next_any(deadline)
+            except TimeoutError:
+                self._ended_by = "max_duration"
+                break
+            if event["type"] == END_CALL_EVENT:
+                self._ended_by = "end_call"
+            elif event["type"] == turn_event and event.get("text"):
+                self._turns += 1
+                if self._turns >= simulation.max_turns:
+                    self._ended_by = "max_turns"
+        self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} bot turn(s)")
+        await self._judge_conversation()
+        return []
+
+    async def _on_end_call(self, params: FunctionCallParams) -> None:
+        """The persona's ``end_call``: note its claim and end the conversation."""
+        arguments = params.arguments or {}
+        self._end_call = {
+            "success": bool(arguments.get("success", False)),
+            "reason": str(arguments.get("reason", "")),
+        }
+        # The call is the persona's last word: no follow-up response.
+        await params.result_callback(
+            {"status": "call ended"}, properties=FunctionCallResultProperties(run_llm=False)
+        )
+        await self._stream.append(
+            {"type": END_CALL_EVENT, "text": self._end_call["reason"], **self._end_call}
+        )
+
+    def conversation(self) -> list[dict]:
+        """The conversation with the persona as ``user`` and the bot as ``assistant``.
+
+        The persona's context holds it the other way round (the bot is what the
+        persona LLM answers), so the roles are swapped for the judge and the
+        result. Tool calls and results are left out.
+        """
+        swapped = {"user": "assistant", "assistant": "user"}
+        messages = []
+        for message in self._context.get_messages():
+            if not isinstance(message, dict):
+                continue
+            role, content = message.get("role"), message.get("content")
+            if role in swapped and isinstance(content, str) and content.strip():
+                messages.append({"role": swapped[role], "content": content})
+        return messages
+
+    async def _judge_conversation(self) -> None:
+        """Decide the goal and score each quality criterion over the conversation."""
+        if self._judge is None:
+            self._reason = "no judge configured"
+            return
+        for message in self.conversation():
+            if message["role"] == "user":
+                self._judge.add_user_message(message["content"])
+            else:
+                self._judge.add_assistant_message(message["content"])
+        verdict = await self._judge.evaluate_conversation(self._simulation.success)
+        self._succeeded = verdict.verdict == "yes"
+        self._reason = verdict.reason
+        self._trace.log(
+            f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {verdict.reason}"
+        )
+        for metric in self._simulation.metrics:
+            verdict = await self._judge.evaluate_conversation(metric.criterion)
+            score = 1.0 if verdict.verdict == "yes" else 0.0
+            self._metrics.append(
+                SimulationMetric(
+                    name=metric.name, score=score, reason=verdict.reason, weight=metric.weight
+                )
+            )
+            self._trace.log(f"judge: {metric.name} = {score:g}: {verdict.reason}")
+
+    def result(
+        self,
+        *,
+        failures: list[EvalAssertionFailure],
+        duration_ms: int,
+        events_seen: list[dict],
+        debug_log: list[str],
+        skipped: str | None = None,
+    ) -> SimulationRunResult:
+        """The run's result; a run-level failure makes it an error, not a goal failure."""
+        error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
+        weights = sum(m.weight for m in self._metrics)
+        quality = sum(m.score * m.weight for m in self._metrics) / weights if weights else None
+        return SimulationRunResult(
+            simulation_name=self._simulation.name,
+            succeeded=self._succeeded and error is None,
+            reason=error or self._reason,
+            error=error,
+            quality=quality,
+            metrics=self._metrics,
+            messages=self.conversation(),
+            turns=self._turns,
+            ended_by=self._ended_by or "error",
+            end_call=self._end_call,
+            duration_ms=duration_ms,
+            events_seen=events_seen,
+            debug_log=debug_log,
+        )

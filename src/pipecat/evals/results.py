@@ -165,8 +165,8 @@ class SimulationRunResult:
             success nor a goal failure.
         quality: Weighted mean of the metrics' scores, or None without metrics.
         metrics: The judged quality criteria's outcomes.
-        messages: The conversation as the persona saw it: the bot's turns as
-            ``user`` messages, the persona's as ``assistant``.
+        messages: The conversation, with the persona's turns as ``user`` messages
+            and the bot's as ``assistant`` (the convention scenarios' judges use).
         turns: How many turns the persona took.
         ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
