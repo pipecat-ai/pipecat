@@ -31,7 +31,9 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
+from pipecat.evals.events import EvalEventStream
 from pipecat.evals.harness import EvalSession
+from pipecat.evals.results import EvalTrace
 from pipecat.evals.scenario import (
     EvalExpectation,
     EvalFunctionCall,
@@ -64,6 +66,10 @@ def _session(bot_audio: bool = False) -> EvalSession:
     return EvalSession(EvalScenario(name="t", turns=[], bot_audio=bot_audio), "ws://localhost:0")
 
 
+def _stream(bot_audio: bool = False) -> EvalEventStream:
+    return EvalEventStream(bot_audio=bot_audio, trace=EvalTrace())
+
+
 class TestFramesToEvents(unittest.TestCase):
     """The bot's frames and reported messages map to the scenario's events."""
 
@@ -72,7 +78,7 @@ class TestFramesToEvents(unittest.TestCase):
         return result[0]
 
     def test_llm_lifecycle_aggregates_text(self):
-        s = _session(bot_audio=False)
+        s = _stream(bot_audio=False)
         self.assertEqual(s.frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}])
         self.assertEqual(s.frames_to_events(LLMTextFrame(text="Hello ")), [])
         self.assertEqual(s.frames_to_events(LLMTextFrame(text="world")), [])
@@ -82,7 +88,7 @@ class TestFramesToEvents(unittest.TestCase):
         )
 
     def test_interruption_suppresses_straggler(self):
-        s = _session(bot_audio=False)
+        s = _stream(bot_audio=False)
         interrupt = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
         )
@@ -103,7 +109,7 @@ class TestFramesToEvents(unittest.TestCase):
     def test_user_transcription_from_message(self):
         # The bot's reported user-transcription arrives as a raw RTVI message frame,
         # not a TranscriptionFrame (which the eval reserves for the bot's response).
-        s = _session()
+        s = _stream()
 
         def msg(data):
             return InputTransportMessageFrame(
@@ -121,12 +127,12 @@ class TestFramesToEvents(unittest.TestCase):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn; the response is emitted from on_user_turn_stopped, not here.
         frame = TranscriptionFrame(text="Paris", user_id="bot", timestamp="t")
-        self.assertEqual(_session(bot_audio=True).frames_to_events(frame), [])
+        self.assertEqual(_stream(bot_audio=True).frames_to_events(frame), [])
 
     def test_reported_speaking_and_vad_events_from_messages(self):
         # The bot's reports about the harness (its raw VAD and turn-level speaking)
         # arrive as raw messages and map to the matching scenario events.
-        s = _session(bot_audio=True)
+        s = _stream(bot_audio=True)
 
         def msg(msg_type):
             return InputTransportMessageFrame(
@@ -157,7 +163,7 @@ class TestFramesToEvents(unittest.TestCase):
     def test_computed_vad_and_speaking_frames_are_ignored(self):
         # The user aggregator's own VAD/speaking/interruption frames (computed from
         # the bot's audio) are internal plumbing, not scenario events.
-        s = _session(bot_audio=True)
+        s = _stream(bot_audio=True)
         for frame in (
             VADUserStartedSpeakingFrame(),
             VADUserStoppedSpeakingFrame(),
@@ -170,7 +176,7 @@ class TestFramesToEvents(unittest.TestCase):
     def test_user_started_speaking_message_discards_interrupted_output(self):
         # A new user turn drops the bot's leftover output (but keeps a queued
         # user_transcription, which is the turn's input).
-        s = _session(bot_audio=True)
+        s = _stream(bot_audio=True)
         s._text_buffer = ["greeting"]
         s._queue.put_nowait({"type": "response", "text": "greeting"})
         s._queue.put_nowait({"type": "user_transcription", "transcript": "hi"})
@@ -183,7 +189,7 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertTrue(s._queue.empty())
 
     def test_function_call(self):
-        s = _session()
+        s = _stream()
         event = self._one(
             s.frames_to_events(
                 FunctionCallInProgressFrame(
@@ -199,16 +205,16 @@ class TestFramesToEvents(unittest.TestCase):
         def tts(text):
             return TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
 
-        self.assertEqual(_session(bot_audio=False).frames_to_events(tts("x")), [])
+        self.assertEqual(_stream(bot_audio=False).frames_to_events(tts("x")), [])
         self.assertEqual(
-            _session(bot_audio=True).frames_to_events(tts("spoken")),
+            _stream(bot_audio=True).frames_to_events(tts("spoken")),
             [{"type": "tts_response", "text": "spoken"}],
         )
 
     def test_empty_response_still_emitted(self):
         # An interrupted response (no text) emits an empty llm_response; the
         # matcher's aggregation decides whether that should pass or fail.
-        s = _session(bot_audio=False)
+        s = _stream(bot_audio=False)
         self.assertEqual(s.frames_to_events(LLMFullResponseStartFrame()), [{"type": "llm_started"}])
         self.assertEqual(
             self._one(s.frames_to_events(LLMFullResponseEndFrame())),
@@ -219,7 +225,7 @@ class TestFramesToEvents(unittest.TestCase):
         msg = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": {}}
         )
-        self.assertEqual(_session().frames_to_events(msg), [])
+        self.assertEqual(_stream().frames_to_events(msg), [])
 
 
 class _FakeJudge:
@@ -260,7 +266,7 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         import time
 
         s = _session()
-        s._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
         expectation = EvalExpectation(event="llm_response", absent=True)
         failure = await s._match_and_verify(expectation, time.monotonic(), 100, 3, 2)
         self.assertIsNotNone(failure)
@@ -273,8 +279,8 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
 
         s = _session()
         # Unrelated events in the window must not trip the absence check.
-        s._queue.put_nowait({"type": "user_stopped_speaking"})
-        s._queue.put_nowait({"type": "tts_response", "text": "spoken"})
+        s._stream._queue.put_nowait({"type": "user_stopped_speaking"})
+        s._stream._queue.put_nowait({"type": "tts_response", "text": "spoken"})
         expectation = EvalExpectation(event="llm_response", absent=True)
         failure = await s._match_and_verify(expectation, time.monotonic(), 100, 0, 0)
         self.assertIsNone(failure)

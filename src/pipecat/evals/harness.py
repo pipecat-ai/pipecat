@@ -94,6 +94,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
+from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -123,20 +124,12 @@ from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    InputTransportMessageFrame,
     InterruptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -164,10 +157,11 @@ class _BotFrameSink(FrameProcessor):
     """Pipeline tap that turns the bot's incoming frames into matcher events.
 
     Sits between the bot-audio side and the user-audio side of the eval pipeline;
-    for every frame it calls back into the session's
-    :meth:`EvalSession.frames_to_events` and appends the results for the
-    matcher with :meth:`EvalSession.append_event`, then passes the frame on. Outgoing frames (the RTVI client messages
-    the session injects) flow through untouched — they don't map to events.
+    for every frame it calls the stream's
+    :meth:`~pipecat.evals.events.EvalEventStream.frames_to_events` and appends
+    the results with :meth:`~pipecat.evals.events.EvalEventStream.append`, then
+    passes the frame on. Outgoing frames (the RTVI client messages the session
+    injects) flow through untouched — they don't map to events.
 
     It also stops the harness's *computed* interruptions here: the user aggregator
     runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts an
@@ -176,14 +170,14 @@ class _BotFrameSink(FrameProcessor):
     user's side of the recording), so the sink swallows it.
     """
 
-    def __init__(self, session: "EvalSession"):
+    def __init__(self, stream: EvalEventStream):
         super().__init__()
-        self._session = session
+        self._stream = stream
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        for event in self._session.frames_to_events(frame):
-            await self._session.append_event(event)
+        for event in self._stream.frames_to_events(frame):
+            await self._stream.append(event)
         # The bot-audio VAD's interruption must not propagate into the user-audio
         # path (user TTS + output); see the class docstring.
         if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
@@ -287,12 +281,9 @@ class EvalSession(BaseObject):
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; _handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
-        self._queue: asyncio.Queue = asyncio.Queue()
         # function_call events popped while matching another expectation, held so
         # the turn's calls can be matched by name in any order (reset per turn).
         self._pending_function_calls: list[dict] = []
-        self._latest_event_times: dict[str, float] = {}
-        self._events_seen: list[dict] = []
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._trace = EvalTrace()
         self._next_id = 0
@@ -302,18 +293,8 @@ class EvalSession(BaseObject):
         # started in run(); None for text-mode scenarios.
         self._user_tts: CachingTTSService | None = user_tts
 
-        # Accumulates the bot's output text for the current response, to
-        # synthesize llm_response. Source depends on the mode: bot-llm-text in
-        # text mode (skip-TTS), bot-tts-text in audio mode (what was spoken).
-        self._text_buffer: list[str] = []
-
-        # Set on an interruption, cleared at the next bot-llm-started. While set,
-        # llm_response segments are dropped: the interrupted response can still
-        # flush a trailing token *after* the interruption event (it was generated
-        # before the interrupt propagated), and that straggler must not be
-        # attributed to the new turn. The genuinely new response begins at the
-        # next bot-llm-started.
-        self._awaiting_llm_restart: bool = False
+        # The bot's output as events: fed by the pipeline's sink, read by the matcher.
+        self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
 
         # Text content of the most recently matched event (the bot's response, or
         # a user transcript), surfaced to verbose progress. Empty for events with
@@ -533,7 +514,7 @@ class EvalSession(BaseObject):
         async def _on_bot_ready(_transport):
             self._bot_ready_event.set()
 
-        sink = _BotFrameSink(self)
+        sink = _BotFrameSink(self._stream)
         processors: list = [transport.input()]
         if self._bot_stt is not None:
             user_aggregator = LLMContextAggregatorPair(
@@ -551,8 +532,8 @@ class EvalSession(BaseObject):
             # against the next turn (mirrors the llm_response suppression).
             @user_aggregator.event_handler("on_user_turn_stopped")
             async def _on_user_turn_stopped(_aggregator, _strategy, message):
-                if message.content and not self._awaiting_llm_restart:
-                    await self.append_event({"type": "response", "text": message.content})
+                if message.content and not self._stream.awaiting_llm_restart:
+                    await self._stream.append({"type": "response", "text": message.content})
 
             processors += [self._bot_stt, user_aggregator]
         processors.append(sink)
@@ -687,7 +668,7 @@ class EvalSession(BaseObject):
             failures=failures,
             turns=turns,
             duration_ms=int((time.monotonic() - started) * 1000),
-            events_seen=self._events_seen,
+            events_seen=self._stream.events_seen,
             debug_log=self._trace.lines,
         )
 
@@ -840,165 +821,6 @@ class EvalSession(BaseObject):
         except Exception:
             pass
 
-    async def append_event(self, event: dict) -> None:
-        """Append a bot event for the matcher.
-
-        Records the event in the result's ``events_seen``, stamps its arrival
-        time for ``send_after`` anchoring, and queues it for the turn's
-        expectations. The pipeline's bot-frame sink appends the events it
-        translates with :meth:`frames_to_events`; the audio-mode ``response`` is
-        appended when the user aggregator finishes the bot's turn.
-
-        Args:
-            event: The event dict, with at least a ``type``.
-        """
-        self._events_seen.append(event)
-        self._latest_event_times[event["type"]] = time.monotonic()
-        preview = event.get("text") or event.get("transcript") or event.get("name") or ""
-        self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
-        await self._queue.put(event)
-
-    def _drop_pending_bot_output(self, why: str) -> None:
-        """Drop the bot's un-matched output, so a later turn can't match it.
-
-        Clears the response buffers and drains the bot's pending output from the
-        event queue, so a greeting (or any prior bot output) can't be matched
-        against this turn. ``user_transcription`` is preserved: a DTMF keypress
-        emits its transcription immediately before the turn-start interruption,
-        and that transcription is the turn's *input*, not the stale bot output
-        this discard is meant to clear — dropping it would race the matcher.
-        Diagnostics (``events_seen``, ``latest_event_times``) are left intact for
-        send_after lookups.
-
-        Args:
-            why: What prompted the drop, for the debug trace.
-        """
-        self._text_buffer = []
-        preserved: list[dict] = []
-        dropped = 0
-        while not self._queue.empty():
-            try:
-                event = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if event.get("type") == "user_transcription":
-                preserved.append(event)
-            else:
-                dropped += 1
-        for event in preserved:
-            self._queue.put_nowait(event)
-        if dropped:
-            self._trace.log(f"discard: dropped {dropped} queued event(s) {why}")
-
-    def frames_to_events(self, frame: Frame) -> list[dict]:
-        """Translate one incoming pipeline frame into zero or more friendly events.
-
-        The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-        deserializes the bot's RTVI server messages into frames; this maps those
-        frames to the events the matcher consumes, applying the modality/aggregation
-        rules (buffer the LLM text, suppress an interrupted response's straggler,
-        emit ``tts_response`` only in audio mode, etc.).
-
-        The bot *reports* events about the harness as ``InputTransportMessageFrame``
-        (see :data:`RTVIHarnessSerializer`), which this maps to scenario events. What
-        the harness *computes* from the bot's audio is handled elsewhere: the
-        ``response`` comes from the user aggregator's ``on_user_turn_stopped`` (it
-        consumes the STT's ``TranscriptionFrame``s, so they never reach here), and
-        the aggregator's own VAD/speaking frames are internal plumbing, ignored here.
-
-        Args:
-            frame: A frame the bot-facing transport produced.
-
-        Returns:
-            The events the frame maps to, in order (often none).
-        """
-        if isinstance(frame, InputTransportMessageFrame):
-            return self._message_to_events(frame.message)
-        if isinstance(frame, LLMFullResponseStartFrame):
-            self._awaiting_llm_restart = False
-            self._text_buffer = []
-            return [{"type": "llm_started"}]
-        if isinstance(frame, LLMTextFrame):
-            if self._awaiting_llm_restart:
-                return []
-            self._text_buffer.append(frame.text)
-            return []
-        if isinstance(frame, LLMFullResponseEndFrame):
-            if self._awaiting_llm_restart:
-                self._text_buffer = []
-                return []
-            return [self._segment_event("llm_response", "".join(self._text_buffer))]
-        if isinstance(frame, TTSTextFrame):
-            if self._scenario.bot_audio:
-                return [self._segment_event("tts_response", frame.text)]
-            return []
-        if isinstance(frame, FunctionCallInProgressFrame):
-            return [
-                {
-                    "type": "function_call",
-                    "name": frame.function_name or None,
-                    "args": dict(frame.arguments or {}),
-                }
-            ]
-        if isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
-            # How the call ended is the assertable part, so `cancelled` sits in
-            # `args` alongside the id: a scenario matches both through the same
-            # `calls:`/`args:` check a function_call uses.
-            return [
-                {
-                    "type": "function_call_stopped",
-                    "name": frame.function_name or None,
-                    "args": {
-                        "tool_call_id": frame.tool_call_id,
-                        "cancelled": isinstance(frame, FunctionCallCancelFrame),
-                    },
-                }
-            ]
-        return []
-
-    def _message_to_events(self, message) -> list[dict]:
-        """Map one of the bot's reported RTVI messages to scenario events.
-
-        These are the bot's reports *about the harness* (its raw VAD, turn-level
-        speaking, and the transcription of what it heard), kept as raw messages by
-        :class:`RTVIHarnessSerializer` so they don't collide with the VAD/transcription
-        frames the harness computes from the bot's audio.
-        """
-        if not isinstance(message, dict):
-            return []
-        msg_type = message.get("type")
-        data = message.get("data") or {}
-        if msg_type == "user-started-speaking":
-            # A new user turn: drop any leftover bot output from a prior turn so it
-            # isn't aggregated into this one.
-            self._drop_pending_bot_output("on interruption")
-            self._awaiting_llm_restart = True
-            return [{"type": "user_started_speaking"}]
-        if msg_type == "bot-interrupted":
-            self._drop_pending_bot_output("on interruption")
-            self._awaiting_llm_restart = True
-            return [{"type": "bot_interrupted"}]
-        if msg_type == "user-stopped-speaking":
-            return [{"type": "user_stopped_speaking"}]
-        if msg_type == "vad-user-started-speaking":
-            return [{"type": "vad_user_started_speaking"}]
-        if msg_type == "vad-user-stopped-speaking":
-            return [{"type": "vad_user_stopped_speaking"}]
-        if msg_type == "user-transcription":
-            if data.get("final", True):
-                return [{"type": "user_transcription", "transcript": data.get("text", "")}]
-            return []
-        return []
-
-    def _segment_event(self, event_type: str, text: str) -> dict:
-        """Build one response segment of ``event_type``.
-
-        Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
-        spoken text). The text may be empty (e.g. an interrupted response); the
-        matcher aggregates successive segments until the content check passes.
-        """
-        return {"type": event_type, "text": text}
-
     @staticmethod
     def _match_summary(event: dict) -> str:
         """A short human label for a matched event, for verbose progress.
@@ -1085,7 +907,7 @@ class EvalSession(BaseObject):
         # send nothing are observation-only and exist to match exactly this pending
         # output (a bot-first greeting), so they keep it.
         if turn.user is not None or turn.dtmf is not None:
-            self._drop_pending_bot_output("before send")
+            self._stream.drop_pending_bot_output("before send")
 
         if turn.user is not None:
             how = turn.audio or ("audio" if self._user_tts is not None else "text")
@@ -1112,7 +934,7 @@ class EvalSession(BaseObject):
             # Suppress in-flight stragglers until the bot's fresh response begins
             # (bot-llm-started clears the flag), so this turn matches only what the
             # bot says in reply to this input.
-            self._awaiting_llm_restart = True
+            self._stream.awaiting_llm_restart = True
 
         await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
 
@@ -1260,7 +1082,7 @@ class EvalSession(BaseObject):
         self._trace.log(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
 
         while True:
-            seen_at = self._latest_event_times.get(send_after.event)
+            seen_at = self._stream.latest_event_times.get(send_after.event)
             if seen_at is not None:
                 wait_s = max(0.0, (seen_at + target_delay_s) - time.monotonic())
                 await asyncio.sleep(wait_s)
@@ -1324,7 +1146,7 @@ class EvalSession(BaseObject):
                 # arriving doesn't short-circuit it).
                 return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
             self._trace.log(f"match: waiting for {expectation.event!r}")
-            event = await self._next_matching_event(expectation.event, deadline)
+            event = await self._stream.next_event(expectation.event, deadline)
             payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
             if payload_failure:
                 return payload_failure
@@ -1353,7 +1175,7 @@ class EvalSession(BaseObject):
         seen_any = False
         while True:
             try:
-                event = await self._next_matching_event(expectation.event, deadline)
+                event = await self._stream.next_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
                     raise  # no response at all → caller logs "no matching event arrived"
@@ -1404,7 +1226,7 @@ class EvalSession(BaseObject):
         """
         self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
         try:
-            event = await self._next_matching_event(expectation.event, deadline)
+            event = await self._stream.next_event(expectation.event, deadline)
         except TimeoutError:
             # The quiet window held: absence confirmed.
             self._last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
@@ -1419,25 +1241,6 @@ class EvalSession(BaseObject):
             ),
             kind="unexpected_event",
         )
-
-    async def _next_matching_event(self, event_type: str, deadline: float) -> dict:
-        """Pop events from the queue until one of ``event_type`` arrives.
-
-        Events that don't match are dropped (so a scenario doesn't have to
-        enumerate every event the bot emits). They remain in ``events_seen`` and
-        ``latest_event_times`` for diagnostics and send_after lookups. Raises
-        TimeoutError once ``deadline`` passes.
-        """
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError()
-
-            async with asyncio.timeout(remaining):
-                event = await self._queue.get()
-
-            if event.get("type") == event_type:
-                return event
 
     async def _match_function_calls(
         self,
@@ -1512,7 +1315,8 @@ class EvalSession(BaseObject):
         turn is satisfied by any call matching both name and arguments rather
         than by the first to share the name — which is what lets a call the LLM
         corrects and repeats satisfy it. Other event types are dropped, as in
-        :meth:`_next_matching_event`. Raises TimeoutError once ``deadline`` passes.
+        :meth:`~pipecat.evals.events.EvalEventStream.next_event`. Raises
+        TimeoutError once ``deadline`` passes.
         """
 
         def matches(ev: dict) -> bool:
@@ -1530,13 +1334,7 @@ class EvalSession(BaseObject):
                 return self._pending_function_calls.pop(i)
 
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError()
-
-            async with asyncio.timeout(remaining):
-                event = await self._queue.get()
-
+            event = await self._stream.next_any(deadline)
             if event.get("type") not in FUNCTION_CALL_EVENTS:
                 continue
             if matches(event):
