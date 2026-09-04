@@ -10,6 +10,14 @@ user: !include user_audio.yaml
 judge: !include judge_audio.yaml
 
 turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into
+  # it). The barge-in below anchors on the latest llm_started, which must be the
+  # story's: anchored on the greeting's, the two user utterances play back to
+  # back as one turn and nothing gets interrupted.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
   - user: "Tell me a long, detailed story about the history of Paris."
     expect:
       - event: llm_started
@@ -19,5 +27,6 @@ turns:
       event: llm_started
       delay_ms: 2000
     expect:
+      - event: bot_interrupted
       - event: response
         eval: "the response says the capital of Japan is Tokyo, instead of continuing the Paris story"
