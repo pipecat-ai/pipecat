@@ -125,9 +125,11 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
+    TTSAudioRawFrame,
     TTSSpeakFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -1440,15 +1442,20 @@ class EvalSession(BaseObject):
     async def _send_audio_file(self, path: str) -> None:
         """Play a turn's ``audio:`` recording to the bot in place of synthesizing it.
 
-        The recording is pushed into the pipeline as one audio frame; the output
-        transport resamples it to the user-audio rate and serializes it to
-        ``raw-audio`` exactly like the user TTS's audio.
+        The recording is spoken exactly like a user TTS utterance: one audio frame
+        bracketed by ``TTSStartedFrame`` / ``TTSStoppedFrame``, pushed into the
+        pipeline. The output transport resamples it to the user-audio rate, paces
+        it to the bot, flushes its final partial chunk on the stop frame, and
+        records it.
         """
         assert self._worker is not None  # pipeline built before any send
         pcm, sample_rate = await load_user_audio(path)
-        await self._worker.queue_frame(
-            OutputAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1)
-        )
+        for frame in (
+            TTSStartedFrame(),
+            TTSAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
+            TTSStoppedFrame(),
+        ):
+            await self._worker.queue_frame(frame)
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.

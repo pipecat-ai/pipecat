@@ -16,13 +16,16 @@ importing this module stays cheap.
 
 import importlib
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN, NotGiven
+
+if TYPE_CHECKING:
+    from pipecat.evals.tts import CachingTTSService
 
 
 def _cfg_language(cfg: dict) -> Language | NotGiven:
@@ -104,7 +107,7 @@ def tts_service_from_config(
     *,
     cache_dir: str | None = None,
     use_cache: bool = True,
-) -> "TTSService":
+) -> "CachingTTSService":
     """Build the user-audio TTS (a caching wrapper) from a ``user_audio`` mapping.
 
     Honors a custom ``factory`` (dotted path to a callable taking ``voice_cfg``

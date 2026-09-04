@@ -642,8 +642,8 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         session._worker = _FakeWorker()
         return queued
 
-    async def test_file_is_queued_as_one_audio_frame_at_its_own_rate(self):
-        from pipecat.frames.frames import OutputAudioRawFrame
+    async def test_file_is_spoken_as_one_tts_utterance_at_its_own_rate(self):
+        from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 
         d = Path(tempfile.mkdtemp())
         tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
@@ -652,11 +652,14 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         queued = self._capture_queued(s)
         await s._send_audio_file(str(d / "hi.wav"))
 
-        self.assertEqual(len(queued), 1)
-        self.assertIsInstance(queued[0], OutputAudioRawFrame)
-        self.assertEqual(queued[0].sample_rate, 16000)
-        self.assertEqual(queued[0].num_channels, 1)
-        self.assertEqual(queued[0].audio, tone.tobytes())
+        # Bracketed like the user TTS's output, so the output transport flushes
+        # the utterance's final partial chunk on the stop frame.
+        self.assertEqual(
+            [type(f) for f in queued], [TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame]
+        )
+        self.assertEqual(queued[1].sample_rate, 16000)
+        self.assertEqual(queued[1].num_channels, 1)
+        self.assertEqual(queued[1].audio, tone.tobytes())
 
     async def test_non_native_rate_is_preserved(self):
         # The frame carries the file's rate (the output transport resamples it),
@@ -668,8 +671,8 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         queued = self._capture_queued(s)
         await s._send_audio_file(str(d / "hi.wav"))
 
-        self.assertEqual(len(queued), 1)
-        self.assertEqual(queued[0].sample_rate, 44100)
+        self.assertEqual(len(queued), 3)
+        self.assertEqual(queued[1].sample_rate, 44100)
 
     async def test_stereo_is_downmixed_to_mono(self):
         d = Path(tempfile.mkdtemp())
@@ -761,6 +764,7 @@ class _FakeRTVIServer:
         self.script[content] = list(messages)
 
     async def _handler(self, ws):
+        speaking = False
         async for raw in ws:
             msg = json.loads(raw)
             self.received.append(msg)
@@ -771,10 +775,16 @@ class _FakeRTVIServer:
                     for out in self.script.get(msg["data"]["content"], []):
                         await ws.send(out)
                 case "raw-audio":
-                    # A real bot transcribes the audio; the fake one answers the
-                    # single scripted reply, so an audio turn can be driven.
-                    for out in next(iter(self.script.values()), []):
-                        await ws.send(out)
+                    # The harness streams the user's side continuously (silence
+                    # around each utterance). A real bot transcribes the audio and
+                    # answers once the user stops speaking; the fake one answers the
+                    # single scripted reply on the first silent frame after speech.
+                    if any(base64.b64decode(msg["data"]["base64Audio"])):
+                        speaking = True
+                    elif speaking:
+                        speaking = False
+                        for out in next(iter(self.script.values()), []):
+                            await ws.send(out)
 
     async def start(self):
         self._server = await websockets.serve(self._handler, "localhost", self.port)
@@ -1354,7 +1364,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        # No speech= override: the file is played, so nothing has to synthesize it.
+        # No user_tts= override: the file is played, so nothing has to synthesize it.
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
 
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
@@ -1365,8 +1375,10 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             [],
             "an audio turn must not also be sent as text",
         )
+        # The user's side is streamed continuously, with silence before and after
+        # the turn, so the recording is one contiguous run inside that stream.
         got = b"".join(base64.b64decode(m["data"]["base64Audio"]) for m in audio_msgs)
-        self.assertEqual(got, tone.tobytes())
+        self.assertIn(tone.tobytes(), got)
         self.assertTrue(all(m["data"]["sampleRate"] == sr for m in audio_msgs))
 
     async def test_context_sends_eval_context_message(self):
