@@ -704,13 +704,13 @@ def _capture_deadlines(session: EvalSession) -> list[float]:
     produce one identical float rather than a float per expectation.
     """
     deadlines: list[float] = []
-    match = session._matcher.match
+    match = session._driver._matcher.match
 
     async def capture(expectation, anchor, budget_ms, turn_idx, exp_idx):
         deadlines.append(anchor + budget_ms / 1000.0)
         return await match(expectation, anchor, budget_ms, turn_idx, exp_idx)
 
-    session._matcher.match = capture
+    session._driver._matcher.match = capture
     return deadlines
 
 

@@ -11,12 +11,19 @@ An :class:`EvalSession` connects to a running bot's eval transport (a
 :class:`~pipecat.evals.serializer.RTVIEvalSerializer`), walks through a parsed
 :class:`~pipecat.evals.scenario.EvalScenario`, and verifies that the expected
 semantic events arrive in order, with the right payloads, within their latency
-budgets. It returns an :class:`EvalResult`.
+budgets. It returns an :class:`~pipecat.evals.results.EvalResult`.
 
-The session is a thin RTVI client. It builds outgoing messages with the RTVI
-models (:mod:`pipecat.processors.frameworks.rtvi.models`) and translates the
-RTVI server messages it receives back into a small set of friendly event names
-the scenario files assert on:
+The session composes a shared runtime with a driver. The runtime is the
+:class:`~pipecat.evals.client.EvalClient`, a Pipecat pipeline acting as an RTVI
+client that sends the user's turns, and the
+:class:`~pipecat.evals.events.EvalEventStream`, the bot's output translated into
+a small set of friendly event names the scenario files assert on. The driver
+decides what the user says next and how the outcome is scored: the
+:class:`~pipecat.evals.driver.ScriptedDriver` plays the scenario's turns and
+matches their expectations with the
+:class:`~pipecat.evals.matcher.ExpectationMatcher`.
+
+The events:
 
 ==========================      ==============================================
 scenario ``event:``             RTVI server message(s)
@@ -77,7 +84,6 @@ Example::
     print(f"{sum(1 for t in scored if t.status == 'passed')}/{len(scored)} turns")
 """
 
-import asyncio
 import time
 import traceback
 import warnings
@@ -86,17 +92,11 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.evals.client import EvalClient
+from pipecat.evals.driver import EvalDriver, ScriptedDriver
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.matcher import ExpectationMatcher
-from pipecat.evals.results import (
-    EvalAssertionFailure,
-    EvalResult,
-    EvalTrace,
-    EvalTurnProgress,
-    EvalTurnResult,
-)
-from pipecat.evals.scenario import EvalScenario, EvalSendAfter, EvalTurn, describe_config
+from pipecat.evals.results import EvalAssertionFailure, EvalResult, EvalTrace, EvalTurnProgress
+from pipecat.evals.scenario import EvalScenario, describe_config
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
@@ -106,8 +106,6 @@ from pipecat.utils.base_object import BaseObject
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
 # than failing on latency. Set ``within_ms`` explicitly to assert on timing.
 DEFAULT_EVENT_TIMEOUT_MS = 60000
-SEND_AFTER_MAX_WAIT_S = 30.0
-SEND_AFTER_POLL_S = 0.01
 
 
 class EvalSession(BaseObject):
@@ -191,8 +189,6 @@ class EvalSession(BaseObject):
 
         self._scenario = scenario
         self._bot_url = bot_url
-        self._default_timeout_ms = default_timeout_ms
-        self._judge: EvalJudge | None = judge
         # response (audio modality): the bot's actual audio, transcribed by an STT
         # in the client's pipeline. Needs audio mode, so run() skips otherwise.
         self._wants_response: bool = any(
@@ -201,9 +197,8 @@ class EvalSession(BaseObject):
 
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._trace = EvalTrace()
-        # The bot's output as events: fed by the client's pipeline, read by the matcher.
+        # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
-        self._matcher = ExpectationMatcher(stream=self._stream, judge=judge, trace=self._trace)
         # The connection to the bot: the eval pipeline and the user's sends.
         self._client = EvalClient(
             scenario=scenario,
@@ -216,6 +211,17 @@ class EvalSession(BaseObject):
             trigger_disconnect=trigger_disconnect,
             user_tts=user_tts,
             bot_stt=bot_stt,
+        )
+        # What the user says next and how the outcome is scored: a scenario is
+        # played by the scripted driver.
+        self._driver: EvalDriver = ScriptedDriver(
+            scenario=scenario,
+            default_timeout_ms=default_timeout_ms,
+            client=self._client,
+            stream=self._stream,
+            judge=judge,
+            trace=self._trace,
+            progress=self._progress,
         )
 
         self._register_event_handler("on_progress")
@@ -325,11 +331,6 @@ class EvalSession(BaseObject):
         for line in describe_config(self._scenario).splitlines():
             self._trace.log(line)
 
-        # One record per scenario turn, filled in as the turns are driven. They
-        # start as not_run and stay that way on every path that ends the run
-        # early, so the result always says which turns were actually scored.
-        turns = [EvalTurnResult(turn_index=i) for i in range(len(self._scenario.turns))]
-
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
         # unreachable: EvalScenario.load resolves `response` to llm_response in text
@@ -337,7 +338,7 @@ class EvalSession(BaseObject):
         if self._wants_response and not self._scenario.bot_audio:
             reason = "asserts 'response' transcription but judge modality is text (no audio)"
             logger.warning(f"Eval '{self._scenario.name}': {reason}; skipping")
-            return self._result(started, turns, [], skipped=reason)
+            return self._result(started, [], skipped=reason)
 
         # A bot that never accepts is a clean <connect> failure.
         try:
@@ -350,33 +351,29 @@ class EvalSession(BaseObject):
                 reason=f"failed to connect to {self._bot_url}: {e.__class__.__name__}",
                 kind="connect_failed",
             )
-            return self._result(started, turns, [failure])
+            return self._result(started, [failure])
 
-        failures = await self._drive(turns)
+        failures = await self._drive()
         self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
-        return self._result(started, turns, failures)
+        return self._result(started, failures)
 
     def _result(
-        self,
-        started: float,
-        turns: list[EvalTurnResult],
-        failures: list[EvalAssertionFailure],
-        skipped: str | None = None,
+        self, started: float, failures: list[EvalAssertionFailure], skipped: str | None = None
     ) -> EvalResult:
         """Assemble the run's result."""
         return EvalResult(
             scenario_name=self._scenario.name,
             passed=not failures and skipped is None,
             failures=failures,
-            turns=turns,
+            turns=self._driver.turns,
             duration_ms=int((time.monotonic() - started) * 1000),
             events_seen=self._stream.events_seen,
             debug_log=self._trace.lines,
             skipped=skipped,
         )
 
-    async def _drive(self, turns: list[EvalTurnResult]) -> list[EvalAssertionFailure]:
-        """Start the client, run the handshake and the turns, and tear down."""
+    async def _drive(self) -> list[EvalAssertionFailure]:
+        """Start the client, run the handshake and the driver, and tear down."""
         await self._client.start()
         failures: list[EvalAssertionFailure] = []
         try:
@@ -400,7 +397,7 @@ class EvalSession(BaseObject):
                     )
                 )
             else:
-                failures = await self._run_turns(turns)
+                failures = await self._driver.run()
         except Exception as e:
             # An unexpected harness-side error (a sub-pipeline failing to start
             # under load, a judge/transcriber raising mid-turn, ...) would
@@ -422,6 +419,7 @@ class EvalSession(BaseObject):
             # The raise happened either inside a turn — which is that turn's
             # failure — or before any of them started (a sub-pipeline that never
             # came up), where the trace's turn is still -1 and every turn is not_run.
+            turns = self._driver.turns
             if 0 <= self._trace.turn < len(turns):
                 record = turns[self._trace.turn]
                 record.status = "failed"
@@ -431,32 +429,6 @@ class EvalSession(BaseObject):
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
-        return failures
-
-    async def _run_turns(self, turns: list[EvalTurnResult]) -> list[EvalAssertionFailure]:
-        """Drive the scenario's turns in order, filling in their records."""
-        failures: list[EvalAssertionFailure] = []
-        for turn_idx, turn in enumerate(self._scenario.turns):
-            self._trace.turn = turn_idx
-            self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
-            turn_started = time.monotonic()
-            turn_failures = await self._run_turn(turn, turn_idx)
-            record = turns[turn_idx]
-            record.status = "failed" if turn_failures else "passed"
-            record.failures = turn_failures
-            record.duration_ms = int((time.monotonic() - turn_started) * 1000)
-            failures.extend(turn_failures)
-            if turn_failures:
-                # By default a failed turn ends the scenario: it leaves the
-                # conversation in an unknown state, so running the rest just
-                # burns another timeout per turn (e.g. a broken greeting turn
-                # shouldn't cost the full budget here and again on the
-                # question). A scenario whose turns are scored independently
-                # sets stop_on_failure: false and drives all of them.
-                if self._scenario.stop_on_failure:
-                    self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
-                    break
-                self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
         return failures
 
     def _add_legacy_progress_callback(
@@ -478,170 +450,3 @@ class EvalSession(BaseObject):
     async def _progress(self, record: EvalTurnProgress) -> None:
         """Emit a progress record to the ``on_progress`` handlers."""
         await self._call_event_handler("on_progress", record)
-
-    async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
-        """Drive one turn: optionally honor send_after, send user input, match expectations.
-
-        The user turn is sent as ``send-text`` (text mode) or, in audio mode, as
-        chunked ``raw-audio`` messages that the bot's STT transcribes for real --
-        the turn's ``audio:`` recording when it names one, otherwise its text
-        synthesized by the user TTS.
-        """
-        failures: list[EvalAssertionFailure] = []
-        # The turn's function calls match by name in any order; start each turn
-        # with an empty buffer so a prior turn's calls can't carry over.
-        self._matcher.reset_turn()
-
-        if turn.send_after is not None:
-            try:
-                await self._wait_send_after(turn.send_after)
-            except TimeoutError as e:
-                # Only the event-anchored wait can time out; the pure-delay form
-                # just sleeps. So event is never None here, but fall back for typing.
-                event_name = turn.send_after.event or "send_after"
-                failures.append(
-                    EvalAssertionFailure(
-                        turn_index=turn_idx,
-                        expectation_index=-1,
-                        event_name=event_name,
-                        reason=f"send_after never fired: {e}",
-                        kind="send_after_timeout",
-                    )
-                )
-                self._trace.log(f"FAIL: {event_name}: {failures[-1].reason}")
-                await self._progress(
-                    EvalTurnProgress(turn_idx, -1, event_name, "timeout", failures[-1].reason)
-                )
-                return failures
-
-        # Register the turn's image (if any) before the user input, so the bot can
-        # serve it when it requests a user image during the turn.
-        if turn.image is not None:
-            await self._client.send_image(turn.image)
-
-        # Anything still queued belongs to an earlier turn: this turn's input hasn't
-        # been sent, so the bot cannot have responded to it yet. Drop it, or an
-        # expectation here can match — and a judge can rule on — output the bot
-        # produced for a previous turn. The bot's own interruption events close this
-        # window too, but only once the input reaches it, which is far too late when
-        # `send_after` holds the send back for seconds.
-        #
-        # Before the send, not after: by the time the input has streamed, the bot has
-        # begun reacting to it, and this turn's own `user_started_speaking` /
-        # `bot_interrupted` would be dropped along with the stale output. Turns that
-        # send nothing are observation-only and exist to match exactly this pending
-        # output (a bot-first greeting), so they keep it.
-        if turn.user is not None or turn.dtmf is not None:
-            self._stream.drop_pending_bot_output("before send")
-
-        if turn.user is not None:
-            how = turn.audio or ("audio" if self._client.has_user_tts else "text")
-            self._trace.log(f"send: {turn.user!r} ({how})")
-            if turn.audio is not None:
-                await self._client.play(turn.audio)
-            elif self._client.has_user_tts:
-                await self._client.say(turn.user)
-            else:
-                await self._client.send_text(turn.user, audio_response=self._scenario.bot_audio)
-            # Record the user turn in the judge's conversation, so a later reply is
-            # judged in context (e.g. a terse "That's four" answering this question).
-            if self._judge is not None:
-                self._judge.add_user_message(turn.user)
-        elif turn.dtmf is not None:
-            self._trace.log(f"send: dtmf {turn.dtmf!r}")
-            await self._client.send_dtmf(turn.dtmf)
-            # Record the keypresses for judge context, so the bot's reply is judged
-            # knowing what was pressed.
-            if self._judge is not None:
-                self._judge.add_user_message(f"(DTMF keypad input: {turn.dtmf})")
-
-        if turn.user is not None or turn.dtmf is not None:
-            # Suppress in-flight stragglers until the bot's fresh response begins
-            # (bot-llm-started clears the flag), so this turn matches only what the
-            # bot says in reply to this input.
-            self._stream.awaiting_llm_restart = True
-
-        await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
-
-        # All of a turn's expectations share one deadline anchored at the send, so a
-        # stalled turn fails within a single ``within_ms`` budget instead of spending
-        # a fresh budget per expectation — e.g. a missing function call followed by a
-        # missing response fails in 60s total, not 120s.
-        anchor = time.monotonic()
-        for exp_idx, expectation in enumerate(turn.expect):
-            budget_ms = expectation.within_ms or self._default_timeout_ms
-
-            try:
-                failure = await self._matcher.match(
-                    expectation, anchor, budget_ms, turn_idx, exp_idx
-                )
-            except TimeoutError:
-                reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
-                failures.append(
-                    EvalAssertionFailure(
-                        turn_index=turn_idx,
-                        expectation_index=exp_idx,
-                        event_name=expectation.event,
-                        reason=reason,
-                        kind="timeout",
-                    )
-                )
-                self._trace.log(f"FAIL: {expectation.event}: {reason}")
-                await self._progress(
-                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
-                )
-                break
-
-            if failure:
-                failures.append(failure)
-                self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
-                await self._progress(
-                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
-                )
-            else:
-                await self._progress(
-                    EvalTurnProgress(
-                        turn_idx,
-                        exp_idx,
-                        expectation.event,
-                        "matched",
-                        self._matcher.last_match_text,
-                    )
-                )
-
-        return failures
-
-    async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
-        """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.
-
-        If the event was seen earlier in the run, anchor on that time (potentially
-        fire immediately). Otherwise, poll the latest_event_times map until the
-        event arrives, then anchor on that.
-
-        With no event (``send_after.event is None``), it's a pure time delay:
-        sleep ``delay_ms`` from now (i.e. from the previous turn's send).
-        """
-        target_delay_s = send_after.delay_ms / 1000.0
-
-        if send_after.event is None:
-            self._trace.log(f"send_after: waiting {send_after.delay_ms}ms")
-            await asyncio.sleep(target_delay_s)
-            return
-
-        deadline = time.monotonic() + SEND_AFTER_MAX_WAIT_S
-        self._trace.log(f"send_after: waiting for {send_after.event!r} + {send_after.delay_ms}ms")
-
-        while True:
-            seen_at = self._stream.latest_event_times.get(send_after.event)
-            if seen_at is not None:
-                wait_s = max(0.0, (seen_at + target_delay_s) - time.monotonic())
-                await asyncio.sleep(wait_s)
-                return
-
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"event {send_after.event!r} not seen within "
-                    f"{int(SEND_AFTER_MAX_WAIT_S * 1000)}ms"
-                )
-
-            await asyncio.sleep(SEND_AFTER_POLL_S)
