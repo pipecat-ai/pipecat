@@ -7,10 +7,33 @@
 """The bot's output as the harness sees it.
 
 :class:`EvalEventStream` turns the frames the bot-facing transport produces into
-the friendly events scenarios assert on, queues them for the matcher, and keeps
-the bookkeeping the rest of the harness reads: every event seen, when each event
+the events scenarios assert on, queues them for the matcher, and keeps the
+bookkeeping the rest of the harness reads: every event seen, when each event
 type last arrived (for ``send_after``), and whether the bot's next output is
 still the tail of an interrupted response.
+
+The events, and the RTVI server messages the bot emits them as:
+
+==========================      ==============================================
+scenario ``event:``             RTVI server message(s)
+==========================      ==============================================
+``user_started_speaking``       ``user-started-speaking``
+``user_stopped_speaking``       ``user-stopped-speaking``
+``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
+``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
+``user_transcription``          ``user-transcription`` (final only)
+``llm_started``                 ``bot-llm-started``
+``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
+                                (audio modality only)
+``response``                    the harness's own transcription of the bot's audio
+                                (audio modality only); ``llm_response`` in text modality
+``function_call``               ``llm-function-call-in-progress``
+``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
+                                ``tool_call_id`` and ``cancelled``, so a scenario
+                                can tell work that was stopped from work that
+                                finished on its own
+==========================      ==============================================
 """
 
 import asyncio

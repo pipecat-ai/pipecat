@@ -24,16 +24,14 @@ from pipecat.evals.scenario import FUNCTION_CALL_EVENTS, EvalExpectation
 class ExpectationMatcher:
     """Matches one expectation at a time against the event stream.
 
-    Matching semantics: expected events must appear in the specified order, but
-    unmatched events may appear between them (so a scenario doesn't have to
-    enumerate every event the bot emits). Most events match a single event and
-    are checked once. A reply carrying a content check (``text_contains`` /
-    ``eval:``) instead *aggregates*: it accumulates the text of successive
-    segments and re-checks on each until the check passes, the judge
-    affirmatively rejects, or the budget expires. A ``user_transcription`` with
-    ``text_contains`` aggregates the same way, since an STT may finalize one
-    utterance in several pieces. A turn's function calls match by name in any
-    order.
+    Expected events must appear in order, but unmatched events may appear
+    between them, so a scenario doesn't have to enumerate everything the bot
+    emits. Most expectations match one event. A reply with a content check
+    (``text_contains`` / ``eval:``) *aggregates* instead: it accumulates the
+    reply's segments and re-checks on each until the check passes, the judge
+    rejects, or the budget expires, so an interim "Let me check on that." is
+    rolled past rather than mistaken for the answer. A turn's function calls
+    match by name in any order.
     """
 
     def __init__(self, *, stream: EvalEventStream, judge: EvalJudge | None, trace: EvalTrace):

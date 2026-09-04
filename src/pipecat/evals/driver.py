@@ -86,17 +86,11 @@ class EvalDriver(ABC):
         """Send one user utterance to the bot.
 
         The utterance goes out as the recording in ``audio_file`` when given,
-        spoken by the user TTS when the client has one, else as text.
-
-        Anything still queued from the bot belongs to an earlier turn: this
-        utterance hasn't been sent, so the bot cannot have responded to it yet.
-        It is dropped first, or an expectation could match, and a judge rule on,
-        output the bot produced for a previous turn. The bot's own interruption
-        events close this window too, but only once the input reaches it, which
-        is far too late when ``send_after`` holds the send back for seconds.
-        Before the send, not after: by the time the input has streamed, the bot
-        has begun reacting to it, and this turn's own ``user_started_speaking``
-        / ``bot_interrupted`` would be dropped along with the stale output.
+        spoken by the user TTS when the client has one, else as text. Bot output
+        still queued from an earlier turn is dropped first, so nothing the bot
+        said before this input can be matched as its reply. The drop has to
+        precede the send: once the input reaches the bot, its reaction to this
+        very input would be dropped along with the stale output.
 
         Args:
             text: What the user says; also recorded in the judge's conversation

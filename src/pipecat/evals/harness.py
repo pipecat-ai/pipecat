@@ -6,68 +6,19 @@
 
 """Eval session: drives a bot over RTVI and asserts on the events it emits.
 
-An :class:`EvalSession` connects to a running bot's eval transport (a
-``SingleClientWebsocketServerTransport`` speaking RTVI via
-:class:`~pipecat.evals.serializer.RTVIEvalSerializer`), walks through a parsed
-:class:`~pipecat.evals.scenario.EvalScenario`, and verifies that the expected
-semantic events arrive in order, with the right payloads, within their latency
-budgets. It returns an :class:`~pipecat.evals.results.EvalResult`.
+An :class:`EvalSession` connects to a running bot's eval transport, walks
+through a parsed :class:`~pipecat.evals.scenario.EvalScenario`, and verifies
+that the expected events arrive in order, with the right payloads, within their
+latency budgets. It returns an :class:`~pipecat.evals.results.EvalResult`.
 
 The session composes a shared runtime with a driver. The runtime is the
 :class:`~pipecat.evals.client.EvalClient`, a Pipecat pipeline acting as an RTVI
 client that sends the user's turns, and the
-:class:`~pipecat.evals.events.EvalEventStream`, the bot's output translated into
-a small set of friendly event names the scenario files assert on. The driver
-decides what the user says next and how the outcome is scored: the
-:class:`~pipecat.evals.driver.ScriptedDriver` plays the scenario's turns and
-matches their expectations with the
+:class:`~pipecat.evals.events.EvalEventStream`, the bot's output as the events
+scenarios assert on. The driver decides what the user says next and how the
+outcome is scored: the :class:`~pipecat.evals.driver.ScriptedDriver` plays the
+scenario's turns and matches their expectations with the
 :class:`~pipecat.evals.matcher.ExpectationMatcher`.
-
-The events:
-
-==========================      ==============================================
-scenario ``event:``             RTVI server message(s)
-==========================      ==============================================
-``user_started_speaking``       ``user-started-speaking``
-``user_stopped_speaking``       ``user-stopped-speaking``
-``vad_user_started_speaking``   ``vad-user-started-speaking`` (raw VAD, ungated by turn detection)
-``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
-``user_transcription``          ``user-transcription`` (final only)
-``llm_started``                 ``bot-llm-started``
-``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
-``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
-                                (audio modality only)
-``response``                    local-STT transcription of the bot's actual audio
-                                (audio modality only); ``llm_response`` in text modality
-``function_call``               ``llm-function-call-in-progress``
-``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
-                                ``tool_call_id`` and ``cancelled``, so a scenario
-                                can tell work that was stopped from work that
-                                finished on its own
-==========================      ==============================================
-
-Matching semantics: expected events must appear in the specified order, but
-unmatched events may appear between them (so a scenario doesn't have to
-enumerate every event the bot emits). The ``within_ms`` budget for each
-expectation is measured from the most recent ``send-text`` / ``raw-audio`` / ``dtmf`` send
-(default 60s when omitted).
-
-A turn with a failed assertion ends the scenario, since the conversation is in
-an unknown state from there on. A scenario that scores each turn independently
-sets ``stop_on_failure: false`` to have every turn driven and reported.
-
-An ``llm_response`` with a content check (``text_contains`` / ``eval:``)
-aggregates: the harness accumulates the text of successive response segments
-within the turn and re-checks on each one, so an interim filler ("Let me check
-on that.") or the on-connect greeting is rolled past rather than mistaken for
-the turn's answer. Responses that began before the turn's input are skipped, so
-an interrupted prior turn doesn't bleed in. The judge returns yes / no /
-continue; ``text_contains`` treats a missing substring as continue. The
-``within_ms`` budget bounds the wait. A ``user_transcription`` with
-``text_contains`` aggregates the same way: an STT may finalize one utterance in
-several pieces, and the check runs on the pieces accumulated so far. Substring
-checks ignore differences in whitespace, so pieces that carry their own spacing
-still match a phrase.
 
 Example::
 
@@ -166,8 +117,8 @@ class EvalSession(BaseObject):
                     Use the ``on_progress`` event handler instead.
                     Will be removed in 2.0.0.
 
-            record_path: When set (and the scenario is audio mode), asks the eval
-                transport to record the conversation audio to this path (bot-side).
+            record_path: When set (and the scenario is audio mode), the
+                conversation audio (both sides) is recorded to this path.
             stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
                 teardown via ``eval-cancel``. The suite enables it to clean up
                 each spawned bot.
