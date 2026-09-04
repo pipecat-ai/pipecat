@@ -1,0 +1,1 @@
+- Fixed `XAISTTService`'s documented defaults: `endpointing` falls back to xAI's 400ms server default, not 10ms, and `encoding` also accepts `opus`.
