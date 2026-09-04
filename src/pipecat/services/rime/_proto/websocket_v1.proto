@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package pipecat.services.rime.v1;
+
+message SynthesisRequest {
+  reserved 1, 7;
+
+  optional string language = 2;
+  optional string speaker = 3;
+  string text = 4;
+  optional AudioParameters audio_parameters = 5;
+  optional SplitStrategy split_strategy = 6;
+  optional CodaParameters coda_parameters = 8;
+  optional MistParameters mist_parameters = 9;
+}
+
+message AudioParameters {
+  optional string audio_format = 1;
+  optional int32 sampling_rate = 2;
+  optional float time_scale_factor = 3;
+}
+
+message CodaParameters {
+  reserved 1, 2, 3, 4, 5, 6, 7;
+  reserved "temperature", "top_k", "top_p", "repetition_penalty", "max_tokens", "min_tokens", "seed";
+
+  optional int32 text_lookahead_tokens = 8;
+}
+
+message MistParameters {
+  optional bool pause_between_brackets = 1;
+  optional bool phonemize_between_brackets = 2;
+  repeated float inline_time_scale_factors = 3;
+  optional bool save_oovs = 4;
+}
+
+enum SplitStrategy {
+  SPLIT_STRATEGY_UNSPECIFIED = 0;
+  SPLIT_STRATEGY_SENTENCE = 1;
+  SPLIT_STRATEGY_NONE = 2;
+}
+
+message WebSocketRequest {
+  reserved 7;
+  reserved "flush";
+
+  string context_id = 1;
+
+  oneof payload {
+    WebSocketConfig config = 2;
+    SynthesisRequest start = 3;
+    string text = 4;
+    WebSocketEnd end = 5;
+    WebSocketCancel cancel = 6;
+  }
+}
+
+message WebSocketConfig {
+  optional string authorization = 1;
+  optional string license = 2;
+  optional SynthesisRequest defaults = 3;
+}
+
+message WebSocketEnd {}
+
+message WebSocketCancel {}
+
+message WebSocketResponse {
+  string context_id = 1;
+
+  oneof payload {
+    WebSocketReady ready = 2;
+    WebSocketStarted started = 3;
+    bytes audio = 4;
+    WebSocketDone done = 5;
+    WebSocketCancelled cancelled = 6;
+    WebSocketError error = 7;
+  }
+}
+
+message WebSocketReady {
+  uint32 protocol = 1;
+  repeated string languages = 2;
+  optional string default_language = 3;
+}
+
+message WebSocketStarted {
+  string request_id = 1;
+}
+
+message WebSocketDone {}
+
+message WebSocketCancelled {}
+
+message WebSocketError {
+  string kind = 1;
+  string message = 2;
+  optional string request_id = 3;
+}
