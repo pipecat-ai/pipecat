@@ -55,7 +55,7 @@ class BackendOutput:
     Parameters:
         text: The text the backend produced.
         is_thought: Whether this is a reasoning summary rather than a response.
-        is_final: Whether this is the backend's answer to the task, as opposed
+        is_final: Whether this is the backend's answer to the delegation, as opposed
             to progress on the way to it.
         speakable: Whether the user may hear this. It is not a promise that
             the frontend speaks it: a frontend decides what to do with the
@@ -193,7 +193,7 @@ def render_transcript_request(
 
 @dataclass
 class _BackendRun:
-    """A job in progress: one delegated task and the LLM runs it takes."""
+    """A job in progress: one delegation and the LLM runs it takes."""
 
     job_id: str
     runs_requested: int = 0
@@ -207,11 +207,11 @@ class BackendLLMWorker(LLMContextWorker):
 
     The worker owns the backend's conversation: an ``LLMContext`` plus the
     aggregator pair, so multi-step tool calling works as it does in any
-    pipeline. Each delegated task arrives as a ``run`` job, is appended to the
-    context as one user message (the conversation since the previous task,
-    then the task), and runs the LLM until it produces a final answer.
+    pipeline. Each delegation arrives as a ``run`` job carrying the request
+    text, which is appended to the context as one user message, and runs the
+    LLM until it produces a final answer.
 
-    Job contract (``@job(name="run")``, one task at a time):
+    Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
       composed by the frontend. What that text says is the application's
@@ -222,8 +222,8 @@ class BackendLLMWorker(LLMContextWorker):
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
-    - response: ``{"text": str}`` — the final answer, or ``""`` if the task
-      ended without one.
+    - response: ``{"text": str}`` — the final answer, or ``""`` if the
+      delegation ended without one.
 
     The final answer arrives twice, as the last update and as the response, so
     a caller uses one or the other: a frontend relaying output as it arrives
@@ -284,11 +284,12 @@ class BackendLLMWorker(LLMContextWorker):
         self._run: _BackendRun | None = None
         self._transform_output = transform_output
 
-        # A task takes one or more LLM runs: the first for the task itself,
-        # then one per round of tool results (the assistant aggregator pushes
-        # an LLMContextFrame back to the LLM after each). Runs are counted as
-        # the LLM picks them up and responses as they end; the task is
-        # finished when the two match and no further run is on the way.
+        # A delegation takes one or more LLM runs: the first for the request
+        # itself, then one per round of tool results (the assistant aggregator
+        # pushes an LLMContextFrame back to the LLM after each). Runs are
+        # counted as the LLM picks them up and responses as they end; the
+        # delegation is finished when the two match and no further run is on
+        # the way.
         @self.llm.event_handler("on_before_process_frame")
         async def on_before_process_frame(llm, frame):
             if isinstance(frame, LLMContextFrame) and self._run is not None:
@@ -303,8 +304,8 @@ class BackendLLMWorker(LLMContextWorker):
             await self._on_assistant_thought(message)
 
     @job(name=BACKEND_JOB_NAME, sequential=True)
-    async def run_task(self, message: BusJobRequestMessage):
-        """Run one delegated task to completion, streaming intermediate responses as updates.
+    async def run_delegation(self, message: BusJobRequestMessage):
+        """Run one delegation to completion, streaming what the backend produces as updates.
 
         Args:
             message: The job request; see the class docstring for the payload.

@@ -166,7 +166,7 @@ class ClientDelegation:
             wrapping any LLM service. The service registers it as a child of
             the pipeline worker at setup, so the pipeline must run under a
             ``WorkerRunner``.
-        timeout_secs: How long a delegated task may take before it is
+        timeout_secs: How long a delegation may take before it is
             abandoned.
     """
 
@@ -205,7 +205,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     ``ExternalUserTurnStrategies(enable_interruptions=False)`` resolve them
     into ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` **without
     broadcasting interruptions**: the model handles being talked over itself,
-    and a delegated task keeps running when that happens (the model is
+    and a delegation keeps running when that happens (the model is
     expected to disregard results the conversation has moved past). As a
     consequence every tool behaves as ``cancel_on_interruption=False``; use
     ``cancellable_by_llm=True`` for tools the model should be able to cancel on

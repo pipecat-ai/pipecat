@@ -116,7 +116,7 @@ async def _run_backend(
     request: str = "Do it",
     transform_output=None,
 ) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
-    """Run one delegated task against ``llm`` under a WorkerRunner."""
+    """Run one delegation against ``llm`` under a WorkerRunner."""
     backend = BackendLLMWorker(
         llm=llm,
         name="backend",
