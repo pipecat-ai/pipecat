@@ -145,6 +145,76 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("not in the currently advertised tool set" in w for w in warnings))
         self.assertFalse(any("just unregistered" in w for w in warnings))
 
+    async def test_handler_that_raises_settles_the_call_with_the_failure(self):
+        """The LLM reads a stand-in message; the frame says what went wrong."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def explode(params):
+            raise RuntimeError("the API is down")
+
+        service.register_function("weather", explode)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        service.push_error = AsyncMock()
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertIsInstance(result, FunctionCallResultFrame)
+        self.assertEqual(result.error, "RuntimeError: the API is down")
+        self.assertEqual(
+            result.result,
+            LLMService.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(function_name="weather"),
+        )
+
+    async def test_a_call_that_returns_carries_no_error(self):
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def handler(params):
+            await params.result_callback({"temperature": 12})
+
+        service.register_function("weather", handler)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertEqual(result.result, {"temperature": 12})
+        self.assertIsNone(result.error)
+
     async def test_function_unregistered_between_queue_and_execute(self):
         """Function unregistered between queuing and execution still terminates."""
         service = MockLLMService()

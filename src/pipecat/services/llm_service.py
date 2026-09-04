@@ -1583,6 +1583,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         )
 
         timeout_task: asyncio.Task | None = None
+        # Set when the handler raises, so the result settling the call on its
+        # behalf can say what went wrong.
+        call_error: str | None = None
 
         # Single callback for both intermediate updates and final results.
         # Pass properties=FunctionCallResultProperties(is_final=False) for updates.
@@ -1627,6 +1630,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 result=result,
                 run_llm=runner_item.run_llm,
                 properties=properties,
+                error=call_error,
             )
 
         # Start a timeout task for deferred function calls
@@ -1697,6 +1701,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             )
             # A handler that raised will never report, so settle the call on its
             # behalf.
+            call_error = f"{type(e).__name__}: {e}"
             await function_call_result_callback(
                 self.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(
                     function_name=runner_item.function_name
