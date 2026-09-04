@@ -1,0 +1,9 @@
+modality: audio
+eval:
+  service: ollama
+  model: gemma4:12b
+  extra:
+    reasoning_effort: none
+transcription:
+  service: moonshine
+  model: small-streaming

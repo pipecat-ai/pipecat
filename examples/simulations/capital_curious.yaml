@@ -5,17 +5,15 @@ name: capital_curious
 # whole conversation whether the caller got the answer, and scores the bot's
 # manner. The smallest simulation that exercises the loop end to end.
 
+simulator: !include simulator.yaml
+
+judge: !include judge_text.yaml
+
 persona: |
   A friendly, curious traveler planning a trip to Europe. Polite and concise:
   asks one question at a time, and thanks the assistant once satisfied.
 
 goal: "Find out what the capital of Germany is, then end the call."
-
-simulator:
-  service: openai
-  model: gpt-4o-mini
-
-judge: !include ../scenarios/judge_text.yaml
 
 success: "the bot told the caller that the capital of Germany is Berlin"
 
