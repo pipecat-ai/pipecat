@@ -22,11 +22,11 @@ subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
 both peers agree on a namespace up front; when the paths are instead
 assigned externally, ``response_path``/``request_path`` set them
 directly and the namespace is unused. Audio rides on a
-single Opus track, replaced by a fresh one on every interruption so the
-audio already in flight is discarded along with the track that carried it
-(see :meth:`MOQTransportClient.restart_audio_track`); RTVI JSON rides on a
-fixed-name ``transcript.json.z``
-track carried by moq's JSON stream helper (``publish_json_stream`` /
+single Opus track, replaced by a fresh one when an interruption catches
+audio still in flight, so that audio is discarded along with the track
+that carried it (see :meth:`MOQTransportClient.restart_audio_track`);
+RTVI JSON rides on a fixed-name ``transcript.json.z`` track carried by
+moq's JSON stream helper (``publish_json_stream`` /
 ``subscribe_json_stream``). The stream is an ordered, lossless append-log
 of records — every message is delivered in order, unlike the JSON
 *snapshot* helper (``publish_json_snapshot`` / ``subscribe_json_snapshot``)
@@ -226,6 +226,12 @@ DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z"
 # pipeline rate up to this for us.
 OPUS_SAMPLE_RATE = 48000
 
+# Unplayed audio below this doesn't justify retiring the audio track. A
+# lead this small is the client's own jitter buffer, or a mixer writing
+# at real-time pace, rather than the write-ahead frontier of an
+# abandoned utterance. See :meth:`MOQTransportClient.restart_audio_track`.
+AUDIO_IN_FLIGHT_FLOOR_S = 0.3
+
 
 def _downmix_s16_to_mono(pcm: bytes, channels: int) -> bytes:
     """Downmix interleaved S16 PCM to mono by averaging channels.
@@ -294,10 +300,11 @@ class MOQParams(TransportParams):
         request_path: Full broadcast path the bot subscribes to (incoming
             requests), overriding ``<namespace>/<peer_id>``. See
             :attr:`response_path`.
-        audio_out_track: Name of the bot's outgoing audio track. Each
-            interruption retires the track and publishes a successor
-            named ``<audio_out_track>-<n>``; subscribers discover the
-            current one through the catalog rather than by this name.
+        audio_out_track: Name of the bot's outgoing audio track. An
+            interruption that catches audio still to be played retires
+            the track and publishes a successor named
+            ``<audio_out_track>-<n>``; subscribers discover the current
+            one through the catalog rather than by this name.
         transcript_track: Name of the bot's outgoing transcript track. A
             fixed-name JSON stream track carrying RTVI messages as a
             lossless, ordered append-log (moq's ``publish_json_stream`` /
@@ -540,8 +547,9 @@ class MOQTransportClient:
         # future-dated timestamps to buffer and pace playback. Only the
         # first stamp of a track reaches the wire as given: the encoder
         # takes it as that track's epoch and derives every later PTS from
-        # the running sample count.
-        self._publish_pts_us: int = 0
+        # the running sample count. ``None`` means the current track has
+        # no epoch yet — the next write takes one from the timeline.
+        self._publish_pts_us: int | None = None
         # Counter distinguishing successive audio tracks. Bumped per
         # interruption; the name of track 0 is `audio_out_track` itself.
         self._audio_track_epoch: int = 0
@@ -619,10 +627,13 @@ class MOQTransportClient:
     def _open_audio_track(self, sample_rate: int):
         """Publish an audio track for the current epoch.
 
-        The track is anchored at the timeline position it starts playing
-        from, which is what the encoder takes as its epoch.
+        The epoch is left unset for the first write to fill in, so the
+        track anchors at the timeline position it starts playing from
+        rather than where it was opened. The two are seconds apart
+        whenever an utterance waits on the LLM, and the encoder takes
+        that first stamp as the track's epoch.
         """
-        self._publish_pts_us = self._elapsed_us()
+        self._publish_pts_us = None
         self._audio_out = self._publish_broadcast.publish_audio(
             self._audio_track_name,
             moq.AudioEncoderInput(
@@ -660,13 +671,27 @@ class MOQTransportClient:
         one audio track and subscribers follow the swap through normal
         rendition selection.
 
-        The successor anchors at the current position on the broadcast's
-        shared timeline rather than continuing from where the abandoned
-        utterance had written to, so the next utterance plays immediately
-        instead of waiting out the buffer it replaced. The pacing clock
-        re-anchors with it.
+        The successor anchors at its own first write rather than
+        continuing from where the abandoned utterance had written to, so
+        the next utterance plays immediately instead of waiting out the
+        buffer it replaced. The pacing clock re-anchors with it.
+
+        Interruptions are broadcast on every user turn, not only on
+        barge-in, so a swap is worth its cost — a catalog update and a
+        resubscribe for every subscriber — only when the track actually
+        carries audio nobody has heard yet. ``_publish_audio_clock`` is
+        the presentation deadline of the last chunk written, so its lead
+        over wall-clock is exactly what is still to be played.
         """
         if self._audio_out is None or not self._audio_out_sample_rate:
+            return
+
+        in_flight_s = (
+            0.0
+            if self._publish_audio_clock is None
+            else self._publish_audio_clock - time.monotonic()
+        )
+        if in_flight_s <= AUDIO_IN_FLIGHT_FLOOR_S:
             return
 
         old = self._audio_out
@@ -699,7 +724,8 @@ class MOQTransportClient:
         ``audio_out_max_buffer_ms`` of it. Interruptions retire the whole
         track (see :meth:`restart_audio_track`), so the cap bounds how much
         encoded audio a retired track can strand rather than how much can
-        still reach the player.
+        still reach the player. It also bounds how long the lead stays
+        above the floor a retirement needs to be worth making.
         """
         producer = self._audio_out
         if producer is None or not self._audio_out_sample_rate:
@@ -728,6 +754,12 @@ class MOQTransportClient:
         # duration of this chunk. S16 = 2 bytes/sample, mono.
         duration_s = len(audio) / (self._audio_out_sample_rate * 2)
         self._publish_audio_clock += duration_s
+
+        # First write on this track: it decides where the track sits on the
+        # broadcast timeline, so take the position now that audio is
+        # actually going out.
+        if self._publish_pts_us is None:
+            self._publish_pts_us = self._elapsed_us()
 
         producer.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
@@ -1413,7 +1445,7 @@ class MOQOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Publish a fresh audio track on interruption.
+        """Retire the audio track when an interruption strands audio on it.
 
         The base class drains the queued audio and stops the writer first,
         so the track is retired with no writes still racing it. Everything

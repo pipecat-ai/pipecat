@@ -803,11 +803,29 @@ class TestMOQAudioTrackRestart(unittest.IsolatedAsyncioTestCase):
     def _published_track_names(self):
         return [call.args[0] for call in self.broadcast.publish_audio.call_args_list]
 
+    def _advance_timeline(self, seconds: float):
+        """Fast-forward the broadcast timeline, as an LLM turn does.
+
+        A track opens the moment the interruption lands but doesn't write
+        until STT, the LLM and TTS have all run, so the gap between the two
+        is what distinguishes the two candidate anchors.
+        """
+        self.client._clock_origin -= seconds
+
+    def _leave_audio_in_flight(self, seconds: float = 5.0):
+        """Park the pacing clock ahead of wall-clock, as a live utterance does.
+
+        Unplayed audio on the track is what a restart exists to discard, so
+        it is also what a restart checks for.
+        """
+        self.client._publish_audio_clock = time.monotonic() + seconds
+
     def test_interruption_retires_the_track_and_publishes_a_successor(self):
         """The old producer is finished — which drops its catalog rendition —
         and a differently-named track takes its place, so the catalog still
         advertises exactly one audio track for subscribers to follow."""
         self.client.open_audio_track(16000)
+        self._leave_audio_in_flight()
         retired = self.client._audio_out
 
         self.client.restart_audio_track()
@@ -820,38 +838,64 @@ class TestMOQAudioTrackRestart(unittest.IsolatedAsyncioTestCase):
     def test_each_interruption_names_a_further_track(self):
         """Names keep advancing, so no two utterances in a session share one."""
         self.client.open_audio_track(16000)
+        self._leave_audio_in_flight()
         self.client.restart_audio_track()
+        self._leave_audio_in_flight()
         self.client.restart_audio_track()
 
         self.assertEqual(self._published_track_names(), ["bot-audio", "bot-audio-1", "bot-audio-2"])
 
-    def test_successor_anchors_into_the_shared_timeline(self):
+    async def test_successor_anchors_where_it_starts_playing(self):
         """Every track the bot publishes stamps against one broadcast clock, so
         a successor re-anchors into that timeline rather than restarting it.
 
-        The anchor is where playback resumes — the elapsed position now — not
-        the write-ahead frontier the abandoned utterance had reached. The
-        encoder takes that first stamp as the track's epoch, so it decides
-        when the new utterance plays."""
+        The anchor is where playback resumes — not the write-ahead frontier
+        the abandoned utterance had reached, and not where the track was
+        opened, which is a whole LLM turn earlier. The encoder takes that
+        first stamp as the track's epoch, so it decides when the new
+        utterance plays."""
         self.client.open_audio_track(16000)
+        self._leave_audio_in_flight()
         # Pacing runs ahead of real-time, so the abandoned utterance left the
         # timestamp far in the future.
         self.client._publish_pts_us = self.client._elapsed_us() + 25_000_000
 
         self.client.restart_audio_track()
+        self.assertIsNone(self.client._publish_pts_us, "anchored before any audio")
+        opened_at = self.client._elapsed_us()
+        self._advance_timeline(2.0)
+        await self.client.publish_audio(b"\x00" * 320)
 
-        anchor = self.client._publish_pts_us
-        self.assertLess(anchor, 1_000_000, "successor anchored at the write-ahead frontier")
-        self.assertAlmostEqual(anchor, self.client._elapsed_us(), delta=100_000)
-
-    def test_first_track_anchors_into_the_same_timeline(self):
-        """The first track is not special-cased: it anchors off the same clock,
-        so a successor's stamps are comparable with its own."""
-        self.client.open_audio_track(16000)
-
-        self.assertAlmostEqual(
-            self.client._publish_pts_us, self.client._elapsed_us(), delta=100_000
+        anchor = self.moq.AudioFrame.call_args.kwargs["timestamp_us"]
+        self.assertLess(
+            anchor, opened_at + 25_000_000, "successor anchored at the write-ahead frontier"
         )
+        self.assertAlmostEqual(anchor, opened_at + 2_000_000, delta=100_000)
+
+    async def test_first_track_anchors_into_the_same_timeline(self):
+        """The first track is not special-cased: it anchors off the same clock,
+        so a successor's stamps are comparable with its own, and it waits for
+        its first write the same way."""
+        self.client.open_audio_track(16000)
+        opened_at = self.client._elapsed_us()
+        self._advance_timeline(2.0)
+        await self.client.publish_audio(b"\x00" * 320)
+
+        anchor = self.moq.AudioFrame.call_args.kwargs["timestamp_us"]
+        self.assertAlmostEqual(anchor, opened_at + 2_000_000, delta=100_000)
+
+    def test_restart_without_audio_in_flight_is_a_no_op(self):
+        """Interruptions are broadcast on every user turn, so most of them find
+        nothing left to play. There is no stale audio to disambiguate, and
+        swapping anyway would cost every subscriber a resubscribe."""
+        self.client.open_audio_track(16000)
+        kept = self.client._audio_out
+
+        self.client.restart_audio_track()
+
+        kept.finish.assert_not_called()
+        self.assertIs(self.client._audio_out, kept)
+        self.assertEqual(self._published_track_names(), ["bot-audio"])
 
     def test_restart_before_the_track_opens_is_a_no_op(self):
         """An interruption can land before StartFrame opens the track (the
@@ -877,11 +921,10 @@ class TestMOQAudioTrackRestart(unittest.IsolatedAsyncioTestCase):
         write = asyncio.create_task(self.client.publish_audio(b"\x00" * 320))
         await asyncio.sleep(0)  # let it reach the pacing sleep
         self.client.restart_audio_track()
-        anchor = self.client._publish_pts_us
         await write
 
         retired.write.assert_not_called()
         self.client._audio_out.write.assert_not_called()
-        # The successor's epoch is still the anchor the restart chose, not one
-        # the discarded chunk moved.
-        self.assertEqual(self.client._publish_pts_us, anchor)
+        # The successor is still waiting on its own first write for an epoch,
+        # rather than taking one from the audio that was just discarded.
+        self.assertIsNone(self.client._publish_pts_us)
