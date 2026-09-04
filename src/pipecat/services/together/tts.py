@@ -34,7 +34,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # Together TTS streams 24 kHz signed 16-bit mono PCM for all models; the API does
 # not support requesting a different rate. The output transport resamples to the
@@ -101,7 +101,7 @@ class TogetherTTSService(WebsocketTTSService):
         default_settings = self.Settings(
             model="hexgrad/Kokoro-82M",
             voice="af_heart",
-            language=Language.EN,
+            language=self.language_to_service_language(Language.EN),
             max_partial_length=None,
         )
 
@@ -121,6 +121,9 @@ class TogetherTTSService(WebsocketTTSService):
         self._url = url
         self._session_id = None
         self._receive_task = None
+        # Audio deltas do not always end on a 16-bit sample boundary, so a
+        # trailing byte is held here until its sample completes.
+        self._audio_buffer = bytearray()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -129,13 +132,15 @@ class TogetherTTSService(WebsocketTTSService):
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Together AI language format.
 
+        Together accepts ISO 639-1 codes and lowercase locale codes (``zh-hk``).
+
         Args:
             language: The language to convert.
 
         Returns:
             The language code string, or None if not supported.
         """
-        return str(language)
+        return str(language).lower()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
@@ -150,6 +155,8 @@ class TogetherTTSService(WebsocketTTSService):
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
         url = f"{self._url}?model={self._settings.model}&voice={self._settings.voice}"
+        if is_given(self._settings.language) and self._settings.language:
+            url += f"&language={self._settings.language}"
         if self._settings.max_partial_length is not None:
             url += f"&max_partial_length={self._settings.max_partial_length}"
         return url
@@ -246,6 +253,7 @@ class TogetherTTSService(WebsocketTTSService):
         finally:
             self._websocket = None
             self._session_id = None
+            self._audio_buffer.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -354,7 +362,14 @@ class TogetherTTSService(WebsocketTTSService):
             try:
                 await self.stop_ttfb_metrics()
                 context_id = self.get_active_audio_context_id()
-                audio_chunk = base64.b64decode(delta)
+                self._audio_buffer.extend(base64.b64decode(delta))
+                # Emit whole samples only: a frame carrying half a sample
+                # breaks consumers that read the audio as 16-bit integers.
+                aligned_length = len(self._audio_buffer) & ~1
+                if not aligned_length:
+                    return
+                audio_chunk = bytes(self._audio_buffer[:aligned_length])
+                del self._audio_buffer[:aligned_length]
                 frame = TTSAudioRawFrame(
                     audio=audio_chunk,
                     sample_rate=self.sample_rate,
@@ -376,6 +391,9 @@ class TogetherTTSService(WebsocketTTSService):
         """
         item_id = evt.get("item_id")
         logger.debug(f"{self} audio generation complete for: {item_id}")
+        # A byte still held back belongs to a sample the server will never
+        # complete; dropping it keeps the next segment sample-aligned.
+        self._audio_buffer.clear()
         await self.stop_all_metrics()
         context_id = self.get_active_audio_context_id()
         if context_id:
@@ -421,6 +439,7 @@ class TogetherTTSService(WebsocketTTSService):
             context_id: The ID of the audio context that was interrupted.
         """
         await self.stop_all_metrics()
+        self._audio_buffer.clear()
         if context_id:
             await self._ws_send({"type": "input_text_buffer.clear"})
         await super().on_audio_context_interrupted(context_id)
