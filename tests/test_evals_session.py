@@ -627,7 +627,6 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         run = LLMContextFrame(context)
         await self._push(sink, interruption, run)
         self.assertEqual(nxt.frames, [interruption, run])
-        self.assertEqual(self._events(sink), ["persona_turn"])
 
     async def test_hang_up_silences_the_persona(self):
         context = LLMContext()
@@ -636,7 +635,6 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         await self._push(sink, LLMContextFrame(context), *_bot_response("Anything else?"))
         self.assertEqual(nxt.frames, [])
         self.assertEqual(context.get_messages(), [])
-        self.assertNotIn("persona_turn", self._events(sink))
 
     async def test_text_feed_hands_the_bots_response_to_the_persona(self):
         context = LLMContext()
@@ -646,7 +644,6 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(nxt.frames), 1)
         self.assertIsInstance(nxt.frames[0], LLMContextFrame)
         self.assertIs(nxt.frames[0].context, context)
-        self.assertEqual(self._events(sink), ["llm_started", "llm_response", "persona_turn"])
 
     async def test_text_feed_waits_for_the_bots_function_call(self):
         context = LLMContext()
@@ -693,7 +690,8 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
 
     def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
         trace = EvalTrace()
-        relay = _PersonaTurnRelay(lambda text: {"type": "send-text", "text": text}, trace)
+        stream = _stream(bot_audio=True)
+        relay = _PersonaTurnRelay(lambda text: {"type": "send-text", "text": text}, trace, stream)
         nxt = _Collector()
         relay.link(nxt)
         return relay, nxt, trace
@@ -710,17 +708,44 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         # The response's own frames go on, for the assistant aggregator.
         self.assertEqual([f for f in nxt.frames if f in frames], frames)
         self.assertTrue(any("'Hi there.' (persona, text)" in line for line in trace.lines))
+        self.assertEqual([e["type"] for e in relay._stream.events_seen], ["persona_turn"])
 
     async def test_spoken_response_is_only_traced(self):
         relay, nxt, trace = self._relay()
-        for frame in _bot_response("Hi", skip_tts=False):
-            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
-        await relay.process_frame(
+        # In audio mode the TTS speaks the text and forwards the end frame after it.
+        for frame in (
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(text="Hi"),
             TTSTextFrame(text="Hi", aggregated_by=AggregationType.SENTENCE),
-            FrameDirection.DOWNSTREAM,
-        )
+            LLMFullResponseEndFrame(),
+        ):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         self.assertFalse(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in nxt.frames))
         self.assertTrue(any("'Hi' (persona, audio)" in line for line in trace.lines))
+        self.assertEqual([e["type"] for e in relay._stream.events_seen], ["persona_turn"])
+
+    async def test_a_response_without_words_is_not_a_turn(self):
+        # An end_call-only response, or one cut off before any word went out.
+        relay, _, _ = self._relay()
+        for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        for frame in (
+            LLMFullResponseStartFrame(),
+            InterruptionFrame(),
+            LLMFullResponseEndFrame(),
+        ):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(relay._stream.events_seen, [])
+
+    async def test_an_interrupted_response_is_not_a_turn(self):
+        relay, _, _ = self._relay()
+        for frame in (
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(text="Could you"),
+            InterruptionFrame(),
+        ):
+            await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(relay._stream.events_seen, [])
 
 
 class TestAudioSender(unittest.IsolatedAsyncioTestCase):
@@ -1734,7 +1759,7 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.end_call, {"success": True, "reason": "I learned it"})
-        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.turns, 1)  # the question; end_call is not a turn
         self.assertEqual(result.quality, 1.0)
         # The persona's question went to the bot as one text turn, not spoken.
         sent = [m for m in self.server.received if m.get("type") == "send-text"]

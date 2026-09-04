@@ -17,7 +17,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseDriver
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import PERSONA_TURN_EVENT, EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import END_CALL_FUNCTION, Persona
@@ -33,10 +33,8 @@ from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 
-# The event the driver appends when the persona calls end_call, and the one the
-# client's sink appends each time it hands the bot's turn to the persona LLM.
+# The event the driver appends when the persona calls end_call.
 END_CALL_EVENT = "end_call"
-PERSONA_TURN_EVENT = "persona_turn"
 
 
 class SimulationDriver(BaseDriver[SimulationRunResult]):

@@ -126,8 +126,7 @@ class _BotFrameSink(FrameProcessor):
     resets its queue when the aggregator's interruption reaches it, dropping a
     turn still queued behind a slow transcription at that moment.
 
-    Every context frame that goes on to the persona LLM is one persona turn,
-    reported as a ``persona_turn`` event. In a text-mode simulation the sink is
+    In a text-mode simulation the sink is
     also what hands the bot's turns to the persona: with no audio there is no
     STT or aggregator to do it, so each finished bot response is appended to
     the persona's context as a user message and the context is pushed on for
@@ -196,10 +195,9 @@ class _BotFrameSink(FrameProcessor):
         await self.push_frame(frame, direction)
 
     async def _run_persona(self, frame: LLMContextFrame) -> None:
-        """Hand a context frame to the persona LLM: one persona turn, unless it hung up."""
+        """Hand a context frame to the persona LLM, unless the persona hung up."""
         if self._persona is None or self._hung_up:
             return
-        await self._stream.append({"type": "persona_turn"})
         await self.push_frame(frame)
 
     async def _feed_persona(self, events: list[dict]) -> None:
@@ -222,45 +220,63 @@ class _BotFrameSink(FrameProcessor):
                     await self._run_persona(LLMContextFrame(self._persona))
 
 
+# The event the relay appends for each response the persona completes.
+PERSONA_TURN_EVENT = "persona_turn"
+
+
 class _PersonaTurnRelay(FrameProcessor):
-    """Relays the persona's turns to the bot and traces them.
+    """Relays the persona's turns to the bot, counts them, and traces them.
 
     In text mode the persona LLM's output carries ``skip_tts`` and reaches this
     processor as text: one whole response is sent to the bot as a single RTVI
     ``send-text``. In audio mode the user TTS has already turned the response
     into audio and this only traces the spoken text as it passes. Either way
     the frames go on to the assistant aggregator that records the persona's
-    side of the conversation.
+    side of the conversation, and each response in which the persona said
+    something is one persona turn, reported as a ``persona_turn`` event. A
+    response that only calls ``end_call``, or one the bot's speech cut off
+    before a word went out, is not a turn.
     """
 
-    def __init__(self, text_turn_message: Callable[[str], dict], trace: EvalTrace):
+    def __init__(
+        self, text_turn_message: Callable[[str], dict], trace: EvalTrace, stream: EvalEventStream
+    ):
         """Initialize the relay.
 
         Args:
             text_turn_message: Builds the RTVI ``send-text`` message for a turn.
             trace: The run's trace.
+            stream: Where the persona's turns are counted.
         """
         super().__init__()
         self._text_turn_message = text_turn_message
         self._trace = trace
+        self._stream = stream
         self._text: list[str] = []
+        self._spoke = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, LLMFullResponseStartFrame) and frame.skip_tts:
+        if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
             self._text = []
+            self._spoke = False
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             self._text.append(frame.text)
-        elif isinstance(frame, LLMFullResponseEndFrame) and frame.skip_tts:
+        elif isinstance(frame, LLMFullResponseEndFrame):
             text = "".join(self._text).strip()
             self._text = []
-            if text:
+            if frame.skip_tts and text:
                 self._trace.log(f"send: {text!r} (persona, text)")
                 await self.push_frame(
                     OutputTransportMessageUrgentFrame(message=self._text_turn_message(text))
                 )
+                self._spoke = True
+            if self._spoke:
+                await self._stream.append({"type": PERSONA_TURN_EVENT})
+            self._spoke = False
         elif isinstance(frame, TTSTextFrame):
             self._trace.log(f"send: {frame.text!r} (persona, audio)")
+            self._spoke = True
         await self.push_frame(frame, direction)
 
 
@@ -767,7 +783,7 @@ class EvalClient:
         if self._user_tts is not None:
             processors.append(self._user_tts)
         if self._persona_llm is not None:
-            processors.append(_PersonaTurnRelay(self._text_turn_message, self._trace))
+            processors.append(_PersonaTurnRelay(self._text_turn_message, self._trace, self._stream))
         processors.append(transport.output())
         if self._persona_llm is not None:
             if aggregators is None:

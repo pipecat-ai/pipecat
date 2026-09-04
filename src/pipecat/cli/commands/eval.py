@@ -1020,7 +1020,7 @@ def _print_simulation_result(result: SimulationRunResult, elapsed: float, verbos
     glyph = _green("✓") if result.succeeded else _red("✗")
     outcome = "goal achieved" if result.succeeded else "goal not achieved"
     quality = f" · quality {result.quality:.2f}" if result.quality is not None else ""
-    how = f"{_fmt_duration(elapsed)}, {result.turns} bot turn(s), ended by {result.ended_by}"
+    how = f"{_fmt_duration(elapsed)}, {result.turns} persona turn(s), ended by {result.ended_by}"
     print(f"  {glyph} {name} {outcome}{quality} {_dim('(' + how + ')')}")
     print(f"    {_dim('judge:')} {result.reason}")
     for metric in result.metrics:
