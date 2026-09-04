@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult, Speculation
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.utils.base_object import BaseObject
 
 
@@ -110,7 +110,7 @@ class BaseUserTurnStopStrategy(BaseObject):
             )
 
     @property
-    def speculation(self) -> Speculation | None:
+    def speculation(self) -> UserTurnSpeculation | None:
         """The speculative inference this strategy has in flight, if any.
 
         Non-None between an eager end of turn and its resolution. The user

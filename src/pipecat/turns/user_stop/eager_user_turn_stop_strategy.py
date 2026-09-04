@@ -13,7 +13,7 @@ from pipecat.frames.frames import (
     EagerEndOfTurnTranscriptionFrame,
     Frame,
 )
-from pipecat.turns.types import ProcessFrameResult, Speculation
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, ExactMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 
@@ -54,10 +54,10 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """
         super().__init__(**kwargs)
         self._match_policy = match_policy or ExactMatch()
-        self._speculation: Speculation | None = None
+        self._speculation: UserTurnSpeculation | None = None
 
     @property
-    def speculation(self) -> Speculation | None:
+    def speculation(self) -> UserTurnSpeculation | None:
         """The speculative inference in flight, if any."""
         return self._speculation
 
@@ -139,7 +139,9 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """Answer an eager end of turn, leaving the turn open."""
         # Segments committed earlier in this turn are part of what the LLM will
         # see, so they're part of what the committed transcript is compared to.
-        self._speculation = Speculation(id=frame.speculation_id, text=self._text + frame.text)
+        self._speculation = UserTurnSpeculation(
+            id=frame.speculation_id, text=self._text + frame.text
+        )
         logger.debug(f"{self}: speculating on eager end of turn: [{self._speculation.text}]")
         await self.trigger_user_turn_inference_triggered()
 

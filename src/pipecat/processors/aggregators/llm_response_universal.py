@@ -91,7 +91,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
-from pipecat.turns.types import Speculation
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -1365,7 +1365,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._call_event_handler("on_user_turn_inference_triggered", strategy)
 
-    async def _run_speculative_inference(self, speculation: Speculation):
+    async def _run_speculative_inference(self, speculation: UserTurnSpeculation):
         """Run an inference for a turn that hasn't ended yet.
 
         The turn is still open, so the context must not record it. The inference

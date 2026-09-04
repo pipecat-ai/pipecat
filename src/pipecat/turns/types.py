@@ -26,7 +26,7 @@ class ProcessFrameResult(Enum):
 
 
 @dataclass
-class Speculation:
+class UserTurnSpeculation:
     """A speculative inference a stop strategy has in flight.
 
     Produced from an eager end of turn: the turn is not over yet, so the

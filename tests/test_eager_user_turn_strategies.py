@@ -27,7 +27,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_stop import EagerUserTurnStopStrategy, NormalizedMatch
+from pipecat.turns.user_stop import EagerUserTurnStopStrategy, NormalizedMatch, deferred
 from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 
 
@@ -364,3 +364,18 @@ class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
         )
         # The eager transcript is never written: only a committed one is.
         assert context.messages == []
+
+
+class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_deferring_forwards_the_speculation(self):
+        # The wrapper is transparent apart from the event it suppresses, so a
+        # speculation started by the inner strategy stays visible. Without it
+        # the aggregator would see none and write the eager transcript to the
+        # real context.
+        inner = EagerUserTurnStopStrategy()
+        wrapper = deferred(inner)
+
+        await wrapper.process_frame(eager("book a flight"))
+
+        assert inner.speculation is not None
+        assert wrapper.speculation is inner.speculation
