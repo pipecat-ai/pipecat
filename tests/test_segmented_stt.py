@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import wave
 from collections.abc import AsyncGenerator
@@ -14,6 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     MetricsFrame,
+    TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -29,7 +31,9 @@ PCM = bytes(range(0, 240)) * 4  # 960 bytes, even length
 DEFAULT_SILENCE = bytes(int(SAMPLE_RATE * 0.5) * 2)
 
 
-def _make_capturing_service(wants_wav: bool | None = None, **kwargs) -> SegmentedSTTService:
+def _make_capturing_service(
+    wants_wav: bool | None = None, transcribe_secs: float = 0.0, **kwargs
+) -> SegmentedSTTService:
     """Build a SegmentedSTTService that captures the bytes handed to run_stt().
 
     Defined as a factory (not a module-level class) so this concrete subclass
@@ -39,6 +43,8 @@ def _make_capturing_service(wants_wav: bool | None = None, **kwargs) -> Segmente
     Args:
         wants_wav: If None, inherit the base default; otherwise force the
             ``wants_wav_segments`` contract to this value.
+        transcribe_secs: When set, ``run_stt`` takes this long and then yields
+            a ``TranscriptionFrame`` naming the segment ("segment 1", ...).
         **kwargs: Passed to the service constructor.
     """
 
@@ -52,8 +58,11 @@ def _make_capturing_service(wants_wav: bool | None = None, **kwargs) -> Segmente
 
         async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
             self.captured.append(audio)
-            return
-            yield  # make this an async generator
+            if transcribe_secs:
+                await asyncio.sleep(transcribe_secs)
+                yield TranscriptionFrame(
+                    text=f"segment {len(self.captured)}", user_id="", timestamp=""
+                )
 
     if wants_wav is not None:
         _CapturingSegmentedSTTService.wants_wav_segments = property(lambda self: wants_wav)
@@ -97,6 +106,37 @@ def _wav_frames(audio: bytes) -> bytes:
         assert wav.getsampwidth() == 2
         assert wav.getnchannels() == 1
         return wav.readframes(wav.getnframes())
+
+
+@pytest.mark.asyncio
+async def test_audio_keeps_flowing_while_a_segment_is_transcribed():
+    # A streaming STT never holds the audio path while a transcript is pending;
+    # neither does a segmented one: audio sent after the VAD stop reaches
+    # downstream before the segment's transcript does.
+    service = _make_capturing_service(transcribe_secs=0.2, trailing_silence_secs=0)
+    after_stop = [
+        InputAudioRawFrame(audio=PCM, sample_rate=SAMPLE_RATE, num_channels=1) for _ in range(3)
+    ]
+
+    received_down, _ = await run_test(service, frames_to_send=_segment_frames() + after_stop)
+
+    kinds = [type(f) for f in received_down]
+    transcript_at = kinds.index(TranscriptionFrame)
+    audio_at = [i for i, k in enumerate(kinds) if k is InputAudioRawFrame]
+    assert len(audio_at) == 4
+    assert all(i < transcript_at for i in audio_at)
+
+
+@pytest.mark.asyncio
+async def test_segments_are_transcribed_in_order_and_flushed_on_stop():
+    service = _make_capturing_service(transcribe_secs=0.05, trailing_silence_secs=0)
+
+    received_down, _ = await run_test(
+        service, frames_to_send=_segment_frames() + _segment_frames() + _segment_frames()
+    )
+
+    transcripts = [f.text for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert transcripts == ["segment 1", "segment 2", "segment 3"]
 
 
 @pytest.mark.asyncio

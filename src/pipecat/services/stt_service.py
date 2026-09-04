@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
+    StartFrame,
     STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
@@ -814,6 +815,13 @@ class SegmentedSTTService(STTService):
     A segment ends right where the VAD stopped, and models tend to drop or
     garble the final word when the audio ends that abruptly, so each segment
     is padded with ``trailing_silence_secs`` of silence before transcription.
+
+    Transcription runs off the audio path. When the VAD stops, the segment is
+    queued and one background task transcribes queued segments in order,
+    pushing each transcript as it completes; meanwhile audio and other frames
+    keep flowing through the service, as they do through a streaming STT whose
+    transcripts arrive asynchronously. A graceful stop transcribes what is
+    queued before the service stops; a cancel drops it.
     """
 
     def __init__(
@@ -840,6 +848,10 @@ class SegmentedSTTService(STTService):
         self._audio_buffer = bytearray()
         self._audio_buffer_size_1s = 0
         self._user_speaking = False
+        # Segments awaiting transcription, drained in order by _segment_task;
+        # None tells the task to finish.
+        self._segment_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._segment_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
@@ -849,6 +861,36 @@ class SegmentedSTTService(STTService):
         """
         await super().setup(setup)
         self._audio_buffer_size_1s = self.sample_rate * 2
+
+    async def start(self, frame: StartFrame):
+        """Start the service and its transcription task.
+
+        Args:
+            frame: The start frame.
+        """
+        await super().start(frame)
+        self._segment_task = self.create_task(self._segment_task_handler())
+
+    async def stop(self, frame: EndFrame):
+        """Transcribe the queued segments, then stop the service.
+
+        Args:
+            frame: The end frame.
+        """
+        if self._segment_task is not None:
+            await self._segment_queue.put(None)
+            await self._segment_task
+            self._segment_task = None
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Stop the service at once, dropping any queued segments.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await self._cancel_segment_task()
+        await super().cancel(frame)
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -911,7 +953,24 @@ class SegmentedSTTService(STTService):
             # WAV container would make them misread the 44-byte header as audio.
             audio = pcm
 
-        await self.process_generator(self.run_stt(audio))
+        await self._segment_queue.put(audio)
+
+    async def _segment_task_handler(self):
+        """Transcribe queued segments one at a time, in order, until told to finish."""
+        running = True
+        while running:
+            audio = await self._segment_queue.get()
+            running = audio is not None
+            if audio:
+                try:
+                    await self.process_generator(self.run_stt(audio))
+                except Exception as e:
+                    await self.push_error(f"{self}: transcription failed: {e}", exception=e)
+
+    async def _cancel_segment_task(self):
+        if self._segment_task is not None:
+            await self.cancel_task(self._segment_task)
+            self._segment_task = None
 
     def _trailing_silence(self) -> bytes:
         """Silence appended to a segment, as 16-bit mono PCM at the service sample rate."""
