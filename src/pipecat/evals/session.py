@@ -324,63 +324,65 @@ class EvalSession(BaseObject):
         )
 
     async def _drive(self) -> list[EvalAssertionFailure]:
-        """Start the client, run the handshake and the driver, and tear down."""
+        """Start the client, converse, and tear down.
+
+        An unexpected harness-side error (a sub-pipeline failing to start under
+        load, a judge or transcriber raising mid-turn) is reported as a failure
+        with its traceback in the trace, so the run still yields a structured
+        result rather than a bare error at the suite.
+        """
         await self._client.start()
-        failures: list[EvalAssertionFailure] = []
         try:
-            # The STT and user TTS run inside the client's pipeline; the judge runs
-            # out-of-band during matching. Everything below is under this `try` so
-            # a service that fails to start (e.g. a local model under load)
-            # surfaces as a failure rather than propagating raw.
-            self._trace.log("connected")
-            try:
-                await self._client.handshake()
-                self._trace.log("handshake: ok (bot-ready)")
-            except TimeoutError as e:
-                self._trace.log("handshake: failed (bot-ready not received)")
-                failures.append(
-                    EvalAssertionFailure(
-                        turn_index=-1,
-                        expectation_index=-1,
-                        event_name="<bot-ready>",
-                        reason=str(e),
-                        kind="handshake_timeout",
-                    )
-                )
-            else:
-                failures = await self._driver.run()
+            return await self._converse()
         except Exception as e:
-            # An unexpected harness-side error (a sub-pipeline failing to start
-            # under load, a judge/transcriber raising mid-turn, ...) would
-            # otherwise propagate up to the suite and be swallowed as a bare
-            # "error: <str>" with no eval.log. Capture it as a failure so the
-            # reason and full traceback land in the result's debug trace (saved
-            # to <bot>.eval.log) and the run still reports a structured outcome.
-            self._trace.log(f"error: {type(e).__name__}: {e}")
-            for line in traceback.format_exc().rstrip().splitlines():
-                self._trace.log(line)
-            failure = EvalAssertionFailure(
-                turn_index=self._trace.turn,
-                expectation_index=-1,
-                event_name="<error>",
-                reason=f"{type(e).__name__}: {e}",
-                kind="harness_error",
-            )
-            failures.append(failure)
-            # The raise happened either inside a turn — which is that turn's
-            # failure — or before any of them started (a sub-pipeline that never
-            # came up), where the trace's turn is still -1 and every turn is not_run.
-            turns = self._driver.turns
-            if 0 <= self._trace.turn < len(turns):
-                record = turns[self._trace.turn]
-                record.status = "failed"
-                record.failures.append(failure)
+            return [self._harness_error(e)]
         finally:
             await self._client.stop()
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
-        return failures
+
+    async def _converse(self) -> list[EvalAssertionFailure]:
+        """Run the handshake, then the driver; a bot that never says ready is a failure."""
+        self._trace.log("connected")
+        try:
+            await self._client.handshake()
+        except TimeoutError as e:
+            self._trace.log("handshake: failed (bot-ready not received)")
+            return [
+                EvalAssertionFailure(
+                    turn_index=-1,
+                    expectation_index=-1,
+                    event_name="<bot-ready>",
+                    reason=str(e),
+                    kind="handshake_timeout",
+                )
+            ]
+        self._trace.log("handshake: ok (bot-ready)")
+        return await self._driver.run()
+
+    def _harness_error(self, e: Exception) -> EvalAssertionFailure:
+        """Trace an unexpected error with its traceback and score it against the current turn.
+
+        The raise happened either inside a turn, which is that turn's failure,
+        or before any turn started (a sub-pipeline that never came up), where
+        the trace's turn is still -1 and every turn stays not_run.
+        """
+        self._trace.log(f"error: {type(e).__name__}: {e}")
+        for line in traceback.format_exc().rstrip().splitlines():
+            self._trace.log(line)
+        failure = EvalAssertionFailure(
+            turn_index=self._trace.turn,
+            expectation_index=-1,
+            event_name="<error>",
+            reason=f"{type(e).__name__}: {e}",
+            kind="harness_error",
+        )
+        turns = self._driver.turns
+        if 0 <= self._trace.turn < len(turns):
+            turns[self._trace.turn].status = "failed"
+            turns[self._trace.turn].failures.append(failure)
+        return failure
 
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
