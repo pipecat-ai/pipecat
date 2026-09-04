@@ -645,6 +645,17 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(nxt.frames), 1)
 
+    async def test_upstream_frames_are_not_the_bots(self):
+        # The persona's own function call travels upstream through the sink; it
+        # is neither an event nor held back.
+        sink, _ = self._sink()
+        prev = _Collector()
+        prev.link(sink)
+        call = FunctionCallInProgressFrame(function_name="end_call", tool_call_id="c", arguments={})
+        await sink.process_frame(call, FrameDirection.UPSTREAM)
+        self.assertEqual(prev.frames, [call])
+        self.assertEqual(sink._stream.events_seen, [])
+
     async def test_text_feed_ignores_an_empty_response(self):
         context = LLMContext()
         sink, nxt = self._sink(persona_feed=context)

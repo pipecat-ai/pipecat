@@ -120,14 +120,13 @@ judge:
 
 
 class TestPersona(unittest.TestCase):
-    def test_context_carries_instruction_and_end_call(self):
+    def test_instruction_and_context(self):
         persona = Persona("A curious traveler.", "Learn the capital of Germany.")
+        self.assertIn("A curious traveler.", persona.instruction)
+        self.assertIn("Learn the capital of Germany.", persona.instruction)
+        self.assertIn(END_CALL_FUNCTION, persona.instruction)
         context = persona.context()
-        messages = context.get_messages()
-        self.assertEqual(messages[0]["role"], "system")
-        self.assertIn("A curious traveler.", messages[0]["content"])
-        self.assertIn("Learn the capital of Germany.", messages[0]["content"])
-        self.assertIn(END_CALL_FUNCTION, messages[0]["content"])
+        self.assertEqual(context.get_messages(), [])
         tools = context.tools
         assert not isinstance(tools, type(None))
         self.assertEqual([t.name for t in tools.standard_tools], [END_CALL_FUNCTION])  # type: ignore[union-attr]
@@ -136,7 +135,7 @@ class TestPersona(unittest.TestCase):
         persona = Persona("x", "y")
         a, b = persona.context(), persona.context()
         a.add_message({"role": "user", "content": "hi"})
-        self.assertEqual(len(b.get_messages()), 1)
+        self.assertEqual(b.get_messages(), [])
 
 
 class TestSimulationRunResult(unittest.TestCase):
@@ -192,10 +191,10 @@ class _FakePersonaLLM:
 
 class _FakeClient:
     def __init__(self):
-        self.configured = False
+        self.instruction: str | None = None
 
-    async def configure_persona(self):
-        self.configured = True
+    async def configure_persona(self, instruction: str):
+        self.instruction = instruction
 
 
 def _simulation(**overrides) -> EvalSimulation:
@@ -223,6 +222,7 @@ def _driver(simulation: EvalSimulation, judge, context: LLMContext | None = None
 
     driver = SimulationDriver(
         simulation=simulation,
+        persona=Persona(simulation.persona, simulation.goal),
         persona_llm=llm,  # type: ignore[arg-type]
         persona_context=context or LLMContext(),
         client=client,  # type: ignore[arg-type]
@@ -284,7 +284,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         await task
 
         self.assertEqual(failures, [])
-        self.assertTrue(client.configured)
+        self.assertIn("A traveler.", client.instruction or "")
         self.assertEqual(
             judge.messages,
             [

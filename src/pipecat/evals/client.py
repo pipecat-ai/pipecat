@@ -58,6 +58,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -74,6 +75,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.workers.runner import WorkerRunner
@@ -155,6 +157,12 @@ class _BotFrameSink(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        # The bot's frames arrive downstream, from the input transport. What
+        # travels upstream is the user side's own (a persona's function call, a
+        # TTS's lifecycle), not bot output, and passes through as is.
+        if direction != FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
+            return
         events = self._stream.frames_to_events(frame)
         for event in events:
             await self._stream.append(event)
@@ -162,9 +170,7 @@ class _BotFrameSink(FrameProcessor):
             await self._feed_persona(events)
         # The bot-audio VAD's interruption must not propagate into the user-audio
         # path (user TTS + output); see the class docstring.
-        if isinstance(frame, InterruptionFrame) and direction == FrameDirection.DOWNSTREAM:
-            return
-        if isinstance(frame, _BOT_FRAMES):
+        if isinstance(frame, (InterruptionFrame, *_BOT_FRAMES)):
             return
         await self.push_frame(frame, direction)
 
@@ -592,13 +598,20 @@ class EvalClient:
             ).model_dump(),
         ).model_dump()
 
-    async def configure_persona(self) -> None:
-        """Tell the persona LLM whether its replies are spoken or sent as text.
+    async def configure_persona(self, instruction: str) -> None:
+        """Give the persona LLM its instruction and tell it how its replies go out.
 
-        In text mode its output carries ``skip_tts`` so the relay sends each
-        response as one ``send-text``; in audio mode the user TTS speaks it.
+        The instruction becomes the service's system instruction. In text mode
+        the LLM's output carries ``skip_tts`` so the relay sends each response
+        as one ``send-text``; in audio mode the user TTS speaks it.
+
+        Args:
+            instruction: The persona's system instruction.
         """
         assert self._sink is not None  # pipeline built before any send
+        await self._sink.inject(
+            LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=instruction))
+        )
         await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._user_audio))
 
     async def send_dtmf(self, keys: str) -> None:

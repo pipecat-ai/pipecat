@@ -487,7 +487,8 @@ class SimulationSession(BotSession[SimulationRunResult]):
         """
         super().__init__(kind="simulation", name=simulation.name, bot_url=bot_url)
         self._simulation = simulation
-        persona_context = Persona(simulation.persona, simulation.goal).context()
+        persona = Persona(simulation.persona, simulation.goal)
+        persona_context = persona.context()
         self._stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=self._trace)
         self._client = EvalClient.for_simulation(
             simulation,
@@ -505,6 +506,7 @@ class SimulationSession(BotSession[SimulationRunResult]):
         )
         self._driver: EvalDriver[SimulationRunResult] = SimulationDriver(
             simulation=simulation,
+            persona=persona,
             persona_llm=persona_llm,
             persona_context=persona_context,
             client=self._client,

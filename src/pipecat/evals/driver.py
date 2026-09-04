@@ -23,7 +23,7 @@ from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
-from pipecat.evals.persona import END_CALL_FUNCTION
+from pipecat.evals.persona import END_CALL_FUNCTION, Persona
 from pipecat.evals.results import (
     EvalAssertionFailure,
     EvalResult,
@@ -428,6 +428,7 @@ class SimulationDriver(EvalDriver[SimulationRunResult]):
         self,
         *,
         simulation: EvalSimulation,
+        persona: Persona,
         persona_llm: LLMService,
         persona_context: LLMContext,
         client: EvalClient,
@@ -440,6 +441,7 @@ class SimulationDriver(EvalDriver[SimulationRunResult]):
 
         Args:
             simulation: The simulation being run.
+            persona: The simulated caller; its instruction goes to the persona LLM.
             persona_llm: The persona LLM service in the pipeline; ``end_call``
                 is registered on it.
             persona_context: The persona's context, kept up to date with both
@@ -452,6 +454,7 @@ class SimulationDriver(EvalDriver[SimulationRunResult]):
         """
         super().__init__(client=client, stream=stream, judge=judge, trace=trace, progress=progress)
         self._simulation = simulation
+        self._persona = persona
         self._persona_llm = persona_llm
         self._context = persona_context
         self._turns = 0
@@ -464,7 +467,7 @@ class SimulationDriver(EvalDriver[SimulationRunResult]):
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
         self._persona_llm.register_function(END_CALL_FUNCTION, self._on_end_call)
-        await self._client.configure_persona()
+        await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
         # The bot's finished turns; in audio mode the transcription of what it said.
         turn_event = "response" if simulation.bot_audio else "llm_response"

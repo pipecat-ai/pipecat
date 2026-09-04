@@ -7,10 +7,12 @@
 """The simulated caller: who they are, what they want, and how they end the call.
 
 A :class:`Persona` turns a simulation's ``persona`` and ``goal`` into the
-instructions and the :class:`~pipecat.processors.aggregators.llm_context.LLMContext`
-the persona LLM runs on inside the eval pipeline. In that context the bot's
-turns are the ``user`` messages and the persona's own are the ``assistant``
-messages: the persona LLM answers the bot the way a bot answers a user.
+instruction the persona LLM runs under (set on the service as its system
+instruction) and the
+:class:`~pipecat.processors.aggregators.llm_context.LLMContext` it runs on
+inside the eval pipeline. In that context the bot's turns are the ``user``
+messages and the persona's own are the ``assistant`` messages: the persona LLM
+answers the bot the way a bot answers a user.
 
 The context advertises one tool, ``end_call``, which the persona calls instead
 of speaking once its goal is achieved or clearly out of reach. Its ``success``
@@ -80,8 +82,5 @@ class Persona:
         )
 
     def context(self) -> LLMContext:
-        """A fresh context for one run: the instruction, and the ``end_call`` tool."""
-        return LLMContext(
-            messages=[{"role": "system", "content": self.instruction}],
-            tools=ToolsSchema(standard_tools=[END_CALL_SCHEMA]),
-        )
+        """A fresh context for one run: no messages yet, and the ``end_call`` tool."""
+        return LLMContext(tools=ToolsSchema(standard_tools=[END_CALL_SCHEMA]))
