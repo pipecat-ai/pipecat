@@ -45,7 +45,11 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import (
+    FrameCallback,
+    FrameDirection,
+    FrameProcessorSetup,
+)
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings
 from pipecat.services.websocket_service import WebsocketService
@@ -909,6 +913,35 @@ class TTSService(AIService):
                 await self._serialization_queue.put(frame)
             else:
                 await self.push_frame(frame, direction)
+
+    async def queue_frame(
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: FrameCallback | None = None,
+    ):
+        """Queue a frame, letting upstream frames skip the speaking pause.
+
+        While this service is speaking, ``_maybe_pause_frame_processing()``
+        blocks the non-system frame queue until ``BotStoppedSpeakingFrame``.
+        That gate exists to keep audio from overlapping, so it only needs to
+        hold back the downstream text -> audio flow.
+
+        Upstream frames do not feed that flow, but they do have to traverse
+        this service: the assistant context aggregator sits after the output
+        transport, so the context frame it pushes upstream after a function
+        call result reaches the LLM through here. Queuing that frame defers the
+        whole next inference until the current utterance has played out.
+
+        System frames keep the normal path, since their ordering relative to
+        interruptions matters; everything else travelling upstream is processed
+        immediately.
+        """
+        if direction == FrameDirection.UPSTREAM and not isinstance(frame, SystemFrame):
+            await self._process_frame_now(frame, direction, callback)
+            return
+
+        await super().queue_frame(frame, direction, callback)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with TTS-specific handling.
