@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
     Frame,
 )
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
-from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, ExactMatch
+from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 
 
@@ -49,17 +49,16 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         Args:
             match_policy: Decides whether the committed transcript is close
                 enough to the eager one to keep the speculative response.
-                Defaults to :class:`~pipecat.turns.user_stop.ExactMatch`.
+                Defaults to :class:`~pipecat.turns.user_stop.NormalizedMatch`,
+                which ignores the capitalization and punctuation services
+                commonly add when they commit a transcript. Pass
+                :class:`~pipecat.turns.user_stop.ExactMatch` to require the two
+                to be identical.
             **kwargs: Additional keyword arguments forwarded to the base class.
         """
         super().__init__(**kwargs)
-        self._match_policy = match_policy or ExactMatch()
+        self._match_policy = match_policy or NormalizedMatch()
         self._speculation: UserTurnSpeculation | None = None
-
-    @property
-    def speculation(self) -> UserTurnSpeculation | None:
-        """The speculative inference in flight, if any."""
-        return self._speculation
 
     @property
     def match_policy(self) -> EagerMatchPolicy:

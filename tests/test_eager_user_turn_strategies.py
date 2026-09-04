@@ -27,7 +27,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_stop import EagerUserTurnStopStrategy, NormalizedMatch, deferred
+from pipecat.turns.user_stop import EagerUserTurnStopStrategy, ExactMatch, deferred
 from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 
 
@@ -171,17 +171,18 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         assert contexts[1].speculation_id is None
         assert context.messages == [{"role": "user", "content": "i think i'll book it tomorrow"}]
 
-    async def test_normalized_match_policy_tolerates_formatting(self):
+    async def test_formatting_differences_are_tolerated_by_default(self):
         context = LLMContext()
 
         down, _ = await run_test(
-            aggregator(context, match_policy=NormalizedMatch()),
+            aggregator(context),
             frames_to_send=[
                 ProposedUserStartedSpeakingFrame(),
                 SleepFrame(),
                 eager("book a flight to tokyo"),
                 SleepFrame(),
-                # The committed transcript is formatted; the response still holds.
+                # The service formats the transcript it commits; the response
+                # still answers the same turn.
                 final("Book a flight to Tokyo."),
                 SleepFrame(),
                 ProposedUserStoppedSpeakingFrame(),
@@ -319,14 +320,16 @@ class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
         )
 
         await strategy.process_frame(eager("book a flight"))
-        assert strategy.speculation is not None
-
         await strategy.handle_user_turn_started()
 
-        assert strategy.speculation is None
         assert [f.speculation_id for f in pushed if isinstance(f, EagerEndOfTurnCancelFrame)] == [
             "abc"
         ]
+
+        # The withdrawal happens once: a second boundary has nothing left to
+        # withdraw.
+        await strategy.handle_user_turn_stopped()
+        assert len([f for f in pushed if isinstance(f, EagerEndOfTurnCancelFrame)]) == 1
 
 
 class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
@@ -383,3 +386,29 @@ class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
 
         assert [s.text for s in triggered] == ["book a flight"]
         assert triggered[0].id == "abc"
+
+
+class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):
+    async def test_formatting_differences_withdraw_the_speculation(self):
+        # Opting into ExactMatch requires the committed transcript to be
+        # identical, so a service that formats what it commits discards the
+        # response it had already generated.
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context, match_policy=ExactMatch()),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight to tokyo"),
+                SleepFrame(),
+                final("Book a flight to Tokyo."),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+        assert [c.speculation_id for c in cancels] == ["abc"]
+        assert context.messages == [{"role": "user", "content": "Book a flight to Tokyo."}]

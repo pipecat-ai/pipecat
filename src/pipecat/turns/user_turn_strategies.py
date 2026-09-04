@@ -187,9 +187,11 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
     Parameters:
         match_policy: Decides whether the committed transcript is close enough to
             the eager one to keep the speculative response. Defaults to
-            :class:`~pipecat.turns.user_stop.ExactMatch`; services that format
-            the committed transcript (capitalization, punctuation) need
-            :class:`~pipecat.turns.user_stop.NormalizedMatch`.
+            :class:`~pipecat.turns.user_stop.NormalizedMatch`, since services
+            commonly format the transcript they commit (capitalization,
+            punctuation) while leaving the eager one raw. Pass
+            :class:`~pipecat.turns.user_stop.ExactMatch` to require the two to
+            be identical.
         enable_interruptions: Whether to broadcast an interruption when a
             proposal starts a turn. Services route their ``should_interrupt``
             setting here.
@@ -198,8 +200,8 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
 
         user_turn_strategies=EagerUserTurnStrategies()
 
-        # For a service that formats the committed transcript:
-        user_turn_strategies=EagerUserTurnStrategies(match_policy=NormalizedMatch())
+        # Require the committed transcript to match the eager one exactly:
+        user_turn_strategies=EagerUserTurnStrategies(match_policy=ExactMatch())
     """
 
     match_policy: EagerMatchPolicy | None = None

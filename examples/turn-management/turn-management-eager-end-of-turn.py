@@ -47,7 +47,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import NormalizedMatch
 from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
@@ -110,13 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            user_turn_strategies=EagerUserTurnStrategies(
-                # Flux formats the committed transcript — capitalization and
-                # punctuation — so comparing it to the raw eager transcript
-                # needs normalization. The default, `ExactMatch()`, would
-                # discard nearly every speculation with this service.
-                match_policy=NormalizedMatch(),
-            ),
+            user_turn_strategies=EagerUserTurnStrategies(),
         ),
     )
 
