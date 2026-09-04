@@ -253,8 +253,7 @@ class EvalEventStream:
             return []
         return []
 
-    @staticmethod
-    def _segment_event(event_type: str, text: str) -> dict:
+    def _segment_event(self, event_type: str, text: str) -> dict:
         """Build one response segment of ``event_type``.
 
         Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's

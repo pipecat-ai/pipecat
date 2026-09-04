@@ -283,6 +283,15 @@ class EvalFunctionCall:
     name: str | None = None
     args: dict | None = None
 
+    @property
+    def signature(self) -> str:
+        """A short label for the call: ``name(arg=value, ...)``."""
+        name = self.name or "any function"
+        if not self.args:
+            return name
+        args = ", ".join(f"{k}={v!r}" for k, v in self.args.items())
+        return f"{name}({args})"
+
 
 @dataclass
 class EvalExpectation:
@@ -319,6 +328,21 @@ class EvalExpectation:
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     absent: bool = False
+
+    @property
+    def aggregates(self) -> bool:
+        """Whether the check accumulates text across events rather than matching one.
+
+        A reply with a content check (``text_contains`` / ``eval``) accumulates
+        the bot's successive segments; a ``user_transcription`` with
+        ``text_contains`` accumulates an STT's pieces. Everything else matches a
+        single event.
+        """
+        if self.event in ("response", "llm_response", "tts_response"):
+            return self.text_contains is not None or self.eval is not None
+        if self.event == "user_transcription":
+            return self.text_contains is not None and self.eval is None
+        return False
 
 
 @dataclass

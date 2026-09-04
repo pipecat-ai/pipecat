@@ -473,7 +473,7 @@ class TestTextContainsResolution(unittest.TestCase):
     """text_contains resolves against whichever event carries the text."""
 
     def _check(self, event: dict, exp: EvalExpectation):
-        return ExpectationMatcher._check_payload(event, exp, 0, 0)
+        return _matcher()._check_payload(event, exp, 0, 0)
 
     def test_on_one_event_text(self):
         exp = EvalExpectation(event="llm_response", text_contains="Paris")

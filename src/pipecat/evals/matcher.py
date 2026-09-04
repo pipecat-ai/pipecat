@@ -18,7 +18,7 @@ from loguru import logger
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
-from pipecat.evals.scenario import FUNCTION_CALL_EVENTS, EvalExpectation, EvalFunctionCall
+from pipecat.evals.scenario import FUNCTION_CALL_EVENTS, EvalExpectation
 
 
 class ExpectationMatcher:
@@ -96,7 +96,7 @@ class ExpectationMatcher:
 
         if expectation.absent:
             return await self._match_absent(expectation, deadline, budget_ms, turn_idx, exp_idx)
-        if self._aggregates(expectation):
+        if expectation.aggregates:
             return await self._match_aggregating(
                 expectation, deadline, budget_ms, turn_idx, exp_idx
             )
@@ -106,15 +106,6 @@ class ExpectationMatcher:
             # arriving doesn't short-circuit it).
             return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx)
         return await self._match_one(expectation, deadline, turn_idx, exp_idx)
-
-    @staticmethod
-    def _aggregates(expectation: EvalExpectation) -> bool:
-        """Whether the expectation accumulates segments rather than matching one event."""
-        if expectation.event in ("response", "llm_response", "tts_response"):
-            return expectation.text_contains is not None or expectation.eval is not None
-        if expectation.event == "user_transcription":
-            return expectation.text_contains is not None and expectation.eval is None
-        return False
 
     async def _match_one(
         self, expectation: EvalExpectation, deadline: float, turn_idx: int, exp_idx: int
@@ -247,9 +238,7 @@ class ExpectationMatcher:
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
-            self._trace.log(
-                f"match: waiting for {expectation.event!r} ({self._call_signature(spec)})"
-            )
+            self._trace.log(f"match: waiting for {expectation.event!r} ({spec.signature})")
             try:
                 event = await self._next_function_call(spec.name, deadline, want, expectation.event)
             except TimeoutError:
@@ -357,9 +346,8 @@ class ExpectationMatcher:
 
         return ("pass", "")
 
-    @classmethod
     def _check_payload(
-        cls,
+        self,
         event: dict,
         expectation: EvalExpectation,
         turn_idx: int,
@@ -367,9 +355,9 @@ class ExpectationMatcher:
     ) -> EvalAssertionFailure | None:
         """Apply payload-level checks to a matched event. Returns the first failure or None."""
         if expectation.text_contains is not None:
-            content = cls._event_text(event)
-            if not cls._text_contains(content, expectation.text_contains):
-                return cls._failure(
+            content = self._event_text(event)
+            if not self._text_contains(content, expectation.text_contains):
+                return self._failure(
                     expectation,
                     turn_idx,
                     exp_idx,
@@ -421,24 +409,13 @@ class ExpectationMatcher:
 
         return None
 
-    @staticmethod
     def _failure(
-        expectation: EvalExpectation, turn_idx: int, exp_idx: int, reason: str, kind: str
+        self, expectation: EvalExpectation, turn_idx: int, exp_idx: int, reason: str, kind: str
     ) -> EvalAssertionFailure:
         """Build the failure record for ``expectation``."""
         return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind)
 
-    @staticmethod
-    def _call_signature(spec: EvalFunctionCall) -> str:
-        """A short label for an expected call: ``name(arg=value, ...)``."""
-        name = spec.name or "any function"
-        if not spec.args:
-            return name
-        args = ", ".join(f"{k}={v!r}" for k, v in spec.args.items())
-        return f"{name}({args})"
-
-    @classmethod
-    def _match_summary(cls, event: dict) -> str:
+    def _match_summary(self, event: dict) -> str:
         """A short human label for a matched event, for verbose progress.
 
         For ``function_call`` it's the call signature (``name(arg=value, ...)``);
@@ -448,15 +425,13 @@ class ExpectationMatcher:
             args = event.get("args") or {}
             sig = ", ".join(f"{k}={v}" for k, v in args.items())
             return f"{event.get('name') or '?'}({sig})"
-        return cls._event_text(event)
+        return self._event_text(event)
 
-    @staticmethod
-    def _event_text(event: dict) -> str:
+    def _event_text(self, event: dict) -> str:
         """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
         return event.get("text") or event.get("transcript") or ""
 
-    @staticmethod
-    def _text_contains(content: str, needle: str) -> bool:
+    def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring how either is spaced.
 
         Aggregated text joins segments with spaces and an STT's pieces may carry
