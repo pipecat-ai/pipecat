@@ -480,6 +480,9 @@ async def test_cleanup_cancels_a_pending_warm():
 async def test_a_new_run_starts_on_an_empty_conversation_context():
     service = AssemblyAISyncSTTService(api_key="k", aiohttp_session=object())
     service._append_context_turn("Booking a flight to Lisbon.")
+    # start() also creates the segment transcription task; this bare service has
+    # no task manager, so stand in for it.
+    service.create_task = lambda coro, *args, **kwargs: coro.close()
 
     await service.start(StartFrame())
 
