@@ -17,7 +17,7 @@ events expected to flow back from the bot. Simple example::
           - event: user_transcription
             text_contains: "hello world"
 
-The runner (see :mod:`pipecat.evals.eval_session`) loads the scenario, connects to
+The runner (see :mod:`pipecat.evals.script_session`) loads the scenario, connects to
 the bot's eval transport over RTVI, drives each turn, collects the RTVI events
 the bot emits, and asserts on them in order.
 
@@ -207,6 +207,7 @@ from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.evals.services import DEFAULT_OLLAMA_JUDGE_EXTRA, DEFAULT_OLLAMA_JUDGE_MODEL
+from pipecat.utils.deprecation import deprecated
 
 
 class _ScenarioLoader(yaml.SafeLoader):
@@ -376,7 +377,7 @@ class EvalExpectation:
 class EvalSendAfter:
     """Scheduling for when a turn's input (``user`` or ``dtmf``) is sent.
 
-    When set on a :class:`EvalTurn`, the harness waits for ``event`` to have been
+    When set on a :class:`EvalScriptTurn`, the harness waits for ``event`` to have been
     seen (either earlier in the run or arriving now), then waits an additional
     ``delay_ms`` before sending the turn's input. Used for barge-in tests:
     ``send_after: {event: llm_started, delay_ms: 500}`` means "interrupt 500ms
@@ -399,7 +400,7 @@ class EvalSendAfter:
 
 
 @dataclass
-class EvalTurn:
+class EvalScriptTurn:
     """One turn in a scenario.
 
     A turn drives the bot one of three ways: the harness sends a ``user``
@@ -452,8 +453,21 @@ class EvalTurn:
     image: str | None = None
 
 
+@deprecated(
+    "`EvalTurn` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptTurn` instead."
+)
 @dataclass
-class EvalScenario:
+class EvalTurn(EvalScriptTurn):
+    """Deprecated alias for :class:`EvalScriptTurn`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptTurn` instead. Will be removed in 2.0.0.
+    """
+
+
+@dataclass
+class EvalScriptScenario:
     """A parsed scenario file.
 
     Parameters:
@@ -503,7 +517,7 @@ class EvalScenario:
             Set False for a scenario whose turns are scored independently, where
             the turns after a failure are still worth driving; each turn's
             outcome is reported in
-            :attr:`~pipecat.evals.results.EvalResult.turns`. This governs
+            :attr:`~pipecat.evals.results.EvalScriptResult.turns`. This governs
             turn-to-turn progression only: within a turn, an expectation that
             times out still ends that turn's matching, because a turn's
             expectations share one deadline anchored at the send.
@@ -511,7 +525,7 @@ class EvalScenario:
     """
 
     name: str
-    turns: list[EvalTurn]
+    turns: list[EvalScriptTurn]
     context: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
     bot_audio: bool = False
@@ -563,8 +577,8 @@ class EvalScenario:
         return False
 
     @classmethod
-    def load(cls, path: str | Path) -> "EvalScenario":
-        """Parse a scenario YAML file into an :class:`EvalScenario`.
+    def load(cls, path: str | Path) -> "EvalScriptScenario":
+        """Parse a scenario YAML file into an :class:`EvalScriptScenario`.
 
         Args:
             path: Path to a YAML file with the scenario schema.
@@ -627,6 +641,19 @@ class EvalScenario:
         )
 
 
+@deprecated(
+    "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptScenario` instead."
+)
+@dataclass
+class EvalScenario(EvalScriptScenario):
+    """Deprecated alias for :class:`EvalScriptScenario`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptScenario` instead. Will be removed in 2.0.0.
+    """
+
+
 _DEFAULT_JUDGE = {
     "service": "ollama",
     "model": DEFAULT_OLLAMA_JUDGE_MODEL,
@@ -652,7 +679,7 @@ def _parse_user_block(user: Any, path: Path) -> tuple[bool, dict | None]:
 
 
 def _check_user_audio(
-    turns: list[EvalTurn], user_audio: bool, speech: dict | None, path: Path
+    turns: list[EvalScriptTurn], user_audio: bool, speech: dict | None, path: Path
 ) -> None:
     """Check the turns against the ``user:`` block they are delivered by."""
     for idx, turn in enumerate(turns):
@@ -696,7 +723,7 @@ def _parse_judge_block(judge: Any, path: Path) -> tuple[bool, dict | None, dict]
     return True, transcription, eval_cfg
 
 
-def _resolve_response_events(turns: list[EvalTurn], bot_audio: bool, path: Path) -> None:
+def _resolve_response_events(turns: list[EvalScriptTurn], bot_audio: bool, path: Path) -> None:
     """Resolve the modality-agnostic ``response`` event and validate consistency.
 
     In audio modality ``response`` is the transcription of the bot's actual
@@ -816,7 +843,7 @@ def describe_config(scenario: EvalConfigured, *, color: bool = False) -> str:
     return _config_lines(lines, color=color)
 
 
-def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
+def _parse_turn(t: Any, path: Path, idx: int) -> EvalScriptTurn:
     """Parse one entry from the ``turns:`` list."""
     if not isinstance(t, dict):
         raise ValueError(f"{path}: turn #{idx} must be a mapping")
@@ -869,7 +896,7 @@ def _parse_turn(t: Any, path: Path, idx: int) -> EvalTurn:
             raise ValueError(f"{path}: turn #{idx} 'image:' must be a path string")
         image = str((path.parent / image).resolve())
 
-    return EvalTurn(
+    return EvalScriptTurn(
         user=user, dtmf=dtmf, expect=expect, send_after=send_after, image=image, audio=audio
     )
 

@@ -7,7 +7,7 @@
 """Audio files played as a user's turn.
 
 A scenario turn's ``audio:`` names a recording to play instead of synthesizing
-the turn's text (see :attr:`pipecat.evals.scenario.EvalTurn.audio`). Reading it
+the turn's text (see :attr:`pipecat.evals.scenario.EvalScriptTurn.audio`). Reading it
 goes through ``soundfile``, so every format libsndfile supports works -- WAV,
 MP3, FLAC, OGG -- and the result matches what
 :meth:`pipecat.evals.speech.EvalSpeech.generate` produces, so both reach the bot

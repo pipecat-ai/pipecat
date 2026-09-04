@@ -6,15 +6,15 @@
 
 """The runtime a session's driver runs on: one conversation with a bot.
 
-A :class:`BaseSession` connects to a running bot's eval transport as an RTVI
+A :class:`BaseEvalSession` connects to a running bot's eval transport as an RTVI
 client and runs a driver over the shared runtime: the
 :class:`~pipecat.evals.client.EvalClient`, a Pipecat pipeline acting as an RTVI
 client that carries the user's side, and the
 :class:`~pipecat.evals.events.EvalEventStream`, the bot's output as events. It
 connects, runs the handshake, lets the driver converse, tears down, and has the
 driver turn what happened (including a failed connect or a harness error) into
-its result. :class:`~pipecat.evals.eval_session.EvalSession` and
-:class:`~pipecat.evals.simulation_session.SimulationSession` build the client and
+its result. :class:`~pipecat.evals.script_session.EvalScriptSession` and
+:class:`~pipecat.evals.simulation_session.EvalSimulationSession` build the client and
 the driver for their kind of eval.
 """
 
@@ -25,16 +25,16 @@ from typing import Generic, TypeVar
 
 from loguru import logger
 
-from pipecat.evals.base_driver import BaseDriver
+from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.results import EvalAssertionFailure, EvalTrace, EvalTurnProgress
+from pipecat.evals.results import EvalAssertionFailure, EvalScriptTurnProgress, EvalTrace
 from pipecat.utils.base_object import BaseObject
 
 R = TypeVar("R")
 
 
-class BaseSession(BaseObject, Generic[R]):
+class BaseEvalSession(BaseObject, Generic[R]):
     """One conversation with a bot over a single WebSocket session, driven to a result.
 
     The runtime the drivers share: connect, run the handshake, let the driver
@@ -44,7 +44,7 @@ class BaseSession(BaseObject, Generic[R]):
 
     Event handlers available:
 
-    - on_progress: Called with an :class:`~pipecat.evals.results.EvalTurnProgress`
+    - on_progress: Called with an :class:`~pipecat.evals.results.EvalScriptTurnProgress`
       as each turn and each expectation resolves. Records are emitted in order,
       and :meth:`run` waits for every handler before it returns.
     """
@@ -53,7 +53,7 @@ class BaseSession(BaseObject, Generic[R]):
         """Initialize the session's runtime.
 
         Args:
-            kind: What is being run (``scenario`` or ``simulation``), for the trace.
+            kind: The scenario kind being run (``script`` or ``simulation``), for the trace.
             name: The scenario's or simulation's name.
             bot_url: WebSocket URL of the bot's eval transport.
         """
@@ -68,7 +68,7 @@ class BaseSession(BaseObject, Generic[R]):
         # the bot, and what drives the conversation.
         self._stream: EvalEventStream
         self._client: EvalClient
-        self._driver: BaseDriver[R]
+        self._driver: BaseEvalDriver[R]
 
     @abstractmethod
     def _describe(self) -> str:
@@ -169,6 +169,6 @@ class BaseSession(BaseObject, Generic[R]):
             kind=kind,
         )
 
-    async def _progress(self, record: EvalTurnProgress) -> None:
+    async def _progress(self, record: EvalScriptTurnProgress) -> None:
         """Emit a progress record to the ``on_progress`` handlers."""
         await self._call_event_handler("on_progress", record)

@@ -77,15 +77,15 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from pipecat.evals.eval_session import DEFAULT_EVENT_TIMEOUT_MS
 from pipecat.evals.results import (
     EvalAssertionFailure,
-    EvalResult,
-    EvalTurnResult,
-    SimulationMetric,
-    SimulationRunResult,
+    EvalScriptResult,
+    EvalScriptTurnResult,
+    EvalSimulationMetricScore,
+    EvalSimulationResult,
 )
-from pipecat.evals.simulation import EvalSimulation, load_scenario_file
+from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS
+from pipecat.evals.simulation import EvalSimulationScenario, load_scenario_file
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900
@@ -206,7 +206,7 @@ def _append_result(
 
 def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     """The results.jsonl record of a scenario run."""
-    result = run.result if isinstance(run.result, EvalResult) else None
+    result = run.result if isinstance(run.result, EvalScriptResult) else None
     record = {
         "bot": run.bot,
         "scenario": run.scenario,
@@ -244,7 +244,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     run ended and what the judge said; the conversation and, for a run that
     did not pass, the events the bot emitted are attached for diagnosis.
     """
-    result = run.result if isinstance(run.result, SimulationRunResult) else None
+    result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
         "scenario": run.scenario,
@@ -271,15 +271,15 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     return record
 
 
-def _simulation_result_from_dict(data: dict) -> SimulationRunResult:
-    """Rebuild a :class:`SimulationRunResult` from the JSON a harness worker writes back."""
-    return SimulationRunResult(
+def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
+    """Rebuild a :class:`EvalSimulationResult` from the JSON a harness worker writes back."""
+    return EvalSimulationResult(
         simulation_name=data["simulation_name"],
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
         error=data.get("error"),
         quality=data.get("quality"),
-        metrics=[SimulationMetric(**m) for m in data.get("metrics", [])],
+        metrics=[EvalSimulationMetricScore(**m) for m in data.get("metrics", [])],
         messages=data.get("messages", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),
@@ -290,19 +290,19 @@ def _simulation_result_from_dict(data: dict) -> SimulationRunResult:
     )
 
 
-def _result_from_dict(data: dict) -> EvalResult:
-    """Rebuild an :class:`EvalResult` from the JSON a harness worker writes back.
+def _result_from_dict(data: dict) -> EvalScriptResult:
+    """Rebuild an :class:`EvalScriptResult` from the JSON a harness worker writes back.
 
     The inverse of ``dataclasses.asdict(result)`` in
     :mod:`pipecat.evals._session_subprocess`; only ``failures`` and ``turns`` need
     rehydrating into their dataclasses, the rest are plain JSON values.
     """
-    return EvalResult(
+    return EvalScriptResult(
         scenario_name=data["scenario_name"],
         passed=data["passed"],
         failures=[EvalAssertionFailure(**f) for f in data.get("failures", [])],
         turns=[
-            EvalTurnResult(
+            EvalScriptTurnResult(
                 turn_index=t["turn_index"],
                 status=t.get("status", "not_run"),
                 failures=[EvalAssertionFailure(**f) for f in t.get("failures", [])],
@@ -332,8 +332,8 @@ class EvalRun:
         bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
         scenario: Display name (the scenario or simulation, without ``.yaml``).
         scenario_path: Path to the scenario or simulation file.
-        kind: ``scenario`` (played by :class:`~pipecat.evals.eval_session.EvalSession`)
-            or ``simulation`` (:class:`~pipecat.evals.simulation_session.SimulationSession`).
+        kind: ``script`` (played by :class:`~pipecat.evals.script_session.EvalScriptSession`)
+            or ``simulation`` (:class:`~pipecat.evals.simulation_session.EvalSimulationSession`).
         attempts: How many times this (bot, scenario) pair runs in the sweep: the
             manifest's ``repeat`` for a scenario, a simulation's ``runs``. Above 1,
             each attempt's artifacts carry its number.
@@ -357,12 +357,12 @@ class EvalRun:
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
-    kind: str = "scenario"
+    kind: str = "script"
     attempts: int = 1
     pass_threshold: float | None = None
     attempt: int = 1
     status: str = "pending"
-    result: EvalResult | SimulationRunResult | None = None
+    result: EvalScriptResult | EvalSimulationResult | None = None
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
@@ -493,12 +493,12 @@ class EvalManifest:
                 # simulation runs as many times as its file says (or the repeat
                 # override), for a success rate. A file that fails to load still
                 # gets its run, which reports the load error.
-                kind, attempts, threshold = "scenario", repeat, None
+                kind, attempts, threshold = "script", repeat, None
                 try:
                     loaded = load_scenario_file(scenario_path)
                 except (ValueError, FileNotFoundError):
                     loaded = None
-                if isinstance(loaded, EvalSimulation):
+                if isinstance(loaded, EvalSimulationScenario):
                     kind = "simulation"
                     attempts = repeat if repeat > 1 else loaded.runs
                     threshold = loaded.pass_threshold

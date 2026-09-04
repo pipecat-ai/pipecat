@@ -28,11 +28,11 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.eval_session import EvalSession
-from pipecat.evals.results import EvalResult, EvalTurnProgress, SimulationRunResult
+from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress, EvalSimulationResult
 from pipecat.evals.scenario import describe_config
-from pipecat.evals.simulation import EvalSimulation, describe_simulation, load_scenario_file
-from pipecat.evals.simulation_session import SimulationSession
+from pipecat.evals.script_session import EvalScriptSession
+from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation, load_scenario_file
+from pipecat.evals.simulation_session import EvalSimulationSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -67,7 +67,7 @@ def _fit_detail(detail: str, used_cols: int) -> str:
     return one_line
 
 
-def _format_detail(p: EvalTurnProgress) -> str:
+def _format_detail(p: EvalScriptTurnProgress) -> str:
     """Detail text for a resolved expectation.
 
     Matched prose (the bot's output) is quoted to set it apart from failure
@@ -118,7 +118,7 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_progress(session: EvalSession, p: EvalTurnProgress) -> None:
+def _print_progress(session: EvalScriptSession, p: EvalScriptTurnProgress) -> None:
     """Print a per-turn / per-expectation line (verbose mode)."""
     if p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
@@ -133,7 +133,7 @@ def _print_progress(session: EvalSession, p: EvalTurnProgress) -> None:
         print(line)
 
 
-def _print_simulation_detail(result: SimulationRunResult) -> None:
+def _print_simulation_detail(result: EvalSimulationResult) -> None:
     """Print what a simulation's one-line verdict leaves out (verbose mode).
 
     The judge's reason, each metric's score and reason, the persona's own claim
@@ -201,7 +201,7 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        kind = "simulation" if isinstance(loaded, EvalSimulation) else "scenario"
+        kind = "simulation" if isinstance(loaded, EvalSimulationScenario) else "script"
         runs.append(
             EvalRun(
                 bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
@@ -240,9 +240,9 @@ async def _execute_scenario(
         loaded = load_scenario_file(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            session: EvalSession | SimulationSession
-            if isinstance(loaded, EvalSimulation):
-                session = SimulationSession.from_simulation(
+            session: EvalScriptSession | EvalSimulationSession
+            if isinstance(loaded, EvalSimulationScenario):
+                session = EvalSimulationSession.from_simulation(
                     loaded,
                     url,
                     record_path=record_path,
@@ -252,7 +252,7 @@ async def _execute_scenario(
                     trigger_disconnect=trigger_disconnect,
                 )
             else:
-                session = EvalSession.from_scenario(
+                session = EvalScriptSession.from_scenario(
                     loaded,
                     url,
                     default_timeout_ms=default_timeout_ms,
@@ -332,7 +332,7 @@ async def _run_scenarios_all(
             if run.status != "done":
                 await go(run, verbose)
             _print_eval_line(run)
-            if verbose and isinstance(run.result, SimulationRunResult):
+            if verbose and isinstance(run.result, EvalSimulationResult):
                 _print_simulation_detail(run.result)
 
 
@@ -465,9 +465,9 @@ def _eval_verdict(r: EvalRun) -> str:
         return r.status  # pending | running
     if r.error or r.result is None:
         return "error"
-    if isinstance(r.result, EvalResult) and r.result.skipped:
+    if isinstance(r.result, EvalScriptResult) and r.result.skipped:
         return "skipped"
-    if isinstance(r.result, SimulationRunResult) and r.result.error:
+    if isinstance(r.result, EvalSimulationResult) and r.result.error:
         return "error"
     return "passed" if r.result.passed else "failed"
 
@@ -484,7 +484,7 @@ def _turn_tally(r: EvalRun) -> str:
     A simulation: its quality and how it ended, e.g. ``quality 0.75 · end_call``.
     """
     result = r.result
-    if isinstance(result, SimulationRunResult):
+    if isinstance(result, EvalSimulationResult):
         parts = []
         if result.quality is not None:
             parts.append(f"quality {result.quality:.2f}")
@@ -761,7 +761,10 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
     Done before the runs (not per-run) so it doesn't interleave with the live
     display, with a trailing blank line separating it from the runs.
     """
-    for kind, heading in (("scenario", "Scenarios:"), ("simulation", "Simulations:")):
+    for kind, heading in (
+        ("script", "Scripted scenarios:"),
+        ("simulation", "Simulated scenarios:"),
+    ):
         seen: set[str] = set()
         for r in runs:
             if r.kind != kind or r.scenario in seen:
@@ -771,7 +774,7 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
             seen.add(r.scenario)
             try:
                 loaded = load_scenario_file(r.scenario_path)
-                if isinstance(loaded, EvalSimulation):
+                if isinstance(loaded, EvalSimulationScenario):
                     cfg = describe_simulation(loaded, color=sys.stdout.isatty())
                 else:
                     cfg = describe_config(loaded, color=sys.stdout.isatty())
@@ -808,11 +811,11 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
         header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
-        if tally and isinstance(r.result, EvalResult):
+        if tally and isinstance(r.result, EvalScriptResult):
             header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
             print(f"{header} {_dim('— ' + r.error)}")
-        elif isinstance(r.result, SimulationRunResult):
+        elif isinstance(r.result, EvalSimulationResult):
             result = r.result
             if result.error:
                 print(f"{header} {_dim('— ' + result.error)}")
@@ -843,7 +846,7 @@ def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int, float | None]:
     qualities = [
         r.result.quality
         for r in group
-        if isinstance(r.result, SimulationRunResult) and r.result.quality is not None
+        if isinstance(r.result, EvalSimulationResult) and r.result.quality is not None
     ]
     quality = sum(qualities) / len(qualities) if qualities else None
     return passed, completed, errored, quality

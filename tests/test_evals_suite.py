@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
 import json  # noqa: E402
 
-from pipecat.evals.results import SimulationMetric, SimulationRunResult  # noqa: E402
+from pipecat.evals.results import EvalSimulationMetricScore, EvalSimulationResult  # noqa: E402
 from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
 
 SIMULATION = """
@@ -252,7 +252,7 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual(book.pass_threshold, 0.5)
         self.assertEqual(book.scenario_path, self.base / "scenarios" / "book.yaml")
         greet = by_name["greet"][0]
-        self.assertEqual(greet.kind, "scenario")
+        self.assertEqual(greet.kind, "script")
         self.assertEqual(greet.attempts, 1)
         self.assertIsNone(greet.pass_threshold)
         # Attempt-major: every scenario's first attempt precedes any second one.
@@ -267,19 +267,21 @@ class TestManifestSimulations(unittest.TestCase):
         """Its kind can't be read, so it runs once as a scenario and reports the error."""
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")
         self.assertEqual(len(manifest.runs), 1)
-        self.assertEqual(manifest.runs[0].kind, "scenario")
+        self.assertEqual(manifest.runs[0].kind, "script")
         self.assertEqual(manifest.runs[0].attempts, 1)
         self.assertIsNone(manifest.runs[0].pass_threshold)
 
 
 class TestSimulationRecords(unittest.TestCase):
     def test_result_roundtrips_through_the_worker_json(self):
-        result = SimulationRunResult(
+        result = EvalSimulationResult(
             simulation_name="book",
             succeeded=True,
             reason="booked",
             quality=0.5,
-            metrics=[SimulationMetric(name="politeness", score=1.0, reason="nice", weight=1.0)],
+            metrics=[
+                EvalSimulationMetricScore(name="politeness", score=1.0, reason="nice", weight=1.0)
+            ],
             messages=[{"role": "user", "content": "hi"}],
             turns=2,
             ended_by="end_call",
@@ -304,7 +306,7 @@ class TestSimulationRecords(unittest.TestCase):
                 attempt=2,
                 status="done",
                 duration_ms=1234,
-                result=SimulationRunResult(
+                result=EvalSimulationResult(
                     simulation_name="book",
                     succeeded=False,
                     reason="no table",

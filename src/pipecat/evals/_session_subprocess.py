@@ -16,7 +16,7 @@ its own GIL.
 
 Invoked as ``python -m pipecat.evals._session_subprocess <config.json>``. The
 config (written by the suite) carries the scenario path, bot URL, and run
-options; the worker writes the :class:`~pipecat.evals.results.EvalResult` back as
+options; the worker writes the :class:`~pipecat.evals.results.EvalScriptResult` back as
 JSON to the ``result_path`` named in the config. The worker silences the console
 and (under ``debug``) writes the harness's per-pipeline logs itself, so the suite
 only has to read back the result.
@@ -30,18 +30,18 @@ from pathlib import Path
 
 from loguru import logger
 
-from pipecat.evals.eval_session import EvalSession
-from pipecat.evals.results import EvalResult, SimulationRunResult
-from pipecat.evals.simulation import EvalSimulation, load_scenario_file
-from pipecat.evals.simulation_session import SimulationSession
+from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
+from pipecat.evals.script_session import EvalScriptSession
+from pipecat.evals.simulation import EvalSimulationScenario, load_scenario_file
+from pipecat.evals.simulation_session import EvalSimulationSession
 from pipecat.evals.suite import capture_pipeline_logs
 
 
-async def _run(config: dict) -> EvalResult | SimulationRunResult:
+async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
     """Build and run the session for the scenario file in ``config``, whichever kind it is."""
     loaded = load_scenario_file(Path(config["scenario_path"]))
-    if isinstance(loaded, EvalSimulation):
-        session = SimulationSession.from_simulation(
+    if isinstance(loaded, EvalSimulationScenario):
+        session = EvalSimulationSession.from_simulation(
             loaded,
             config["bot_url"],
             connect_timeout_s=config["connect_timeout_s"],
@@ -52,7 +52,7 @@ async def _run(config: dict) -> EvalResult | SimulationRunResult:
             trigger_disconnect=config.get("trigger_disconnect", False),
         )
         return await session.run()
-    session = EvalSession.from_scenario(
+    session = EvalScriptSession.from_scenario(
         loaded,
         config["bot_url"],
         connect_timeout_s=config["connect_timeout_s"],

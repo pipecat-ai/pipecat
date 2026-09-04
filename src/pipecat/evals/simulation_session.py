@@ -6,44 +6,44 @@
 
 """Simulation session: lets a persona hold a conversation with a bot and judges it.
 
-A :class:`SimulationSession` runs an
-:class:`~pipecat.evals.simulation.EvalSimulation` over the
-:class:`~pipecat.evals.base_session.BaseSession` runtime with the
-:class:`~pipecat.evals.simulation_driver.SimulationDriver`: the persona LLM rides in the
+A :class:`EvalSimulationSession` runs an
+:class:`~pipecat.evals.simulation.EvalSimulationScenario` over the
+:class:`~pipecat.evals.base_session.BaseEvalSession` runtime with the
+:class:`~pipecat.evals.simulation_driver.EvalSimulationDriver`: the persona LLM rides in the
 pipeline and answers the bot on its own, the judge decides the goal and the
 quality criteria, and the result is a
-:class:`~pipecat.evals.results.SimulationRunResult`.
+:class:`~pipecat.evals.results.EvalSimulationResult`.
 
 Example::
 
-    simulation = EvalSimulation.load("simulations/curious_caller.yaml")
-    run = await SimulationSession.from_simulation(simulation, "ws://localhost:7860").run()
+    simulation = EvalSimulationScenario.load("simulations/curious_caller.yaml")
+    run = await EvalSimulationSession.from_simulation(simulation, "ws://localhost:7860").run()
     print(f"{'succeeded' if run.succeeded else 'failed'}: {run.reason}")
 """
 
 from loguru import logger
 
-from pipecat.evals.base_driver import BaseDriver
-from pipecat.evals.base_session import BaseSession
+from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.persona import Persona
-from pipecat.evals.results import SimulationRunResult
+from pipecat.evals.persona import EvalPersona
+from pipecat.evals.results import EvalSimulationResult
 from pipecat.evals.services import (
     llm_service_from_config,
     stt_service_from_config,
     tts_service_from_config,
 )
-from pipecat.evals.simulation import EvalSimulation, describe_simulation
-from pipecat.evals.simulation_driver import SimulationDriver
+from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation
+from pipecat.evals.simulation_driver import EvalSimulationDriver
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 
 
-class SimulationSession(BaseSession[SimulationRunResult]):
-    """Runs one :class:`~pipecat.evals.simulation.EvalSimulation` against a bot.
+class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
+    """Runs one :class:`~pipecat.evals.simulation.EvalSimulationScenario` against a bot.
 
     The persona LLM rides in the client's pipeline and answers the bot on its
     own; the session watches for the conversation's end and has the judge
@@ -54,7 +54,7 @@ class SimulationSession(BaseSession[SimulationRunResult]):
 
     def __init__(
         self,
-        simulation: EvalSimulation,
+        simulation: EvalSimulationScenario,
         bot_url: str,
         *,
         persona_llm: LLMService,
@@ -90,7 +90,7 @@ class SimulationSession(BaseSession[SimulationRunResult]):
         """
         super().__init__(kind="simulation", name=simulation.name, bot_url=bot_url)
         self._simulation = simulation
-        persona = Persona(simulation.persona, simulation.goal)
+        persona = EvalPersona(simulation.persona, simulation.goal)
         persona_context = persona.context()
         self._stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=self._trace)
         self._client = EvalClient.for_simulation(
@@ -107,7 +107,7 @@ class SimulationSession(BaseSession[SimulationRunResult]):
             persona_llm=persona_llm,
             persona_context=persona_context,
         )
-        self._driver: BaseDriver[SimulationRunResult] = SimulationDriver(
+        self._driver: BaseEvalDriver[EvalSimulationResult] = EvalSimulationDriver(
             simulation=simulation,
             persona=persona,
             persona_llm=persona_llm,
@@ -122,7 +122,7 @@ class SimulationSession(BaseSession[SimulationRunResult]):
     @classmethod
     def from_simulation(
         cls,
-        simulation: EvalSimulation,
+        simulation: EvalSimulationScenario,
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
@@ -135,7 +135,7 @@ class SimulationSession(BaseSession[SimulationRunResult]):
         judge: EvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
-    ) -> "SimulationSession":
+    ) -> "EvalSimulationSession":
         """Build a ready-to-run session from a simulation, constructing what it needs.
 
         Builds the persona LLM, the judge, and in audio mode the user TTS and

@@ -6,11 +6,11 @@
 
 """The base driver: what the user says next, and how the outcome is judged.
 
-A :class:`BaseDriver` runs the conversation with the bot over the session's
+A :class:`BaseEvalDriver` runs the conversation with the bot over the session's
 runtime (the client's pipeline, the event stream, the trace) and assembles the
-run's result. :class:`~pipecat.evals.eval_driver.EvalDriver` plays a scenario's
+run's result. :class:`~pipecat.evals.script_driver.EvalScriptDriver` plays a scenario's
 ``turns:`` and matches each turn's expectations;
-:class:`~pipecat.evals.simulation_driver.SimulationDriver` lets the persona LLM
+:class:`~pipecat.evals.simulation_driver.EvalSimulationDriver` lets the persona LLM
 in the pipeline hold the conversation and judges the whole of it.
 """
 
@@ -21,12 +21,12 @@ from typing import Generic, TypeVar
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.results import EvalAssertionFailure, EvalTrace, EvalTurnProgress
+from pipecat.evals.results import EvalAssertionFailure, EvalScriptTurnProgress, EvalTrace
 
 R = TypeVar("R")
 
 
-class BaseDriver(ABC, Generic[R]):
+class BaseEvalDriver(ABC, Generic[R]):
     """Base class for the drivers: drives the conversation and scores it.
 
     The runtime is shared, the client sends and the stream receives, and a
@@ -43,7 +43,7 @@ class BaseDriver(ABC, Generic[R]):
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -54,7 +54,7 @@ class BaseDriver(ABC, Generic[R]):
                 turns are added to its conversation so replies are judged in
                 context.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalTurnProgress` as turns and
+            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns and
                 expectations resolve.
         """
         self._client = client

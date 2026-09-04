@@ -6,16 +6,16 @@
 
 """Eval session: runs a scripted scenario against a bot and asserts on its behavior.
 
-An :class:`EvalSession` runs an :class:`~pipecat.evals.scenario.EvalScenario`
-over the :class:`~pipecat.evals.base_session.BaseSession` runtime with the
-:class:`~pipecat.evals.eval_driver.EvalDriver`, which plays the scenario's turns
+An :class:`EvalScriptSession` runs an :class:`~pipecat.evals.scenario.EvalScriptScenario`
+over the :class:`~pipecat.evals.base_session.BaseEvalSession` runtime with the
+:class:`~pipecat.evals.script_driver.EvalScriptDriver`, which plays the scenario's turns
 and matches each turn's expectations, and returns an
-:class:`~pipecat.evals.results.EvalResult`.
+:class:`~pipecat.evals.results.EvalScriptResult`.
 
 Example::
 
-    scenario = EvalScenario.load("scenarios/greeting.yaml")
-    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860").run()
+    scenario = EvalScriptScenario.load("scenarios/greeting.yaml")
+    result = await EvalScriptSession.from_scenario(scenario, "ws://localhost:7860").run()
     if result.passed:
         print("PASS")
     else:
@@ -32,17 +32,18 @@ from collections.abc import Callable
 
 from loguru import logger
 
-from pipecat.evals.base_driver import BaseDriver
-from pipecat.evals.base_session import BaseSession
+from pipecat.evals.base_driver import BaseEvalDriver
+from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.client import EvalClient
-from pipecat.evals.eval_driver import EvalDriver
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.results import EvalResult, EvalTurnProgress
-from pipecat.evals.scenario import EvalScenario, describe_config
+from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
+from pipecat.evals.scenario import EvalScriptScenario, describe_config
+from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
+from pipecat.utils.deprecation import deprecated
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -50,8 +51,8 @@ from pipecat.services.stt_service import STTService
 DEFAULT_EVENT_TIMEOUT_MS = 60000
 
 
-class EvalSession(BaseSession[EvalResult]):
-    """Runs one :class:`~pipecat.evals.scenario.EvalScenario` against a bot.
+class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
+    """Runs one :class:`~pipecat.evals.scenario.EvalScriptScenario` against a bot.
 
     Connects as an RTVI client, drives each turn (sending ``send-text``,
     ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and
@@ -67,12 +68,12 @@ class EvalSession(BaseSession[EvalResult]):
 
     def __init__(
         self,
-        scenario: EvalScenario,
+        scenario: EvalScriptScenario,
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
         default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
-        on_progress: Callable[[EvalTurnProgress], None] | None = None,
+        on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
         record_path: str | None = None,
         stop_bot: bool = False,
         trigger_disconnect: bool = False,
@@ -95,7 +96,7 @@ class EvalSession(BaseSession[EvalResult]):
             default_timeout_ms: Per-expectation latency budget for expectations
                 without their own ``within_ms`` (the turn's expectations share one
                 deadline anchored at the send). Defaults to 60s.
-            on_progress: Optional callback invoked with a :class:`EvalTurnProgress`
+            on_progress: Optional callback invoked with a :class:`EvalScriptTurnProgress`
                 as each turn and expectation resolves (used for verbose output).
 
                 .. deprecated:: 1.9.0
@@ -121,7 +122,7 @@ class EvalSession(BaseSession[EvalResult]):
                 ``response`` event (added to the eval pipeline in audio mode), or
                 ``None`` when unused.
         """
-        super().__init__(kind="scenario", name=scenario.name, bot_url=bot_url)
+        super().__init__(kind="script", name=scenario.name, bot_url=bot_url)
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
@@ -140,7 +141,7 @@ class EvalSession(BaseSession[EvalResult]):
         )
         # What the user says next and how the outcome is scored: a scenario is
         # played by the eval driver.
-        self._driver: BaseDriver[EvalResult] = EvalDriver(
+        self._driver: BaseEvalDriver[EvalScriptResult] = EvalScriptDriver(
             scenario=scenario,
             default_timeout_ms=default_timeout_ms,
             client=self._client,
@@ -155,12 +156,12 @@ class EvalSession(BaseSession[EvalResult]):
     @classmethod
     def from_scenario(
         cls,
-        scenario: EvalScenario,
+        scenario: EvalScriptScenario,
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
         default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
-        on_progress: Callable[[EvalTurnProgress], None] | None = None,
+        on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
         record_path: str | None = None,
         cache_dir: str | None = None,
         use_cache: bool = True,
@@ -169,7 +170,7 @@ class EvalSession(BaseSession[EvalResult]):
         judge: EvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
-    ) -> "EvalSession":
+    ) -> "EvalScriptSession":
         """Build a ready-to-run session from a scenario, constructing what it needs.
 
         Builds the judge, user TTS, and STT the scenario calls for and injects them
@@ -177,7 +178,7 @@ class EvalSession(BaseSession[EvalResult]):
         ``user_tts`` / ``bot_stt`` to override any of them with your own pre-built
         instance. Then await :meth:`run`::
 
-            session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
+            session = EvalScriptSession.from_scenario(scenario, "ws://localhost:7860")
             result = await session.run()
 
         Args:
@@ -248,14 +249,14 @@ class EvalSession(BaseSession[EvalResult]):
     def _skip_reason(self) -> str | None:
         # The `response` transcription needs the bot's actual audio; without audio
         # mode there's nothing to transcribe, so skip rather than fail. (Normally
-        # unreachable: EvalScenario.load resolves `response` to llm_response in text
+        # unreachable: EvalScriptScenario.load resolves `response` to llm_response in text
         # modality; this guards Scenarios built directly.)
         if self._scenario.wants_response() and not self._scenario.bot_audio:
             return "asserts 'response' transcription but judge modality is text (no audio)"
         return None
 
     def _add_legacy_progress_callback(
-        self, on_progress: Callable[[EvalTurnProgress], None]
+        self, on_progress: Callable[[EvalScriptTurnProgress], None]
     ) -> None:
         """Register a bare ``on_progress`` callback as an ``on_progress`` handler.
 
@@ -269,3 +270,15 @@ class EvalSession(BaseSession[EvalResult]):
             stacklevel=3,
         )
         self.add_event_handler("on_progress", lambda _session, record: on_progress(record))
+
+
+@deprecated(
+    "`EvalSession` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptSession` instead."
+)
+class EvalSession(EvalScriptSession):
+    """Deprecated alias for :class:`EvalScriptSession`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptSession` instead. Will be removed in 2.0.0.
+    """

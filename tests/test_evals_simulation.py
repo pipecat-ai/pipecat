@@ -10,10 +10,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pipecat.evals.persona import END_CALL_FUNCTION, Persona
-from pipecat.evals.results import SimulationRunResult
-from pipecat.evals.scenario import EvalScenario
-from pipecat.evals.simulation import EvalSimulation, describe_simulation, load_scenario_file
+from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
+from pipecat.evals.results import EvalSimulationResult
+from pipecat.evals.scenario import EvalScriptScenario
+from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation, load_scenario_file
 
 MINIMAL = """
 name: capital_curious
@@ -33,7 +33,7 @@ def _write(yaml_text: str) -> Path:
 
 class TestSimulationLoader(unittest.TestCase):
     def test_minimal_has_defaults(self):
-        s = EvalSimulation.load(_write(MINIMAL))
+        s = EvalSimulationScenario.load(_write(MINIMAL))
         self.assertEqual(s.name, "capital_curious")
         self.assertEqual(s.persona, "A curious traveler.")
         self.assertEqual(s.goal, "Learn the capital of Germany.")
@@ -49,7 +49,7 @@ class TestSimulationLoader(unittest.TestCase):
         self.assertEqual(s.judge["service"], "ollama")
 
     def test_metrics_and_caps(self):
-        s = EvalSimulation.load(
+        s = EvalSimulationScenario.load(
             _write(
                 MINIMAL
                 + """
@@ -72,7 +72,7 @@ pass_threshold: 0.8
         self.assertEqual(s.pass_threshold, 0.8)
 
     def test_audio_modalities(self):
-        s = EvalSimulation.load(
+        s = EvalSimulationScenario.load(
             _write(
                 MINIMAL
                 + """
@@ -92,29 +92,29 @@ judge:
 
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
-            EvalSimulation.load(_write(MINIMAL + "user: {modality: audio}\n"))
+            EvalSimulationScenario.load(_write(MINIMAL + "user: {modality: audio}\n"))
         self.assertIn("user.speech", str(cm.exception))
 
     def test_required_fields(self):
         for missing in ("persona", "goal", "success", "simulator"):
             text = "\n".join(line for line in MINIMAL.splitlines() if not line.startswith(missing))
             with self.assertRaises(ValueError, msg=missing) as cm:
-                EvalSimulation.load(_write(text))
+                EvalSimulationScenario.load(_write(text))
             self.assertIn(missing, str(cm.exception))
 
     def test_metric_needs_a_criterion(self):
         with self.assertRaises(ValueError) as cm:
-            EvalSimulation.load(_write(MINIMAL + "metrics: [{name: politeness}]\n"))
+            EvalSimulationScenario.load(_write(MINIMAL + "metrics: [{name: politeness}]\n"))
         self.assertIn("criterion", str(cm.exception))
 
     def test_caps_must_be_positive(self):
         with self.assertRaises(ValueError):
-            EvalSimulation.load(_write(MINIMAL + "max_turns: 0\n"))
+            EvalSimulationScenario.load(_write(MINIMAL + "max_turns: 0\n"))
         with self.assertRaises(ValueError):
-            EvalSimulation.load(_write(MINIMAL + "max_duration_s: -1\n"))
+            EvalSimulationScenario.load(_write(MINIMAL + "max_duration_s: -1\n"))
 
     def test_describe(self):
-        text = describe_simulation(EvalSimulation.load(_write(MINIMAL)))
+        text = describe_simulation(EvalSimulationScenario.load(_write(MINIMAL)))
         self.assertIn(
             "user  -> modality: text | persona: openai/gpt-4o-mini | max_turns: 20 | "
             "max_duration_s: 300",
@@ -127,10 +127,12 @@ judge:
 
 class TestLoadScenarioFile(unittest.TestCase):
     def test_a_persona_makes_a_simulation(self):
-        self.assertIsInstance(load_scenario_file(_write(MINIMAL)), EvalSimulation)
+        self.assertIsInstance(load_scenario_file(_write(MINIMAL)), EvalSimulationScenario)
 
     def test_turns_make_a_scripted_scenario(self):
-        self.assertIsInstance(load_scenario_file(_write("name: greet\nturns: []\n")), EvalScenario)
+        self.assertIsInstance(
+            load_scenario_file(_write("name: greet\nturns: []\n")), EvalScriptScenario
+        )
 
     def test_a_file_is_one_kind_or_the_other(self):
         with self.assertRaises(ValueError) as cm:
@@ -144,7 +146,7 @@ class TestLoadScenarioFile(unittest.TestCase):
 
 class TestPersona(unittest.TestCase):
     def test_instruction_and_context(self):
-        persona = Persona("A curious traveler.", "Learn the capital of Germany.")
+        persona = EvalPersona("A curious traveler.", "Learn the capital of Germany.")
         self.assertIn("A curious traveler.", persona.instruction)
         self.assertIn("Learn the capital of Germany.", persona.instruction)
         self.assertIn(END_CALL_FUNCTION, persona.instruction)
@@ -155,7 +157,7 @@ class TestPersona(unittest.TestCase):
         self.assertEqual([t.name for t in tools.standard_tools], [END_CALL_FUNCTION])  # type: ignore[union-attr]
 
     def test_each_context_is_fresh(self):
-        persona = Persona("x", "y")
+        persona = EvalPersona("x", "y")
         a, b = persona.context(), persona.context()
         a.add_message({"role": "user", "content": "hi"})
         self.assertEqual(b.get_messages(), [])
@@ -163,9 +165,9 @@ class TestPersona(unittest.TestCase):
 
 class TestSimulationRunResult(unittest.TestCase):
     def test_passed_needs_success_and_no_error(self):
-        self.assertTrue(SimulationRunResult("s", succeeded=True).passed)
-        self.assertFalse(SimulationRunResult("s", succeeded=False).passed)
-        self.assertFalse(SimulationRunResult("s", succeeded=True, error="boom").passed)
+        self.assertTrue(EvalSimulationResult("s", succeeded=True).passed)
+        self.assertFalse(EvalSimulationResult("s", succeeded=False).passed)
+        self.assertFalse(EvalSimulationResult("s", succeeded=True, error="boom").passed)
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +182,7 @@ from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.simulation import EvalSimulationMetric  # noqa: E402
-from pipecat.evals.simulation_driver import END_CALL_EVENT, SimulationDriver  # noqa: E402
+from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
@@ -226,7 +228,7 @@ class _FakeClient:
         self.hung_up = True
 
 
-def _simulation(**overrides) -> EvalSimulation:
+def _simulation(**overrides) -> EvalSimulationScenario:
     fields = dict(
         name="capital",
         persona="A traveler.",
@@ -237,10 +239,10 @@ def _simulation(**overrides) -> EvalSimulation:
         max_duration_s=5.0,
     )
     fields.update(overrides)
-    return EvalSimulation(**fields)
+    return EvalSimulationScenario(**fields)
 
 
-def _driver(simulation: EvalSimulation, judge, context: LLMContext | None = None):
+def _driver(simulation: EvalSimulationScenario, judge, context: LLMContext | None = None):
     trace = EvalTrace()
     stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=trace)
     llm = _FakePersonaLLM()
@@ -249,9 +251,9 @@ def _driver(simulation: EvalSimulation, judge, context: LLMContext | None = None
     async def progress(_record):
         pass
 
-    driver = SimulationDriver(
+    driver = EvalSimulationDriver(
         simulation=simulation,
-        persona=Persona(simulation.persona, simulation.goal),
+        persona=EvalPersona(simulation.persona, simulation.goal),
         persona_llm=llm,  # type: ignore[arg-type]
         persona_context=context or LLMContext(),
         client=client,  # type: ignore[arg-type]

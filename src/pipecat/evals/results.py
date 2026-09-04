@@ -6,13 +6,15 @@
 
 """What an eval run produces.
 
-Per-assertion failures, per-turn outcomes, the run's :class:`EvalResult` (a
-scenario) or :class:`SimulationRunResult` (a simulation), the live progress
+Per-assertion failures, per-turn outcomes, the run's :class:`EvalScriptResult` (a
+scenario) or :class:`EvalSimulationResult` (a simulation), the live progress
 records, and the harness's own trace.
 """
 
 import time
 from dataclasses import dataclass, field
+
+from pipecat.utils.deprecation import deprecated
 
 # Categories for :attr:`EvalAssertionFailure.kind`, the stable key for grouping
 # failures across runs. Each says how an assertion failed, so a repeated suite can
@@ -33,7 +35,7 @@ FAILURE_KINDS = (
     "harness_error",  # the harness itself raised (sub-pipeline, judge, ...)
 )
 
-# Statuses for :attr:`EvalTurnResult.status`. ``not_run`` is distinct from a pass:
+# Statuses for :attr:`EvalScriptTurnResult.status`. ``not_run`` is distinct from a pass:
 # a run that stops at the first failure leaves its later turns undriven, and
 # counting those as passes would inflate any rate computed from the result.
 TURN_STATUSES = ("passed", "failed", "not_run")
@@ -70,7 +72,7 @@ class EvalAssertionFailure:
 
 
 @dataclass
-class EvalTurnResult:
+class EvalScriptTurnResult:
     """Outcome of one turn within a scenario run.
 
     The turn is the unit a run is scored by: a turn's expectations share a single
@@ -81,7 +83,7 @@ class EvalTurnResult:
         turn_index: Index of the turn in the scenario.
         status: One of ``TURN_STATUSES``. ``not_run`` means the run ended before
             reaching this turn — see
-            :attr:`~pipecat.evals.scenario.EvalScenario.stop_on_failure`.
+            :attr:`~pipecat.evals.scenario.EvalScriptScenario.stop_on_failure`.
         failures: The turn's failed assertions, in order; empty unless ``status``
             is ``failed``.
         duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the
@@ -94,15 +96,28 @@ class EvalTurnResult:
     duration_ms: int = 0
 
 
+@deprecated(
+    "`EvalTurnResult` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptTurnResult` instead."
+)
 @dataclass
-class EvalResult:
-    """Outcome of running a scenario in an :class:`~pipecat.evals.eval_session.EvalSession`.
+class EvalTurnResult(EvalScriptTurnResult):
+    """Deprecated alias for :class:`EvalScriptTurnResult`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptTurnResult` instead. Will be removed in 2.0.0.
+    """
+
+
+@dataclass
+class EvalScriptResult:
+    """Outcome of running a scenario in an :class:`~pipecat.evals.script_session.EvalScriptSession`.
 
     Parameters:
         scenario_name: Name of the scenario that was run.
         passed: Whether every assertion passed.
         failures: The assertions that failed, in order.
-        turns: One :class:`EvalTurnResult` per scenario turn, in order — what a
+        turns: One :class:`EvalScriptTurnResult` per scenario turn, in order — what a
             per-turn pass rate is computed from, without needing the scenario
             file for a denominator. ``failures`` is these turns' failures
             flattened, plus any that belong to no turn (a failed connect).
@@ -119,14 +134,27 @@ class EvalResult:
     scenario_name: str
     passed: bool
     failures: list[EvalAssertionFailure] = field(default_factory=list)
-    turns: list[EvalTurnResult] = field(default_factory=list)
+    turns: list[EvalScriptTurnResult] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
 
 
-# How a simulation run came to an end, for :attr:`SimulationRunResult.ended_by`.
+@deprecated(
+    "`EvalResult` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptResult` instead."
+)
+@dataclass
+class EvalResult(EvalScriptResult):
+    """Deprecated alias for :class:`EvalScriptResult`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptResult` instead. Will be removed in 2.0.0.
+    """
+
+
+# How a simulation run came to an end, for :attr:`EvalSimulationResult.ended_by`.
 SIMULATION_ENDINGS = (
     "end_call",  # the persona called its end_call tool
     "bot",  # the bot ended the call (it closed the connection)
@@ -137,14 +165,14 @@ SIMULATION_ENDINGS = (
 
 
 @dataclass
-class SimulationMetric:
+class EvalSimulationMetricScore:
     """One judged quality criterion's outcome for a simulation run.
 
     Parameters:
         name: The metric's name, from the simulation file.
         score: 1.0 if the judge said the criterion held, else 0.0.
         reason: The judge's justification.
-        weight: The metric's weight in :attr:`SimulationRunResult.quality`.
+        weight: The metric's weight in :attr:`EvalSimulationResult.quality`.
     """
 
     name: str
@@ -154,7 +182,7 @@ class SimulationMetric:
 
 
 @dataclass
-class SimulationRunResult:
+class EvalSimulationResult:
     """Outcome of one run of a simulation.
 
     Parameters:
@@ -182,7 +210,7 @@ class SimulationRunResult:
     reason: str = ""
     error: str | None = None
     quality: float | None = None
-    metrics: list[SimulationMetric] = field(default_factory=list)
+    metrics: list[EvalSimulationMetricScore] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
     turns: int = 0
     ended_by: str = "error"
@@ -198,7 +226,7 @@ class SimulationRunResult:
 
 
 @dataclass
-class EvalTurnProgress:
+class EvalScriptTurnProgress:
     """A real-time progress record emitted while a turn runs (for verbose output).
 
     Parameters:
@@ -217,11 +245,24 @@ class EvalTurnProgress:
     detail: str = ""
 
 
+@deprecated(
+    "`EvalTurnProgress` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `EvalScriptTurnProgress` instead."
+)
+@dataclass
+class EvalTurnProgress(EvalScriptTurnProgress):
+    """Deprecated alias for :class:`EvalScriptTurnProgress`.
+
+    .. deprecated:: 1.9.0
+        Use :class:`EvalScriptTurnProgress` instead. Will be removed in 2.0.0.
+    """
+
+
 class EvalTrace:
     """Timestamped, turn-tagged trace of the harness's own decisions.
 
     Every part of the harness logs here (events received, sends, matcher
-    progress, errors), and the lines become :attr:`EvalResult.debug_log`. The
+    progress, errors), and the lines become :attr:`EvalScriptResult.debug_log`. The
     tag is the turn the harness is currently *processing* (``[--]`` before the
     first turn). Because events are logged the moment they arrive, an event that
     lands while a turn is still waiting on ``send_after`` is tagged with that

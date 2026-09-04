@@ -32,7 +32,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.scenario import EvalScenario
+from pipecat.evals.scenario import EvalScriptScenario
 from pipecat.evals.serializer import (
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
@@ -41,7 +41,7 @@ from pipecat.evals.serializer import (
     HARNESS_STT_SAMPLE_RATE,
     RTVIHarnessSerializer,
 )
-from pipecat.evals.simulation import EvalSimulation
+from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -399,7 +399,7 @@ class EvalClient:
 
     @classmethod
     def for_scenario(
-        cls, scenario: EvalScenario, *, trigger_disconnect: bool = False, **kwargs
+        cls, scenario: EvalScriptScenario, *, trigger_disconnect: bool = False, **kwargs
     ) -> "EvalClient":
         """A client for a scripted scenario, asking the bot for what its assertions need.
 
@@ -422,7 +422,7 @@ class EvalClient:
 
     @classmethod
     def for_simulation(
-        cls, simulation: EvalSimulation, *, trigger_disconnect: bool = False, **kwargs
+        cls, simulation: EvalSimulationScenario, *, trigger_disconnect: bool = False, **kwargs
     ) -> "EvalClient":
         """A client for a simulation: the persona hears the bot, and the judge sees its tool calls.
 

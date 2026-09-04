@@ -74,7 +74,7 @@ from pipecat.evals.scenario import (
     _CFG_EVAL,
     _CFG_LIMIT,
     _DEFAULT_JUDGE,
-    EvalScenario,
+    EvalScriptScenario,
     _config_lines,
     _ConfigLine,
     _judge_segments,
@@ -104,7 +104,7 @@ class EvalSimulationMetric:
 
 
 @dataclass
-class EvalSimulation:
+class EvalSimulationScenario:
     """A parsed simulation file.
 
     Parameters:
@@ -150,8 +150,8 @@ class EvalSimulation:
     source_path: Path | None = None
 
     @classmethod
-    def load(cls, path: str | Path) -> "EvalSimulation":
-        """Parse a simulation YAML file into an :class:`EvalSimulation`.
+    def load(cls, path: str | Path) -> "EvalSimulationScenario":
+        """Parse a simulation YAML file into an :class:`EvalSimulationScenario`.
 
         Args:
             path: Path to a YAML file with the simulation schema.
@@ -208,7 +208,7 @@ class EvalSimulation:
         )
 
 
-def load_scenario_file(path: str | Path) -> EvalScenario | EvalSimulation:
+def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationScenario:
     """Load a scenario file as whichever kind it is.
 
     A file with a ``persona:`` is a simulation; one with ``turns:`` is a scripted
@@ -219,8 +219,8 @@ def load_scenario_file(path: str | Path) -> EvalScenario | EvalSimulation:
         path: Path to a scenario or simulation YAML file.
 
     Returns:
-        The parsed :class:`EvalSimulation` or
-        :class:`~pipecat.evals.scenario.EvalScenario`.
+        The parsed :class:`EvalSimulationScenario` or
+        :class:`~pipecat.evals.scenario.EvalScriptScenario`.
 
     Raises:
         ValueError: If the file is neither kind, claims to be both, or is
@@ -234,9 +234,9 @@ def load_scenario_file(path: str | Path) -> EvalScenario | EvalSimulation:
             f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
         )
     if "persona" in data:
-        return EvalSimulation.load(path)
+        return EvalSimulationScenario.load(path)
     if "turns" in data:
-        return EvalScenario.load(path)
+        return EvalScriptScenario.load(path)
     raise ValueError(
         f"{path}: a scenario file needs 'turns:' (scripted) or 'persona:' (a simulation)"
     )
@@ -279,7 +279,7 @@ def _positive_number(data: dict, key: str, default: float, path: Path) -> float:
     return float(value)
 
 
-def describe_simulation(simulation: EvalSimulation, *, color: bool = False) -> str:
+def describe_simulation(simulation: EvalSimulationScenario, *, color: bool = False) -> str:
     """Three-line summary of a simulation's user config, judge config, and goal, for pre-run logs.
 
     The lines of :func:`~pipecat.evals.scenario.describe_config`, the ``user`` line

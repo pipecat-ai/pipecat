@@ -19,7 +19,7 @@ from pipecat.cli.commands.eval import (
     _group_below_threshold,
     _turn_tally,
 )
-from pipecat.evals.results import EvalResult, EvalTurnResult, SimulationRunResult
+from pipecat.evals.results import EvalScriptResult, EvalScriptTurnResult, EvalSimulationResult
 from pipecat.evals.suite import EvalRun
 
 
@@ -27,8 +27,8 @@ def _run(statuses: list[str] | None) -> EvalRun:
     """An EvalRun whose result has turns in the given statuses (None for no result)."""
     result = None
     if statuses is not None:
-        turns = [EvalTurnResult(turn_index=i, status=s) for i, s in enumerate(statuses)]
-        result = EvalResult(
+        turns = [EvalScriptTurnResult(turn_index=i, status=s) for i, s in enumerate(statuses)]
+        result = EvalScriptResult(
             scenario_name="s",
             passed=all(t.status == "passed" for t in turns),
             turns=turns,
@@ -101,11 +101,11 @@ def _simulation_run(
 ) -> EvalRun:
     """A finished simulation run; ``succeeded=None`` is one that errored out."""
     if succeeded is None:
-        result = SimulationRunResult(
+        result = EvalSimulationResult(
             simulation_name="book", succeeded=False, error="bot never answered"
         )
     else:
-        result = SimulationRunResult(
+        result = EvalSimulationResult(
             simulation_name="book",
             succeeded=succeeded,
             reason="judged",

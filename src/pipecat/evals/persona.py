@@ -6,7 +6,7 @@
 
 """The simulated caller: who they are, what they want, and how they end the call.
 
-A :class:`Persona` turns a simulation's ``persona`` and ``goal`` into the
+A :class:`EvalPersona` turns a simulation's ``persona`` and ``goal`` into the
 instruction the persona LLM runs under (set on the service as its system
 instruction) and the
 :class:`~pipecat.processors.aggregators.llm_context.LLMContext` it runs on
@@ -61,7 +61,7 @@ help, say nothing more and call the {end_call} tool with whether you succeeded \
 and why."""
 
 
-class Persona:
+class EvalPersona:
     """The simulated caller behind a simulation's persona LLM."""
 
     def __init__(self, description: str, goal: str):

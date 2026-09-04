@@ -139,7 +139,7 @@ A repeated sweep always exits 0: it reports a rate, and what rate is acceptable 
 your policy, not the harness's.
 
 Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
-its `kind` (`scenario` or `simulation`), its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
+its `kind` (`script` or `simulation`), its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
 status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
 and paths to its artifacts — appended as each run finishes, so an interrupted sweep
 keeps everything already done. It's the machine-readable counterpart to the printed

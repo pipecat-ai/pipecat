@@ -6,35 +6,35 @@
 
 """Eval driver: plays a scenario's turns and matches each turn's expectations.
 
-The :class:`EvalDriver` sends the scenario's ``turns:`` in order (honoring
+The :class:`EvalScriptDriver` sends the scenario's ``turns:`` in order (honoring
 ``send_after``), matches each turn's expectations with the
 :class:`~pipecat.evals.matcher.ExpectationMatcher`, and assembles the run's
-:class:`~pipecat.evals.results.EvalResult`.
+:class:`~pipecat.evals.results.EvalScriptResult`.
 """
 
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-from pipecat.evals.base_driver import BaseDriver
+from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
-    EvalResult,
+    EvalScriptResult,
+    EvalScriptTurnProgress,
+    EvalScriptTurnResult,
     EvalTrace,
-    EvalTurnProgress,
-    EvalTurnResult,
 )
-from pipecat.evals.scenario import EvalScenario, EvalSendAfter, EvalTurn
+from pipecat.evals.scenario import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 
 
-class EvalDriver(BaseDriver[EvalResult]):
+class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
     """Plays a scenario's ``turns:`` in order and matches each turn's expectations.
 
     A turn with a failed assertion ends the scenario, since the conversation is
@@ -46,13 +46,13 @@ class EvalDriver(BaseDriver[EvalResult]):
     def __init__(
         self,
         *,
-        scenario: EvalScenario,
+        scenario: EvalScriptScenario,
         default_timeout_ms: int,
         client: EvalClient,
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -64,7 +64,7 @@ class EvalDriver(BaseDriver[EvalResult]):
             stream: The bot's output as events.
             judge: The judge for ``eval:`` assertions, or ``None``.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalTurnProgress` as turns and
+            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns and
                 expectations resolve.
         """
         super().__init__(
@@ -80,7 +80,7 @@ class EvalDriver(BaseDriver[EvalResult]):
         # One record per turn, filled in as the driver runs. They start as
         # not_run and stay that way on every path that ends the run early, so
         # the result always says which turns were actually scored.
-        self.turns = [EvalTurnResult(turn_index=i) for i in range(len(scenario.turns))]
+        self.turns = [EvalScriptTurnResult(turn_index=i) for i in range(len(scenario.turns))]
 
     def result(
         self,
@@ -90,9 +90,9 @@ class EvalDriver(BaseDriver[EvalResult]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
-    ) -> EvalResult:
+    ) -> EvalScriptResult:
         """The scenario's result: passed only if nothing failed and nothing was skipped."""
-        return EvalResult(
+        return EvalScriptResult(
             scenario_name=self._scenario.name,
             passed=not failures and skipped is None,
             failures=failures,
@@ -140,7 +140,7 @@ class EvalDriver(BaseDriver[EvalResult]):
                 self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
         return failures
 
-    async def _run_turn(self, turn: EvalTurn, turn_idx: int) -> list[EvalAssertionFailure]:
+    async def _run_turn(self, turn: EvalScriptTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: honor ``send_after``, send the input, match the expectations."""
         # The turn's function calls match by name in any order; start each turn
         # with an empty buffer so a prior turn's calls can't carry over.
@@ -152,7 +152,9 @@ class EvalDriver(BaseDriver[EvalResult]):
                 return [failure]
 
         await self._send_turn(turn)
-        await self._progress(EvalTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn"))
+        await self._progress(
+            EvalScriptTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn")
+        )
         return await self._match_expectations(turn, turn_idx)
 
     async def _await_send_after(
@@ -174,7 +176,7 @@ class EvalDriver(BaseDriver[EvalResult]):
             )
             self._trace.log(f"FAIL: {event_name}: {failure.reason}")
             await self._progress(
-                EvalTurnProgress(turn_idx, -1, event_name, "timeout", failure.reason)
+                EvalScriptTurnProgress(turn_idx, -1, event_name, "timeout", failure.reason)
             )
             return failure
         return None
@@ -217,7 +219,7 @@ class EvalDriver(BaseDriver[EvalResult]):
 
             await asyncio.sleep(SEND_AFTER_POLL_S)
 
-    async def _send_turn(self, turn: EvalTurn) -> None:
+    async def _send_turn(self, turn: EvalScriptTurn) -> None:
         """Send the turn's input: its image (if any), then its utterance or keypresses.
 
         Turns that send nothing are observation-only and exist to match exactly
@@ -233,7 +235,7 @@ class EvalDriver(BaseDriver[EvalResult]):
             await self._press(turn.dtmf)
 
     async def _match_expectations(
-        self, turn: EvalTurn, turn_idx: int
+        self, turn: EvalScriptTurn, turn_idx: int
     ) -> list[EvalAssertionFailure]:
         """Match the turn's expectations in order against one shared deadline.
 
@@ -263,7 +265,7 @@ class EvalDriver(BaseDriver[EvalResult]):
                 )
                 self._trace.log(f"FAIL: {expectation.event}: {reason}")
                 await self._progress(
-                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
+                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
                 break
 
@@ -271,11 +273,13 @@ class EvalDriver(BaseDriver[EvalResult]):
                 failures.append(failure)
                 self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
-                    EvalTurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
+                    EvalScriptTurnProgress(
+                        turn_idx, exp_idx, expectation.event, "failed", failure.reason
+                    )
                 )
             else:
                 await self._progress(
-                    EvalTurnProgress(
+                    EvalScriptTurnProgress(
                         turn_idx,
                         exp_idx,
                         expectation.event,

@@ -6,30 +6,30 @@
 
 """Simulation driver: lets the persona hold the conversation, then judges it.
 
-The :class:`SimulationDriver` registers the persona's ``end_call`` on the
+The :class:`EvalSimulationDriver` registers the persona's ``end_call`` on the
 persona LLM, watches the event stream until the persona ends the call, the
 bot's turns reach the cap, or the wall clock runs out, then has the judge
 decide the goal and score each quality criterion over the whole conversation,
-assembling the run's :class:`~pipecat.evals.results.SimulationRunResult`.
+assembling the run's :class:`~pipecat.evals.results.EvalSimulationResult`.
 """
 
 import json
 import time
 from collections.abc import Awaitable, Callable
 
-from pipecat.evals.base_driver import BaseDriver
+from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT, EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.persona import END_CALL_FUNCTION, Persona
+from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalScriptTurnProgress,
+    EvalSimulationMetricScore,
+    EvalSimulationResult,
     EvalTrace,
-    EvalTurnProgress,
-    SimulationMetric,
-    SimulationRunResult,
 )
-from pipecat.evals.simulation import EvalSimulation
+from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
@@ -38,7 +38,7 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 END_CALL_EVENT = "end_call"
 
 
-class SimulationDriver(BaseDriver[SimulationRunResult]):
+class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     """Lets the persona LLM hold the conversation, then judges the whole of it.
 
     The persona runs inside the client's pipeline and answers the bot on its
@@ -52,15 +52,15 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
     def __init__(
         self,
         *,
-        simulation: EvalSimulation,
-        persona: Persona,
+        simulation: EvalSimulationScenario,
+        persona: EvalPersona,
         persona_llm: LLMService,
         persona_context: LLMContext,
         client: EvalClient,
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -75,7 +75,7 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
             stream: The bot's output as events.
             judge: The judge for the goal and the quality criteria.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalTurnProgress` as turns resolve.
+            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns resolve.
         """
         super().__init__(client=client, stream=stream, judge=judge, trace=trace, progress=progress)
         self._simulation = simulation
@@ -87,7 +87,7 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
         self._end_call: dict | None = None
         self._succeeded = False
         self._reason = ""
-        self._metrics: list[SimulationMetric] = []
+        self._metrics: list[EvalSimulationMetricScore] = []
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
@@ -195,7 +195,7 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
             verdict = await self._judge.evaluate_conversation(metric.criterion, evidence=evidence)
             score = 1.0 if verdict.verdict == "yes" else 0.0
             self._metrics.append(
-                SimulationMetric(
+                EvalSimulationMetricScore(
                     name=metric.name, score=score, reason=verdict.reason, weight=metric.weight
                 )
             )
@@ -209,12 +209,12 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
-    ) -> SimulationRunResult:
+    ) -> EvalSimulationResult:
         """The run's result; a run-level failure makes it an error, not a goal failure."""
         error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
         weights = sum(m.weight for m in self._metrics)
         quality = sum(m.score * m.weight for m in self._metrics) / weights if weights else None
-        return SimulationRunResult(
+        return EvalSimulationResult(
             simulation_name=self._simulation.name,
             succeeded=self._succeeded and error is None,
             reason=error or self._reason,
