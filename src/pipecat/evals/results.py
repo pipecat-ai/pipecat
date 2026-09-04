@@ -6,8 +6,9 @@
 
 """What an eval run produces.
 
-Per-assertion failures, per-turn outcomes, the run's :class:`EvalResult`, the
-live progress records, and the harness's own trace.
+Per-assertion failures, per-turn outcomes, the run's :class:`EvalResult` (a
+scenario) or :class:`SimulationRunResult` (a simulation), the live progress
+records, and the harness's own trace.
 """
 
 import time
@@ -123,6 +124,76 @@ class EvalResult:
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
+
+
+# How a simulation run came to an end, for :attr:`SimulationRunResult.ended_by`.
+SIMULATION_ENDINGS = (
+    "end_call",  # the persona called its end_call tool
+    "max_turns",  # the persona's turn cap was reached
+    "max_duration",  # the run's wall-clock cap was reached
+    "error",  # the run did not complete (see ``error``)
+)
+
+
+@dataclass
+class SimulationMetric:
+    """One judged quality criterion's outcome for a simulation run.
+
+    Parameters:
+        name: The metric's name, from the simulation file.
+        score: 1.0 if the judge said the criterion held, else 0.0.
+        reason: The judge's justification.
+        weight: The metric's weight in :attr:`SimulationRunResult.quality`.
+    """
+
+    name: str
+    score: float
+    reason: str = ""
+    weight: float = 1.0
+
+
+@dataclass
+class SimulationRunResult:
+    """Outcome of one run of a simulation.
+
+    Parameters:
+        simulation_name: Name of the simulation that was run.
+        succeeded: Whether the judge decided the goal was achieved.
+        reason: The judge's justification for ``succeeded``, or the error.
+        error: When set, the run did not complete (a failed connect, a harness
+            error); ``succeeded`` is then False and the run is neither a goal
+            success nor a goal failure.
+        quality: Weighted mean of the metrics' scores, or None without metrics.
+        metrics: The judged quality criteria's outcomes.
+        messages: The conversation as the persona saw it: the bot's turns as
+            ``user`` messages, the persona's as ``assistant``.
+        turns: How many turns the persona took.
+        ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
+        end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
+            when it made one; advisory, the judge decides ``succeeded``.
+        duration_ms: Wall-clock time the run took, in milliseconds.
+        events_seen: Every friendly event observed, for diagnostics.
+        debug_log: Timestamped trace of the harness's own decisions.
+    """
+
+    simulation_name: str
+    succeeded: bool
+    reason: str = ""
+    error: str | None = None
+    quality: float | None = None
+    metrics: list[SimulationMetric] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
+    turns: int = 0
+    ended_by: str = "error"
+    end_call: dict | None = None
+    duration_ms: int = 0
+    events_seen: list[dict] = field(default_factory=list)
+    debug_log: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        """Whether the run completed and achieved its goal."""
+        return self.error is None and self.succeeded
 
 
 @dataclass

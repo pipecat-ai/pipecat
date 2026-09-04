@@ -195,7 +195,7 @@ relative to the scenario file's directory. This is handy for sharing the
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 from loguru import logger
@@ -674,11 +674,21 @@ _CFG_SERVICE = "32"  # green — speech (TTS) / transcription (STT) keywords
 _CFG_EVAL = "35"  # magenta — eval keyword (judge LLM)
 
 
-def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
-    """Two-line summary of a scenario's user + judge config, for pre-run logs.
+class EvalConfigured(Protocol):
+    """The modality and service config a scenario and a simulation share."""
+
+    user_audio: bool
+    user_speech: dict | None
+    bot_audio: bool
+    transcriber: dict | None
+    judge: dict
+
+
+def describe_config(scenario: EvalConfigured, *, color: bool = False) -> str:
+    """Two-line summary of a scenario's (or simulation's) user + judge config, for pre-run logs.
 
     Args:
-        scenario: The parsed scenario to summarize.
+        scenario: The parsed scenario or simulation to summarize.
         color: When True, ANSI-color each segment's keyword by category (modality,
             service, judge LLM) so they're easy to tell apart.
 
