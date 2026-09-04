@@ -1,0 +1,39 @@
+name: async_tool_deferred_delivery_audio
+
+# Audio modality, end to end: an async function call
+# (cancel_on_interruption=False) whose result lands on a turn the bot is
+# interrupted out of. The bot never gets to report the weather on the turn it
+# arrives on, so it has to recall it from context on a later turn it was never
+# told to expect it on.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+
+  # The delay lets a bot's "let me check on that" filler finish before the story
+  # request arrives.
+  - user: "Tell me a short story about a sea turtle."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: llm_started
+
+  - user: "Actually, I've changed my mind. Tell me a joke instead."
+    send_after:
+      event: llm_started
+      delay_ms: 10000
+    expect:
+      - event: response
+        eval: "first, tells a joke, then informs that the weather in San Francisco is 75 degrees"

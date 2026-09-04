@@ -64,6 +64,7 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 # ---------------------------------------------------------------------------
 # Test-only frame
@@ -310,9 +311,8 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
     ElevenLabsTTSService's actual override: it resets alignment state but never
     calls _maybe_resume_frame_processing(). Because no TTSAudioRawFrame is ever
     produced, the output transport's BotStartedSpeakingFrame/
-    BotStoppedSpeakingFrame never fire in production either, so nothing resumes
-    frame processing after pause_processing_frames() latches — until
-    TTSService's own pause watchdog force-resumes after pause_watchdog_timeout_s.
+    BotStoppedSpeakingFrame never fire in production either, so the context
+    completing in silence is the only thing that can lift the pause.
     """
 
     def __init__(self, **kwargs):
@@ -320,7 +320,6 @@ class MockWebSocketPauseTTSServiceZeroAudioCompletion(TTSService):
             push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            pause_watchdog_timeout_s=0.2,
             sample_rate=_SAMPLE_RATE,
             **kwargs,
         )
@@ -347,8 +346,8 @@ class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
     whose audio context completes quickly (as ElevenLabs-style providers
     typically report isFinal shortly after the last text is sent), but whose
     actual playback — tracked independently by the output transport — keeps
-    going past pause_watchdog_timeout_s after the turn's LLMFullResponseEndFrame
-    pauses frame processing.
+    going well after the turn's LLMFullResponseEndFrame pauses frame
+    processing.
 
     Does NOT override on_audio_context_completed(), matching
     ElevenLabsTTSService's actual override (resets alignment state but never
@@ -363,7 +362,6 @@ class MockWebSocketPauseTTSServiceLongPlayback(TTSService):
             push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            pause_watchdog_timeout_s=0.2,
             sample_rate=_SAMPLE_RATE,
             **kwargs,
         )
@@ -1592,8 +1590,8 @@ async def test_no_deadlock_on_zero_audio_context_completion():
 
     Timeline:
     1. LLM response -> _processing_text=True.
-    2. LLMFullResponseEndFrame -> pause_processing_frames() called, starting
-       the pause watchdog.
+    2. LLMFullResponseEndFrame -> pause_processing_frames() called, the context
+       still being open and able to produce audio.
     3. Provider reports the context finished with no audio (TTSStoppedFrame,
        zero TTSAudioRawFrame). on_audio_context_completed() is a no-op here,
        matching ElevenLabsTTSService's actual override.
@@ -1601,10 +1599,8 @@ async def test_no_deadlock_on_zero_audio_context_completion():
        production the output transport only sends them once TTS audio was
        actually received, and this test models that absence directly by never
        sending either.
-    5. The pause watchdog (pause_watchdog_timeout_s=0.2 here) fires with no
-       BotStartedSpeakingFrame seen, force-resumes frame processing, and
-       reports a non-fatal error. FooFrame must arrive downstream within the
-       timeout.
+    5. The context completing with no audio resumes frame processing, so
+       FooFrame must arrive downstream.
     """
     tts = MockWebSocketPauseTTSServiceZeroAudioCompletion()
 
@@ -1675,20 +1671,19 @@ async def test_filter_stripped_text_does_not_pause_frame_processing():
 
 
 @pytest.mark.asyncio
-async def test_no_spurious_watchdog_on_long_streaming_turn():
-    """A long streaming turn whose audio is still playing past
-    pause_watchdog_timeout_s after the pause must not trip the watchdog.
+async def test_no_early_resume_on_long_streaming_turn():
+    """A long streaming turn whose audio is still playing must stay paused.
 
     Timeline:
     1. LLM response -> _processing_text=True.
     2. BotStartedSpeakingFrame arrives *before* LLMFullResponseEndFrame —
        streaming TTS starts playback while the LLM is still generating, and
        the output transport only sends this frame once per turn.
-    3. LLMFullResponseEndFrame -> pause_processing_frames() called. Audio for
-       this turn was already confirmed, so no watchdog should be armed.
-    4. More than pause_watchdog_timeout_s (0.2s here) elapses with no
-       BotStoppedSpeakingFrame yet — this must NOT force-resume or push an
-       ErrorFrame; playback is still legitimately in progress.
+    3. LLMFullResponseEndFrame -> pause_processing_frames() called, this turn's
+       audio being on its way to the transport.
+    4. Time passes with no BotStoppedSpeakingFrame yet — nothing must resume
+       frame processing or push an ErrorFrame; playback is still legitimately
+       in progress.
     5. BotStoppedSpeakingFrame finally arrives (playback finished) and
        resumes frame processing normally; FooFrame must arrive afterward.
     """
@@ -1710,7 +1705,7 @@ async def test_no_spurious_watchdog_on_long_streaming_turn():
         BotStartedSpeakingFrame(),
         SleepFrame(sleep=0.05),
         LLMFullResponseEndFrame(),
-        SleepFrame(sleep=0.3),  # longer than pause_watchdog_timeout_s=0.2
+        SleepFrame(sleep=0.3),  # playback still in progress
         BotStoppedSpeakingFrame(),
         FooFrame(label="after_stop"),
     ]
@@ -1722,10 +1717,7 @@ async def test_no_spurious_watchdog_on_long_streaming_turn():
 
     down, up = frames_received
     error_frames = [f for f in up if isinstance(f, ErrorFrame)]
-    assert not error_frames, (
-        f"Spurious pause-watchdog ErrorFrame(s) during in-progress playback: {error_frames} — "
-        "the watchdog must not arm when audio was already confirmed before the pause"
-    )
+    assert not error_frames, f"Spurious ErrorFrame(s) during in-progress playback: {error_frames}"
 
     foo_frames = [f for f in down if isinstance(f, FooFrame)]
     assert any(f.label == "after_stop" for f in foo_frames), (
@@ -2411,6 +2403,131 @@ async def test_aggregated_anchor_pts_precedes_its_progress_per_context():
             f"Anchor {anchor.text!r} pts {anchor.pts} must be <= its first progress pts "
             f"{first_progress_pts} so it is delivered before its own progress"
         )
+
+
+@pytest.mark.asyncio
+async def test_sentence_inline_tts_markup_tracks_word_by_word():
+    """A synthesis tag inline in the source text must not cost the sentence its
+    word-level tracking.
+
+    Only the tagged span is unalignable — the TTS reports "1234." for it, so it can
+    only be committed whole. The words around it are byte-identical on both sides
+    and must still advance progress one at a time.
+    """
+    tts = _MockPerCallWordTimestampWSTTSService(
+        # One run_tts call carries the whole sentence, so all of its words arrive
+        # from this single word-time list.
+        # Cartesia echoes the tag block as one token; the service strips it to "1234.".
+        word_times_per_call=[
+            [("I", 0.0), ("love", 0.2), ("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
+        ],
+        text_aggregation_mode=TextAggregationMode.SENTENCE,
+    )
+    tts._text_aggregator = SkipTagsAggregator(
+        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.SENTENCE
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame(text="I"),
+            TextFrame(text=" love"),
+            TextFrame(text=" to count <spell>"),
+            TextFrame(text="1234</spell>."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+    down = frames_received[0]
+    sentence = "I love to count <spell>1234</spell>."
+
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert [f.accumulated_text for f in progress] == [
+        "I",
+        "I love",
+        "I love to",
+        "I love to count",
+        sentence,
+    ]
+
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    assert len(anchors) == 1
+    assert anchors[0].text == sentence
+
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == ["I", "love", "to", "count", "1234."]
+    assert all(f.append_to_context for f in word_frames), (
+        "only the tagged span is atomic, so every word reaches the context: "
+        f"{[(f.text, f.append_to_context) for f in word_frames]}"
+    )
+    assert word_frames[-1].raw_text == "<spell>1234</spell>.", (
+        "the word completing the tagged span must commit it with its tag, got "
+        f"{word_frames[-1].raw_text!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_token_inline_tts_markup_tracks_word_by_word():
+    """TOKEN-mode counterpart of test_sentence_inline_tts_markup_tracks_word_by_word.
+
+    The sentence reaches the TTS as three separate tokens here, the tagged span
+    among them, and the sequencer regroups them into one sentence before tracking
+    it. The result must match SENTENCE mode: only the tagged span is committed
+    whole, every other word advancing progress on its own.
+    """
+    tts = _MockTokenStreamingWSTTSService(
+        # One run_tts call per token, each with its own word-time list.
+        # Cartesia echoes the tag block as one token; the service strips it to "1234.".
+        word_times_per_call=[
+            [("I", 0.0)],
+            [("love", 0.2)],
+            [("to", 0.4), ("count", 0.6), ("1234.", 0.8)],
+        ],
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    tts._text_aggregator = SkipTagsAggregator(
+        [("<spell>", "</spell>")], aggregation_type=TextAggregationMode.TOKEN
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            TextFrame(text="I"),
+            TextFrame(text=" love"),
+            TextFrame(text=" to count <spell>"),
+            TextFrame(text="1234</spell>."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+    down = frames_received[0]
+    sentence = "I love to count <spell>1234</spell>."
+
+    progress = [f for f in down if isinstance(f, AggregatedTextProgressFrame)]
+    assert [f.accumulated_text for f in progress] == [
+        "I",
+        "I love",
+        "I love to",
+        "I love to count",
+        sentence,
+    ]
+    assert [f.remaining_text for f in progress][-1] == ""
+
+    # The tokens are regrouped into a single sentence, so they announce one segment
+    # rather than one per token.
+    anchors = [f for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken]
+    assert len(anchors) == 1
+    assert anchors[0].text == sentence
+    assert all(f.segment_id == anchors[0].id for f in progress)
+
+    word_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == ["I", "love", "to", "count", "1234."]
+    assert all(f.append_to_context for f in word_frames), (
+        "only the tagged span is atomic, so every word reaches the context: "
+        f"{[(f.text, f.append_to_context) for f in word_frames]}"
+    )
+    assert word_frames[-1].raw_text == "<spell>1234</spell>.", (
+        "the word completing the tagged span must commit it with its tag, got "
+        f"{word_frames[-1].raw_text!r}"
+    )
 
 
 if __name__ == "__main__":

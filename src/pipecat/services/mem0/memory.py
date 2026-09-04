@@ -19,7 +19,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import Frame, LLMContextFrame
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+    LLMStandardMessage,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -54,7 +58,9 @@ class Mem0MemoryService(FrameProcessor):
                     removed in 2.0.0.
 
             system_prompt: Prefix text for memory context messages.
-            add_as_system_message: Whether to add memories as system messages.
+            add_as_system_message: Whether to add memories as instruction
+                messages ("developer" role) rather than user messages.
+                Providers without a "developer" role receive them as "user".
             position: Position to insert memory messages in context.
         """
 
@@ -168,7 +174,7 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    async def _store_messages(self, messages: list[dict[str, Any]]):
+    async def _store_messages(self, messages: list[LLMStandardMessage]):
         """Store messages in Mem0.
 
         Runs the blocking Mem0 API call in a background thread to avoid
@@ -275,9 +281,12 @@ class Mem0MemoryService(FrameProcessor):
         for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
-        # Add memories as a system message or user message based on configuration
-        role = "system" if self.add_as_system_message else "user"
-        memory_message = {"role": role, "content": memory_text}
+        # Add memories as a developer message or user message based on configuration
+        memory_message: LLMStandardMessage = (
+            {"role": "developer", "content": memory_text}
+            if self.add_as_system_message
+            else {"role": "user", "content": memory_text}
+        )
 
         messages = context.get_messages()
         position = max(0, min(self.position, len(messages)))
@@ -303,15 +312,21 @@ class Mem0MemoryService(FrameProcessor):
                 latest_user_message = None
 
                 for message in reversed(context_messages):
-                    if message.get("role") == "user" and isinstance(message.get("content"), str):
-                        latest_user_message = message.get("content")
+                    if isinstance(message, LLMSpecificMessage):
+                        continue
+                    content = message.get("content")
+                    if message.get("role") == "user" and isinstance(content, str):
+                        latest_user_message = content
                         break
 
                 if latest_user_message:
                     # Filter to only user/assistant messages — Mem0 API
                     # doesn't accept other roles (system, developer, etc.)
                     messages_to_store = [
-                        m for m in context_messages if m.get("role") in ("user", "assistant")
+                        m
+                        for m in context_messages
+                        if not isinstance(m, LLMSpecificMessage)
+                        and m.get("role") in ("user", "assistant")
                     ]
                     # Enhance context with memories before passing it downstream
                     await self._enhance_context_with_memories(context, latest_user_message)

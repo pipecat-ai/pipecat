@@ -9,6 +9,7 @@ import unittest.mock
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
@@ -29,6 +31,7 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETION_INSTRUCTIONS,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
+    IncompleteType,
     TurnMarker,
     UserTurnCompletionConfig,
     UserTurnCompletionLLMServiceMixin,
@@ -45,7 +48,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
     """Tests for UserUserTurnCompletionLLMServiceMixin functionality."""
 
     async def test_complete_marker_pushes_text(self):
-        """Test that ✓ marker is detected and text after it is pushed normally."""
+        """Test that ● marker is detected and text after it is pushed normally."""
         processor = MockProcessor()
 
         # Capture frames that get pushed
@@ -54,7 +57,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
         )
 
-        # Simulate LLM generating: "✓ Hello there!"
+        # Simulate LLM generating: "● Hello there!"
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello there!")
 
         # The marker rides as LLMMarkerFrame(append_to_context_immediately=False);
@@ -74,7 +77,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertEqual(len(completed), 2)
 
     async def test_incomplete_short_marker_suppresses_text(self):
-        """Test that ○ marker suppresses text and is emitted as a stand-alone marker frame."""
+        """Test that ◐ marker suppresses text and is emitted as a stand-alone marker frame."""
         processor = MockProcessor()
 
         pushed_frames = []
@@ -100,7 +103,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertEqual(len(completed), 0)
 
     async def test_incomplete_long_marker_suppresses_text(self):
-        """Test that ◐ marker suppresses text and is emitted as a stand-alone marker frame."""
+        """Test that ○ marker suppresses text and is emitted as a stand-alone marker frame."""
         processor = MockProcessor()
 
         pushed_frames = []
@@ -234,11 +237,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)],
             [" \n\t"],
         )
-        self.assertEqual(
-            len([f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]),
-            1,
-        )
-        self.assertEqual(len([f for f in pushed_frames if isinstance(f, LLMRunFrame)]), 1)
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual(len(append_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
 
     async def test_empty_response_reprompts_once(self):
         """A response with no text or completion marker should trigger recovery."""
@@ -261,22 +263,19 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.push_frame(LLMFullResponseEndFrame())
 
         append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
-        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
         text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame) and f.text.strip()]
 
         self.assertEqual(len(append_frames), 1)
         self.assertEqual(append_frames[0].messages[0]["role"], "developer")
         self.assertIn(USER_TURN_COMPLETE_MARKER, append_frames[0].messages[0]["content"])
-        self.assertEqual(len(run_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
         self.assertEqual(text_frames, [])
 
         end_index = next(
             i for i, frame in enumerate(pushed_frames) if isinstance(frame, LLMFullResponseEndFrame)
         )
         self.assertGreater(pushed_frames.index(append_frames[0]), end_index)
-        self.assertGreater(
-            pushed_frames.index(run_frames[0]), pushed_frames.index(append_frames[0])
-        )
 
     async def test_empty_response_does_not_reprompt_when_filter_disabled(self):
         """An empty response outside incomplete-turn filtering is left unchanged."""
@@ -293,6 +292,126 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
         self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_empty_response_reprompt_uses_configured_complete_marker(self):
+        """The recovery prompt should use the configured complete marker."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        processor.set_user_turn_completion_config(
+            UserTurnCompletionConfig(
+                complete_marker="Y", incomplete_short_marker="N", incomplete_long_marker="W"
+            )
+        )
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frame = next(
+            frame for frame in pushed_frames if isinstance(frame, LLMMessagesAppendFrame)
+        )
+        prompt = append_frame.messages[0]["content"]
+        self.assertIn("Respond now with Y", prompt)
+        self.assertNotIn(USER_TURN_COMPLETE_MARKER, prompt)
+        self.assertTrue(append_frame.run_llm)
+
+    async def test_empty_response_does_not_reprompt_while_user_is_speaking(self):
+        """A preemptive empty response must not trigger another run over the user."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                )
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                )
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual(len(append_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+
+    async def test_error_response_does_not_reprompt(self):
+        """An inference error followed by its response end must not retry here."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_error(error_msg="Inference failed")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        error_frames = [f for f in pushed_frames if isinstance(f, ErrorFrame)]
+        self.assertEqual(len(error_frames), 1)
+        self.assertIs(error_frames[0].processor, processor)
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_foreign_error_does_not_mask_empty_llm_response(self):
+        """An upstream error from another processor should not suppress recovery."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        foreign_processor = FrameProcessor()
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(
+                ErrorFrame(error="Downstream failed", processor=foreign_processor),
+                FrameDirection.UPSTREAM,
+            )
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual(len(append_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+
+    async def test_user_activity_during_end_forwarding_cancels_reprompt(self):
+        """User activity while the response end propagates should cancel recovery."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+            if isinstance(frame, LLMFullResponseEndFrame):
+                with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                    await processor.process_frame(
+                        VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                    )
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
 
     async def test_complete_marker_without_text_reprompts_once(self):
         """A bare complete marker should trigger one recovery inference."""
@@ -315,22 +434,19 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.push_frame(LLMFullResponseEndFrame())
 
         append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
-        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
         text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame) and f.text.strip()]
 
         self.assertEqual(len(append_frames), 1)
         self.assertEqual(append_frames[0].messages[0]["role"], "developer")
         self.assertIn(USER_TURN_COMPLETE_MARKER, append_frames[0].messages[0]["content"])
-        self.assertEqual(len(run_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
         self.assertEqual(text_frames, [])
 
         first_end_index = next(
             i for i, frame in enumerate(pushed_frames) if isinstance(frame, LLMFullResponseEndFrame)
         )
         self.assertGreater(pushed_frames.index(append_frames[0]), first_end_index)
-        self.assertGreater(
-            pushed_frames.index(run_frames[0]), pushed_frames.index(append_frames[0])
-        )
 
     async def test_successful_bare_complete_recovery_speaks_once(self):
         """The recovery inference can produce the turn's spoken response."""
@@ -349,16 +465,16 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.push_frame(LLMFullResponseEndFrame())
 
         append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
-        run_frames = [f for f in pushed_frames if isinstance(f, LLMRunFrame)]
         text_frames = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
 
         self.assertEqual(len(append_frames), 1)
-        self.assertEqual(len(run_frames), 1)
+        self.assertTrue(append_frames[0].run_llm)
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
         self.assertEqual(text_frames, ["Recovered response"])
         self.assertTrue(processor._user_turn_completion_voiced)
 
-    async def test_user_resume_disarms_bare_complete_marker_reprompt(self):
-        """Do not re-prompt after the user resumes speaking during the response."""
+    async def test_user_resume_disarms_reprompt_without_resetting_used_budget(self):
+        """User resumption should cancel recovery without replenishing its budget."""
         processor = MockProcessor()
         pushed_frames = []
 
@@ -372,11 +488,38 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
                 await processor.process_frame(
                     VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
                 )
-            self.assertFalse(processor._no_speakable_text_retry_attempted)
+            self.assertTrue(processor._no_speakable_text_retry_attempted)
             await processor.push_frame(LLMFullResponseEndFrame())
 
         self.assertFalse(any(isinstance(f, LLMMessagesAppendFrame) for f in pushed_frames))
         self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
+
+    async def test_empty_recovery_stays_capped_after_vad_activity(self):
+        """VAD activity during a recovery should not replenish the retry budget."""
+        processor = MockProcessor()
+        processor._filter_incomplete_user_turns = True
+        pushed_frames = []
+
+        async def capture_frame(_processor, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", capture_frame):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+            with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                await processor.process_frame(
+                    VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                )
+                await processor.process_frame(
+                    VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM
+                )
+
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        append_frames = [f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual(len(append_frames), 1)
 
     async def test_interruption_disarms_bare_complete_marker_reprompt(self):
         """An interrupted response must not start a recovery inference."""
@@ -421,7 +564,9 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertEqual(
             len([f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame)]), 1
         )
-        self.assertEqual(len([f for f in pushed_frames if isinstance(f, LLMRunFrame)]), 1)
+        append_frame = next(f for f in pushed_frames if isinstance(f, LLMMessagesAppendFrame))
+        self.assertTrue(append_frame.run_llm)
+        self.assertFalse(any(isinstance(f, LLMRunFrame) for f in pushed_frames))
 
     async def test_function_call_disarms_bare_complete_marker_reprompt(self):
         """A pending post-tool inference makes a separate recovery redundant."""
@@ -475,7 +620,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         """
         processor = MockProcessor()
 
-        # Arm an incomplete timeout via an ○ marker.
+        # Arm an incomplete timeout via an ◐ marker.
         processor.push_frame = AsyncMock()
         processor._start_incomplete_timeout = AsyncMock()
         await processor._push_turn_text(USER_TURN_INCOMPLETE_SHORT_MARKER)
@@ -497,7 +642,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         """The user resuming speech mid-turn cancels the pending re-prompt timeout.
 
         A resume inside an already-open turn produces a VADUserStartedSpeakingFrame
-        but no InterruptionFrame, so the incomplete (○/◐) re-prompt timeout would
+        but no InterruptionFrame, so the incomplete (◐/○) re-prompt timeout would
         otherwise expire and talk over the user.
         """
         processor = MockProcessor()
@@ -510,10 +655,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         processor._cancel_incomplete_timeout.assert_awaited_once()
 
     async def test_only_first_completion_voiced_per_user_turn(self):
-        """A second ✓ inference within the same user turn is not voiced again.
+        """A second ● inference within the same user turn is not voiced again.
 
         The acoustic detector can trigger several inferences per user turn, each
-        producing its own ✓; only the first should be spoken. This holds as long
+        producing its own ●; only the first should be spoken. This holds as long
         as the user hasn't resumed speaking in between — a VADUserStartedSpeakingFrame
         resets the latch instead (see test_resumed_speech_does_not_permanently_silence_the_turn).
         """
@@ -524,7 +669,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
         )
 
-        # First inference: ✓ is voiced.
+        # First inference: ● is voiced.
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
         # End of that response resets per-response state but not the per-turn latch.
         await processor._turn_reset()
@@ -532,7 +677,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         text_before = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(text_before, ["How are you?"])
 
-        # Second inference in the same user turn: identical ✓ must be dropped.
+        # Second inference in the same user turn: identical ● must be dropped.
         pushed_frames.clear()
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} How are you?")
         self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
@@ -572,7 +717,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         reset the latch would stay tripped for the rest of the turn. Since the
         controller drops any in-flight completion as stale once the user resumes
         (see UserTurnController._trigger_user_turn_stop), voicing it would only
-        repeat/talk over the user anyway — so the next ✓, for the turn the user is
+        repeat/talk over the user anyway — so the next ●, for the turn the user is
         now continuing, should get to speak instead.
         """
         processor = MockProcessor()
@@ -586,10 +731,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
     async def test_resumed_speech_does_not_permanently_silence_the_turn(self):
         """Regression test for the confirmed double-inference-fix interaction bug.
 
-        Sequence: a first ✓ is voiced mid-turn (latch set); the user resumes
+        Sequence: a first ● is voiced mid-turn (latch set); the user resumes
         speaking within the same still-open turn (no UserStartedSpeakingFrame
         fires, since the controller only emits that for a brand new turn); a
-        second, legitimate ✓ then arrives once the user pauses again. Without
+        second, legitimate ● then arrives once the user pauses again. Without
         resetting the latch on the resume, the second response would be
         silently dropped and the bot would never reply.
         """
@@ -600,15 +745,16 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
         )
 
-        # First (premature) inference: LLM says ✓, voiced, latch set.
+        # First (premature) inference: LLM says ●, voiced, latch set.
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} First answer")
         await processor._turn_reset()
         self.assertTrue(processor._user_turn_completion_voiced)
 
         # The user resumes speaking within the same still-open turn (no new
-        # UserStartedSpeakingFrame, since the turn never closed).
+        # UserStartedSpeakingFrame, since the turn never closed), then pauses.
         with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
             await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         # A second, legitimate inference completes once the user pauses again.
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Second answer")
@@ -617,12 +763,59 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         texts = [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)]
         self.assertEqual(texts, ["First answer", "Second answer"])
 
+    async def test_complete_while_user_speaking_is_treated_as_incomplete(self):
+        """A ● that resolves while VAD hears the user is stale and handled as ◐.
+
+        Sequence: an inference is triggered, the user resumes speaking before it
+        resolves, then the LLM answers ●. The controller would refuse to close
+        the turn (user still speaking), and no interruption can fire inside an
+        already-open turn, so voicing the response would talk over the user
+        with no way to stop it. Instead: no text, no completion broadcast, a ◐
+        marker in context, and the short re-prompt timeout armed.
+        """
+        processor = MockProcessor()
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+        processor._start_incomplete_timeout = AsyncMock()
+
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Stale answer")
+        # Any continuation of the stale response stays suppressed.
+        await processor._push_turn_text(" and more")
+
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMTextFrame)], [])
+        self.assertEqual(
+            [f for f in pushed_frames if isinstance(f, UserTurnInferenceCompletedFrame)], []
+        )
+        marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
+        self.assertEqual(len(marker_frames), 1)
+        self.assertEqual(marker_frames[0].marker, USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertTrue(marker_frames[0].append_to_context_immediately)
+        self.assertEqual(processor._turn_marker, TurnMarker.INCOMPLETE)
+        self.assertFalse(processor._user_turn_completion_voiced)
+        processor._start_incomplete_timeout.assert_awaited_once_with(IncompleteType.SHORT)
+
+        # Once the user pauses, the next ● is voiced normally.
+        await processor._turn_reset()
+        with unittest.mock.patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            await processor.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        pushed_frames.clear()
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Real answer")
+        self.assertEqual(
+            [f.text for f in pushed_frames if isinstance(f, LLMTextFrame)], ["Real answer"]
+        )
+
     async def test_function_call_resets_completion_latch(self):
         """A FunctionCallsStartedFrame lets the post-tool inference voice a completion.
 
         The LLM committing to a tool call means a fresh post-tool response is
         coming, and that response is expected to speak. Without resetting the
-        latch here, its text would hit the ✓ guard and be dropped.
+        latch here, its text would hit the ● guard and be dropped.
         """
         processor = MockProcessor()
         processor._user_turn_completion_voiced = True
@@ -634,12 +827,12 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertFalse(processor._user_turn_completion_voiced)
 
     async def test_post_tool_response_speaks_after_voiced_filler(self):
-        """Regression test for #5063: silence after a tool call following a spoken ✓ filler.
+        """Regression test for #5063: silence after a tool call following a spoken ● filler.
 
-        Sequence: the LLM speaks a ✓ acknowledgement ("One moment."), setting the
+        Sequence: the LLM speaks a ● acknowledgement ("One moment."), setting the
         latch; it then commits to a tool call (FunctionCallsStartedFrame); the
         filler response ends (per-response state resets; the latch is per-turn);
-        the post-tool inference produces a fresh ✓ with the real answer. Without
+        the post-tool inference produces a fresh ● with the real answer. Without
         resetting the latch on the tool-call path, the second response would be
         silently dropped and the bot would go quiet despite the tool succeeding.
         """
@@ -652,7 +845,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             "push_frame",
             AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
         ):
-            # Filler response: LLM speaks a ✓ acknowledgement, latch is set.
+            # Filler response: LLM speaks a ● acknowledgement, latch is set.
             await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} One moment.")
             self.assertTrue(processor._user_turn_completion_voiced)
 
@@ -660,7 +853,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
             await processor.push_frame(FunctionCallsStartedFrame(function_calls=[]))
             await processor.push_frame(LLMFullResponseEndFrame())
 
-            # Post-tool inference: fresh ✓ with the real answer must be spoken.
+            # Post-tool inference: fresh ● with the real answer must be spoken.
             await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Here are the openings.")
             await processor.push_frame(LLMFullResponseEndFrame())
 
@@ -671,7 +864,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         """A tool call grants exactly ONE extra spoken completion, then re-latches.
 
         Clearing the latch on FunctionCallsStartedFrame lets the post-tool
-        response speak, but that response's own ✓ re-arms the latch, so a later
+        response speak, but that response's own ● re-arms the latch, so a later
         stray inference in the same turn is still dropped. This guards against
         the reset accidentally widening into an open-ended window.
         """
@@ -738,11 +931,11 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         self.assertTrue(processor._user_turn_completion_voiced)
 
     async def test_reprompt_speaks_after_voiced_completion(self):
-        """Regression test for #5145: silence after a re-prompt following a spoken ✓.
+        """Regression test for #5145: silence after a re-prompt following a spoken ●.
 
-        Sequence: the user's turn completes and the bot voices a ✓ reply, setting
+        Sequence: the user's turn completes and the bot voices a ● reply, setting
         the latch; the user stays silent, so an idle handler appends a developer
-        message with ``run_llm=True``; the resulting ✓ must be spoken. Without
+        message with ``run_llm=True``; the resulting ● must be spoken. Without
         resetting the latch on the requested run, that response is dropped and
         the bot stays mute.
         """
@@ -780,7 +973,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         """A requested run grants exactly ONE extra spoken completion, then re-latches.
 
         Clearing the latch on the requested run lets the re-prompt speak, but
-        that response's own ✓ re-arms the latch, so a later stray inference in
+        that response's own ● re-arms the latch, so a later stray inference in
         the same turn is still dropped.
         """
         processor = MockProcessor()
@@ -934,3 +1127,60 @@ class TestSystemInstructionComposition(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
+    """Markers are configurable, and the prompts follow whatever is configured."""
+
+    def test_default_markers_are_the_fill_gradient(self):
+        """Full is a finished turn, half is cut off mid-thought, empty is not started."""
+        self.assertEqual(USER_TURN_COMPLETE_MARKER, "●")
+        self.assertEqual(USER_TURN_INCOMPLETE_SHORT_MARKER, "◐")
+        self.assertEqual(USER_TURN_INCOMPLETE_LONG_MARKER, "○")
+
+    def test_prompts_follow_configured_markers(self):
+        """Custom markers reach the instructions and both re-prompts."""
+        config = UserTurnCompletionConfig(
+            complete_marker="Y", incomplete_short_marker="N", incomplete_long_marker="W"
+        )
+
+        for prompt in (config.completion_instructions, config.short_prompt, config.long_prompt):
+            for default in (
+                USER_TURN_COMPLETE_MARKER,
+                USER_TURN_INCOMPLETE_SHORT_MARKER,
+                USER_TURN_INCOMPLETE_LONG_MARKER,
+            ):
+                self.assertNotIn(default, prompt)
+
+        self.assertIn("Mark as COMPLETE (Y) when:", config.completion_instructions)
+        self.assertIn("`N`", config.completion_instructions)
+        self.assertIn("`W`", config.completion_instructions)
+        self.assertIn("respond with Y", config.short_prompt)
+        self.assertIn("respond with Y", config.long_prompt)
+
+    def test_custom_instructions_still_win(self):
+        """An explicit instructions string overrides the rendered default."""
+        config = UserTurnCompletionConfig(instructions="do it my way")
+        self.assertEqual(config.completion_instructions, "do it my way")
+
+    async def test_parser_detects_configured_markers(self):
+        """The detector matches the configured markers, not the defaults."""
+        processor = MockProcessor()
+        processor.set_user_turn_completion_config(
+            UserTurnCompletionConfig(
+                complete_marker="Y", incomplete_short_marker="N", incomplete_long_marker="W"
+            )
+        )
+
+        pushed_frames = []
+        processor.push_frame = AsyncMock(
+            side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)
+        )
+
+        await processor._push_turn_text("Y Hello there!")
+
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual([f.text for f in text_frames], ["Hello there!"])
+
+        marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
+        self.assertEqual([f.marker for f in marker_frames], ["Y"])

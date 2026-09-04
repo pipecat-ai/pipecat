@@ -1,0 +1,1 @@
+- Corrected the `model` docstring in `OneShotInputParams` for `UltravoxRealtimeLLMService`: the field defaults to `None`, which lets Ultravox pick its current default model, rather than to the legacy `fixie-ai/ultravox` alias.

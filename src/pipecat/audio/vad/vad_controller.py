@@ -20,10 +20,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     SpeechControlParamsFrame,
-    StartFrame,
     VADParamsUpdateFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -109,41 +108,52 @@ class VADController(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the controller with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        self._task_manager = task_manager
+        await super().setup(setup.task_manager)
         self._last_audio_time = time.monotonic()
-        if self._audio_idle_timeout > 0 and not self._audio_idle_task:
-            self._audio_idle_task = self._task_manager.create_task(
-                self._audio_idle_handler(),
-                f"{self}::_audio_idle_handler",
-            )
+        self._vad_analyzer.set_sample_rate(setup.audio_in_sample_rate)
 
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
 
-        Handles `StartFrame` to initialize the sample rate and `InputAudioRawFrame`
-        to analyze audio for voice activity.
+        Handles `InputAudioRawFrame` to analyze audio for voice activity, and
+        `VADParamsUpdateFrame` to reconfigure the analyzer.
 
         Args:
             frame: The frame to process.
         """
-        if isinstance(frame, StartFrame):
-            await self._start(frame)
-        elif isinstance(frame, InputAudioRawFrame):
+        if isinstance(frame, InputAudioRawFrame):
             await self._handle_audio(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
             self._vad_analyzer.set_params(frame.params)
             await self.broadcast_frame(SpeechControlParamsFrame, vad_params=frame.params)
 
-    async def _start(self, frame: StartFrame):
-        self._vad_analyzer.set_sample_rate(frame.audio_in_sample_rate)
+    async def start(self):
+        """Announce the analyzer's params and start the idle timer.
+
+        Paired with :meth:`stop`.
+        """
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
+
+        if self._audio_idle_timeout > 0 and not self._audio_idle_task:
+            self._audio_idle_task = self.create_task(self._audio_idle_handler())
+
+    async def stop(self):
+        """Stop the idle timer, leaving the analyzer alone.
+
+        Called at session end so the timer can't report silence that only
+        means the session is over. The analyzer may be shared, so releasing
+        it waits for :meth:`cleanup`.
+        """
+        if self._audio_idle_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_idle_task)
+            self._audio_idle_task = None
 
     async def cleanup(self):
         """Clean up resources.
@@ -153,9 +163,7 @@ class VADController(BaseObject):
         before returning.
         """
         await super().cleanup()
-        if self._audio_idle_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_idle_task)
-            self._audio_idle_task = None
+        await self.stop()
         if self._vad_analyzer:
             await self._vad_analyzer.cleanup()
 

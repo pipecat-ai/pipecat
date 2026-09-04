@@ -11,12 +11,14 @@ WebSocket API for streaming audio transcription.
 """
 
 import asyncio
+import io
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
+import aiohttp
 from loguru import logger
 from websockets.protocol import State
 
@@ -24,24 +26,26 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
-from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import ASSEMBLYAI_SYNC_TTFS_P99, ASSEMBLYAI_TTFS_P99
+from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -57,13 +61,11 @@ from .models import (
 # are clipped before sending — a single value can never exceed the whole budget.
 MAX_AGENT_CONTEXT_CHARS = 1500
 
-# Model-name prefixes shared by every Universal-3 Pro streaming variant. The
-# ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, future
-# ``u3-rt-pro-*`` releases) and ``universal-3-5-pro`` (and any
-# ``universal-3-5-pro-*`` release) both expose the full U3 Pro feature set:
-# built-in turn detection, prompting, continuous partials, interruption_delay,
-# context carryover, and voice focus.
-U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro")
+# Model-name prefixes shared by every Universal-3 Pro streaming variant, all of
+# which expose the full U3 Pro feature set: built-in turn detection, prompting,
+# continuous partials, interruption_delay, context carryover, and voice focus.
+# universal-3-6-pro is universal-3-5-pro upgraded — same model, same features.
+U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
@@ -74,17 +76,18 @@ HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 MAX_LANGUAGE_CODES = 10
 
 
-def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
+def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
-    any ``u3-rt-pro-*`` variant) and ``universal-3-5-pro`` (and any
-    ``universal-3-5-pro-*`` variant) so U3 Pro-only features are gated on the
+    any ``u3-rt-pro-*`` variant) and the ``universal-3-5-pro`` /
+    ``universal-3-6-pro`` releases (and any ``universal-3-5-pro-*`` /
+    ``universal-3-6-pro-*`` variant) so U3 Pro-only features are gated on the
     whole family rather than a single exact string.
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
-            (``str | None | _NotGiven``); anything that is not a matching
+            (``str | None | NotGiven``); anything that is not a matching
             string returns False.
 
     Returns:
@@ -217,28 +220,28 @@ class AssemblyAISTTSettings(STTSettings):
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
-            audio frames as silence. Only applicable to u3-rt-pro.
+            audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
             set to "medical-v1" to enable Medical Mode for healthcare transcription.
         continuous_partials: Emit partial transcripts at a steady cadence during
             long turns, rather than only one early partial near the turn start.
-            Only applicable to u3-rt-pro; not sent for other models. Defaults to
+            Only applicable to U3 Pro models; not sent for other models. Defaults to
             True in this plugin so voice agents receive continuous interim updates.
         interruption_delay: Override, in milliseconds (0–1000), for how soon the
             first partial is emitted. The server adds 256ms (MIN_TURN_DURATION_MS)
-            on top, so 0 → 256ms effective. Only applicable to u3-rt-pro. Defaults
+            on top, so 0 → 256ms effective. Only applicable to U3 Pro models. Defaults
             to None (use the server default).
         agent_context: Context carryover seed — the agent's most recent spoken
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
-            u3-rt-pro; clipped to ~1500 characters and reset on reconnect. Set this
+            U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
             for a known opening line, or call
             :meth:`AssemblyAISTTService.update_agent_context` to update it
             mid-session. Defaults to None (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable
-            automatic context carryover entirely. Only applicable to u3-rt-pro. Most
+            automatic context carryover entirely. Only applicable to U3 Pro models. Most
             integrations should leave this at the default. Defaults to None (use the
             server default, which is 3).
         voice_focus: Isolate the primary voice and suppress background noise.
@@ -256,33 +259,33 @@ class AssemblyAISTTSettings(STTSettings):
             to None (not sent).
     """
 
-    formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_finalization_max_wait_time: int | None | _NotGiven = field(
+    formatted_finals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_finalization_max_wait_time: int | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    end_of_turn_confidence_threshold: float | None | _NotGiven = field(
+    end_of_turn_confidence_threshold: float | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    min_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms_prompt: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    continuous_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    agent_context: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    previous_context_n_turns: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    voice_focus: Literal["near-field", "far-field"] | None | _NotGiven = field(
+    min_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms_prompt: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_detection: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interruption_delay: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    agent_context: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    previous_context_n_turns: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_focus: Literal["near-field", "far-field"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | _NotGiven = field(
+    voice_focus_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -314,7 +317,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         api_key: str,
         language: Language | None = None,
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         connection_params: AssemblyAIConnectionParams | None = None,
         vad_force_turn_endpoint: bool = True,
@@ -335,7 +338,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                     Will be removed in 2.0.0.
 
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Audio sample rate in Hz. If None, uses the input sample
+                rate from the start frame.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             connection_params: Connection configuration parameters.
 
@@ -350,14 +354,17 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - max_turn_silence is ALWAYS set equal to min_turn_silence
                 - VAD stop sends ForceEndpoint as ceiling
                 - No UserStarted/StoppedSpeakingFrame emitted from STT
-                When False (AssemblyAI turn detection mode, u3-rt-pro only): AssemblyAI's model
+                When False (AssemblyAI turn detection mode, U3 Pro models only): AssemblyAI's model
                 controls turn endings using built-in turn detection.
                 - Uses AssemblyAI API defaults for all parameters (unless user explicitly sets them)
                 - Emits UserStarted/StoppedSpeakingFrame from STT
                 - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in AssemblyAI turn detection mode (vad_force_turn_endpoint=False). Only applies
-                when using AssemblyAI's built-in turn detection. Defaults to True.
+                when using AssemblyAI's built-in turn detection. Passed along to the
+                user turn strategies this service recommends, which own the
+                interruption; a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
@@ -433,9 +440,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not vad_force_turn_endpoint and not is_u3_pro:
             raise ValueError(
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
-                f"u3-rt-pro for SpeechStarted support. Either set "
+                f"a U3 Pro model for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {default_settings.model}, "
-                f"or use model='u3-rt-pro'."
+                f"or use model='universal-3-5-pro'."
             )
 
         if (
@@ -462,7 +469,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "https://www.assemblyai.com/docs/streaming/prompting"
             )
 
-        # continuous_partials and interruption_delay are u3-rt-pro-only.
+        # continuous_partials and interruption_delay are U3 Pro-only.
         # isinstance(int) narrows away None/NOT_GIVEN so the range check is type-safe.
         interruption_delay = default_settings.interruption_delay
         if isinstance(interruption_delay, int) and not (0 <= interruption_delay <= 1000):
@@ -470,11 +477,11 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if not is_u3_pro and isinstance(interruption_delay, int):
             logger.warning(
-                "interruption_delay is only supported by u3-rt-pro and will be ignored "
+                "interruption_delay is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
             )
 
-        # previous_context_n_turns is u3-rt-pro-only (context carryover). Valid
+        # previous_context_n_turns is U3 Pro-only (context carryover). Valid
         # range is [0, 100] (0 disables carryover entirely), matching the server.
         previous_context_n_turns = default_settings.previous_context_n_turns
         if isinstance(previous_context_n_turns, int) and not (0 <= previous_context_n_turns <= 100):
@@ -482,7 +489,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if not is_u3_pro and isinstance(previous_context_n_turns, int):
             logger.warning(
-                "previous_context_n_turns is only supported by u3-rt-pro and will be ignored "
+                "previous_context_n_turns is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
             )
 
@@ -587,7 +594,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         self._user_speaking = False
 
-        # Warn only once if update_agent_context is called on a non-u3-rt-pro
+        # Warn only once if update_agent_context is called on a non-U3 Pro
         # model (the observer would otherwise warn on every bot turn).
         self._agent_context_warned = False
 
@@ -604,7 +611,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         finals as fast as possible so Pipecat's smart turn analyzer can decide
         when the user is done speaking. VAD stop is the absolute ceiling.
 
-        u3-rt-pro:
+        U3 Pro models:
         - min_turn_silence defaults to 100ms (user can override)
         - max_turn_silence is ALWAYS set equal to min_turn_silence
           to avoid double turn detection (AssemblyAI + Pipecat both analyzing)
@@ -618,10 +625,10 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         Args:
             settings: The settings to configure in place.
-            is_u3_pro: Whether using u3-rt-pro model.
+            is_u3_pro: Whether using a U3 Pro model.
         """
         if is_u3_pro:
-            # u3-rt-pro: Synchronize max_turn_silence with min_turn_silence
+            # U3 Pro: Synchronize max_turn_silence with min_turn_silence
             min_silence = settings.min_turn_silence
             if min_silence is None:
                 min_silence = 100
@@ -655,15 +662,17 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Request external turn strategies in AssemblyAI's turn-detection mode.
 
         With ``vad_force_turn_endpoint=False`` AssemblyAI's model decides turn
-        endings and emits ``UserStarted/StoppedSpeakingFrame``, so the user
-        aggregator defers to those rather than running local VAD/smart-turn. In the
-        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT emits no turn
-        frames, so the defaults are left in place. Applied unless the user passed
+        endings and emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user
+        aggregator resolves those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT proposes no
+        turns, so the defaults are left in place. Applied unless the user passed
         their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -736,13 +745,13 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_codes=_prepare_language_codes(language_codes)
         )
 
-    async def start(self, frame: StartFrame):
-        """Start the speech-to-text service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Start frame to begin processing.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
@@ -788,16 +797,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames for VAD and metrics handling.
+        """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
 
         Args:
             frame: Frame to process.
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            pass
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
                 and self._websocket
@@ -805,7 +812,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -917,10 +923,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def update_agent_context(self, text: str):
         """Send the agent's latest spoken reply to AssemblyAI as carryover context.
 
-        Context carryover (u3-rt-pro only) gives the model a short memory of what
+        Context carryover (U3 Pro models only) gives the model a short memory of what
         the agent just said so it can better transcribe the user's reply — short
         answers, spelled-out entities (emails, IDs), and similar-sounding words.
-        No-op for non-u3-rt-pro models.
+        No-op for non-U3 Pro models.
 
         Args:
             text: The agent's spoken reply text. Clipped to ~1500 characters.
@@ -929,7 +935,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             if not self._agent_context_warned:
                 self._agent_context_warned = True
                 logger.warning(
-                    f"{self} update_agent_context is only supported by u3-rt-pro; "
+                    f"{self} update_agent_context is only supported by U3 Pro models; "
                     f"ignoring for model '{self._settings.model}'."
                 )
             return
@@ -1118,10 +1124,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _handle_speech_started(self, message: SpeechStartedMessage):
         """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
 
-        Broadcasts UserStartedSpeakingFrame to signal the start of user
-        speech, then pushes an interruption to cancel any bot audio.
-        SpeechStarted fires before any transcript arrives, so the turn
-        is cleanly started before any transcription frames are pushed.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption. SpeechStarted fires
+        before any transcript arrives, so the turn is cleanly started before any
+        transcription frames are pushed.
 
         Only applies when using AssemblyAI's built-in turn detection. When using
         Pipecat turn detection, VAD + smart turn analyzer handle interruptions.
@@ -1129,10 +1135,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._vad_force_turn_endpoint:
             return  # Pipecat mode: handled by aggregator
 
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):
@@ -1212,7 +1215,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
@@ -1226,7 +1228,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
         else:
             # --- AssemblyAI turn detection mode ---
-            # SpeechStarted always arrives before transcripts with u3-rt-pro,
+            # SpeechStarted always arrives before transcripts on U3 Pro models,
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
             if is_final_turn:
                 # AssemblyAI controls finalization, just mark as finalized
@@ -1244,11 +1246,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
-                # AAI is authoritative — emit UserStoppedSpeakingFrame immediately.
-                # broadcast_frame pushes downstream (same queue as TranscriptionFrame
-                # above, so ordering is preserved) and upstream.
-                await self.broadcast_frame(UserStoppedSpeakingFrame)
+                # Propose the turn stop immediately. broadcast_frame pushes
+                # downstream (same queue as TranscriptionFrame above, so ordering
+                # is preserved) and upstream.
+                await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
                 self._user_speaking = False
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
@@ -1261,3 +1262,383 @@ class AssemblyAISTTService(WebsocketSTTService):
                         message,
                     )
                 )
+
+
+# Default host for the Sync speech-to-text API.
+ASSEMBLYAI_SYNC_BASE_URL = "https://sync.assemblyai.com"
+
+# Sync API paths appended to the base URL.
+ASSEMBLYAI_SYNC_TRANSCRIBE_PATH = "/v1/transcribe"
+ASSEMBLYAI_SYNC_WARM_PATH = "/v1/warm"
+
+
+@dataclass
+class AssemblyAISyncSTTSettings(STTSettings):
+    """Settings for :class:`AssemblyAISyncSTTService`.
+
+    Parameters:
+        prompt: Custom transcription instruction prepended to the model's system
+            prompt. When set, ``language`` is ignored — state the language in the
+            prompt instead.
+        keyterms_prompt: Key terms or phrases to bias the decoder toward.
+        conversation_context: Prior turns from the same conversation, oldest
+            first, giving the model the surrounding dialogue for better continuity
+            and proper-noun consistency across a multi-turn conversation. A single
+            string is treated as one turn. Setting this explicitly turns off the
+            service's automatic context buffer and sends exactly this value; leave
+            it unset to let the service manage context (see ``max_context_turns``).
+    """
+
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms_prompt: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    conversation_context: str | list[str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
+class AssemblyAISyncSTTService(SegmentedSTTService):
+    """AssemblyAI Sync speech-to-text service.
+
+    Transcribes a complete speech segment in a single request/response against
+    AssemblyAI's Sync API, rather than holding open a streaming WebSocket. It
+    inherits from :class:`SegmentedSTTService`, which uses VAD events to buffer
+    each utterance and calls :meth:`run_stt` once per segment with the audio as a
+    WAV container. Each segment is POSTed as ``multipart/form-data`` and the
+    transcript is returned directly — no upload step, no polling, no session to
+    manage.
+
+    Audio segments must be at most 120 seconds; the API rejects longer ones. This
+    suits dictation, scribe, and voice-agent turns where the client detects
+    speech locally and transcribes each turn on demand.
+
+    When pre-warming is enabled (the default), the service opens the connection
+    as soon as the user starts speaking, so the transcription request skips the
+    DNS, TCP, and TLS handshake once the utterance ends. Call :meth:`warm`
+    directly to warm the connection at any other time.
+
+    Because the Sync API is stateless, the service also carries recent
+    conversation context automatically: it keeps a rolling buffer of the most
+    recent turns — user transcripts and the agent's replies together, in the
+    order spoken — and sends them as ``conversation_context`` on each request, so
+    the model transcribes each turn with the surrounding dialogue. Agent replies
+    are captured from the pipeline's assistant-turn frame, so this needs no
+    wiring in a standard voice-agent pipeline. Set ``max_context_turns=0`` to
+    disable it, or set ``conversation_context`` explicitly in ``settings`` to
+    supply the context yourself (that value is honored as-is).
+    """
+
+    Settings = AssemblyAISyncSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        aiohttp_session: aiohttp.ClientSession,
+        base_url: str = ASSEMBLYAI_SYNC_BASE_URL,
+        sample_rate: int | None = None,
+        enable_prewarming: bool = True,
+        max_context_turns: int = 5,
+        max_context_chars: int = 1500,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = ASSEMBLYAI_SYNC_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the AssemblyAI Sync STT service.
+
+        Args:
+            api_key: AssemblyAI API key for authentication.
+            aiohttp_session: aiohttp ClientSession for HTTP requests. Pre-warming
+                only helps when the warm and transcribe requests share this
+                session's connection pool, so keep one session for the service.
+            base_url: Base URL for the Sync API. Override for a data-residency
+                endpoint (e.g. ``https://sync.us.assemblyai.com`` or
+                ``https://sync.eu.assemblyai.com``).
+            sample_rate: Audio sample rate in Hz. If not provided, uses the
+                pipeline's rate.
+            enable_prewarming: Whether to open the connection when the user starts
+                speaking so the transcription request avoids the connection
+                handshake. Defaults to True.
+            max_context_turns: Number of prior conversation turns — user
+                transcripts and agent replies together, in one chronological
+                buffer — automatically carried as ``conversation_context`` on each
+                request, so the model transcribes each turn with the surrounding
+                dialogue. Set to 0 to disable automatic context. Ignored when
+                ``conversation_context`` is set explicitly in ``settings`` (that
+                value is honored as-is). Defaults to 5.
+            max_context_chars: Character budget for the same buffer; the oldest
+                turns are dropped first once either cap is exceeded. Defaults to
+                1500.
+            settings: Runtime-updatable settings.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in
+                seconds. Broadcast at pipeline start for downstream turn timing;
+                set it to your measured value.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
+        default_settings = self.Settings(
+            model="universal-3-5-pro",
+            language=Language.EN,
+            prompt=None,
+            keyterms_prompt=None,
+            conversation_context=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._session = aiohttp_session
+        self._base_url = base_url.rstrip("/")
+        self._enable_prewarming = enable_prewarming
+        self._warm_task: asyncio.Task | None = None
+
+        # Rolling buffer of prior turns (user + agent) carried as
+        # conversation_context (see _append_context_turn).
+        self._max_context_turns = max_context_turns
+        self._max_context_chars = max_context_chars
+        self._context_turns: list[str] = []
+
+    def can_generate_metrics(self) -> bool:
+        """Whether this service generates processing metrics.
+
+        Returns:
+            True. The Sync API issues a discrete request per segment, so its
+            duration is measured and reported.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Pipecat Language to an AssemblyAI language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The AssemblyAI language code (base ISO code).
+        """
+        return language_to_assemblyai_language(language)
+
+    def _model_header(self) -> dict[str, str]:
+        """The routing header both endpoints send."""
+        model = assert_given(self._settings.model)
+        assert model is not None
+        return {"X-AAI-Model": model}
+
+    def _request_headers(self) -> dict[str, str]:
+        return {"Authorization": self._api_key, **self._model_header()}
+
+    def _build_config(self) -> dict:
+        """Assemble the optional ``config`` part from the current settings."""
+        config: dict[str, Any] = {}
+
+        language = self._settings.language
+        if is_given(language) and language is not None:
+            # ``language_codes`` accepts a string or a list; a single
+            # language goes as a one-element list.
+            config["language_codes"] = [language]
+
+        prompt = self._settings.prompt
+        if is_given(prompt) and prompt is not None:
+            config["prompt"] = prompt
+
+        keyterms_prompt = self._settings.keyterms_prompt
+        if is_given(keyterms_prompt) and keyterms_prompt:
+            config["keyterms_prompt"] = list(keyterms_prompt)
+
+        if self._context_is_manual():
+            config["conversation_context"] = self._settings.conversation_context
+        elif self._context_turns:
+            config["conversation_context"] = list(self._context_turns)
+
+        return config
+
+    def _context_is_manual(self) -> bool:
+        """Whether conversation_context was supplied explicitly in settings."""
+        ctx = self._settings.conversation_context
+        return is_given(ctx) and bool(ctx)
+
+    def _append_context_turn(self, text: str) -> None:
+        """Append a completed turn (user or agent) to the rolling context buffer.
+
+        Both sides share one chronological buffer under a single turn/char cap,
+        matching how the model consumes context (it draws no distinction between
+        user and agent text). The oldest turns are evicted first once a cap is
+        exceeded. No-op when automatic context is disabled or a manual
+        conversation_context is set.
+        """
+        text = (text or "").strip()
+        if not text or self._max_context_turns <= 0 or self._context_is_manual():
+            return
+        self._context_turns.append(text)
+        while len(self._context_turns) > 1 and (
+            len(self._context_turns) > self._max_context_turns
+            or sum(len(t) for t in self._context_turns) > self._max_context_chars
+        ):
+            self._context_turns.pop(0)
+
+    async def start(self, frame: StartFrame):
+        """Start the service on an empty conversation context.
+
+        The buffer holds one conversation, so an instance reused for another
+        run starts it fresh.
+        """
+        await super().start(frame)
+        self._context_turns.clear()
+
+    async def _process_assistant_turn(self, text: str) -> None:
+        """Feed the agent's completed reply into the conversation context.
+
+        Called automatically by the base class when an assistant turn ends (an
+        ``LLMContextAssistantTurnFrame`` reaches the service). The reply is
+        appended to the same chronological buffer as user turns.
+        """
+        self._append_context_turn(text)
+
+    async def warm(self):
+        """Pre-warm the connection to the Sync API.
+
+        Establishes the connection (DNS, TCP, TLS) ahead of a transcription
+        request so the next :meth:`run_stt` starts uploading audio immediately.
+        Best-effort: failures are logged and swallowed, since a failed warm-up
+        only forfeits the latency saving. The warmed connection is reused only by
+        requests that share this service's aiohttp session and base URL.
+        """
+        url = f"{self._base_url}{ASSEMBLYAI_SYNC_WARM_PATH}"
+        try:
+            # Route the warm with the same model as the transcription so the
+            # opened connection lands on the right backend.
+            async with self._session.get(url, headers=self._model_header()) as response:
+                await response.read()
+        except Exception as e:
+            logger.debug(f"{self}: connection pre-warm failed (ignored): {e}")
+
+    async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+        await super()._handle_user_started_speaking(frame)
+        if self._enable_prewarming and (self._warm_task is None or self._warm_task.done()):
+            self._warm_task = self.create_task(self.warm())
+
+    async def _transcribe(self, audio: bytes) -> dict:
+        """POST an audio segment to the Sync API and return the parsed result.
+
+        Args:
+            audio: Raw audio bytes in WAV format (already converted by the base
+                class).
+
+        Returns:
+            The decoded JSON transcription result.
+
+        Raises:
+            aiohttp.ClientResponseError: If the API returns a non-200 status.
+        """
+        url = f"{self._base_url}{ASSEMBLYAI_SYNC_TRANSCRIBE_PATH}"
+
+        # The base class always hands run_stt a WAV container, so the audio part
+        # is always sent as audio/wav.
+        data = aiohttp.FormData()
+        data.add_field(
+            "audio",
+            io.BytesIO(audio),
+            filename="audio.wav",
+            content_type="audio/wav",
+        )
+        config = self._build_config()
+        if config:
+            data.add_field(
+                "config",
+                json.dumps(config),
+                content_type="application/json",
+            )
+
+        async with self._session.post(url, data=data, headers=self._request_headers()) as response:
+            if response.status != 200:
+                # The status rides on the exception so the framework can
+                # classify the failure: a rejected key leaves the service
+                # unusable, a rate limit or a server error does not.
+                raise aiohttp.ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=await self._error_detail(response),
+                )
+            return await response.json()
+
+    async def _error_detail(self, response: aiohttp.ClientResponse) -> str:
+        """Build a readable message from a non-200 response.
+
+        Errors arrive either as a problem-details body (``title``/``detail``)
+        or as ``{"error_code", "message"}``; surface whichever fields are
+        present, falling back to the raw body. The status is carried by the
+        exception this message goes on, so it isn't repeated here.
+        """
+        try:
+            body = await response.json(content_type=None)
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            fields = (
+                body.get("error_code"),
+                body.get("title"),
+                body.get("detail") or body.get("message"),
+            )
+            parts = [field for field in fields if field]
+            if parts:
+                return " - ".join(parts)
+        return await response.text()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: str | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        await self.stop_processing_metrics()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Transcribe an audio segment using the AssemblyAI Sync API.
+
+        Args:
+            audio: Raw audio bytes in WAV format (already converted by the base
+                class).
+
+        Yields:
+            Frame: A TranscriptionFrame with the transcribed text, or an
+            ErrorFrame on failure. Only non-empty transcriptions are yielded.
+        """
+        try:
+            await self.start_processing_metrics()
+
+            result = await self._transcribe(audio)
+
+            text = (result.get("text") or "").strip()
+            if text:
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
+                await self._handle_transcription(text, True, language)
+                logger.debug(f"Transcription: [{text}]")
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    language,
+                    result=result,
+                )
+                # Record this user turn for the next request's context. This
+                # request's config was already built, so an utterance never
+                # appears in its own context.
+                self._append_context_turn(text)
+        except Exception as e:
+            logger.error(f"{self}: error transcribing audio: {e}")
+            yield ErrorFrame(error=f"Sync transcription error: {e}", exception=e)
+
+    async def cleanup(self):
+        """Cancel any in-flight pre-warm task and clean up."""
+        if self._warm_task is not None and not self._warm_task.done():
+            await self.cancel_task(self._warm_task)
+        self._warm_task = None
+        await super().cleanup()

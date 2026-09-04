@@ -6,7 +6,6 @@
 
 """Krisp Instance manager for pipecat audio."""
 
-import atexit
 import os
 from threading import Lock
 
@@ -84,8 +83,28 @@ def int_to_krisp_frame_duration(frame_duration_ms: int):
     return KRISP_FRAME_DURATIONS[frame_duration_ms]
 
 
+# Krisp SDK switched its Python bindings from pybind11 to nanobind starting in
+# 1.11.0. Among other things, this changed the noise suppression level argument
+# from int to float and requires writable (not just readable) ndarray input.
+_NANOBIND_SDK_VERSION = (1, 11, 0)
+
+
+def krisp_sdk_uses_nanobind_bindings() -> bool:
+    """Whether the installed krisp_audio build uses nanobind bindings (>= 1.11.0)."""
+    version = krisp_audio.getVersion()
+    return (version.major, version.minor, version.patch) >= _NANOBIND_SDK_VERSION
+
+
 class KrispVivaSDKManager:
-    """Singleton manager for Krisp VIVA SDK with reference counting."""
+    """Singleton manager for Krisp VIVA SDK with reference counting.
+
+    The SDK's global state is shared by every Krisp session in the process, so it
+    is initialized once, on first use, and left up for the life of the process:
+    destroying it while any session is still alive leaves that session reading
+    freed memory, and there is no point in the process where every session is
+    known to be gone. The reference count tracks how many components hold the
+    SDK; it does not decide when to tear it down.
+    """
 
     _initialized = False
     _lock = Lock()
@@ -105,18 +124,19 @@ class KrispVivaSDKManager:
     def acquire(cls, api_key: str = ""):
         """Acquire a reference to the SDK (initializes if needed).
 
-        Call this when creating a filter instance.
+        Call this before creating Krisp sessions.
 
         Args:
             api_key: Krisp SDK API key. If empty, falls back to the
-                KRISP_VIVA_API_KEY environment variable.
+                KRISP_VIVA_API_KEY environment variable. Only the key of the
+                caller that initializes the SDK is used.
 
         Raises:
             Exception: If SDK initialization fails (propagated from krisp_audio)
         """
         with cls._lock:
-            # Initialize SDK on first acquire
-            if cls._reference_count == 0:
+            # Initialize the SDK once per process.
+            if not cls._initialized:
                 try:
                     key = api_key or os.environ.get("KRISP_VIVA_API_KEY", "")
                     try:
@@ -131,46 +151,35 @@ class KrispVivaSDKManager:
                     except TypeError:
                         # Old SDK signature (no license key)
                         krisp_audio.globalInit("", cls._log_callback, krisp_audio.LogLevel.Off)
-
-                    cls._initialized = True
-
-                    SDK_VERSION = krisp_audio.getVersion()
-                    logger.debug(
-                        f"Krisp Audio Python SDK initialized - Version: "
-                        f"{SDK_VERSION.major}.{SDK_VERSION.minor}.{SDK_VERSION.patch}"
-                    )
-
-                    # Register cleanup on program exit (failsafe)
-                    atexit.register(cls._force_cleanup)
-
                 except Exception as e:
-                    cls._initialized = False
                     logger.error(f"Krisp SDK initialization failed: {e}")
                     raise
+
+                # Set before anything else that could fail: a flag that claims the
+                # SDK is down while it is up would let a second globalInit()
+                # re-seat global state that live sessions still point at.
+                cls._initialized = True
+
+                SDK_VERSION = krisp_audio.getVersion()
+                logger.debug(
+                    f"Krisp Audio Python SDK initialized - Version: "
+                    f"{SDK_VERSION.major}.{SDK_VERSION.minor}.{SDK_VERSION.patch}"
+                )
 
             cls._reference_count += 1
             logger.debug(f"Krisp SDK reference count: {cls._reference_count}")
 
     @classmethod
     def release(cls):
-        """Release a reference to the SDK (destroys if last reference).
+        """Release a reference to the SDK.
 
-        Call this when destroying a filter instance.
+        Call this once the caller's Krisp sessions are gone. Releasing the last
+        reference does not tear the SDK down; see the class docstring.
         """
         with cls._lock:
             if cls._reference_count > 0:
                 cls._reference_count -= 1
                 logger.debug(f"Krisp SDK reference count: {cls._reference_count}")
-
-                # Destroy SDK when last reference is released
-                if cls._reference_count == 0 and cls._initialized:
-                    try:
-                        krisp_audio.globalDestroy()
-                        cls._initialized = False
-                        logger.debug("Krisp Audio SDK destroyed (all references released)")
-                    except Exception as e:
-                        logger.error(f"Error during Krisp SDK cleanup: {e}")
-                        cls._initialized = False
 
     @classmethod
     def get_reference_count(cls) -> int:
@@ -191,17 +200,3 @@ class KrispVivaSDKManager:
         """
         with cls._lock:
             return cls._initialized
-
-    @classmethod
-    def _force_cleanup(cls):
-        """Force cleanup on program exit (failsafe)."""
-        with cls._lock:
-            if cls._initialized:
-                try:
-                    logger.warning(
-                        f"Force cleaning up Krisp SDK at exit (ref count: {cls._reference_count})"
-                    )
-                    krisp_audio.globalDestroy()
-                    cls._initialized = False
-                except Exception as e:
-                    logger.error(f"Error during forced Krisp SDK cleanup: {e}")

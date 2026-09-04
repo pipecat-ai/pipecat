@@ -26,10 +26,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from hume import AsyncHumeClient
@@ -58,11 +59,15 @@ class HumeTTSSettings(TTSSettings):
         description: Natural-language acting directions (up to 100 characters).
         speed: Speaking-rate multiplier (0.5-2.0).
         trailing_silence: Seconds of silence to append at the end (0-5).
+        temperature: Sampling temperature for speech generation. Higher values increase
+            variation, lower values increase consistency. When unset, Hume applies its own
+            per-model default.
     """
 
-    description: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    trailing_silence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    description: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    trailing_silence: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class HumeTTSService(TTSService):
@@ -152,6 +157,7 @@ class HumeTTSService(TTSService):
             description=None,
             speed=None,
             trailing_silence=None,
+            temperature=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -338,12 +344,17 @@ class HumeTTSService(TTSService):
             # Track the duration of this utterance based on the last timestamp
             utterance_duration = 0.0
 
+            request_kwargs: dict[str, Any] = {}
+            if self._settings.temperature is not None:
+                request_kwargs["temperature"] = self._settings.temperature
+
             async for chunk in self._client.tts.synthesize_json_streaming(
                 utterances=[utterance],
                 format=pcm_fmt,
                 instant_mode=True,
                 version=version,
                 include_timestamp_types=["word"],  # Request word-level timestamps
+                **request_kwargs,
             ):
                 # Process audio chunks
                 audio_b64 = getattr(chunk, "audio", None)

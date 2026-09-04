@@ -6,7 +6,11 @@
 
 import unittest
 
-from pipecat.utils.string import match_endofsentence, parse_start_end_tags
+from pipecat.utils.string import (
+    longest_trailing_partial_match,
+    match_endofsentence,
+    parse_start_end_tags,
+)
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
@@ -272,6 +276,34 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             ("<a>", "</a>"),
             41,
         )
+
+
+class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_and_no_match(self):
+        assert longest_trailing_partial_match("", ["<a>"]) == 0
+        assert longest_trailing_partial_match("Hello", []) == 0
+        assert longest_trailing_partial_match("Hello", ["<a>"]) == 0
+
+    async def test_single_candidate(self):
+        assert longest_trailing_partial_match("Hello <", ["<think>"]) == 1
+        assert longest_trailing_partial_match("Hello <thin", ["<think>"]) == 5
+        # A complete candidate is not a partial match (proper prefixes only).
+        assert longest_trailing_partial_match("Hello <think>", ["<think>"]) == 0
+
+    async def test_text_shorter_than_candidate(self):
+        assert longest_trailing_partial_match("<th", ["<think>"]) == 3
+
+    async def test_multiple_candidates_longest_wins(self):
+        # "<te" matches "<test>" (3) over the shared "<t" prefix of "<think>" (2).
+        assert longest_trailing_partial_match("Hi <te", ["<think>", "<test>"]) == 3
+        assert longest_trailing_partial_match("Hi <th", ["<think>", "<test>"]) == 3
+        # Shared prefix alone matches both; length is the same either way.
+        assert longest_trailing_partial_match("Hi <t", ["<think>", "<test>"]) == 2
+        # Candidate order doesn't change the result.
+        assert longest_trailing_partial_match("Hi <te", ["<test>", "<think>"]) == 3
+
+    async def test_single_char_candidate_has_no_proper_prefix(self):
+        assert longest_trailing_partial_match("Hello <", ["<"]) == 0
 
 
 if __name__ == "__main__":

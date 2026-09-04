@@ -9,7 +9,7 @@
 Provides two STT services:
 
 - ``OpenAISTTService``: REST-based transcription using the Audio API
-  (Whisper / GPT-4o).
+  (Whisper / GPT transcription models).
 - ``OpenAIRealtimeSTTService``: WebSocket-based streaming transcription
   using the Realtime API in transcription-only mode.
 """
@@ -30,16 +30,15 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import (
@@ -47,8 +46,10 @@ from pipecat.services.whisper.base_stt import (
     Transcription,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 @dataclass
@@ -63,6 +64,10 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    With ``include_prob_metrics=True``, GPT transcription models report per-token
+    logprobs and Whisper models report per-segment logprobs. Diarization models
+    support neither, so they report no probabilities.
     """
 
     Settings = OpenAISTTSettings
@@ -84,7 +89,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         """Initialize OpenAI STT service.
 
         Args:
-            model: Model to use — either gpt-4o or Whisper.
+            model: Transcription model to use. Defaults to ``"gpt-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
@@ -119,7 +124,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         # --- 1. Hardcoded defaults ---
         _language = language or Language.EN
         default_settings = self.Settings(
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
             language=_language,
             prompt=None,
             temperature=None,
@@ -150,24 +155,39 @@ class OpenAISTTService(BaseWhisperSTTService):
             **kwargs,
         )
 
+        # Model already reported as unable to supply probabilities, so that
+        # warning is logged once per model rather than once per utterance.
+        self._prob_metrics_warned_model: str | None = None
+
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._settings.language is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
 
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self._settings.model,
+            "model": model,
             "language": self._settings.language,
         }
 
         if self._include_prob_metrics:
-            # GPT-4o-transcribe models only support logprobs (not verbose_json)
-            if self._settings.model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+            # GPT transcription models return logprobs alongside a "json" response;
+            # Whisper models carry per-segment logprobs in "verbose_json" instead.
+            # Diarization models support neither and reject the logprobs request.
+            if model.startswith("whisper"):
+                kwargs["response_format"] = "verbose_json"
+            elif "diarize" in model:
+                if self._prob_metrics_warned_model != model:
+                    self._prob_metrics_warned_model = model
+                    logger.warning(
+                        f"{self}: {model} does not support probability metrics; "
+                        "transcription results will carry no probability."
+                    )
+            else:
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]
-            else:
-                # Whisper models support verbose_json
-                kwargs["response_format"] = "verbose_json"
 
         if self._settings.prompt is not None:
             kwargs["prompt"] = self._settings.prompt
@@ -190,8 +210,8 @@ class OpenAIRealtimeSTTSettings(STTSettings):
             to disable.
     """
 
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    noise_reduction: Literal["near_field", "far_field"] | None | _NotGiven = field(
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noise_reduction: Literal["near_field", "far_field"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -211,10 +231,12 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     audio buffer so that the server begins transcription for the completed
     speech segment.
 
-    **Server-side VAD** (``turn_detection=None``): The OpenAI server performs voice-activity
-    detection. The service broadcasts ``UserStartedSpeakingFrame`` and
-    ``UserStoppedSpeakingFrame`` when the server detects speech boundaries.
-    Do **not** use a separate VAD processor in the pipeline in this mode.
+    **Server-side VAD** (``turn_detection={"type": "server_vad"}``): The OpenAI server
+    performs voice-activity detection. The service proposes turn boundaries when the
+    server detects them, and recommends the external user turn strategies that resolve
+    those proposals into turn frames. Do **not** use a separate VAD processor in the
+    pipeline in this mode. Requires a model that supports turn detection —
+    ``gpt-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
 
     Audio is sent as 24 kHz 16-bit mono PCM as required by the OpenAI Realtime
     API. If the pipeline runs at a different sample rate (e.g. 16 kHz for Silero
@@ -255,8 +277,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             api_key: OpenAI API key for authentication.
             model: Transcription model. For low-latency streaming
                 transcription, use ``"gpt-realtime-whisper"``. Other
-                supported transcription models include
-                ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
+                supported transcription models include ``"gpt-transcribe"``
+                and ``"gpt-live-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
@@ -280,9 +302,12 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
             turn_detection: Server-side VAD configuration. Defaults to
                 ``False`` (disabled), which relies on a local VAD
-                processor in the pipeline. Pass ``None`` to use server
-                defaults (``server_vad``), or a dict with custom
+                processor in the pipeline. Pass a dict to enable it — at
+                minimum ``{"type": "server_vad"}``, optionally with custom
                 settings (e.g. ``{"type": "server_vad", "threshold": 0.5}``).
+                Requires a model that supports turn detection; see ``model``.
+                ``None`` omits the field entirely, leaving the session's own
+                default in place.
             noise_reduction: Noise reduction mode. ``"near_field"`` for
                 close microphones, ``"far_field"`` for distant
                 microphones, or ``None`` to disable.
@@ -293,7 +318,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
-                turn detection is enabled. Defaults to True.
+                turn detection is enabled. Passed along to the user turn
+                strategies this service recommends, which own the interruption;
+                a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -391,6 +419,22 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when server-side VAD drives turns.
+
+        With server-side VAD enabled the OpenAI server detects speech boundaries
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. With ``turn_detection=False``
+        (the default) the server emits no VAD events and the defaults are left in
+        place. Applied unless the user passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._server_vad_enabled:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
+        return frame
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and send session update if needed.
 
@@ -403,21 +447,21 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
-        for field, previous_value in self._omit_unsupported_prompt(self._settings).items():
-            changed.setdefault(field, previous_value)
+        for field_name, previous_value in self._omit_unsupported_prompt(self._settings).items():
+            changed.setdefault(field_name, previous_value)
 
         if changed and self._session_ready:
             await self._send_session_update()
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -471,9 +515,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # Handle local VAD events when server-side VAD is disabled.
         if not self._server_vad_enabled:
-            if isinstance(frame, VADUserStartedSpeakingFrame):
-                await self.start_processing_metrics()
-            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
                 await self._commit_audio_buffer()
 
     # ------------------------------------------------------------------
@@ -699,8 +741,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
 
-        For ``gpt-realtime-whisper``, ``gpt-4o-transcribe``, and
-        ``gpt-4o-mini-transcribe``, deltas contain low-latency streaming
+        For ``gpt-realtime-whisper``, ``gpt-live-transcribe``, and
+        ``gpt-transcribe``, deltas contain low-latency streaming
         partial text.
 
         Args:
@@ -740,7 +782,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription_trace(transcript, True)
-            await self.stop_processing_metrics()
 
     @traced_stt
     async def _handle_transcription_trace(
@@ -761,29 +802,26 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_speech_started(self, evt: dict):
         """Handle server-side VAD speech start.
 
-        Broadcasts ``UserStartedSpeakingFrame`` and optionally triggers
-        interruption of current bot output.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption.
 
         Args:
             evt: The ``input_audio_buffer.speech_started`` event.
         """
         logger.debug("Server VAD: speech started")
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_speech_stopped(self, evt: dict):
         """Handle server-side VAD speech stop.
 
-        Broadcasts ``UserStoppedSpeakingFrame``. The audio buffer is
-        automatically committed by the server when VAD is enabled.
+        Proposes a turn stop. The audio buffer is automatically committed by the
+        server when VAD is enabled.
 
         Args:
             evt: The ``input_audio_buffer.speech_stopped`` event.
         """
         logger.debug("Server VAD: speech stopped")
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_transcription_failed(self, evt: dict):
         """Handle a transcription failure for a speech segment.

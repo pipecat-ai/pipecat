@@ -288,8 +288,11 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(strategy._sdk_acquired)
 
     def test_init_raises_if_no_model_path(self):
-        with self.assertRaises(ValueError):
-            KrispVivaIPUserTurnStartStrategy(api_key="test-key")
+        # Cleared, since the constructor falls back to KRISP_VIVA_IP_MODEL_PATH
+        # and an ambient value would satisfy it.
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                KrispVivaIPUserTurnStartStrategy(api_key="test-key")
 
     def test_init_raises_if_wrong_extension(self):
         with self.assertRaises(ValueError):

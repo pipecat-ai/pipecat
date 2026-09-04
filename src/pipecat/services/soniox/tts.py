@@ -11,7 +11,7 @@ Text-to-Speech API. It streams text to the server incrementally and receives
 audio back as base64-encoded chunks, multiplexed across multiple concurrent
 streams by ``stream_id``.
 
-Soniox API reference: https://soniox.com/docs/tts/api-reference/websocket-api
+Soniox API reference: https://soniox.com/docs/api-reference/tts/websocket-api
 """
 
 import asyncio
@@ -30,14 +30,15 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 # Soniox idle timeout is 20-30s; keepalive cadence must stay well inside it.
 KEEPALIVE_INTERVAL_SECONDS = 20
@@ -80,6 +81,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.HR: "hr",
         Language.HU: "hu",
         Language.ID: "id",
+        Language.IS: "is",
         Language.IT: "it",
         Language.JA: "ja",
         Language.KK: "kk",
@@ -102,6 +104,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.SL: "sl",
         Language.SQ: "sq",
         Language.SR: "sr",
+        Language.SU: "su",
         Language.SV: "sv",
         Language.SW: "sw",
         Language.TA: "ta",
@@ -111,6 +114,7 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
         Language.TR: "tr",
         Language.UK: "uk",
         Language.UR: "ur",
+        Language.UZ: "uz",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
@@ -121,19 +125,25 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
 class SonioxTTSSettings(TTSSettings):
     """Settings for SonioxTTSService.
 
-    ``voice``, ``model``, ``language``, and ``speed`` travel in the per-stream
-    config message, so changing any of them does not require reconnecting the
-    WebSocket. The current context is flushed so the next stream opens with the
-    new values.
+    ``voice``, ``model``, ``language``, ``speed``, and ``reduce_silence`` travel
+    in the per-stream config message, so changing any of them does not require
+    reconnecting the WebSocket. The current context is flushed so the next
+    stream opens with the new values.
 
     Parameters:
         voice: Voice name (e.g. ``"Adrian"``) or the UUID of a cloned voice in
             the project owning the API key.
         speed: Speech rate multiplier in the range 0.7-1.3. ``None`` leaves it
             unset and uses the Soniox server default (1.0).
+        reduce_silence: Shorten the pauses between words so the speech flows
+            more tightly, without changing how fast the words themselves are
+            spoken. Only models whose catalogue entry reports
+            ``supports_silence_reduction`` accept it. ``None`` leaves it unset
+            and uses the Soniox server default (false).
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduce_silence: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):
@@ -146,7 +156,7 @@ class SonioxTTSService(WebsocketTTSService):
     ``stream_id``). Supports up to 5 concurrent streams per connection.
 
     For complete API documentation, see:
-    https://soniox.com/docs/tts/api-reference/websocket-api
+    https://soniox.com/docs/api-reference/tts/websocket-api
     """
 
     Settings = SonioxTTSSettings
@@ -182,10 +192,11 @@ class SonioxTTSService(WebsocketTTSService):
         """
         # Initialize default_settings
         default_settings = self.Settings(
-            model="tts-rt-v1",
-            voice="Adrian",
+            model="tts-rt-v2",
+            voice="Bryce",
             language=Language.EN,
             speed=None,
+            reduce_silence=None,
         )
 
         # Settings delta (canonical API, always wins)
@@ -243,13 +254,13 @@ class SonioxTTSService(WebsocketTTSService):
         """
         return language_to_soniox_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Soniox TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self._audio_format.startswith("pcm_") and self.sample_rate not in VALID_SAMPLE_RATES:
             logger.warning(
                 f"{self}: sample_rate={self.sample_rate} is not in Soniox supported rates "
@@ -358,7 +369,17 @@ class SonioxTTSService(WebsocketTTSService):
         if not changed:
             return changed
 
-        if changed.keys() & {"voice", "model", "language", "speed"}:
+        if changed.keys() & {"voice", "model", "language", "speed", "reduce_silence"}:
+            if self._turn_context_id:
+                # Finalize the old context's still-pending sentence so its
+                # already-heard prefix still emits progress frames (mirrors the
+                # LLMFullResponseEnd / TTSSpeak close paths). A mid-sentence
+                # settings change would otherwise abandon it before promotion,
+                # dropping that prefix from the transcript.
+                await self._push_sequencer_frames(
+                    await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                    self._turn_context_id,
+                )
             if self._turn_context_id and self.audio_context_available(self._turn_context_id):
                 await self.flush_audio(context_id=self._turn_context_id)
             # Assign a new turn context ID so subsequent sentences in this turn
@@ -441,6 +462,8 @@ class SonioxTTSService(WebsocketTTSService):
             config["language"] = s.language
         if s.speed is not None:
             config["speed"] = s.speed
+        if s.reduce_silence is not None:
+            config["reduce_silence"] = s.reduce_silence
         # Character-level timestamps drive the word-aligned TTSTextFrames.
         config["return_timestamps"] = True
         if self._audio_format.startswith("pcm_"):

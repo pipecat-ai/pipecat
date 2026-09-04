@@ -6,20 +6,46 @@
 
 """DeepSeek LLM service implementation using OpenAI-compatible interface."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+
+
+class DeepSeekThinkingConfig(BaseModel):
+    """Configuration for thinking.
+
+    Parameters:
+        type: Thinking mode. DeepSeek's V4 models think before answering unless
+            "disabled" turns it off, which for real-time voice cuts the time to
+            the first answer token.
+    """
+
+    # `| str` keeps the field usable if DeepSeek adds further modes.
+    type: Literal["enabled", "disabled"] | str
 
 
 @dataclass
 class DeepSeekLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for DeepSeekLLMService."""
+    """Settings for DeepSeekLLMService.
 
-    pass
+    Parameters:
+        thinking: Thinking mode configuration. When unset, DeepSeek's own
+            default applies: thinking enabled at "high" reasoning effort.
+    """
+
+    thinking: DeepSeekThinkingConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    def __post_init__(self):
+        """Coerce a plain ``thinking`` dict to a :class:`DeepSeekThinkingConfig`."""
+        if isinstance(self.thinking, dict):
+            self.thinking = DeepSeekThinkingConfig(**self.thinking)
 
 
 class DeepSeekLLMService(OpenAILLMService):
@@ -34,6 +60,7 @@ class DeepSeekLLMService(OpenAILLMService):
     supports_developer_role = False
 
     Settings = DeepSeekLLMSettings
+    ThinkingConfig = DeepSeekThinkingConfig
     _settings: Settings
 
     def __init__(
@@ -50,7 +77,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-chat".
+            model: The model identifier to use. Defaults to "deepseek-v4-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -61,7 +88,7 @@ class DeepSeekLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="deepseek-chat")
+        default_settings = self.Settings(model="deepseek-v4-flash", thinking=None)
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -113,6 +140,12 @@ class DeepSeekLLMService(OpenAILLMService):
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
         }
+
+        # `thinking` is DeepSeek's own field, so it travels in the OpenAI
+        # client's `extra_body` rather than as a client keyword argument.
+        thinking = assert_given(self._settings.thinking)
+        if thinking:
+            params["extra_body"] = {"thinking": thinking.model_dump(exclude_none=True)}
 
         # Messages, tools, tool_choice
         params.update(params_from_context)

@@ -11,9 +11,9 @@ was speaking (or about to start speaking) for the turn being interrupted. It
 tracks this with two flags:
 
 - ``_bot_speaking`` (on the base TTSService): true only once BotStartedSpeakingFrame
-  confirms the output transport actually received audio; also gates
-  TTSService's pause watchdog (see test_no_spurious_watchdog_on_long_streaming_turn
-  and test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).
+  confirms the output transport actually received audio (see
+  test_no_early_resume_on_long_streaming_turn and
+  test_no_deadlock_on_zero_audio_context_completion in test_tts_frame_ordering.py).
 - ``_tts_started`` (InterruptibleTTSService only): true from the moment
   run_tts is invoked (TTSStartedFrame pushed) until consumed by an
   interruption, or cleared by BotStoppedSpeakingFrame (turn ended normally) or
@@ -23,11 +23,12 @@ tracks this with two flags:
 
 These are deliberately separate: folding _tts_started's early, unconfirmed
 signal into _bot_speaking would let a turn that produces zero audio look
-"confirmed" and suppress the pause watchdog.
+"confirmed", leaving nothing to lift the pause it took.
 """
 
 import unittest
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -35,7 +36,7 @@ import pytest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    ErrorFrame,
+    DataFrame,
     Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -49,6 +50,13 @@ from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 
 _SAMPLE_RATE = 16000
+
+
+@dataclass
+class MarkerFrame(DataFrame):
+    """Marks how far downstream processing has got."""
+
+    label: str = ""
 
 
 class FakeInterruptibleTTSService(InterruptibleTTSService):
@@ -169,9 +177,9 @@ async def test_tts_started_cleared_on_new_turn():
     """_tts_started must not leak into a new turn.
 
     Models a turn that invoked run_tts (TTSStartedFrame) but never got a
-    BotStartedSpeakingFrame or BotStoppedSpeakingFrame — e.g. force-resumed by
-    TTSService's own pause watchdog after a zero-audio completion, so nothing
-    ever clears _tts_started via the normal BotStoppedSpeakingFrame path.
+    BotStartedSpeakingFrame or BotStoppedSpeakingFrame — a turn that completed
+    with no audio, say — so nothing ever clears _tts_started via the normal
+    BotStoppedSpeakingFrame path.
     Without the LLMFullResponseStartFrame reset, an interruption during the
     *next* turn (before it has invoked run_tts itself) would incorrectly
     reconnect because of the stale flag.
@@ -203,30 +211,22 @@ async def test_tts_started_cleared_on_new_turn():
 
 
 @pytest.mark.asyncio
-async def test_pause_watchdog_not_masked_by_early_tts_started_marker():
-    """Regression test: TTSStartedFrame must not suppress TTSService's pause
-    watchdog for InterruptibleTTSService subclasses that combine it with
-    pause_frame_processing=True (e.g. DeepgramFluxTTSService, the deprecated
-    RimeNonJsonTTSService).
+async def test_silent_turn_resumes_frame_processing():
+    """A turn that plays nothing must not leave frame processing paused for an
+    InterruptibleTTSService subclass that combines it with
+    pause_frame_processing=True (e.g. the deprecated RimeNonJsonTTSService).
 
-    Before _tts_started was split out from _bot_speaking, InterruptibleTTSService's
-    push_frame set _bot_speaking = True on every TTSStartedFrame — which fed
-    straight into TTSService._maybe_pause_frame_processing()'s watchdog-skip
-    check, so a turn that completed with zero audio would look "confirmed"
-    and the watchdog would never arm, reintroducing the pipeline-hang bug this
-    whole mechanism exists to fix.
-
-    Here, a context completes (TTSStoppedFrame) with zero TTSAudioRawFrames
-    and no BotStartedSpeakingFrame/BotStoppedSpeakingFrame ever arrives (as in
-    production, since the output transport never receives audio to react to).
-    The watchdog must still force-resume.
+    A context completes (TTSStoppedFrame) with zero TTSAudioRawFrames, and no
+    BotStartedSpeakingFrame/BotStoppedSpeakingFrame ever arrives — as in
+    production, where the output transport never receives audio to react to.
+    Whether the pause is taken at all depends on how long the provider holds
+    the context open, so this asserts only that the pipeline keeps moving.
     """
 
     class FakeInterruptiblePauseTTSService(FakeInterruptibleTTSService):
         def __init__(self, **kwargs):
             super().__init__(
                 pause_frame_processing=True,
-                pause_watchdog_timeout_s=0.2,
                 **kwargs,
             )
 
@@ -247,16 +247,16 @@ async def test_pause_watchdog_not_masked_by_early_tts_started_marker():
         LLMFullResponseStartFrame(),
         TextFrame(text="Hello."),
         LLMFullResponseEndFrame(),
-        SleepFrame(sleep=0.4),  # longer than pause_watchdog_timeout_s=0.2
+        SleepFrame(sleep=0.4),  # let the silent context complete
+        MarkerFrame(label="after_silence"),
     ]
 
-    down, up = await run_test(tts, frames_to_send=frames_to_send)
+    down, _ = await run_test(tts, frames_to_send=frames_to_send)
 
-    error_frames = [f for f in up if isinstance(f, ErrorFrame)]
-    assert error_frames, (
-        "Expected the pause watchdog to force-resume and report a non-fatal "
-        "ErrorFrame after a zero-audio completion; none was seen, meaning "
-        "TTSStartedFrame's early marker masked the watchdog"
+    markers = [f for f in down if isinstance(f, MarkerFrame)]
+    assert any(f.label == "after_silence" for f in markers), (
+        "Frame processing stayed paused after a zero-audio completion, meaning "
+        "TTSStartedFrame's early marker masked both recoveries"
     )
 
 

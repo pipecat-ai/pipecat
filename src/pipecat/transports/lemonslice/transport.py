@@ -43,6 +43,7 @@ from pipecat.transports.daily.transport import (
     DailyTransportClient,
 )
 from pipecat.transports.lemonslice.api import LemonSliceApi
+from pipecat.utils.shared import acquires, releases
 
 
 class LemonSliceNewSessionRequest(BaseModel):
@@ -134,7 +135,7 @@ class LemonSliceTransportClient:
         self,
         *,
         bot_name: str,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         callbacks: LemonSliceCallbacks,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
@@ -150,6 +151,7 @@ class LemonSliceTransportClient:
             session_request: Session creation parameters.
             session: The aiohttp session for making async HTTP requests.
         """
+        params = params or LemonSliceParams()
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
         if session_request is None:
@@ -184,15 +186,13 @@ class LemonSliceTransportClient:
         self._control_url = response["control_url"]
         return response["room_url"]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._session_id is not None:
-            logger.debug(f"Session ID already defined: {self._session_id}")
-            return
         try:
             room_url = await self._initialize()
             daily_callbacks = DailyCallbacks(
@@ -241,6 +241,7 @@ class LemonSliceTransportClient:
             await self._end_session()
             raise
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources."""
         try:
@@ -286,11 +287,16 @@ class LemonSliceTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
-        await self._daily_transport_client.start(frame)
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.leave()
         await self._end_session()
 
@@ -311,6 +317,9 @@ class LemonSliceTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -332,6 +341,9 @@ class LemonSliceTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -356,6 +368,10 @@ class LemonSliceTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.out_sample_rate
 
     @property
@@ -365,6 +381,10 @@ class LemonSliceTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:
@@ -463,8 +483,6 @@ class LemonSliceInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -487,11 +505,6 @@ class LemonSliceInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
         await self.set_transport_ready(frame)
@@ -573,8 +586,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
 
@@ -599,11 +610,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
 
@@ -729,7 +735,7 @@ class LemonSliceTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
     ):
@@ -745,6 +751,7 @@ class LemonSliceTransport(BaseTransport):
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
+        params = params or LemonSliceParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 

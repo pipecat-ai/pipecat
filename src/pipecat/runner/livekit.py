@@ -84,6 +84,49 @@ def generate_token_with_agent(
     return token.to_jwt()
 
 
+def livekit_credentials() -> tuple[str, str, str]:
+    """Return ``(url, api_key, api_secret)`` from the environment.
+
+    Raises:
+        Exception: If ``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, or ``LIVEKIT_API_SECRET``
+            is not set in the environment.
+    """
+    url = os.getenv("LIVEKIT_URL")
+    api_key = os.getenv("LIVEKIT_API_KEY")
+    api_secret = os.getenv("LIVEKIT_API_SECRET")
+    if not url or not api_key or not api_secret:
+        raise Exception(
+            "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set in environment variables."
+        )
+    return url, api_key, api_secret
+
+
+def generate_session_tokens(
+    room_name: str, session_id: str, api_key: str, api_secret: str
+) -> tuple[str, str]:
+    """Mint distinct agent/user tokens for a session.
+
+    Identities are suffixed with the session id so concurrent sessions sharing
+    a room (e.g. a fixed ``LIVEKIT_ROOM_NAME``) don't collide — LiveKit evicts
+    the earlier connection when a new one joins with the same identity.
+
+    Args:
+        room_name: Name of the LiveKit room.
+        session_id: Unique id for this session; used to suffix participant identities.
+        api_key: LiveKit API key.
+        api_secret: LiveKit API secret.
+
+    Returns:
+        ``(agent_token, user_token)``, for the bot and the caller respectively.
+    """
+    suffix = session_id[:8]
+    agent_token = generate_token_with_agent(
+        room_name, f"Pipecat Agent-{suffix}", api_key, api_secret
+    )
+    user_token = generate_token(room_name, f"User-{suffix}", api_key, api_secret)
+    return agent_token, user_token
+
+
 async def configure():
     """Configure LiveKit room URL and token from arguments or environment.
 

@@ -39,13 +39,14 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
-    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic
+    from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
+    from anthropic import APITimeoutError, AsyncAnthropic
     from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -53,23 +54,50 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+# The first Sonnet generation with adaptive thinking on when a request omits
+# ``thinking``. Earlier Sonnets, and every Haiku, have thinking off unless asked.
+_SONNET_THINKS_BY_DEFAULT_FROM = 5
+
+
+def _sonnet_generation(model: str) -> int | None:
+    """The generation of a Sonnet model id, or ``None`` for any other model.
+
+    Searched rather than anchored because the service also takes Bedrock and
+    Vertex clients, whose ids prefix the name (``anthropic.claude-sonnet-5``).
+    Pre-4 ids such as ``claude-3-5-sonnet-20241022`` put the generation before
+    the name and don't match; they don't think either.
+    """
+    match = re.search(r"sonnet-(\d{1,2})(?!\d)", model.lower())
+    return int(match.group(1)) if match else None
+
+
 class AnthropicThinkingConfig(BaseModel):
-    """Configuration for extended thinking.
+    """Configuration for thinking.
 
     Parameters:
-        type: Type of thinking mode (currently only "enabled" or "disabled").
+        type: Thinking mode. "adaptive" lets the model decide when and how deeply
+            to think; prefer it. "enabled" is legacy manual thinking, sized by
+            ``budget_tokens``: Claude 4.7 and later reject it, and Claude 4.5 and
+            earlier accept only it. "disabled" turns thinking off.
         budget_tokens: Maximum number of tokens for thinking.
             With today's models, the minimum is 1024.
-            Currently required when type is "enabled", not allowed when "disabled".
+            Required when type is "enabled", not allowed otherwise.
+        display: How thinking text comes back: "summarized" for readable
+            thinking, which is what :class:`~pipecat.frames.frames.LLMThoughtTextFrame`
+            carries, or "omitted" for thinking blocks whose text is empty. Claude
+            4.7 and later default to "omitted", so set "summarized" there to keep
+            those frames carrying text. Not allowed when type is "disabled".
     """
 
     # Why `| str` here? To not break compatibility in case Anthropic adds
     # more types in the future.
-    type: Literal["enabled", "disabled"] | str
+    type: Literal["adaptive", "enabled", "disabled"] | str
 
     # No client-side validation on budget_tokens — we let the server
     # enforce the rules so we stay forward-compatible if they change.
     budget_tokens: int | None = None
+
+    display: Literal["summarized", "omitted"] | str | None = None
 
 
 @dataclass
@@ -78,20 +106,23 @@ class AnthropicLLMSettings(LLMSettings):
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.
-        thinking: Extended thinking configuration.
+        thinking: Thinking configuration. If this is not provided, Pipecat
+            disables thinking on Sonnet 5 and later, which otherwise decide
+            per request whether to think, to reduce latency; Opus and Fable
+            are left at Anthropic's default.
     """
 
-    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    # Override inherited LLMSettings fields to also accept anthropic's NotGiven
-    # sentinel. The service stores anthropic's NOT_GIVEN in these fields so
-    # they can be passed through unchanged to the AsyncAnthropic client.
-    temperature: float | None | _NotGiven | AnthropicNotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
+    enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    # Override inherited LLMSettings fields to also accept the Anthropic SDK's
+    # sentinel, which the service stores here so these fields can be passed
+    # through unchanged to the AsyncAnthropic client.
+    temperature: float | None | NotGiven | AnthropicNotGiven = field(
+        default_factory=lambda: NOT_GIVEN
     )
-    top_k: int | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    top_p: float | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven, AnthropicNotGiven] = field(
-        default_factory=lambda: _NOT_GIVEN
+    top_k: int | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | NotGiven | AnthropicNotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: Union["AnthropicLLMService.ThinkingConfig", NotGiven, AnthropicNotGiven] = field(
+        default_factory=lambda: NOT_GIVEN
     )
 
     @classmethod
@@ -144,17 +175,27 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             thinking: Extended thinking configuration.
                 Enabling extended thinking causes the model to spend more time "thinking" before responding.
                 It also causes this service to emit LLMThinking*Frames during response generation.
-                Extended thinking is disabled by default.
+                If this is not provided, Pipecat disables thinking on Sonnet 5 and later, which
+                otherwise decide per request whether to think, to reduce latency; Opus and
+                Fable are left at Anthropic's default.
             extra: Additional parameters to pass to the API.
         """
 
+        # These fields declare the caller-facing type but default to anthropic's
+        # NOT_GIVEN sentinel, which the declaration predates.
         enable_prompt_caching: bool | None = None
         max_tokens: int | None = Field(default_factory=lambda: 4096, ge=1)
-        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        top_k: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
-            default_factory=lambda: NOT_GIVEN
+        temperature: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0.0, le=1.0
+        )
+        top_k: int | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0
+        )
+        top_p: float | None = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN, ge=0.0, le=1.0
+        )
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(  # pyright: ignore[reportAssignmentType]
+            default_factory=lambda: ANTHROPIC_NOT_GIVEN
         )
         extra: dict[str, Any] | None = Field(default_factory=dict)
 
@@ -200,15 +241,15 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             system_instruction=None,
             max_tokens=4096,
             enable_prompt_caching=False,
-            temperature=NOT_GIVEN,
-            top_k=NOT_GIVEN,
-            top_p=NOT_GIVEN,
+            temperature=ANTHROPIC_NOT_GIVEN,
+            top_k=ANTHROPIC_NOT_GIVEN,
+            top_p=ANTHROPIC_NOT_GIVEN,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            thinking=NOT_GIVEN,
+            thinking=ANTHROPIC_NOT_GIVEN,
             extra={},
         )
 
@@ -225,7 +266,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 default_settings.temperature = params.temperature
                 default_settings.top_k = params.top_k
                 default_settings.top_p = params.top_p
-                default_settings.thinking = params.thinking
+                if params.thinking is not None:
+                    default_settings.thinking = params.thinking
                 if isinstance(params.extra, dict):
                     default_settings.extra = params.extra
                 if params.enable_prompt_caching is not None:
@@ -277,6 +319,28 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             response = await api_call(**params)
             return response
 
+    def _maybe_disable_thinking(self, params: dict[str, Any]):
+        """Turn thinking off by default on Sonnet models where it is on unless told not to.
+
+        Sonnet 5 and later run adaptive thinking whenever the request omits
+        ``thinking``, which for real-time voice can add seconds before the first
+        answer token, so when the caller hasn't configured thinking, request
+        ``{"type": "disabled"}``. We only do this for the Sonnet line,
+        Anthropic's speed tier: Opus and Fable are left at the provider
+        default, since choosing one is a decision to reason. Mirrors Gemini's
+        ``_maybe_unset_thinking_budget``, which does the same for the Flash
+        line.
+
+        Args:
+            params: The request params dict (modified in place).
+        """
+        if "thinking" in params:
+            return
+        model = assert_given(self._settings.model)
+        generation = _sonnet_generation(model or "")
+        if generation is not None and generation >= _SONNET_THINKS_BY_DEFAULT_FROM:
+            params["thinking"] = {"type": "disabled"}
+
     async def run_inference(
         self,
         context: LLMContext,
@@ -296,7 +360,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             The LLM's response as a string, or None if no response is generated.
         """
         messages = []
-        system = NOT_GIVEN
+        system = ANTHROPIC_NOT_GIVEN
         tools = []
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
@@ -330,6 +394,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             params["thinking"] = thinking.model_dump(exclude_unset=True)
 
         params.update(self._settings.extra)
+
+        # Applied last, so an explicit thinking config from the settings or from
+        # extra wins over the low-latency default.
+        self._maybe_disable_thinking(params)
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
@@ -417,14 +485,16 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             params.update(self._settings.extra)
 
+            # Applied last, so an explicit thinking config from the settings or from
+            # extra wins over the low-latency default.
+            self._maybe_disable_thinking(params)
+
             # "Interleaved thinking" needed to allow thinking between sequences
             # of function calls, when extended thinking is enabled.
             # Note that this requires us to use `client.beta`, below.
             params.update({"betas": ["interleaved-thinking-2025-05-14"]})
 
             response = await self._create_message_stream(self._client.beta.messages.create, params)
-
-            await self.stop_ttfb_metrics()
 
             # Function calling
             tool_use_block = None
@@ -433,6 +503,11 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             function_calls = []
             async for event in response:
                 # Aggregate streaming content, create frames, trigger events
+
+                # The events that open the stream (message_start, ping) carry no
+                # model output, so TTFB ends at the first content block.
+                if event.type in ("content_block_start", "content_block_delta"):
+                    await self.stop_ttfb_metrics()
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
@@ -449,6 +524,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
+                        # A turn that only calls tools produces no answer text, so
+                        # the call itself is what the caller gets and TTFAT ends
+                        # here rather than going unmeasured.
+                        await self.stop_ttfat_metrics()
                         tool_use_block = event.content_block
                         json_accumulator = ""
                     elif event.content_block.type == "thinking":
@@ -512,14 +591,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         else 0
                     )
                     logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
-                    total_input_tokens = (
-                        prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
-                    )
-                    if total_input_tokens >= 1024:
-                        if hasattr(
-                            context, "turns_above_cache_threshold"
-                        ):  # LLMContext doesn't have this attribute
-                            context.turns_above_cache_threshold += 1
 
             await self.run_function_calls(function_calls)
 

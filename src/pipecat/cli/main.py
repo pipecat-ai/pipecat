@@ -29,10 +29,14 @@ _INSTALL_HINT = (
     '        uv pip install "pipecat-ai[cli]"      # or: pip install "pipecat-ai[cli]"\n'
 )
 
-# Official optional sub-CLIs. Each ships as a separate plugin package that registers
-# a Typer app under the ``pipecat_cli.extensions`` group. We list them in ``--help``
-# even when they're not installed (as stubs) so they're discoverable, and the stub
-# prints how to enable the plugin. Only first-party plugins belong here.
+# Official sub-CLIs the user must install themselves. Each ships as a separate plugin
+# package that registers a Typer app under the ``pipecat_cli.extensions`` group. We list
+# them in ``--help`` even when they're not installed (as stubs) so they're discoverable,
+# and the stub prints how to enable the plugin.
+#
+# `context-hub` is deliberately absent: it ships with the `cli` extra, so it mounts from
+# its entry point like any installed plugin and a stub advertising an install step would
+# be describing one that doesn't exist.
 _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
     "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
 }
@@ -171,7 +175,15 @@ def _build_app():
         app.command(
             cmd_name,
             help=f"{help_text} (requires {package})",
-            context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+            # An empty help_option_names lets `--help` reach the stub too. Otherwise
+            # `pipecat <plugin> --help` — the natural thing to type after spotting the
+            # command in `pipecat --help` — renders an empty options panel and says
+            # nothing about installing it, while every other invocation explains.
+            context_settings={
+                "ignore_unknown_options": True,
+                "allow_extra_args": True,
+                "help_option_names": [],
+            },
         )(_make_extension_stub(cmd_name, package))
 
     def version_callback(value: bool):
@@ -211,6 +223,24 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _warn_about_stale_hub_index():
+    """Print a one-line notice when the local Context Hub index needs a refresh.
+
+    A stale index is invisible until a coding agent cites an API that has since
+    changed, so it is worth surfacing on the way past. Silent unless an index
+    exists, written to stderr so it never lands in parsed stdout, and swallowed
+    on any failure — a hint must not break the command the user asked for.
+    """
+    try:
+        from pipecat.cli.hub_status import freshness_warning
+
+        warning = freshness_warning()
+    except Exception:
+        return
+    if warning:
+        print(f"⚠ {warning}", file=sys.stderr)
+
+
 def run():
     """Console-script entry point; degrades gracefully when the ``cli`` extra is absent."""
     try:
@@ -218,6 +248,10 @@ def run():
     except ImportError:
         print(_INSTALL_HINT, file=sys.stderr)
         raise SystemExit(1)
+    # Here rather than in the group callback: click answers a bare `--help`
+    # eagerly, without ever invoking the callback, so a check placed there would
+    # miss it. This runs for every invocation of the console script.
+    _warn_about_stale_hub_index()
     app()
 
 

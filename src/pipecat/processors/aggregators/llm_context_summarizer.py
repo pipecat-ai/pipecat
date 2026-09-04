@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     LLMSummarizeContextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
@@ -122,28 +122,19 @@ class LLMContextSummarizer(BaseObject):
         self._auto_config = config or LLMAutoContextSummarizationConfig()
         self._auto_trigger = auto_trigger
 
-        self._task_manager: BaseTaskManager | None = None
-
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
 
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
 
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} context summarizer was not properly setup")
-        return self._task_manager
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the summarizer with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the summarizer.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        self._task_manager = task_manager
+        await super().setup(setup.task_manager)
 
     async def cleanup(self):
         """Cleanup the summarizer."""
@@ -215,12 +206,10 @@ class LLMContextSummarizer(BaseObject):
         must be set (enforced at config construction time).
 
         Returns:
-            True if all conditions are met:
-            - ``auto_trigger`` is enabled
-            - No summarization currently in progress
-            - AND either:
-              - Token count exceeds ``max_context_tokens`` (when set)
-              - OR message count exceeds ``max_unsummarized_messages`` since last summary (when set)
+            True when ``auto_trigger`` is enabled, no summarization is in
+            progress, and either the token count exceeds ``max_context_tokens``
+            or the message count since the last summary exceeds
+            ``max_unsummarized_messages`` — whichever of the two is set.
         """
         logger.trace(f"{self}: Checking if context summarization is needed")
 

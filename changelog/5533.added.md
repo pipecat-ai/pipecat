@@ -1,0 +1,1 @@
+- `CartesiaTurnsSTTSettings` gained `turn_start_threshold`, `turn_eager_end_threshold`, `turn_end_threshold` and `turn_end_timeout_ms`, Cartesia's turn detection tuning parameters. Unset by default, so the server's own defaults apply.

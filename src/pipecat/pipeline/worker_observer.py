@@ -16,7 +16,14 @@ from typing import Any
 
 from attr import dataclass
 
-from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
+from pipecat.observers.base_observer import (
+    BaseObserver,
+    FrameProcessed,
+    FramePushed,
+    ProcessorSetUp,
+    StartupWarmup,
+)
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 @dataclass
@@ -108,17 +115,20 @@ class WorkerObserver(BaseObserver):
         if observer in self._observers:
             self._observers.remove(observer)
 
-    async def start(self):
-        """Start all proxy observer tasks."""
+    async def setup(self, task_manager: BaseTaskManager):
+        """Set up a proxy for every managed observer.
+
+        Processors report their own setup to observers, so the proxies are in
+        place before any of them is set up.
+
+        Args:
+            task_manager: The task manager the proxies run their tasks on.
+        """
+        await super().setup(task_manager)
         self._proxies = self._create_proxies(self._observers)
 
-    async def stop(self):
-        """Stop all proxy observer tasks."""
-        if not self._proxies:
-            return
-
-        for proxy in self._proxies.values():
-            await self.cancel_task(proxy.task)
+        for observer in self._proxies:
+            await observer.setup(task_manager)
 
     async def cleanup(self):
         """Cleanup all proxy observers."""
@@ -126,6 +136,9 @@ class WorkerObserver(BaseObserver):
 
         if not self._proxies:
             return
+
+        for proxy in self._proxies.values():
+            await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
             await observer.cleanup()
@@ -147,6 +160,22 @@ class WorkerObserver(BaseObserver):
 
         Args:
             data: The frame push event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
+    async def on_processor_setup(self, data: ProcessorSetUp):
+        """Queue processor setup timing for all managed observers.
+
+        Args:
+            data: The processor setup event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
+    async def on_startup_warmup(self, data: StartupWarmup):
+        """Queue deferred-import warming timing for all managed observers.
+
+        Args:
+            data: The startup warmup event data to distribute to observers.
         """
         await self._send_to_proxy(data)
 
@@ -182,5 +211,9 @@ class WorkerObserver(BaseObserver):
                 await observer.on_push_frame(data)
             elif isinstance(data, FrameProcessed):
                 await observer.on_process_frame(data)
+            elif isinstance(data, ProcessorSetUp):
+                await observer.on_processor_setup(data)
+            elif isinstance(data, StartupWarmup):
+                await observer.on_startup_warmup(data)
 
             queue.task_done()

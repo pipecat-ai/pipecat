@@ -22,11 +22,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -82,6 +81,10 @@ class AsyncAITTSService(WebsocketTTSService):
     """
 
     Settings = AsyncAITTSSettings
+
+    #: Settings baked into the websocket init message, and therefore only
+    #: changeable by starting a new session.
+    _SESSION_INIT_FIELDS = frozenset({"model", "voice", "language"})
     _settings: Settings
 
     @deprecated(
@@ -130,7 +133,7 @@ class AsyncAITTSService(WebsocketTTSService):
 
             version: Async API version.
             url: WebSocket URL for Async TTS API.
-            model: TTS model to use (e.g., "async_flash_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSService.Settings(model=...)`` instead.
@@ -158,7 +161,7 @@ class AsyncAITTSService(WebsocketTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="async_flash_v1.0",
+            model="async_flash_v1.5",
             voice=None,
             language=None,
         )
@@ -205,16 +208,29 @@ class AsyncAITTSService(WebsocketTTSService):
         self._keepalive_task = None
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta.
+        """Apply a settings delta, reconnecting when a session-init field changes.
 
-        Settings are stored but not applied to the active connection.
+        ``model``, ``voice`` and ``language`` are sent once in the init message at
+        connect time and are never repeated per utterance — ``_build_msg`` carries
+        only the transcript and context id — so a new websocket session is the only
+        way a change to any of them reaches Async.
+
+        Args:
+            delta: A settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        self._warn_unhandled_updated_settings(changed)
+        if self._SESSION_INIT_FIELDS & changed.keys():
+            await self._disconnect()
+            await self._connect()
+
+        self._warn_unhandled_updated_settings(changed.keys() - self._SESSION_INIT_FIELDS)
 
         return changed
 
@@ -241,13 +257,13 @@ class AsyncAITTSService(WebsocketTTSService):
         msg = {"transcript": text, "context_id": context_id, "force": force}
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Async TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
         await self._connect()
 
@@ -517,7 +533,7 @@ class AsyncAIHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             aiohttp_session: An aiohttp session for making HTTP requests.
-            model: TTS model to use (e.g., "async_flash_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.5").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AsyncAIHttpTTSService.Settings(model=...)`` instead.
@@ -540,7 +556,7 @@ class AsyncAIHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="async_flash_v1.0",
+            model="async_flash_v1.5",
             voice=None,
             language=None,
         )
@@ -601,13 +617,13 @@ class AsyncAIHttpTTSService(TTSService):
         """
         return language_to_async_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Async HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
 
     @traced_tts

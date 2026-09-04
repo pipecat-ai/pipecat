@@ -4,10 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval suite's manifest parsing and per-run log capture."""
+"""Tests for the eval suite's manifest parsing, per-run log capture, and run updates."""
 
+import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -16,6 +18,8 @@ from pipecat.evals.suite import (
     DEFAULT_CONCURRENCY,
     DEFAULT_SPAWN,
     EvalManifest,
+    EvalRun,
+    EvalSuite,
     capture_pipeline_logs,
 )
 
@@ -115,6 +119,82 @@ class TestCapturePipelineLogs(unittest.TestCase):
             content = (logs_dir / "run1.debug.log").read_text()
             self.assertIn("mine", content)
             self.assertNotIn("theirs", content)
+
+
+class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
+    """``on_update`` handlers see each run enter ``running`` and reach ``done``."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logs_dir = Path(self._tmp.name)
+        # A bot path that doesn't exist: the run errors out before spawning
+        # anything, which is enough to drive both status changes.
+        run = EvalRun(
+            bot="missing.py",
+            scenario="none",
+            scenario_path=self.logs_dir / "none.yaml",
+            bot_path=self.logs_dir / "missing.py",
+        )
+        self.suite = EvalSuite(
+            EvalManifest(
+                runs=[run],
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=1,
+                repeat=1,
+                base_port=7900,
+                runs_dir=self.logs_dir,
+                record=False,
+                cache_dir=None,
+            )
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        # EvalSuite.run() drops every log sink to keep stdout clean for its caller;
+        # put loguru's default back so the rest of the session still logs.
+        logger.remove()
+        logger.add(sys.stderr)
+
+    async def test_event_handler_receives_runs(self):
+        seen = []
+
+        @self.suite.event_handler("on_update")
+        async def on_update(source, run):
+            seen.append((source, run.status))
+
+        await self.suite.run(self.logs_dir)
+
+        self.assertTrue(all(source is self.suite for source, _ in seen))
+        self.assertEqual([status for _, status in seen], ["running", "done"])
+
+    async def test_callback_is_deprecated_and_still_called(self):
+        seen = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.suite.run(self.logs_dir, on_update=lambda run: seen.append(run.status))
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        # The callback takes only the run, not the suite an event handler gets.
+        self.assertEqual(seen, ["running", "done"])
+
+    async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
+        """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""
+        seen = []
+        callback = lambda run: seen.append(run.status)  # noqa: E731
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"])
+
+            # Passing it again reports each change once more, not twice.
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"] * 2)
+
+        # Omitting it stops the reporting.
+        await self.suite.run(self.logs_dir)
+        self.assertEqual(seen, ["running", "done"] * 2)
 
 
 if __name__ == "__main__":

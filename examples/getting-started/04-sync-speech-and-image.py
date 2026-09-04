@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -109,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         webrtc_connection: The WebRTC connection to use
         room_name: Optional room name for display purposes
     """
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Create an HTTP session for API calls
     async with aiohttp.ClientSession() as session:
@@ -118,7 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tts = CartesiaHttpTTSService(
             api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaHttpTTSService.Settings(
-                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+                voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
             ),
             # No need to aggregate by sentences (the default), as we already know we're getting full sentences
             # (Otherwise the service will unnecessarily wait for follow-up input to confirm the sentence is complete,
@@ -194,23 +194,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         worker = PipelineWorker(
             pipeline,
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
         )
+
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
 
         # Set up transport event handlers
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Start the month narration once connected
             await worker.queue_frames(frames)
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await worker.cancel()
+            logger.info("Client disconnected")
+            await runner.cancel()
 
-        # Run the pipeline
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-        await runner.add_workers(worker)
         await runner.run()
 
 

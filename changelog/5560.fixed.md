@@ -1,0 +1,1 @@
+- Fixed the PCM sample rates `GrokRealtimeLLMService` accepts: the Grok Voice Agent API's 22050 Hz option is now allowed, and 21050 Hz — which the API rejects — is not.

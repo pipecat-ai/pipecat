@@ -70,10 +70,14 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import subprocess
+import sys
 import unittest
+import warnings
 from unittest.mock import patch
 
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
+from openai._types import NotGiven as OpenAINotGiven
 
 from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -90,6 +94,7 @@ from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesL
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
+    LLMSpecificMessage,
     LLMStandardMessage,
 )
 
@@ -127,6 +132,13 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
         self.assertEqual(params["messages"][1]["content"], "Hello, how are you?")
         self.assertEqual(params["messages"][2]["content"], "I'm doing well, thank you for asking!")
+
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
 
     def test_llm_specific_message_filtering(self):
         """Test that OpenAI-specific messages are included and others are filtered out."""
@@ -1485,6 +1497,71 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
 
+    def test_thought_converted_to_thinking_block(self):
+        """A signed thought becomes a thinking block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The thought and the response merge into a single assistant message,
+        # with the thinking block first.
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0], {"type": "thinking", "thinking": "Let me check.", "signature": "sig"}
+        )
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_with_empty_text_preserved(self):
+        """A signed thought with no text still round-trips as a thinking block.
+
+        Models that default to ``display: "omitted"`` return thinking blocks whose
+        text is empty and whose signature carries the reasoning; Anthropic requires
+        those blocks to be passed back.
+        """
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(content[0], {"type": "thinking", "thinking": "", "signature": "sig"})
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be round-tripped, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": ""},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["content"], "What's the weather?")
+        self.assertEqual(params["messages"][1]["content"], "It's sunny.")
+
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
@@ -1896,6 +1973,65 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertIn("toolResult", params["messages"][-1]["content"][0])
+
+    def test_image_before_text_does_not_raise_unbound_local_error(self):
+        """Regression test for issue #4724: image placed before text must not raise UnboundLocalError.
+
+        When a user message's content list places the image *before* the text (e.g. a
+        UserImageRawFrame followed by a prompt), _from_standard_message previously
+        raised ``UnboundLocalError: cannot access local variable 'image_item'``
+        because the ``new_content.insert(...)`` call was outside the
+        ``if img_idx > first_txt_idx:`` guard that assigns ``image_item``.
+        """
+        # Image appears FIRST (before text) — this is the failing shape from the issue.
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "What do you see?"},
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        # Must not raise — previously threw UnboundLocalError.
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Image was already first, so the adapter should leave it in place.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
+
+    def test_image_after_text_reordered_to_first(self):
+        """Image placed after text is reordered to come before text (existing behaviour)."""
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Adapter should have moved the image before the text.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
@@ -2458,6 +2594,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(tool["description"], "Get the current weather")
         self.assertIn("properties", tool["parameters"])
 
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
+
     def test_empty_messages(self):
         """Empty messages list produces empty input list."""
         context = LLMContext(messages=[])
@@ -2922,6 +3065,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
                 "from context", "from settings", discard_context_system=True
             )
             mock_logger.warning.assert_called_once()
+            self.assertIn("is not sent to the model", mock_logger.warning.call_args[0][0])
 
         self.assertEqual(result, "from settings")
 
@@ -3060,6 +3204,101 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         for model, expected in cases.items():
             service = self._bedrock(model=model)
             self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
+
+
+class TestContextSystemMessageDeprecation(unittest.TestCase):
+    """Every adapter warns when the system prompt is carried in the context."""
+
+    def _context(self):
+        return LLMContext(
+            messages=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
+
+    def _invoke(self, adapter, system_instruction):
+        if isinstance(adapter, OpenAILLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                convert_developer_to_user=False,
+            )
+        if isinstance(adapter, AnthropicLLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                enable_prompt_caching=False,
+            )
+        return adapter.get_llm_invocation_params(
+            self._context(), system_instruction=system_instruction
+        )
+
+    def test_every_adapter_warns_with_or_without_system_instruction(self):
+        adapters = [
+            OpenAILLMAdapter,
+            OpenAIResponsesLLMAdapter,
+            AnthropicLLMAdapter,
+            GeminiLLMAdapter,
+            GeminiLiveLLMAdapter,
+            AWSBedrockLLMAdapter,
+            AWSNovaSonicLLMAdapter,
+            OpenAIRealtimeLLMAdapter,
+            GrokRealtimeLLMAdapter,
+        ]
+        for cls in adapters:
+            for system_instruction in (None, "Be concise."):
+                with self.subTest(adapter=cls.__name__, system_instruction=system_instruction):
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        self._invoke(cls(), system_instruction)
+                    messages = [
+                        str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)
+                    ]
+                    self.assertTrue(messages, "expected a DeprecationWarning")
+                    self.assertIn("system_instruction", messages[0])
+
+    def test_warns_once_per_adapter(self):
+        adapter = OpenAILLMAdapter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._invoke(adapter, None)
+            self._invoke(adapter, None)
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(deprecations), 1)
+
+    def test_warns_through_an_ignore_filter(self):
+        """The warning reaches a bot whose interpreter ignores the category.
+
+        Every caller is inside an LLM service, so the default
+        ``ignore::DeprecationWarning`` would hide it. Run in a subprocess to get
+        an interpreter whose filters ignore the category.
+        """
+        script = (
+            "from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter\n"
+            "from pipecat.processors.aggregators.llm_context import LLMContext\n"
+            "ctx = LLMContext(messages=["
+            "{'role': 'system', 'content': 'Be helpful.'},"
+            "{'role': 'user', 'content': 'hi'}])\n"
+            "OpenAILLMAdapter().get_llm_invocation_params("
+            "ctx, system_instruction=None, convert_developer_to_user=False)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is deprecated since 1.9.0", result.stderr)
+
+    def test_no_warning_without_a_context_system_message(self):
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            OpenAILLMAdapter().get_llm_invocation_params(
+                context, system_instruction="Be concise.", convert_developer_to_user=False
+            )
+        self.assertFalse([w for w in caught if issubclass(w.category, DeprecationWarning)])
 
 
 if __name__ == "__main__":

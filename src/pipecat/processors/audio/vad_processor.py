@@ -15,13 +15,15 @@ from loguru import logger
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     StartFrame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 
 class VADProcessor(FrameProcessor):
@@ -95,6 +97,15 @@ class VADProcessor(FrameProcessor):
         async def on_broadcast_frame(_controller, frame_cls: type[Frame], **kwargs):
             await self.broadcast_frame(frame_cls, **kwargs)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._vad_controller.setup(setup)
+
     async def cleanup(self):
         """Clean up VAD controller resources."""
         await super().cleanup()
@@ -115,7 +126,9 @@ class VADProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self._vad_controller.setup(self.task_manager)
+            await self._vad_controller.start()
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self._vad_controller.stop()
 
         # Let the VAD controller handle the frame
         await self._vad_controller.process_frame(frame)

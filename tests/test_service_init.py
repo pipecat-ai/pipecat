@@ -40,7 +40,8 @@ import pytest
 
 import pipecat.services
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import ServiceSettings, is_given
+from pipecat.services.settings import ServiceSettings
+from pipecat.utils.types import is_given
 
 # Modules that define abstract base service classes (not concrete services).
 _BASE_MODULES = frozenset(
@@ -122,8 +123,11 @@ def _concrete_service_classes():
     return [
         cls
         for cls in sorted(_all_subclasses(AIService), key=lambda c: c.__qualname__)
+        # Services only: subclasses defined elsewhere, such as the stand-ins
+        # other test modules build, are not what this checks.
+        if cls.__module__.startswith("pipecat.services.")
         # Skip abstract base classes defined in framework modules.
-        if cls.__module__ not in _BASE_MODULES
+        and cls.__module__ not in _BASE_MODULES
     ]
 
 

@@ -1,0 +1,1 @@
+- `KokoroTTSService.Settings` has a `speed` field, kokoro-onnx's speech rate multiplier (0.5 to 2.0, default 1.0), settable at construction and at runtime.

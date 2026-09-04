@@ -20,18 +20,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    STTSettings,
-    _NotGiven,
-    is_given,
-)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -39,6 +32,7 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
     from deepgram import AsyncDeepgramClient
@@ -205,23 +199,27 @@ class DeepgramSTTSettings(STTSettings):
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
         utterance_end_ms: Silence duration in ms before an utterance-end event.
+        version: Model version to transcribe with, e.g. a dated standard-model
+            version such as ``"2021-03-17.0"`` or a custom model's version id.
+            ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
     """
 
-    detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    dictation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterm: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keywords: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuate: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    replace: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    utterance_end_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    dictation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -362,13 +360,14 @@ class DeepgramSTTService(STTService):
             keyterm=None,
             keywords=None,
             numerals=False,
-            profanity_filter=True,
+            profanity_filter=None,
             punctuate=True,
             redact=None,
             replace=None,
             search=None,
             smart_format=False,
             utterance_end_ms=None,
+            version=None,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -412,6 +411,11 @@ class DeepgramSTTService(STTService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            # Sync the delta first: on a delta, an unset field is NOT_GIVEN, so a
+            # matching extra key can still be promoted. On the merged store every
+            # field already holds a default and the value would be dropped.
+            settings = settings.copy()
+            settings._sync_extra_to_fields()
             default_settings.apply_update(settings)
 
         # Sync extra to top-level fields so self._settings is unambiguous
@@ -460,11 +464,15 @@ class DeepgramSTTService(STTService):
 
         self._connection = None
         self._connection_task = None
-        self._connection_ready = asyncio.Event()
-        # Rapid failure detection: if the connection dies within
-        # QuickFailureTracker.min_stable_duration of connecting (e.g. an invalid
-        # API key rejected at the WebSocket handshake) enough times in a row,
-        # stop retrying instead of looping forever. Shared with WebsocketService.
+
+        # Set once connecting has resolved, whether it connected or gave up, so
+        # that setting the service up doesn't outlast the attempt it started.
+        self._connection_settled = asyncio.Event()
+
+        # Rapid failure detection: if the connection keeps failing to stay up for
+        # QuickFailureTracker.min_stable_duration (e.g. an invalid API key
+        # rejected at the WebSocket handshake) enough times in a row, stop
+        # retrying instead of looping forever. Shared with WebsocketService.
         self._quick_failure_tracker = QuickFailureTracker()
 
     def can_generate_metrics(self) -> bool:
@@ -476,25 +484,27 @@ class DeepgramSTTService(STTService):
         return True
 
     async def _do_reconnect(self):
-        """Disconnect and reconnect to Deepgram, waiting until ready.
+        """Disconnect and reconnect to Deepgram.
 
         Called by ``STTService._reconnect()`` inside the reconnecting guard.
-        Unlike ``WebsocketSTTService``, Deepgram's ``_connect()`` only
-        launches a background task — the actual WebSocket handshake happens
-        asynchronously. This method waits for ``_connection_ready`` to be set
-        before returning so that buffered audio frames are replayed only after
-        the new connection can accept them.
+        ``_connect()`` returns once connecting has resolved, so a connection
+        that is still missing by then is one that isn't coming back: say so
+        rather than let the caller replay buffered audio into nothing.
 
         Raises:
-            asyncio.TimeoutError: If the connection is not established within
-                05 seconds.
+            ConnectionError: If the service could not reconnect.
         """
         await self._disconnect()
         await self._connect()
-        await asyncio.wait_for(self._connection_ready.wait(), timeout=5.0)
+        if not self._connection:
+            raise ConnectionError(f"{self} could not reconnect to Deepgram")
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
+        if isinstance(delta, self.Settings):
+            delta = delta.copy()
+            delta._sync_extra_to_fields()
+
         changed = await super()._update_settings(delta)
 
         if not changed:
@@ -508,13 +518,13 @@ class DeepgramSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -619,18 +629,17 @@ class DeepgramSTTService(STTService):
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
         self._quick_failure_tracker.reset()
+        self._connection_settled.clear()
         self._connection_task = self.create_task(self._connection_handler())
+        await self._connection_settled.wait()
 
     async def _disconnect(self):
         if not self._connection_task:
             return
 
-        logger.debug("Disconnecting from Deepgram")
-        # Clear _connection and _connection_ready first to prevent run_stt
-        # from sending audio during the close handshake, and to ensure any
-        # concurrent _do_reconnect() waiter sees a clean state before the
-        # new connection is established.
-        self._connection_ready.clear()
+        logger.debug(f"{self}: Disconnecting from Deepgram")
+        # Clear the connection first to prevent run_stt from sending audio
+        # during the close handshake.
         connection = self._connection
         self._connection = None
 
@@ -643,59 +652,68 @@ class DeepgramSTTService(STTService):
     async def _connection_handler(self):
         """Manages the full WebSocket lifecycle inside a single async with block.
 
-        Reconnects automatically after transient errors, with exponential
-        backoff between attempts. A 4xx ``ApiError`` (e.g. an invalid API key
-        rejected at the handshake) stops retrying immediately, since the SDK
-        has already told us the request itself is bad. Any other error that
-        keeps failing quickly is also tracked by ``_quick_failure_tracker``,
-        which gives up after enough consecutive quick failures so a
-        persistent problem can't retry forever unnoticed. Exits cleanly when
-        the task is cancelled (i.e. on stop/cancel).
+        Reconnects automatically after an error, with exponential backoff
+        between attempts, and gives up once enough attempts in a row have
+        failed to produce a connection that stays up. A 4xx ``ApiError``
+        (e.g. an invalid API key rejected at the handshake) gives up at once,
+        since the SDK has already told us the request itself is bad. Giving up
+        leaves the service unusable either way, so a ``ServiceSwitcher`` can
+        move off it. Exits cleanly when the task is cancelled (i.e. on
+        stop/cancel).
         """
-        while True:
-            connect_kwargs = self._build_connect_kwargs()
-            keepalive_task = None
-            attempt_start = time.monotonic()
-            try:
-                async with self._client.listen.v1.connect(**connect_kwargs) as connection:
-                    self._connection = connection
-                    self._connection_ready.set()
-                    connection.on(EventType.MESSAGE, self._on_message)
-                    connection.on(EventType.ERROR, self._on_error)
+        try:
+            while True:
+                connect_kwargs = self._build_connect_kwargs()
+                keepalive_task = None
+                connected_at = None
+                try:
+                    async with self._client.listen.v1.connect(**connect_kwargs) as connection:
+                        connected_at = time.monotonic()
+                        self._connection = connection
+                        self._connection_settled.set()
+                        connection.on(EventType.MESSAGE, self._on_message)
+                        connection.on(EventType.ERROR, self._on_error)
 
-                    logger.debug(f"{self}: Websocket connection initialized")
+                        logger.debug(f"{self}: Websocket connection initialized")
 
-                    keepalive_task = self.create_task(
-                        self._keepalive_handler(), f"{self}::keepalive"
+                        keepalive_task = self.create_task(
+                            self._keepalive_handler(), f"{self}::keepalive"
+                        )
+                        await connection.start_listening()
+                except ApiError as e:
+                    if e.status_code is not None and 400 <= e.status_code < 500:
+                        msg = f"Deepgram rejected the connection (status {e.status_code}): {e}"
+                        await self.push_error(
+                            error_msg=msg, exception=e, force_treat_as_permanent=True
+                        )
+                        return
+                    logger.warning(f"{self}: Connection lost, will retry: {e}")
+                    await self.push_error(error_msg=f"connection error: {e}", exception=e)
+                except Exception as e:
+                    logger.warning(f"{self}: Connection lost, will retry: {e}")
+                    await self.push_error(error_msg=f"connection error: {e}", exception=e)
+                finally:
+                    self._connection = None
+                    if keepalive_task:
+                        await self.cancel_task(keepalive_task)
+
+                # How long the connection lasted, which is nothing at all when
+                # the handshake never completed. Timing the attempt instead
+                # would read a handshake that hangs before failing as a healthy
+                # connection and keep retrying it forever.
+                uptime = time.monotonic() - connected_at if connected_at is not None else 0.0
+                if self._quick_failure_tracker.record(uptime).should_give_up:
+                    msg = (
+                        "connection failed to stay up "
+                        f"{self._quick_failure_tracker.max_consecutive_failures} times in a row"
                     )
-                    await connection.start_listening()
-            except ApiError as e:
-                if e.status_code is not None and 400 <= e.status_code < 500:
-                    msg = f"Deepgram rejected the connection (status {e.status_code}): {e}"
-                    await self.push_error(error_msg=msg, exception=e)
+                    await self.push_error(error_msg=msg, force_treat_as_permanent=True)
                     return
-                logger.warning(f"{self}: Connection lost, will retry: {e}")
-                await self.push_error(error_msg=f"connection error: {e}", exception=e)
-            except Exception as e:
-                logger.warning(f"{self}: Connection lost, will retry: {e}")
-                await self.push_error(error_msg=f"connection error: {e}", exception=e)
-            finally:
-                self._connection_ready.clear()
-                self._connection = None
-                if keepalive_task:
-                    await self.cancel_task(keepalive_task)
-
-            duration = time.monotonic() - attempt_start
-            result = self._quick_failure_tracker.record(duration)
-            if result.should_give_up:
-                msg = (
-                    "connection failed "
-                    f"{self._quick_failure_tracker.max_consecutive_failures} times "
-                    "immediately after connecting"
-                )
-                await self.push_error(error_msg=msg)
-                return
-            await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
+                await asyncio.sleep(exponential_backoff_time(self._quick_failure_tracker.count))
+        finally:
+            # Nothing further will be attempted, so whoever is waiting for the
+            # service to connect can stop waiting.
+            self._connection_settled.set()
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout.
@@ -711,10 +729,6 @@ class DeepgramSTTService(STTService):
                     logger.trace(f"{self}: Sent keepalive")
                 except Exception as e:
                     logger.warning(f"{self}: Keepalive failed: {e}")
-
-    async def _start_metrics(self):
-        """Start processing metrics collection for this utterance."""
-        await self.start_processing_metrics()
 
     async def _on_error(self, error):
         logger.warning(f"{self} connection error, will retry: {error}")
@@ -760,7 +774,6 @@ class DeepgramSTTService(STTService):
                         )
                     )
                     await self._handle_transcription(transcript, is_final, language)
-                    await self.stop_processing_metrics()
                 elif from_finalize:
                     # Deepgram already sent the transcript via a regular is_final
                     # before the finalize response arrived (empty). Report STT TTFB
@@ -788,9 +801,7 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             if self._connection:

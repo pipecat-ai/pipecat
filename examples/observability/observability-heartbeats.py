@@ -11,7 +11,7 @@ from loguru import logger
 
 from pipecat.frames.frames import Frame, SystemFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.workers.runner import WorkerRunner
 
@@ -36,15 +36,20 @@ async def main():
     """
     pipeline = Pipeline([NullProcessor()])
 
-    worker = PipelineWorker(pipeline, params=PipelineParams(enable_heartbeats=True))
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(enable_heartbeats=True),
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
+
+    runner = WorkerRunner()
+
+    await runner.add_workers(worker)
 
     @worker.event_handler("on_heartbeat_timeout")
     async def on_heartbeat_timeout(worker: PipelineWorker):
         logger.warning("Heartbeat timeout detected — pipeline may be stalled")
 
-    runner = WorkerRunner()
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

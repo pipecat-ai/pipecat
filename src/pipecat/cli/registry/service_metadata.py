@@ -40,13 +40,11 @@ BotType = Literal["web", "telephony"]
 class ServiceDefinition:
     """Service metadata definition.
 
-    Required fields:
-        value: Service identifier (e.g., "openai_llm")
-        label: Human-readable name (e.g., "OpenAI")
-        package: Python package requirement (e.g., "pipecat-ai[openai]")
-
-    Optional fields:
-        class_name: List of class names to import for this service
+    Parameters:
+        value: Service identifier (e.g., "openai_llm").
+        label: Human-readable name (e.g., "OpenAI").
+        package: Python package requirement (e.g., "pipecat-ai[openai]").
+        class_name: List of class names to import for this service.
         env_prefix: Prefix for environment variables (e.g., "OPENAI" -> "OPENAI_API_KEY")
         include_params: Constructor params that have defaults but should still appear in the
             generated config (e.g., "api_key" has a default but we want users to set it via
@@ -333,6 +331,14 @@ class ServiceRegistry:
             package="pipecat-ai[fal]",
             class_name=["FalSTTService"],
             env_prefix="FAL",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="gemini_stt",
+            label="Gemini Transcribe Live",
+            package="pipecat-ai[google]",
+            class_name=["GeminiSTTService"],
+            env_prefix="GOOGLE",
             include_params=["api_key"],
         ),
         ServiceDefinition(
@@ -727,6 +733,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="bland_tts",
+            label="Bland",
+            package="pipecat-ai[bland]",
+            class_name=["BlandTTSService"],
+            env_prefix="BLAND",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "2f29fdbb-c55e-4add-9c7c-93437ebf379d"},
+        ),
+        ServiceDefinition(
             value="cartesia_tts",
             label="Cartesia",
             package="pipecat-ai[cartesia]",
@@ -734,7 +750,7 @@ class ServiceRegistry:
             env_prefix="CARTESIA",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "71a7ad14-091c-4e8e-a314-022ece01c121"},
+            param_defaults={"voice": "86e30c1d-714b-4074-a1f2-1cb6b552fb49"},
         ),
         ServiceDefinition(
             value="deepgram_tts",
@@ -755,6 +771,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="deepgram_flux_sagemaker_tts",
+            label="Deepgram Flux SageMaker",
+            package="pipecat-ai[deepgram,sagemaker]",
+            class_name=["DeepgramFluxSageMakerTTSService"],
+            env_prefix="DEEPGRAM_FLUX_SAGEMAKER_TTS",
+            include_params=["endpoint_name", "region"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="deepgram_sagemaker_tts",
             label="Deepgram SageMaker",
             package="pipecat-ai[deepgram,sagemaker]",
@@ -768,6 +793,15 @@ class ServiceRegistry:
             label="ElevenLabs",
             package="pipecat-ai[elevenlabs]",
             class_name=["ElevenLabsTTSService"],
+            env_prefix="ELEVENLABS",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="elevenlabs_dialogue_tts",
+            label="ElevenLabs Dialogue (v3)",
+            package="pipecat-ai[elevenlabs]",
+            class_name=["ElevenLabsDialogueTTSService"],
             env_prefix="ELEVENLABS",
             include_params=["api_key"],
             settings_params=["voice"],
@@ -965,6 +999,15 @@ class ServiceRegistry:
             package="pipecat-ai[soniox]",
             class_name=["SonioxTTSService"],
             env_prefix="SONIOX",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="speechify_tts",
+            label="Speechify",
+            package="pipecat-ai",
+            class_name=["SpeechifyHttpTTSService"],
+            env_prefix="SPEECHIFY",
             include_params=["api_key"],
             settings_params=["voice"],
         ),

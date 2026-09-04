@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -56,9 +56,9 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """AssemblyAI u3-rt-pro with Built-in Turn Detection
+    """AssemblyAI Universal-3 Pro with Built-in Turn Detection
 
-    This example demonstrates using AssemblyAI's u3-rt-pro Speech-to-Text model
+    This example demonstrates using AssemblyAI's Universal-3 Pro Speech-to-Text model
     with AssemblyAI's built-in turn detection for more natural conversation flow.
 
     Key features:
@@ -91,13 +91,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     For more information: https://www.assemblyai.com/docs/speech-to-text/streaming
     """
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = AssemblyAISTTService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
             # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default
@@ -111,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -147,11 +146,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -160,12 +164,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

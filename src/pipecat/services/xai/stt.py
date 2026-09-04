@@ -26,15 +26,16 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import XAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_xai_stt_language(language: Language) -> str:
@@ -91,11 +92,11 @@ class XAISTTSettings(STTSettings):
             word identifying the detected speaker.
     """
 
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    multichannel: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    channels: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multichannel: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    channels: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAISTTService(WebsocketSTTService):
@@ -119,7 +120,7 @@ class XAISTTService(WebsocketSTTService):
         *,
         api_key: str,
         ws_url: str = "wss://api.x.ai/v1/stt",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm",
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = XAI_TTFS_P99,
@@ -131,7 +132,8 @@ class XAISTTService(WebsocketSTTService):
             api_key: xAI API key (used as Bearer for the WebSocket handshake).
             ws_url: WebSocket endpoint URL. Defaults to ``wss://api.x.ai/v1/stt``.
             sample_rate: Audio sample rate in Hz. Supported values: 8000,
-                16000, 22050, 24000, 44100, 48000. Defaults to 16000.
+                16000, 22050, 24000, 44100, 48000. If None, uses the input
+                sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
                 ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
@@ -190,9 +192,13 @@ class XAISTTService(WebsocketSTTService):
         await self._connect()
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the speech-to-text service."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -386,8 +392,6 @@ class XAISTTService(WebsocketSTTService):
             )
         )
         await self._trace_transcription(text, True, language)
-        if speech_final:
-            await self.stop_processing_metrics()
 
     def _language_for_frame(self) -> Language:
         """Return a Language enum suitable for transcription frames.

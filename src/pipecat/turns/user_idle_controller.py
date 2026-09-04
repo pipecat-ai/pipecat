@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
 
@@ -73,10 +74,26 @@ class UserIdleController(BaseObject):
 
         self._register_event_handler("on_user_turn_idle", sync=True)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the controller.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        return await super().setup(setup.task_manager)
+
+    async def stop(self):
+        """Stop the idle timer.
+
+        Called at session end so it can't report idleness that only means
+        the session is over.
+        """
+        await self._cancel_idle_timer()
+
     async def cleanup(self):
         """Cleanup the controller."""
         await super().cleanup()
-        await self._cancel_idle_timer()
+        await self.stop()
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to track user activity state.

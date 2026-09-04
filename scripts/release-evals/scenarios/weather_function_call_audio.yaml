@@ -1,0 +1,26 @@
+name: weather_function_call_audio
+
+# Audio modality: ask for the weather (which requires a tool call) as speech, and
+# judge the transcription of the bot's spoken answer. This is the native path for
+# speech-to-speech services — audio in, the provider's own turn detection, a
+# function call, and a spoken answer back. The text-modality
+# `weather_function_call` asserts the same behavior but injects the user's turn as
+# text, which never touches either audio path.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco, California? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+      - event: response
+        eval: "the response describes the weather in San Francisco, including a temperature in degrees"

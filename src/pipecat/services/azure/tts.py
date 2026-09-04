@@ -23,13 +23,14 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (
@@ -87,17 +88,23 @@ class AzureTTSSettings(TTSSettings):
         role: Voice role for expression (e.g., "YoungAdultFemale").
         style: Speaking style (e.g., "cheerful", "sad", "excited").
         style_degree: Intensity of the speaking style (0.01 to 2.0).
+        voice_parameters: Model parameters for HD voices, as SSML's
+            semicolon-separated ``parameters`` attribute on ``<voice>`` (e.g.
+            ``"temperature=0.7;top_p=0.8;top_k=22;cfg_scale=1.4"``, or
+            ``"enhancePronunciation=true"``). Which keys apply depends on the
+            voice's base model; standard neural voices ignore the attribute.
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
-    emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    force_locale: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    force_locale: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_parameters: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:
@@ -193,11 +200,15 @@ class AzureBaseTTSService:
         # Escape special characters
         escaped_text = self._escape_text(text)
 
+        voice_attrs = f"name='{self._settings.voice}'"
+        if self._settings.voice_parameters:
+            voice_attrs += f" parameters='{self._settings.voice_parameters}'"
+
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._settings.voice}'>"
+            f"<voice {voice_attrs}>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
@@ -337,6 +348,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             role=None,
             style=None,
             style_degree=None,
+            voice_parameters=None,
             volume=None,
         )
 
@@ -407,17 +419,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Azure TTS service and initialize speech synthesizer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: Start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
-        if self._speech_config:
-            return
-
+        await super().setup(setup)
         # Now self.sample_rate is properly initialized
         if self._private_endpoint:
             self._speech_config = SpeechConfig(
@@ -450,6 +458,14 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
         self._speech_synthesizer.synthesis_word_boundary.connect(self._handle_word_boundary)
+
+    async def start(self, frame: StartFrame):
+        """Start the Azure TTS service and initialize speech synthesizer.
+
+        Args:
+            frame: Start frame containing initialization parameters.
+        """
+        await super().start(frame)
 
         # Start word processor task
         if not self._word_processor_task:
@@ -885,6 +901,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             role=None,
             style=None,
             style_degree=None,
+            voice_parameters=None,
             volume=None,
         )
 
@@ -939,16 +956,13 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Azure HTTP TTS service and initialize speech synthesizer.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: Start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
-        if self._speech_config:
-            return
+        await super().setup(setup)
 
         if self._private_endpoint:
             self._speech_config = SpeechConfig(

@@ -10,7 +10,7 @@ import asyncio
 import signal
 import wave
 
-from daily import *
+from daily import CallClient, Daily
 
 SAMPLE_RATE = 16000
 NUM_CHANNELS = 1
@@ -96,7 +96,7 @@ class AsyncSendWavApp:
         await self.__start_event.wait()
 
         if self.__app_error:
-            print(f"Unable to send WAV file!")
+            print("Unable to send WAV file!")
             return
 
         try:

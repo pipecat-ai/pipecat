@@ -166,7 +166,7 @@ class SyncParallelPipeline(BasePipeline):
         self._frame_order = frame_order
 
         if len(args) == 0:
-            raise Exception(f"SyncParallelPipeline needs at least one argument")
+            raise Exception("SyncParallelPipeline needs at least one argument")
 
         self._sinks = []
         self._sources = []
@@ -242,12 +242,12 @@ class SyncParallelPipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all contained processors."""
         await super().cleanup()
-        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Send a frame through all parallel pipelines and release output once all finish.

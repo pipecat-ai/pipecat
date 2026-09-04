@@ -300,12 +300,16 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
         relpath = str(py_file.relative_to(src_root.parent))
         if relpath in exclude:
             continue
+        # An editor may leave a lock symlink such as ``.#module.py`` pointing
+        # at nothing readable. It matches the glob but is not source.
+        if not py_file.is_file():
+            continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
 
         for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
             scan.directives.append(Directive(relpath, "<module>", param, version, body))
 
-        def visit(node, prefix: str, parent_is_class: bool) -> None:
+        def visit(node, prefix: str, parent_is_class: bool, relpath: str = relpath) -> None:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.Assign):
                     for target in child.targets:

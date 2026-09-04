@@ -15,7 +15,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -26,7 +26,10 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import (
+    OpenAIResponsesLLMService,
+    OpenAIResponsesReasoningConfig,
+)
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -44,8 +47,40 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
     # Simulate a long-running API call, so we can test async function calls.
-    await asyncio.sleep(20)
+    await asyncio.sleep(15)
+    logger.debug("Returning get_current_weather result.")
     await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+# A lookup that hangs: it sleeps far past the deadline it was registered with,
+# so the call is always cancelled before it can report anything. The result it
+# would eventually have returned is distinctive on purpose — if the bot ever
+# quotes a share price, a cancelled handler's result reached the conversation.
+@tool_options(cancel_on_interruption=False, timeout_secs=5)
+async def get_stock_price(params: FunctionCallParams, symbol: str):
+    """Get the current share price for a stock.
+
+    Args:
+        symbol: The ticker symbol, e.g. "NVDA".
+    """
+    await asyncio.sleep(20)
+    logger.debug("Returning get_stock_price result.")
+    await params.result_callback({"price": "184.20", "currency": "USD"})
+
+
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True, timeout_secs=120)
+async def write_report(params: FunctionCallParams, topic: str):
+    """Write a long research report on a topic.
+
+    Args:
+        topic: What the report should cover.
+    """
+    # Long enough to still be running when the LLM asks to stop it: listing what
+    # is running and then calling the cancel tool, with a spoken reply often in
+    # between, outlasts shorter work.
+    await asyncio.sleep(25)
+    logger.debug("Returning write_report result.")
+    await params.result_callback({"report": f"A 5000-word report on {topic}."})
 
 
 async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
@@ -80,21 +115,22 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
     llm = OpenAIResponsesLLMService(
         api_key=os.environ["OPENAI_API_KEY"],
-        enable_async_tool_cancellation=True,
         settings=OpenAIResponsesLLMService.Settings(
+            model="gpt-5.4",
+            reasoning=OpenAIResponsesReasoningConfig(effort="low"),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
@@ -118,7 +154,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # cancel_on_interruption=False (set via @tool_options) makes this an async
     # function call.
-    context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
+    context = LLMContext(
+        tools=[
+            get_current_weather,
+            write_report,
+            get_stock_price,
+            get_restaurant_recommendation,
+        ]
+    )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -143,11 +186,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -156,12 +204,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

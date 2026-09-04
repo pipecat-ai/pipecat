@@ -27,7 +27,7 @@ from pipecat.services.inworld.realtime import events
 class InworldRealtimeLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Inworld Realtime API.
 
-    Attributes:
+    Parameters:
         system_instruction: System prompt/instructions for the session.
         messages: List of conversation items formatted for Inworld Realtime.
         tools: List of tool definitions.
@@ -128,6 +128,7 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
 
         # Extract system message as session instructions
         if messages and messages[0].get("role") == "system":
+            self._warn_context_system_message()
             system = messages.pop(0)
             content = system.get("content")
             if isinstance(content, str):

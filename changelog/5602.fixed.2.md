@@ -1,0 +1,1 @@
+- The LLM usage debug log now includes cache creation tokens alongside cache reads.

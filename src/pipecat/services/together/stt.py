@@ -26,12 +26,10 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import TOGETHER_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -132,13 +130,13 @@ class TogetherSTTService(WebsocketSTTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Together AI STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -180,9 +178,7 @@ class TogetherSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._commit_audio_buffer()
 
     # ------------------------------------------------------------------
@@ -358,7 +354,6 @@ class TogetherSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription_trace(transcript, True, self._settings.language)
-            await self.stop_processing_metrics()
 
     @traced_stt
     async def _handle_transcription_trace(

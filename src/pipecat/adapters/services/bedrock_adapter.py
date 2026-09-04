@@ -333,7 +333,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 if img_idx > first_txt_idx:
                     # Move image before the first text
                     image_item = new_content.pop(img_idx)
-                new_content.insert(first_txt_idx, image_item)
+                    new_content.insert(first_txt_idx, image_item)
             return {"role": msg["role"], "content": new_content}
 
         return msg

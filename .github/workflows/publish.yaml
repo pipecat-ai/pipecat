@@ -76,3 +76,42 @@ jobs:
           verbose: true
           print-hash: true
           repository-url: https://test.pypi.org/legacy/
+
+  # Runs once the package is installable from PyPI, so the release notification
+  # never points at a version nobody can install yet. Notes come from the
+  # CHANGELOG.md section at the tag: the changelog is the single source of
+  # release notes, reformatted for GitHub by scripts/release-changelog.py. A tag
+  # whose version has no changelog section fails the run.
+  github-release:
+    name: 'Create GitHub Release'
+    runs-on: ubuntu-latest
+    needs: [publish-to-pypi]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.gitref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate release notes
+        env:
+          GITREF: ${{ github.event.inputs.gitref }}
+        run: |
+          python scripts/release-changelog.py --no-heading "${GITREF#v}" > release-notes.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITREF: ${{ github.event.inputs.gitref }}
+        run: |
+          if gh release view "$GITREF" >/dev/null 2>&1; then
+            gh release edit "$GITREF" --notes-file release-notes.md
+          else
+            gh release create "$GITREF" --title "$GITREF" --notes-file release-notes.md
+          fi

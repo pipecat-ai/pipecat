@@ -71,7 +71,7 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -279,13 +279,11 @@ class ListWorker(UIWorker):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting shopping-list bot")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),
+            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),
         ),
     )
     llm = OpenAILLMService(
@@ -294,8 +292,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # The UI worker owns the list; create it up front so the voice layer's
-    # read-only ``check_list`` tool can look at its live snapshot. It's added
-    # to the runner at the end alongside the main worker.
+    # read-only ``check_list`` tool can look at its live snapshot.
     list_worker = ListWorker()
 
     @tool_options(timeout_secs=10)
@@ -337,7 +334,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         name=MAIN_NAME,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(list_worker, worker)
 
     # Every user turn drives the UI: forward the transcript to the UIWorker
     # as a respond job (a bus message). Fire it from the turn-stopped event
@@ -378,8 +380,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(list_worker, worker)
 
     await runner.run()
 

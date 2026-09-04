@@ -1,0 +1,48 @@
+name: async_tool_cancellation
+
+# Text: an async function call the user abandons while it's still running. An
+# interruption alone doesn't stop an async call, so the bot has to recognize the
+# result is no longer wanted and cancel it with the built-in cancel tool that the
+# report writer brings with it. A tool registered cancellable_by_llm=True is
+# advertised alongside a cancel_<name> tool; work that didn't opt in has none, so
+# it cannot be stopped.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "Write me a report about sea turtles."
+    expect:
+      - event: function_call
+        calls:
+          - name: write_report
+
+  # The delay lets a bot's filler finish before the change of mind arrives, while
+  # leaving the report mid-flight so there is something left to cancel.
+  - user: "Actually, never mind the report. Tell me a joke instead."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: cancel_write_report
+      - event: response
+        eval: "tells a joke"
+
+  # Speak again once the report would have finished had it not been cancelled, and
+  # check the reply for it. Asserting silence instead would fail a bot that simply
+  # rounds the turn off — confirming the cancellation, or asking what else it can
+  # do — which a cancelled call leaves it free to do.
+  #
+  # The wait has to outlast the report itself. Any shorter and an uncancelled
+  # report would still be running here too, so the turn passes either way.
+  - user: "Anything else I should know?"
+    send_after:
+      delay_ms: 45000
+    expect:
+      - event: response
+        eval: "does not deliver or summarize a report about sea turtles"

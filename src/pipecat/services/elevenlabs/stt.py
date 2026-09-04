@@ -30,19 +30,18 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 def language_to_elevenlabs_language(language: Language) -> str:
@@ -179,10 +178,13 @@ class ElevenLabsSTTSettings(STTSettings):
         tag_audio_events: Whether to include audio events like (laughter),
             (coughing) in the transcription.
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript. Supported by ``scribe_v2`` only.
     """
 
-    tag_audio_events: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -193,6 +195,8 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
 
     Parameters:
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript.
         vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
@@ -200,12 +204,13 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
-    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    filter_background_audio: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_silence_threshold_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_background_audio: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):
@@ -282,6 +287,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             language=Language.EN,
             tag_audio_events=None,
             keyterms=None,
+            no_verbatim=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -365,6 +371,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
         if is_given(keyterms) and keyterms is not None:
             for keyterm in keyterms:
                 data.add_field("keyterms", keyterm)
+        no_verbatim = self._settings.no_verbatim
+        if is_given(no_verbatim) and no_verbatim is not None:
+            data.add_field("no_verbatim", str(no_verbatim).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -557,6 +566,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
             keyterms=None,
+            no_verbatim=None,
             filter_background_audio=None,
         )
 
@@ -635,19 +645,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating service should start.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_format = audio_format_from_sample_rate(self.sample_rate)
         await self._connect()
-
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
@@ -658,10 +664,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            # Start metrics when user starts speaking
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -777,6 +780,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 for keyterm in keyterms:
                     params.append(urlencode({"keyterms": keyterm}))
 
+            no_verbatim = self._settings.no_verbatim
+            if is_given(no_verbatim) and no_verbatim is not None:
+                params.append(f"no_verbatim={str(no_verbatim).lower()}")
+
             # Add optional parameters
             if self._include_timestamps:
                 params.append(f"include_timestamps={str(self._include_timestamps).lower()}")
@@ -881,12 +888,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type in (
             "error",
             "auth_error",
-            "quota_exceeded_error",
+            "quota_exceeded",
             "transcriber_error",
             "input_error",
+            "invalid_request",
             "commit_throttled",
-            "transcriber_error",
-            "unaccepted_terms_error",
+            "unaccepted_terms",
             "rate_limited",
             "queue_overflow",
             "resource_exhausted",
@@ -937,16 +944,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             data: Committed transcript data.
         """
-        # If timestamps are enabled, skip this message and wait for the
-        # committed_transcript_with_timestamps message which contains all the data
-        if self._include_timestamps:
+        # The server pairs every commit with a committed_transcript_with_timestamps
+        # message whenever timestamps or language detection is enabled, and only that
+        # message carries language_code. Skip this one so each commit is emitted once.
+        if self._include_timestamps or self._include_language_detection:
             return
 
         text = data.get("text", "").strip()
         if not text:
             return
-
-        await self.stop_processing_metrics()
 
         # Get language if provided
         language = data.get("language_code")
@@ -974,10 +980,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     async def _on_committed_transcript_with_timestamps(self, data: dict):
         """Handle committed transcript with word-level timestamps.
 
-        This message is sent when include_timestamps=true. The result data includes:
+        This message is sent when include_timestamps=true or
+        include_language_detection=true. The result data includes:
         - text: The transcribed text
         - language_code: Detected language (if available)
-        - words: Array of word objects with timing information:
+        - words: Array of word objects with timing information, null when only
+          language detection was requested:
             - text: The word text
             - start: Start time in seconds
             - end: End time in seconds
@@ -993,8 +1001,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_processing_metrics()
-
         # Get language if provided
         language = data.get("language_code")
 
@@ -1004,8 +1010,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         finalized = self._commit_strategy == CommitStrategy.MANUAL
 
-        # This message is sent after committed_transcript when include_timestamps=true.
-        # It contains the full transcript data including text and word-level timestamps.
         await self.emit_stt_usage_metrics()
         await self.push_frame(
             TranscriptionFrame(

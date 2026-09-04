@@ -14,15 +14,23 @@ Two layers:
   RTVI WebSocket server that replies to ``client-ready``/``send-text`` with
   scripted RTVI server messages — exercising the handshake, send/receive, event
   matching, and context paths without a real bot pipeline.
+- :class:`TestProgressEvent` covers the ``on_progress`` event and the deprecated
+  callback that feeds it.
 """
 
+import asyncio
+import base64
 import json
 import socket
+import tempfile
 import unittest
+import warnings
+from pathlib import Path
 
 import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.evals.audio import load_user_audio
 from pipecat.evals.harness import EvalSession
 from pipecat.evals.scenario import (
     EvalExpectation,
@@ -404,6 +412,7 @@ class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.skipped)
         self.assertFalse(result.passed)
         self.assertIn("response", result.skipped)
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
 
 
 class TestTextContainsResolution(unittest.TestCase):
@@ -416,6 +425,11 @@ class TestTextContainsResolution(unittest.TestCase):
         exp = EvalExpectation(event="llm_response", text_contains="Paris")
         self.assertIsNone(self._check({"type": "llm_response", "text": "It's Paris."}, exp))
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "London."}, exp))
+
+    def test_on_user_transcription_ignores_spacing(self):
+        exp = EvalExpectation(event="user_transcription", text_contains="the capital of")
+        ok = {"type": "user_transcription", "transcript": " What  is the  capital  of Germany?"}
+        self.assertIsNone(self._check(ok, exp))
 
     def test_on_user_transcription_transcript(self):
         exp = EvalExpectation(event="user_transcription", text_contains="hello")
@@ -449,6 +463,84 @@ class TestAudioSender(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
         self.assertEqual(b"".join(chunk for chunk, _ in sent), b"\x01\x02" * 16000 * 2)
         self.assertTrue(all(rate == 16000 for _, rate in sent))
+
+
+class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
+    """A turn's ``audio:`` file is played to the bot instead of being synthesized."""
+
+    @staticmethod
+    def _write_tone(path, sample_rate=16000, seconds=2.0, channels=1):
+        import numpy as np
+        import soundfile as sf
+
+        t = np.linspace(0, seconds, int(sample_rate * seconds), endpoint=False)
+        tone = (0.3 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        data = tone if channels == 1 else np.column_stack([tone] * channels)
+        sf.write(str(path), data, sample_rate)
+        return tone
+
+    async def test_file_is_sent_as_raw_audio_at_its_own_rate(self):
+        d = Path(tempfile.mkdtemp())
+        tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
+
+        s = _session(bot_audio=True)
+        sent: list[tuple[bytes, int]] = []
+
+        async def fake_send_raw(chunk, sample_rate):
+            sent.append((chunk, sample_rate))
+
+        s._send_raw_audio = fake_send_raw
+        await s._send_audio_file(str(d / "hi.wav"))
+
+        self.assertEqual(len(sent), 2)  # 2s -> two ~1s slices
+        self.assertTrue(all(rate == 16000 for _, rate in sent))
+        self.assertEqual(b"".join(chunk for chunk, _ in sent), tone.tobytes())
+
+    async def test_non_native_rate_is_preserved(self):
+        # The rate travels with the audio, so a recording need not match the bot.
+        d = Path(tempfile.mkdtemp())
+        self._write_tone(d / "hi.wav", sample_rate=44100, seconds=0.5)
+
+        s = _session(bot_audio=True)
+        sent: list[tuple[bytes, int]] = []
+
+        async def fake_send_raw(chunk, sample_rate):
+            sent.append((chunk, sample_rate))
+
+        s._send_raw_audio = fake_send_raw
+        await s._send_audio_file(str(d / "hi.wav"))
+
+        self.assertTrue(sent)
+        self.assertTrue(all(rate == 44100 for _, rate in sent))
+
+    async def test_stereo_is_downmixed_to_mono(self):
+        d = Path(tempfile.mkdtemp())
+        tone = self._write_tone(d / "s.wav", sample_rate=16000, seconds=0.5, channels=2)
+
+        pcm, rate = await load_user_audio(str(d / "s.wav"))
+        self.assertEqual(rate, 16000)
+        self.assertEqual(pcm, tone.tobytes())
+
+    async def test_unreadable_file_reports_the_path(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "x.txt").write_text("not audio", encoding="utf-8")
+        with self.assertRaises(ValueError) as cm:
+            await load_user_audio(str(d / "x.txt"))
+        self.assertIn("x.txt", str(cm.exception))
+
+
+class TestAudioFileEnablesMic(unittest.TestCase):
+    def test_audio_turn_adds_user_audio_flag(self):
+        # Without the flag the transport runs no mic and the audio is dropped,
+        # even though the scenario names no TTS.
+        scenario = EvalScenario(
+            name="t",
+            turns=[EvalTurn(user="hi", audio="/tmp/hi.wav")],
+            bot_audio=True,
+            user_audio=True,
+        )
+        url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
+        self.assertIn("user_audio=true", url)
 
 
 class TestDTMFSender(unittest.IsolatedAsyncioTestCase):
@@ -516,6 +608,11 @@ class _FakeRTVIServer:
                 case "send-text":
                     for out in self.script.get(msg["data"]["content"], []):
                         await ws.send(out)
+                case "raw-audio":
+                    # A real bot transcribes the audio; the fake one answers the
+                    # single scripted reply, so an audio turn can be driven.
+                    for out in next(iter(self.script.values()), []):
+                        await ws.send(out)
 
     async def start(self):
         self._server = await websockets.serve(self._handler, "localhost", self.port)
@@ -528,6 +625,23 @@ class _FakeRTVIServer:
     @property
     def url(self) -> str:
         return f"ws://localhost:{self.port}"
+
+
+def _capture_deadlines(session: EvalSession) -> list[float]:
+    """Record the deadline every expectation in a run is matched against.
+
+    A deadline is ``anchor + within_ms``, so expectations anchored together
+    produce one identical float rather than a float per expectation.
+    """
+    deadlines: list[float] = []
+    match_and_verify = session._match_and_verify
+
+    async def capture(expectation, anchor, budget_ms, turn_idx, exp_idx):
+        deadlines.append(anchor + budget_ms / 1000.0)
+        return await match_and_verify(expectation, anchor, budget_ms, turn_idx, exp_idx)
+
+    session._match_and_verify = capture
+    return deadlines
 
 
 class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
@@ -590,6 +704,42 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
+    async def test_user_transcription_aggregates_pieces(self):
+        # An STT that finalizes an utterance in pieces emits one user-transcription
+        # per piece; text_contains accumulates the finals (skipping interims), so a
+        # phrase spanning pieces matches however each piece is spaced.
+        self.server.on_text(
+            "what is the capital of Germany?",
+            _rtvi("user-transcription", {"text": " What is", "final": False}),
+            _rtvi("user-transcription", {"text": " What", "final": True}),
+            _rtvi("user-transcription", {"text": " is the capital", "final": True}),
+            _rtvi("user-transcription", {"text": " of", "final": True}),
+            _rtvi("user-transcription", {"text": " Germany?", "final": True}),
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Berlin."}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScenario(
+            name="pieces",
+            turns=[
+                EvalTurn(
+                    user="what is the capital of Germany?",
+                    expect=[
+                        EvalExpectation(
+                            event="user_transcription",
+                            within_ms=2000,
+                            text_contains="capital of Germany",
+                        ),
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="Berlin"
+                        ),
+                    ],
+                )
+            ],
+        )
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
     async def test_function_call_pass(self):
         self.server.on_text(
             "weather in Paris?",
@@ -620,6 +770,160 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await EvalSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
+    def _cancel_scenario(self, expected_id: str) -> EvalScenario:
+        """One turn asserting a cancel call named a particular id."""
+        return EvalScenario(
+            name="cancel",
+            turns=[
+                EvalTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call",
+                            within_ms=2000,
+                            calls=[
+                                EvalFunctionCall(
+                                    name="cancel_write_report",
+                                    args={"tool_call_id": expected_id},
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    async def test_corrected_call_satisfies_the_turn(self):
+        # A model that mistypes an id, is refused, and repeats the call with the
+        # right one has made the call the turn asks for.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "cull_turtles"},
+                    "tool_call_id": "call_cancel_1",
+                },
+            ),
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_turtles"},
+                    "tool_call_id": "call_cancel_2",
+                },
+            ),
+        )
+        result = await EvalSession.from_scenario(
+            self._cancel_scenario("call_turtles"), self.server.url
+        ).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_wrong_args_reports_what_the_bot_sent(self):
+        # No call carried the expected id, so the failure names the ones that did
+        # arrive rather than claiming the call was never made.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_volcanoes"},
+                    "tool_call_id": "call_cancel",
+                },
+            ),
+        )
+        result = await EvalSession.from_scenario(
+            self._cancel_scenario("call_turtles"), self.server.url
+        ).run()
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "function_args_mismatch")
+        self.assertIn("call_volcanoes", str(result.failures[0]))
+
+    def _stopped_scenario(self, cancelled: bool) -> EvalScenario:
+        """One turn asserting a call stopped, and how it ended."""
+        return EvalScenario(
+            name="stopped",
+            turns=[
+                EvalTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=2000,
+                            calls=[
+                                EvalFunctionCall(
+                                    name="write_report",
+                                    args={"tool_call_id": "call_turtles", "cancelled": cancelled},
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    async def _run_stopped(self, reported_cancelled: bool, expect_cancelled: bool):
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-stopped",
+                {
+                    "function_name": "write_report",
+                    "tool_call_id": "call_turtles",
+                    "cancelled": reported_cancelled,
+                },
+            ),
+        )
+        return await EvalSession.from_scenario(
+            self._stopped_scenario(expect_cancelled), self.server.url
+        ).run()
+
+    async def test_cancelled_call_matches(self):
+        result = await self._run_stopped(reported_cancelled=True, expect_cancelled=True)
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_call_that_ran_to_completion_is_not_a_cancellation(self):
+        # The distinction the event exists for: work that finished on its own
+        # stops too, and a scenario asserting cancellation must not accept it.
+        result = await self._run_stopped(reported_cancelled=False, expect_cancelled=True)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "function_args_mismatch")
+
+    async def test_started_and_stopped_events_do_not_claim_each_other(self):
+        # Both carry a name and a tool_call_id, so an expectation for one must
+        # not be satisfied by the other.
+        self.server.on_text(
+            "report on sea turtles",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "write_report",
+                    "arguments": {"topic": "sea turtles"},
+                    "tool_call_id": "call_turtles",
+                },
+            ),
+        )
+        scenario = EvalScenario(
+            name="no_crosstalk",
+            turns=[
+                EvalTurn(
+                    user="report on sea turtles",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=1500,
+                            calls=[EvalFunctionCall(name="write_report")],
+                        ),
+                    ],
+                )
+            ],
+        )
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failures[0].kind, "missing_function_call")
+
     async def test_text_mismatch_fails_clearly(self):
         self.server.on_text(
             "hi",
@@ -645,6 +949,86 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
         self.assertIn("does not contain", result.failures[0].reason)
+
+    def _two_turn_first_fails(self, *, stop_on_failure: bool) -> EvalScenario:
+        """A scenario whose first turn fails on content and whose second passes."""
+        self.server.on_text(
+            "first",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        self.server.on_text(
+            "second",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Berlin"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        return EvalScenario(
+            name="stop",
+            bot_audio=False,
+            stop_on_failure=stop_on_failure,
+            turns=[
+                EvalTurn(
+                    user="first",
+                    expect=[
+                        EvalExpectation(event="llm_response", within_ms=300, text_contains="London")
+                    ],
+                ),
+                EvalTurn(
+                    user="second",
+                    expect=[
+                        EvalExpectation(
+                            event="llm_response", within_ms=2000, text_contains="Berlin"
+                        )
+                    ],
+                ),
+            ],
+        )
+
+    def _sent_texts(self) -> list[str]:
+        return [m["data"]["content"] for m in self.server.received if m.get("type") == "send-text"]
+
+    async def test_failed_turn_stops_scenario_by_default(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=True)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        self.assertFalse(result.passed)
+        # Only turn 0 is reported, and turn 1 is never sent.
+        self.assertEqual([f.turn_index for f in result.failures], [0])
+        self.assertEqual(self._sent_texts(), ["first"])
+        # The turn the run stopped short of is not_run, not a pass.
+        self.assertEqual([t.status for t in result.turns], ["failed", "not_run"])
+
+    async def test_stop_on_failure_false_drives_remaining_turns(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        # The run still fails, but every turn was driven and the passing turn
+        # after the failure adds no failure of its own.
+        self.assertFalse(result.passed)
+        self.assertEqual([f.turn_index for f in result.failures], [0])
+        self.assertEqual(self._sent_texts(), ["first", "second"])
+        self.assertEqual([t.status for t in result.turns], ["failed", "passed"])
+
+    async def test_turn_results_carry_their_own_failures(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        failed, passed = result.turns
+        self.assertEqual([f.kind for f in failed.failures], ["text_mismatch"])
+        self.assertEqual(passed.failures, [])
+        # Every turn's failures, in order, are the flat list on the result.
+        self.assertEqual([f for t in result.turns for f in t.failures], result.failures)
+
+    async def test_turn_results_are_timed(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        # A driven turn is timed; one that never ran has no duration to report.
+        self.assertGreater(result.turns[0].duration_ms, 0)
+        self.assertGreater(result.turns[1].duration_ms, 0)
+
+        stopping = await EvalSession.from_scenario(
+            self._two_turn_first_fails(stop_on_failure=True), self.server.url
+        ).run()
+        self.assertEqual(stopping.turns[1].duration_ms, 0)
 
     async def test_missing_event_times_out(self):
         scenario = EvalScenario(
@@ -681,7 +1065,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # A turn that expects a function call AND a response but gets neither must
         # fail within a single within_ms budget. The function_call timeout returns a
         # failure (not a raise) so the loop continues to the response; both share the
-        # anchor, so the run takes ~one budget, not budget-per-expectation.
+        # anchor, so the turn spends one budget, not budget-per-expectation.
         scenario = EvalScenario(
             name="shared_deadline",
             turns=[
@@ -698,10 +1082,13 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+        session = EvalSession.from_scenario(scenario, self.server.url)
+        deadlines = _capture_deadlines(session)
+        result = await session.run()
         self.assertFalse(result.passed)
-        # One shared 400ms budget, not 400ms + 400ms.
-        self.assertLess(result.duration_ms, 700)
+        # Both expectations wait against one 400ms deadline, not 400ms each.
+        self.assertEqual(len(deadlines), 2)
+        self.assertEqual(len(set(deadlines)), 1)
 
     async def test_send_after_delays_run(self):
         self.server.on_text("first", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
@@ -741,6 +1128,8 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.failures), 1)
         self.assertEqual(result.failures[0].event_name, "<connect>")
         self.assertIn("failed to connect", result.failures[0].reason)
+        # A run that never reached the bot scored nothing.
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
 
     async def test_unexpected_error_surfaced_not_swallowed(self):
         # A sub-pipeline that fails to start (e.g. a local model thrashing under
@@ -769,6 +1158,52 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # The full traceback is preserved in the debug trace (saved to <bot>.eval.log).
         self.assertTrue(any("kokoro boom" in line for line in result.debug_log))
         self.assertTrue(any("Traceback" in line for line in result.debug_log))
+        # The raise came before any turn started, so none of them are scored.
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_audio_turn_sends_the_file_not_synthesized_text(self):
+        import numpy as np
+        import soundfile as sf
+
+        d = Path(tempfile.mkdtemp())
+        sr = 16000
+        t = np.linspace(0, 0.5, sr // 2, endpoint=False)
+        tone = (0.3 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        sf.write(str(d / "hi.wav"), tone, sr)
+
+        self.server.on_text(
+            "hello there",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hi!"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScenario(
+            name="audio-turn",
+            bot_audio=False,
+            user_audio=True,
+            turns=[
+                EvalTurn(
+                    user="hello there",
+                    audio=str(d / "hi.wav"),
+                    expect=[EvalExpectation(event="llm_started", within_ms=2000)],
+                )
+            ],
+        )
+
+        # No speech= override: the file is played, so nothing has to synthesize it.
+        result = await EvalSession.from_scenario(scenario, self.server.url).run()
+
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+        audio_msgs = [m for m in self.server.received if m.get("type") == "raw-audio"]
+        self.assertTrue(audio_msgs, "the turn's audio file never reached the bot")
+        self.assertEqual(
+            [m for m in self.server.received if m.get("type") == "send-text"],
+            [],
+            "an audio turn must not also be sent as text",
+        )
+        got = b"".join(base64.b64decode(m["data"]["base64Audio"]) for m in audio_msgs)
+        self.assertEqual(got, tone.tobytes())
+        self.assertTrue(all(m["data"]["sampleRate"] == sr for m in audio_msgs))
 
     async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
@@ -807,6 +1242,85 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             if m.get("type") == "client-message" and m["data"].get("t") == "eval-context"
         ]
         self.assertEqual(context_messages, [])
+
+
+class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
+    """``on_progress`` handlers see every turn and expectation, in order."""
+
+    def _scenario(self) -> EvalScenario:
+        return EvalScenario(
+            name="progress",
+            turns=[
+                EvalTurn(
+                    user="hi",
+                    expect=[
+                        EvalExpectation(event="llm_started", within_ms=2000),
+                        EvalExpectation(event="llm_response", within_ms=2000),
+                    ],
+                )
+            ],
+        )
+
+    async def asyncSetUp(self):
+        self.server = _FakeRTVIServer(_free_port())
+        await self.server.start()
+        self.server.on_text(
+            "hi",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "hello"}),
+            _rtvi("bot-llm-stopped"),
+        )
+
+    async def asyncTearDown(self):
+        await self.server.stop()
+
+    async def test_event_handler_receives_records(self):
+        session = EvalSession.from_scenario(self._scenario(), self.server.url)
+        seen = []
+
+        @session.event_handler("on_progress")
+        async def on_progress(source, progress):
+            seen.append((source, progress))
+
+        await session.run()
+
+        self.assertTrue(all(source is session for source, _ in seen))
+        self.assertEqual(
+            [(p.event_name, p.status) for _, p in seen],
+            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+        )
+
+    async def test_records_are_delivered_before_run_returns(self):
+        """Handlers dispatch as tasks, so run() waits them out before it returns."""
+        session = EvalSession.from_scenario(self._scenario(), self.server.url)
+        finished = []
+
+        @session.event_handler("on_progress")
+        async def on_progress(source, progress):
+            await asyncio.sleep(0.01)
+            finished.append(progress.event_name)
+
+        await session.run()
+
+        self.assertEqual(finished, ["hi", "llm_started", "llm_response"])
+
+    async def test_callback_is_deprecated_and_still_called(self):
+        seen = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            session = EvalSession.from_scenario(
+                self._scenario(), self.server.url, on_progress=seen.append
+            )
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+
+        await session.run()
+
+        # The callback takes only the record, not the session an event handler gets.
+        self.assertEqual(
+            [(p.event_name, p.status) for p in seen],
+            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+        )
 
 
 if __name__ == "__main__":

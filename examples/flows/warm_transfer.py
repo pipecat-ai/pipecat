@@ -57,7 +57,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.flows import ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import ActionConfig, ContextStrategy
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -620,7 +620,12 @@ async def main():
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
         )
+
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
 
         # Initialize flow manager
         flow_manager = FlowManager(
@@ -665,7 +670,7 @@ async def main():
                 if v.get("info", {}).get("userId") in {"agent", "customer"}
             }
             if not human_participants:
-                await worker.cancel()
+                await runner.cancel()
 
         # Print URL for joining as customer, and store URL for joining as human agent, to be printed later
         customer_token = await get_customer_token(
@@ -703,9 +708,6 @@ async def main():
 
         atexit.register(cleanup_hold_music_process)
 
-        # Run the pipeline
-        runner = WorkerRunner()
-        await runner.add_workers(worker)
         await runner.run()
 
 

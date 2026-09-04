@@ -10,7 +10,7 @@ This module provides a smart turn analyzer that uses PyTorch models for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from loguru import logger
@@ -77,13 +77,16 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         elif torch.cuda.is_available():
             self._device = "cuda"
         # Move model to selected device and set it to evaluation mode
-        self._turn_model = self._turn_model.to(self._device)
+        # torch types Module.to as a wrapper descriptor, so the device binds to `self`
+        self._turn_model = self._turn_model.to(self._device)  # pyright: ignore[reportArgumentType]
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn v2")
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local PyTorch model."""
-        inputs = self._turn_processor(
+        # transformers types the processor's kwargs as nested TypedDict groups,
+        # while the runtime accepts the flat form used here
+        inputs = cast(Any, self._turn_processor)(
             audio_array,
             sampling_rate=16000,
             padding="max_length",

@@ -17,7 +17,7 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.startup_timing_observer import StartupTimingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -81,14 +81,14 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -128,7 +128,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[latency_observer, startup_observer],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @latency_observer.event_handler("on_first_bot_speech_latency")
     async def on_first_bot_speech_latency(observer, latency_seconds):
@@ -140,9 +145,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @startup_observer.event_handler("on_startup_timing_report")
     async def on_startup_timing_report(observer, report):
+        # Getting ready runs concurrently, so the longest piece of work is what
+        # the phase cost. The StartFrame then reaches processors one at a time,
+        # so what each spends on it adds up.
         logger.info(f"Total startup: {report.total_duration_secs:.3f}s")
+
+        # Every processor is set up, so listing them all gives the pipeline it
+        # ran against, which is what the phase totals below are spread over.
+        logger.info(f"  Setup (concurrent): {report.setup_phase_secs:.3f}s")
+        if report.warmup:
+            logger.info(f"    warming deferred imports: {report.warmup.duration_secs:.3f}s")
         for timing in report.processor_timings:
-            logger.info(f"  {timing.processor_name}: {timing.duration_secs:.3f}s")
+            logger.info(f"    {timing.processor_name}: {timing.setup_duration_secs:.3f}s")
+
+        logger.info(f"  Start (sequential): {report.start_phase_secs:.3f}s")
+        for timing in report.processor_timings:
+            if timing.start_duration_secs >= 0.001:
+                logger.info(f"    {timing.processor_name}: {timing.start_duration_secs:.3f}s")
 
     @startup_observer.event_handler("on_transport_timing_report")
     async def on_transport_timing_report(observer, report):
@@ -171,7 +190,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -180,12 +199,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

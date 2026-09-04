@@ -21,16 +21,21 @@ from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
+    Generic,
     Literal,
 )
+
+from typing_extensions import TypeVar
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
+from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -40,7 +45,6 @@ if TYPE_CHECKING:
     from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
-    from pipecat.services.settings import ServiceSettings
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
     from pipecat.utils.context.llm_context_summarization import LLMContextSummaryConfig
     from pipecat.utils.tracing.tracing_context import TracingContext
@@ -357,7 +361,7 @@ class LLMMarkerFrame(DataFrame):
 
     The primary use today is the ``filter_incomplete_user_turns``
     protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    turn-completion markers ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -371,8 +375,8 @@ class LLMMarkerFrame(DataFrame):
             soon as it's received. If False, the marker is appended to
             the running assistant aggregation and flushed to the
             context together with the following text as a single
-            message (e.g. for the ✓ case the context message ends up
-            as "✓ <response>").
+            message (e.g. for the ● case the context message ends up
+            as "● <response>").
     """
 
     marker: str
@@ -695,11 +699,12 @@ class LLMSetToolsFrame(DataFrame):
     Parameters:
         tools: The tools to advertise. May be a ``ToolsSchema``, a plain list of
             direct functions and/or ``FunctionSchema`` objects (normalized to a
-            ``ToolsSchema``, with direct-function handlers auto-registered), a
-            list of provider-specific tool dicts, or ``NOT_GIVEN`` to clear tools.
+            ``ToolsSchema``, with direct-function handlers auto-registered), or
+            ``NOT_GIVEN`` to clear tools. Provider-native tools travel in a
+            ``ToolsSchema``'s ``custom_tools``, keyed by adapter type.
     """
 
-    tools: list[dict] | list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
+    tools: list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
 
 
 @dataclass
@@ -775,6 +780,9 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
         result: The result returned by the function.
         run_llm: Whether to run the LLM after this result.
         properties: Additional properties for result handling.
+        error: What went wrong, when the call ended because its handler raised.
+            The ``result`` is then a stand-in message written for the LLM to
+            read, rather than anything the handler returned.
 
     """
 
@@ -784,6 +792,7 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
     result: Any
     run_llm: bool | None = None
     properties: FunctionCallResultProperties | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -903,6 +912,18 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 #
 
 
+# Fields of :class:`StartFrame` whose reads are deprecated.
+_START_FRAME_DEPRECATED_FIELDS = (
+    "audio_in_sample_rate",
+    "audio_out_sample_rate",
+    "enable_metrics",
+    "enable_tracing",
+    "enable_usage_metrics",
+    "report_only_initial_ttfb",
+    "tracing_context",
+)
+
+
 @dataclass
 class StartFrame(SystemFrame):
     """Initial frame to start pipeline processing.
@@ -912,12 +933,46 @@ class StartFrame(SystemFrame):
 
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
+
+            .. deprecated:: 1.8.0
+                Read ``audio_in_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         audio_out_sample_rate: Output audio sample rate in Hz.
+
+            .. deprecated:: 1.8.0
+                Read ``audio_out_sample_rate`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_metrics: Whether to enable performance metrics collection.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_tracing: Whether to enable OpenTelemetry tracing.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_tracing`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         enable_usage_metrics: Whether to enable usage metrics collection.
+
+            .. deprecated:: 1.8.0
+                Read ``enable_usage_metrics`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+
+            .. deprecated:: 1.8.0
+                Read ``report_only_initial_ttfb`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
+
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
+
+            .. deprecated:: 1.8.0
+                Read ``tracing_context`` in ``FrameProcessorSetup.setup()`` instead.
+                Will be removed in 2.0.0.
     """
 
     audio_in_sample_rate: int = 16000
@@ -927,6 +982,21 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None
+
+    def __getattribute__(self, name: str) -> Any:
+        # Reads warn, writes don't: assignment goes through ``__setattr__``. The None
+        # guard is for ``tracing_context``, the only field whose default is None and
+        # so can't be told apart from unset.
+        if name in _START_FRAME_DEPRECATED_FIELDS:
+            value = object.__getattribute__(self, name)
+            if value is not None:
+                warn_deprecated_read(
+                    f"`StartFrame.{name}` is deprecated since 1.8.0, "
+                    f"read `{name}` in `FrameProcessorSetup.setup()` instead. "
+                    "Will be removed in 2.0.0."
+                )
+            return value
+        return object.__getattribute__(self, name)
 
 
 @dataclass
@@ -951,31 +1021,83 @@ class ErrorFrame(SystemFrame):
     """Frame notifying of errors in the pipeline.
 
     This is used to notify upstream that an error has occurred downstream in
-    the pipeline. A fatal error indicates the error is unrecoverable and that the
-    bot should exit.
+    the pipeline.
 
     Parameters:
         error: Description of the error that occurred.
         fatal: Whether the error is fatal and requires bot shutdown.
+
+            .. deprecated:: 1.8.0
+                Use :meth:`FrameProcessor.push_error` with
+                ``force_treat_as_permanent=True`` instead, when the error leaves
+                its originating processor unable to do its job: it marks that
+                processor unusable and the pipeline worker applies its
+                :class:`ProcessorUnusablePolicy`. For an error that isn't about
+                a processor's state, push an :class:`EndWorkerFrame` after the
+                error to end the pipeline. Will be removed in 2.0.0.
+
         processor: The frame processor that generated the error.
         exception: The exception that occurred.
+        category: What kind of failure this was, drawn from `ErrorCategory`:
+            rejected credentials, an unreachable provider, a malformed request
+            and so on. ``None`` means nobody has said yet, which invites the
+            category to be worked out from the exception; set it to
+            `ErrorCategory.UNKNOWN` to report an error whose cause can't be
+            attributed. Always set by the time the frame travels.
     """
 
     error: str
     fatal: bool = False
     processor: FrameProcessor | None = None
     exception: Exception | None = None
+    category: ErrorCategory | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Only a set flag carries behavior worth warning about, and
+        # `FatalErrorFrame` already warns about itself.
+        if self.fatal and not isinstance(self, FatalErrorFrame):
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`ErrorFrame.fatal` is deprecated since 1.8.0 and will be removed in "
+                    "2.0.0. If the error leaves its originating processor unable to do its "
+                    "job, report it with `push_error(..., force_treat_as_permanent=True)`: "
+                    "that marks the processor unusable, and the PipelineWorker acts on it "
+                    "according to its `processor_unusable_policy` "
+                    "(`ProcessorUnusablePolicy.CANCEL` does what `fatal=True` did). "
+                    "Otherwise, push this ErrorFrame without `fatal` and follow it with an "
+                    "`EndWorkerFrame` to end the pipeline.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
 
     def __str__(self):
-        return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
+        category = (
+            f", category: {self.category.value}"
+            if self.category and self.category is not ErrorCategory.UNKNOWN
+            else ""
+        )
+        return f"{self.name}(error: {self.error}, fatal: {self.fatal}{category})"
 
 
+@deprecated(
+    "`FatalErrorFrame` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+    "Use `ErrorFrame` instead. See the `ErrorFrame.fatal` docstring for how to "
+    "report an error that used to be fatal."
+)
 @dataclass
 class FatalErrorFrame(ErrorFrame):
     """Frame notifying of unrecoverable errors requiring bot shutdown.
 
-    This is used to notify upstream that an unrecoverable error has occurred and
-    that the bot should exit immediately.
+    .. deprecated:: 1.8.0
+        Use :class:`ErrorFrame` instead. Report the error with
+        :meth:`FrameProcessor.push_error` and ``force_treat_as_permanent=True``
+        when it leaves its originating processor unable to do its job — the
+        pipeline worker then applies its :class:`ProcessorUnusablePolicy`, of
+        which ``CANCEL`` shuts the bot down. For an error that isn't about a
+        processor's state, push an :class:`EndWorkerFrame` after the error
+        instead. Will be removed in 2.0.0.
 
     Parameters:
         fatal: Always True for fatal errors.
@@ -1007,6 +1129,11 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
     This frame is used to resume frame processing for the given processor
     if it was previously paused as fast as possible. After resuming frame
     processing all queued frames will be processed in the order received.
+
+    Note:
+        This frame is now equivalent to FrameProcessorResumeFrame, which was
+        changed to a SystemFrame to fix a bug where resume frames would get
+        stuck in the blocked processing queue.
 
     Parameters:
         processor: The frame processor to resume.
@@ -1130,6 +1257,42 @@ class VADUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class ProposedUserStartedSpeakingFrame(SystemFrame):
+    """Frame proposing that the user turn has started.
+
+    Emitted by a component with its own turn detection — typically an STT or
+    realtime LLM service whose provider reports speech boundaries. It is a
+    proposal, not a decision: an
+    :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` resolves it
+    into a :class:`UserStartedSpeakingFrame` and broadcasts the interruption.
+
+    This is a system frame because resolving it broadcasts an interruption,
+    which must preempt queued frames rather than wait behind them. Its
+    end-of-turn counterpart has the opposite requirement and is a control
+    frame; see :class:`ProposedUserStoppedSpeakingFrame`.
+    """
+
+    pass
+
+
+@dataclass
+class ProposedUserStoppedSpeakingFrame(ControlFrame):
+    """Frame proposing that the user turn has ended.
+
+    The end-of-turn counterpart to :class:`ProposedUserStartedSpeakingFrame`,
+    resolved into a :class:`UserStoppedSpeakingFrame` by an
+    :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`.
+
+    This is a control frame so it stays ordered against the final
+    :class:`TranscriptionFrame`. A service with its own turn detection pushes
+    that transcript and then proposes the stop, and the turn strategy needs
+    that text in hand to close the turn on.
+    """
+
+    pass
+
+
+@dataclass
 class BotStartedSpeakingFrame(SystemFrame):
     """Frame indicating the bot started speaking.
 
@@ -1217,10 +1380,15 @@ class FunctionCallCancelFrame(SystemFrame):
     Parameters:
         function_name: Name of the function that was cancelled.
         tool_call_id: Unique identifier for the cancelled function call.
+        run_llm: Whether to run the LLM after this cancellation. Only a call
+            cancelled by its own timeout sets this: an interruption must not
+            trigger inference, and a cancellation the LLM asked for already
+            runs inference through the result of the tool that requested it.
     """
 
     function_name: str
     tool_call_id: str
+    run_llm: bool = False
 
 
 @dataclass
@@ -1785,22 +1953,33 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
-    when it returns to the source the worker sets ``event``. Once that fires,
-    every frame queued ahead of the probe has completed the round-trip and been
-    processed. Useful to wait for the pipeline to drain (e.g. after an
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
+    source turns it around, and the worker sets ``event`` when it reaches the
+    sink a second time. Once that fires, every frame queued ahead of the probe
+    has been processed, along with anything a processor started by pushing
+    upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
     This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its round-trip.
+    InterruptionFrame and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
+        returning: Whether the probe is on its second pass downstream, after
+            having been back up to the source. Work a processor starts by
+            pushing upstream — an LLM run triggered by a function call result,
+            say — only reaches the sink after that turnaround, so the probe
+            makes the trip twice and settles on the second arrival.
+        origin: Name of the worker that started the flush. A probe that crosses
+            into another pipeline is answered there, out of sight of whoever is
+            waiting, so the answering worker reports progress back to this name.
     """
 
     event: asyncio.Event | None = field(default=None, compare=False)
+    returning: bool = field(default=False, compare=False)
+    origin: str | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -1880,12 +2059,19 @@ class FrameProcessorPauseFrame(ControlFrame):
 
 
 @dataclass
-class FrameProcessorResumeFrame(ControlFrame):
+class FrameProcessorResumeFrame(SystemFrame):
     """Frame to resume frame processing for a specific processor.
 
     This frame is used to resume frame processing for the given processor if
     it was previously paused. After resuming frame processing all queued frames
     will be processed in the order received.
+
+    This is a SystemFrame to ensure it bypasses the blocked processing queue
+    when the processor is paused. Otherwise, the resume frame would get queued
+    and never processed.
+
+    Note:
+        This frame is now equivalent to FrameProcessorResumeUrgentFrame.
 
     Parameters:
         processor: The frame processor to resume.
@@ -2077,8 +2263,17 @@ class TTSStoppedFrame(ControlFrame):
     context_id: str | None = None
 
 
+# Covariant so a bare ``ServiceUpdateSettingsFrame`` annotation still accepts the
+# subclasses. Gotcha: ``delta`` is mutable, so writing through the base type is
+# unsound and goes unreported — treat a base-typed frame as read-only::
+#
+#     def audit(frame: ServiceUpdateSettingsFrame) -> None:
+#         frame.delta = TTSSettings(voice="x")  # accepted, even for an LLM frame
+TSettings = TypeVar("TSettings", bound=ServiceSettings, default=ServiceSettings, covariant=True)
+
+
 @dataclass
-class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
+class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame, Generic[TSettings]):
     """Base frame for updating service settings.
 
     Supports both a ``settings`` dict (for backward compatibility) and a
@@ -2104,27 +2299,27 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
-    delta: ServiceSettings | None = None
+    delta: TSettings | None = None
     service: FrameProcessor | None = None
     reach_inactive_services: bool = False
 
 
 @dataclass
-class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame[LLMSettings]):
     """Frame for updating LLM service settings."""
 
     pass
 
 
 @dataclass
-class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame[TTSSettings]):
     """Frame for updating TTS service settings."""
 
     pass
 
 
 @dataclass
-class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame[STTSettings]):
     """Frame for updating STT service settings."""
 
     pass

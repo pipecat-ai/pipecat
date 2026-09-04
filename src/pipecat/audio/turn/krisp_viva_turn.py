@@ -310,7 +310,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 # Instead, we wait for the model's probability check below to confirm
                 # end-of-turn based on the threshold.
 
-                prob = self._tt_session.process(frame.tolist(), is_speech, False)
+                prob = self._tt_session.process(frame, is_speech, False)
 
                 # Store the probability for external access
                 self._last_probability = prob
@@ -331,7 +331,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                             probability=prob,
                             e2e_processing_time_ms=self._e2e_processing_time_ms,
                         )
-                        logger.debug(f"Krisp turn complete")
+                        logger.debug("Krisp turn complete")
                     state = EndOfTurnState.COMPLETE
                     self.clear()
                     break

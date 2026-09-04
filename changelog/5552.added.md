@@ -1,0 +1,1 @@
+- Added a `speed` setting to `DeepgramTTSService` and `DeepgramHttpTTSService`, passing Deepgram's Aura speech-rate multiplier (0.7 to 1.5) through to `/v1/speak`.

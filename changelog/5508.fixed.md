@@ -1,0 +1,1 @@
+- Corrected the Nova Sonic region lists in `AWSNovaSonicLLMService`'s docstring and example: `eu-north-1` is a supported region for both Nova 2 Sonic and Nova Sonic.

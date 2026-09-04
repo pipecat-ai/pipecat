@@ -169,8 +169,8 @@ async def test_reconnect_succeeds_on_later_attempt(service, report_error):
 
 
 @pytest.mark.asyncio
-async def test_reconnect_exhausted_emits_non_fatal_error(service, report_error):
-    """Exhausting all retries returns False and emits a non-fatal ErrorFrame."""
+async def test_reconnect_exhausted_emits_error(service, report_error):
+    """Exhausting all retries returns False and emits an ErrorFrame."""
     service._reconnect_websocket = AsyncMock(side_effect=ConnectionError("Connection refused"))
 
     result = await service._try_reconnect(report_error=report_error)
@@ -179,7 +179,6 @@ async def test_reconnect_exhausted_emits_non_fatal_error(service, report_error):
     assert service._reconnect_websocket.call_count == 3
     final_error = report_error.call_args_list[-1][0][0]
     assert isinstance(final_error, ErrorFrame)
-    assert final_error.fatal is False
     assert "Connection refused" in final_error.error
 
 
@@ -192,7 +191,6 @@ async def test_reconnect_exhausted_when_connect_does_not_raise(service, report_e
     assert report_error.call_count == 4
     final_error = report_error.call_args_list[-1][0][0]
     assert isinstance(final_error, ErrorFrame)
-    assert final_error.fatal is False
     assert "websocket reconnection failed verification" in final_error.error
 
 
@@ -220,7 +218,6 @@ async def test_quick_failures_emit_error(service, report_error):
     report_error.assert_called_once()
     error_frame = report_error.call_args[0][0]
     assert isinstance(error_frame, ErrorFrame)
-    assert error_frame.fatal is False
     assert "failed 3 times immediately after connecting" in error_frame.error
 
 
@@ -267,8 +264,7 @@ async def test_stable_connection_resets_quick_failure_counter(service, report_er
 
     assert call_count == 6
     report_error.assert_called_once()
-    error_frame = report_error.call_args[0][0]
-    assert error_frame.fatal is False
+    assert isinstance(report_error.call_args[0][0], ErrorFrame)
 
 
 # ---------------------------------------------------------------------------

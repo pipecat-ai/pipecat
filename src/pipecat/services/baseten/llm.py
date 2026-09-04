@@ -10,8 +10,6 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -73,78 +71,6 @@ class BasetenLLMService(OpenAILLMService):
             default_settings.apply_update(settings)
 
         super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
-
-        # Counters for accumulating token usage metrics
-        self._prompt_tokens = 0
-        self._completion_tokens = 0
-        self._cache_read_input_tokens = 0
-        self._reasoning_tokens = 0
-        self._has_reported_prompt_tokens = False
-        self._is_processing = False
-
-    def _reset_token_usage(self):
-        """Reset accumulated token counters at the start of each LLM call."""
-        self._prompt_tokens = 0
-        self._completion_tokens = 0
-        self._cache_read_input_tokens = 0
-        self._reasoning_tokens = 0
-        self._has_reported_prompt_tokens = False
-        self._is_processing = True
-
-    async def _process_context(self, context: LLMContext):
-        """Process a context through the LLM and accumulate token usage metrics.
-
-        Overrides the parent implementation to handle Baseten's cumulative token
-        reporting, collapsing the per-chunk counts into a single total reported
-        once at the end of processing.
-
-        Args:
-            context: The context to process, containing messages and other
-                information needed for the LLM interaction.
-        """
-        self._reset_token_usage()
-
-        # Wrap in try/finally so accumulated metrics are still reported if the
-        # response is interrupted or cancelled mid-stream.
-        try:
-            await super()._process_context(context)
-        finally:
-            self._is_processing = False
-            if self._prompt_tokens > 0 or self._completion_tokens > 0:
-                tokens = LLMTokenUsage(
-                    prompt_tokens=self._prompt_tokens,
-                    completion_tokens=self._completion_tokens,
-                    total_tokens=self._prompt_tokens + self._completion_tokens,
-                    cache_read_input_tokens=self._cache_read_input_tokens or None,
-                    reasoning_tokens=self._reasoning_tokens or None,
-                )
-                await super().start_llm_usage_metrics(tokens)
-
-    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        """Accumulate token usage metrics during processing.
-
-        Baseten reports cumulative usage on every streamed chunk rather than
-        once at the end, so each update supersedes the previous one instead of
-        adding to it.
-
-        Args:
-            tokens: Token usage information to accumulate.
-        """
-        if not self._is_processing:
-            return
-
-        # Prompt and cache-read counts are constant across chunks; take the first.
-        if not self._has_reported_prompt_tokens and tokens.prompt_tokens > 0:
-            self._prompt_tokens = tokens.prompt_tokens
-            self._cache_read_input_tokens = tokens.cache_read_input_tokens or 0
-            self._has_reported_prompt_tokens = True
-
-        # Completion and reasoning counts grow as the response streams.
-        if tokens.completion_tokens > self._completion_tokens:
-            self._completion_tokens = tokens.completion_tokens
-        reasoning_tokens = tokens.reasoning_tokens or 0
-        if reasoning_tokens > self._reasoning_tokens:
-            self._reasoning_tokens = reasoning_tokens
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Baseten API endpoint.

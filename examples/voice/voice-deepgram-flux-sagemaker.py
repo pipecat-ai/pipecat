@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
 from pipecat.services.deepgram.flux.sagemaker.stt import DeepgramFluxSageMakerSTTService
-from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService
+from pipecat.services.deepgram.flux.sagemaker.tts import DeepgramFluxSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -56,7 +56,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Initialize Deepgram Flux SageMaker STT Service
     # This requires:
@@ -70,15 +70,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # Initialize Deepgram SageMaker TTS Service
+    # Initialize Deepgram Flux SageMaker TTS Service
     # This requires:
     # - AWS credentials configured (via environment variables or AWS CLI)
-    # - A deployed SageMaker endpoint with Deepgram TTS model
-    tts = DeepgramSageMakerTTSService(
+    # - A deployed SageMaker endpoint with Deepgram Flux TTS model
+    tts = DeepgramFluxSageMakerTTSService(
         endpoint_name=os.environ["SAGEMAKER_TTS_ENDPOINT_NAME"],
         region=os.environ["AWS_REGION"],
-        settings=DeepgramSageMakerTTSService.Settings(
-            voice="aura-2-andromeda-en",
+        settings=DeepgramFluxSageMakerTTSService.Settings(
+            voice="flux-cole-en",
         ),
     )
 
@@ -116,27 +116,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     @stt.event_handler("on_update")
     async def on_deepgram_flux_update(stt, transcript):
         logger.debug(f"On deepgram flux update: {transcript}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 
