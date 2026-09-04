@@ -35,11 +35,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     WorkerFrame,
 )
-
-# Lifecycle frames that must still flow after a gate closes. Worker frames
-# (e.g. EndWorkerFrame) are addressed to PipelineWorker; CancelWorkerFrame
-# already passes because it is a SystemFrame.
-_CLOSED_GATE_ALLOWLIST = (SystemFrame, EndFrame, StopFrame, WorkerFrame)
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -51,6 +46,9 @@ from pipecat.services.llm_service import LLMService
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
+
+# Lifecycle frames that must still flow after a gate closes
+_CLOSED_GATE_ALLOWLIST = (SystemFrame, EndFrame, StopFrame, WorkerFrame)
 
 
 class NotifierGate(FrameProcessor):
@@ -184,7 +182,6 @@ class ClassifierGate(NotifierGate):
             if not self._conversation_detected:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, _CLOSED_GATE_ALLOWLIST):
-            # Always allow system, end/stop, and worker lifecycle frames through.
             await self.push_frame(frame, direction)
 
     async def _wait_for_conversation(self):
