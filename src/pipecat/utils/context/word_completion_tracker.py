@@ -219,6 +219,24 @@ class WordCompletionTracker:
         self._overflow_word = word
         return True
 
+    def force_complete_remaining(self) -> None:
+        """End this frame early because no further word event is coming.
+
+        The audio context ended with words still outstanding, so the caller is
+        emitting the unspoken remainder itself (see
+        :meth:`AggregatedFrameSequencer.force_complete`). Adopt that remainder
+        here too: jump the user-facing and LLM cursors to the end, exactly as
+        :meth:`_force_complete` does when a stray word forces the frame, so the
+        accumulated text covers the whole frame and the transcript keeps it.
+
+        Callers read the ``get_remaining_*`` accessors *before* calling this --
+        afterwards there is no remainder left to read.
+        """
+        self._user_facing_pos = len(self._user_facing_text)
+        if self._llm_text is not None:
+            self._llm_pos = len(self._llm_text)
+        self._force_completed = True
+
     def _record_llm_span(self, word: str, llm_pos_before: int) -> None:
         """Record which part of ``llm_text`` the word just added stands for.
 
