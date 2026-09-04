@@ -105,6 +105,9 @@ class _FakeWebSocket:
             raise StopAsyncIteration
         return self._messages.pop(0)
 
+    async def close(self) -> None:
+        self._messages.clear()
+
 
 class _FrameRecorder:
     """Records frames passed to a service's ``push_frame``."""
@@ -1015,6 +1018,34 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
         "\n"
         "Act on the user's most recent request in the conversation above."
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_reset_starts_the_next_delegation_transcript_afresh(monkeypatch):
+    """A new session has no previous delegation for a transcript to run from."""
+    requests: list[str] = []
+
+    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
+        requests.append(request)
+        return ""
+
+    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service._connect = AsyncMock()
+
+    await _drive(service, [_transcript_delta("user", "what's the weather in seattle")])
+    await service._run_client_delegation(_client_delegation("item_d1"))
+
+    await _drive(service, [_transcript_delta("user", "and in boston", start_ms=2000)])
+    await service._run_client_delegation(_client_delegation("item_d2"))
+
+    await service.reset_conversation()
+
+    await _drive(service, [_transcript_delta("user", "let's start over", start_ms=4000)])
+    await service._run_client_delegation(_client_delegation("item_d3"))
+
+    assert requests[0].startswith("Voice conversation so far:")
+    assert requests[1].startswith("Voice conversation since the previous delegation:")
+    assert requests[2].startswith("Voice conversation so far:")
 
 
 @pytest.mark.asyncio
