@@ -60,7 +60,11 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm.backend_llm_worker import BackendOutput, run_backend_job
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendOutput,
+    render_transcript_request,
+    run_backend_job,
+)
 
 from . import events
 
@@ -327,9 +331,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._open_function_calls: dict[str, str] = {}
         self._pending_responses: dict[str, _PendingResponse] = {}
 
-        # Client delegation: the conversation not yet sent to the backend, and
-        # the delegations in flight, by delegation id.
+        # Client delegation: the conversation not yet sent to the backend, the
+        # delegations in flight by id, and whether the backend has run before.
         self._transcript_fragments: list[dict[str, str]] = []
+        self._delegated_before = False
         self._delegation_tasks: dict[str, asyncio.Task] = {}
 
         self._register_event_handler("on_session_started")
@@ -621,6 +626,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 await self.cancel_task(task)
             self._delegation_tasks.clear()
             self._transcript_fragments.clear()
+            self._delegated_before = False
             self._sent_tools_snapshot = None
             self._open_function_calls.clear()
             self._pending_responses.clear()
@@ -919,7 +925,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         assert isinstance(config, ClientDelegation)
         # The delegation carries no task text: the backend is handed the
         # conversation since the last one and works out the request itself.
-        fragments = self._take_transcript()
+        request = render_transcript_request(
+            self._take_transcript(), first=not self._delegated_before
+        )
+        self._delegated_before = True
 
         async def on_update(output: BackendOutput):
             await self._send_context_append(delegation.id, output.text, speakable=output.speakable)
@@ -930,7 +939,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await run_backend_job(
                 self.pipeline_worker,
                 config.backend.name,
-                conversation=fragments,
+                request=request,
                 on_update=on_update,
                 timeout_secs=config.timeout_secs,
             )

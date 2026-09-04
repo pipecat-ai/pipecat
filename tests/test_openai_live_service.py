@@ -922,8 +922,8 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, conversation, on_update, timeout_secs):
-        calls.append((worker, backend_name, conversation, timeout_secs))
+    async def fake_run_backend_job(worker, backend_name, *, request, on_update, timeout_secs):
+        calls.append((worker, backend_name, request, timeout_secs))
         await on_update(BackendOutput(text="Checking the weather.", speakable=True))
         await on_update(BackendOutput(text="Still looking.", is_thought=True, speakable=False))
         await on_update(
@@ -942,16 +942,17 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
     )
     await service._run_client_delegation(_client_delegation("item_d1"))
 
-    # No task text: the delegation names none, so the backend gets the
-    # conversation and works out the request from it.
+    # No task text: the delegation names none, so the backend is handed the
+    # conversation rendered as a transcript and works the request out from it.
     assert calls == [
         (
             "worker",
             "backend",
-            [
-                {"role": "user", "content": "what's the weather in seattle"},
-                {"role": "assistant", "content": "Let me check."},
-            ],
+            "Voice conversation so far:\n"
+            "USER: what's the weather in seattle\n"
+            "ASSISTANT: Let me check.\n"
+            "\n"
+            "Act on the user's most recent request in the conversation above.",
             5,
         )
     ]
@@ -974,8 +975,8 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     """Frame-boundary fragments are joined back up, spacing and all."""
     calls = []
 
-    async def fake_run_backend_job(worker, backend_name, *, conversation, on_update, timeout_secs):
-        calls.append(conversation)
+    async def fake_run_backend_job(worker, backend_name, *, request, on_update, timeout_secs):
+        calls.append(request)
         return ""
 
     service, _ = await _client_delegation_service(monkeypatch, fake_run_backend_job)
@@ -995,10 +996,11 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     await service._run_client_delegation(_client_delegation("item_d1"))
 
     assert calls == [
-        [
-            {"role": "assistant", "content": "Hey there!"},
-            {"role": "user", "content": "Get me the weather in Washington, DC"},
-        ]
+        "Voice conversation so far:\n"
+        "ASSISTANT: Hey there!\n"
+        "USER: Get me the weather in Washington, DC\n"
+        "\n"
+        "Act on the user's most recent request in the conversation above."
     ]
 
 

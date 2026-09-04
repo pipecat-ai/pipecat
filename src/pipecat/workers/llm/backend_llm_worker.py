@@ -13,6 +13,12 @@ A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work: over the worker job API it
 streams back everything it produces and returns its final answer.
 :func:`run_backend_job` is the caller side of that contract.
+
+A request is text, so how a frontend words one is its own business.
+:func:`render_transcript_request` renders the conversation as a labelled
+transcript, which is what a frontend hands over when its model signals a
+handoff without wording a request; a frontend whose model does word one sends
+that instead.
 """
 
 import asyncio
@@ -123,31 +129,46 @@ def message_text(message: LLMStandardMessage) -> str:
     return ""
 
 
-def render_backend_request(
-    task: str | None, conversation: Sequence[LLMStandardMessage], *, first: bool
-) -> str:
-    """Render a delegated task, with the conversation that led to it, as one user message.
+#: What :func:`render_transcript_request` tells the backend to do with a transcript.
+DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
 
-    The conversation is flattened into labelled transcript text rather than
-    carried over as context messages of their own. That keeps the two
-    conversations apart: the backend's context holds only what the backend
-    itself said as assistant messages, so it never mistakes the frontend's
-    speech for its own.
+
+def render_transcript_request(
+    conversation: Sequence[LLMStandardMessage],
+    *,
+    instruction: str = DEFAULT_TRANSCRIPT_INSTRUCTION,
+    first: bool = True,
+) -> str:
+    """Render a conversation as a labelled transcript for the backend to act on.
+
+    The conversation is flattened into transcript text rather than carried
+    over as context messages of their own. That keeps the two conversations
+    apart: the backend's context holds only what the backend itself said as
+    assistant messages, so it never mistakes the frontend's speech for its
+    own.
 
     Only user and assistant text crosses today: tool calls, tool results,
     images and other non-text content are skipped, and say so at debug level.
     Carrying more is a question of how to render it, not something the
     contract rules out.
 
+    A frontend whose model words its own request passes that as the
+    ``instruction``::
+
+        render_transcript_request(
+            conversation, instruction=f"Task from the voice assistant: {task}"
+        )
+
     Args:
-        task: The request the frontend delegated, when it worded one. Without
-            it the backend is asked to act on the conversation.
         conversation: The conversation the user is having with the frontend,
             as standard context messages.
-        first: Whether this is the backend's first task in the conversation.
+        instruction: What the backend should do with the transcript, placed
+            after it.
+        first: Whether this is the backend's first request in the
+            conversation, which decides how the transcript is introduced.
 
     Returns:
-        The message text.
+        The rendered request.
     """
     lines: list[str] = []
     if conversation:
@@ -162,10 +183,7 @@ def render_backend_request(
             else:
                 logger.debug(f"Skipping delegated message with no transcript form: role={role!r}")
         lines.append("")
-    if task:
-        lines.append(f"Task from the voice assistant: {task}")
-    else:
-        lines.append("Act on the user's most recent request in the conversation above.")
+    lines.append(instruction)
     return "\n".join(lines)
 
 
@@ -191,12 +209,12 @@ class BackendLLMWorker(LLMContextWorker):
 
     Job contract (``@job(name="run")``, one task at a time):
 
-    - request payload: ``{"task": str | None, "conversation": [<standard
-      context message>, ...]}`` — what is being asked, and the conversation
-      the user is having with the frontend. A frontend whose model words the request
-      sends a ``task``; one whose model hands over without wording anything
-      sends the conversation alone and lets the backend work out what is being
-      asked. Sending both says the most.
+    - request payload: ``{"request": str}`` — the text to put to the backend,
+      composed by the frontend. What that text says is the application's
+      business: :func:`render_transcript_request` renders the conversation as
+      a transcript, which is what a frontend whose model hands off without
+      wording a request needs, but a frontend that has a worded request can
+      simply send it.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
@@ -260,7 +278,6 @@ class BackendLLMWorker(LLMContextWorker):
             assistant_params=assistant_params,
         )
         self._run: _BackendRun | None = None
-        self._jobs_run = 0
         self._transform_output = transform_output
 
         # A task takes one or more LLM runs: the first for the task itself,
@@ -288,21 +305,15 @@ class BackendLLMWorker(LLMContextWorker):
         Args:
             message: The job request; see the class docstring for the payload.
         """
-        payload = message.payload or {}
-        task = str(payload.get("task") or "").strip() or None
-        conversation = payload.get("conversation") or []
-        if not task and not conversation:
-            logger.warning(
-                f"Worker '{self.name}': job {message.job_id} has neither a task nor conversation"
-            )
+        request = str((message.payload or {}).get("request") or "").strip()
+        if not request:
+            logger.warning(f"Worker '{self.name}': job {message.job_id} has no request")
             await self.send_job_response(message.job_id, {"text": ""})
             return
 
-        self._jobs_run += 1
         run = self._run = _BackendRun(job_id=message.job_id)
-        text = render_backend_request(task, conversation, first=self._jobs_run == 1)
         await self.queue_frame(
-            LLMMessagesAppendFrame(messages=[{"role": "user", "content": text}], run_llm=True)
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": request}], run_llm=True)
         )
         try:
             await run.finished.wait()
@@ -350,28 +361,21 @@ async def run_backend_job(
     worker: BaseWorker,
     backend_name: str,
     *,
-    task: str | None = None,
-    conversation: Sequence[LLMStandardMessage] | None = None,
+    request: str,
     on_update: BackendUpdateCallback | None = None,
     timeout_secs: float | None = None,
 ) -> str:
-    """Send a task to a :class:`BackendLLMWorker` and return its final text.
+    """Put a request to a :class:`BackendLLMWorker` and return its final text.
 
     Args:
         worker: The worker making the request (for a pipeline processor,
             ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
-        task: The request to delegate, when the frontend words one. Omit it
-            when the frontend hands over without saying what it wants, and the
-            backend will work that out from ``conversation``.
-        conversation: The conversation the user is having with the frontend,
-            as standard context messages — a frontend can hand over a slice of
-            its own context unchanged. Normally just what has been said since
-            the previous delegation, since the backend's own context keeps the
-            rest, though sending more is harmless. Worth sending alongside a
-            worded task too: it is what lets the backend read a short reply or
-            a correction. Only user and assistant text survives the
-            flattening.
+        request: The text to put to the backend, as its user message.
+            :func:`render_transcript_request` composes one from a
+            conversation; a frontend whose model words its own request can
+            pass that instead, and an application with its own frontend to
+            backend protocol can pass whatever that protocol says.
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling
@@ -387,7 +391,7 @@ async def run_backend_job(
     """
     params = JobParams(
         name=BACKEND_JOB_NAME,
-        payload={"task": task, "conversation": list(conversation or [])},
+        payload={"request": request},
         timeout=timeout_secs,
     )
     async with worker.job(backend_name, params=params) as backend_job:

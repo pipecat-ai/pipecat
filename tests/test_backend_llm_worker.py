@@ -34,7 +34,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, run_backend_job
-from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_backend_request
+from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_transcript_request
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -113,8 +113,7 @@ async def get_weather(params: FunctionCallParams, location: str):
 async def _run_backend(
     llm: _ScriptedLLM,
     *,
-    task: str | None = None,
-    conversation: list[dict[str, Any]] | None = None,
+    request: str = "Do it",
     transform_output=None,
 ) -> tuple[str, list[BackendOutput], BackendLLMWorker]:
     """Run one delegated task against ``llm`` under a WorkerRunner."""
@@ -137,12 +136,7 @@ async def _run_backend(
     async def body():
         try:
             result["text"] = await run_backend_job(
-                requester,
-                "backend",
-                task=task,
-                conversation=conversation,
-                on_update=on_update,
-                timeout_secs=10,
+                requester, "backend", request=request, on_update=on_update, timeout_secs=10
             )
         finally:
             await runner.cancel()
@@ -162,11 +156,13 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
 
     text, updates, backend = await _run_backend(
         llm,
-        task="What's the weather in Seattle?",
-        conversation=[
-            {"role": "user", "content": "what's the weather in seattle"},
-            {"role": "assistant", "content": "Let me find out."},
-        ],
+        request=render_transcript_request(
+            [
+                {"role": "user", "content": "what's the weather in seattle"},
+                {"role": "assistant", "content": "Let me find out."},
+            ],
+            instruction="Task from the voice assistant: What's the weather in Seattle?",
+        ),
     )
 
     assert text == "It's 62 and raining in Seattle."
@@ -201,7 +197,7 @@ async def test_fast_tool_result_before_response_end_does_not_finish_the_run_earl
         settle_secs=0.1,
     )
 
-    text, updates, _ = await _run_backend(llm, task="Weather in Seattle?")
+    text, updates, _ = await _run_backend(llm)
 
     assert text == "Rain, 62 degrees."
     assert [(u.text, u.is_final) for u in updates] == [
@@ -219,7 +215,7 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
         ]
     )
 
-    text, updates, _ = await _run_backend(llm, task="Weather?")
+    text, updates, _ = await _run_backend(llm)
 
     assert text == "It's raining."
     # The tool-only response produces no text; only the final answer is sent.
@@ -238,7 +234,7 @@ async def test_thoughts_are_streamed_as_thought_updates():
         ]
     )
 
-    text, updates, _ = await _run_backend(llm, task="Weather?")
+    text, updates, _ = await _run_backend(llm)
 
     assert text == "It's raining."
     assert [(u.text, u.is_thought, u.speakable) for u in updates] == [
@@ -261,14 +257,14 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
             await run_backend_job(
                 requester,
                 "backend",
-                task="One",
-                conversation=[{"role": "user", "content": "one"}],
+                request=render_transcript_request([{"role": "user", "content": "one"}], first=True),
             )
             await run_backend_job(
                 requester,
                 "backend",
-                task="Two",
-                conversation=[{"role": "user", "content": "two"}],
+                request=render_transcript_request(
+                    [{"role": "user", "content": "two"}], first=False
+                ),
             )
         finally:
             await runner.cancel()
@@ -280,14 +276,12 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
     assert requests[1].startswith("Voice conversation since your last task:\nUSER: two")
 
 
-def test_render_backend_request_omits_the_transcript_when_there_are_no_turns():
-    assert render_backend_request("Do it", [], first=True) == "Task from the voice assistant: Do it"
+def test_render_transcript_request_is_the_instruction_alone_when_nothing_was_said():
+    assert render_transcript_request([], instruction="Do it") == "Do it"
 
 
-def test_render_backend_request_without_a_task_points_at_the_conversation():
-    rendered = render_backend_request(
-        None, [{"role": "user", "content": "what's the weather"}], first=True
-    )
+def test_render_transcript_request_points_the_backend_at_the_conversation():
+    rendered = render_transcript_request([{"role": "user", "content": "what's the weather"}])
     assert rendered == (
         "Voice conversation so far:\n"
         "USER: what's the weather\n"
@@ -301,7 +295,8 @@ async def test_a_task_less_job_runs_from_the_conversation_alone():
     llm = _ScriptedLLM([[("text", "It's raining.")]])
 
     text, _, _ = await _run_backend(
-        llm, conversation=[{"role": "user", "content": "what's the weather"}]
+        llm,
+        request=render_transcript_request([{"role": "user", "content": "what's the weather"}]),
     )
 
     assert text == "It's raining."
@@ -328,7 +323,7 @@ async def test_transform_output_can_rewrite_text_and_speakability():
             return replace(output, text=output.text[2:].lstrip(), speakable=True)
         return replace(output, speakable=False)
 
-    _, updates, _ = await _run_backend(llm, task="Weather?", transform_output=transform_output)
+    _, updates, _ = await _run_backend(llm, transform_output=transform_output)
 
     assert [(u.text, u.speakable) for u in updates] == [
         ("Checking.", True),
@@ -336,10 +331,9 @@ async def test_transform_output_can_rewrite_text_and_speakability():
     ]
 
 
-def test_render_backend_request_flattens_what_a_transcript_can_hold():
+def test_render_transcript_request_flattens_what_a_transcript_can_hold():
     """A frontend can pass its context slice as-is; only spoken text survives."""
-    rendered = render_backend_request(
-        None,
+    rendered = render_transcript_request(
         [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": [{"type": "text", "text": "what is this"}]},
@@ -356,7 +350,6 @@ def test_render_backend_request_flattens_what_a_transcript_can_hold():
             },
             {"role": "tool", "tool_call_id": "call_1", "content": '{"seen": true}'},
         ],
-        first=True,
     )
     assert rendered == (
         "Voice conversation so far:\n"

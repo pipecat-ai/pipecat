@@ -9,6 +9,7 @@
 from pipecat.workers.llm.backend_llm_worker import (
     BackendLLMWorker,
     BackendOutput,
+    render_transcript_request,
     run_backend_job,
 )
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
@@ -21,6 +22,7 @@ __all__ = [
     "LLMWorkerActivationArgs",
     "LLMContextWorker",
     "BackendOutput",
+    "render_transcript_request",
     "run_backend_job",
     "tool",
 ]

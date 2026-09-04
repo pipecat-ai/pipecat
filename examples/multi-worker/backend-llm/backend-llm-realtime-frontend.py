@@ -54,7 +54,12 @@ from pipecat.services.openai.realtime.events import (
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import BackendLLMWorker, BackendOutput, run_backend_job
+from pipecat.workers.llm import (
+    BackendLLMWorker,
+    BackendOutput,
+    render_transcript_request,
+    run_backend_job,
+)
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -66,19 +71,20 @@ aloud, so keep them to one or two natural sentences without any formatting.
 
 Answer simple conversational questions yourself. Whenever the user asks for
 current information, such as the weather or a restaurant recommendation, or
-asks you to look something up, call the delegate tool with a self-contained
-request: include the user's goal, the exact details they gave (places,
-dates, names) and their latest correction. While it runs, keep the
-conversation going; when the result comes back, relay it in your own
-words."""
+asks you to look something up, call the delegate tool. The backend reads the
+conversation, so you don't need to word the request — hand off as soon as
+you know it is for the backend. While it runs, keep the conversation going;
+when the result comes back, relay it in your own words."""
 
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Each message you receive
-contains a task the assistant delegated to you, possibly with the recent
-voice conversation as a transcript. Use the available tools to answer
-questions about the weather and restaurants. Reply with the verified result
-in concise, conversational plain text that the assistant can say to the user
-— no Markdown, no raw JSON — and never claim an action completed without a
-tool result confirming it."""
+is the recent voice conversation between the user and the assistant, as a
+transcript. Work out what is being asked from it and answer that. The
+transcript may contain transcription errors; use the most likely intent.
+
+Use the available tools to answer questions about the weather and
+restaurants. Reply with the verified result in concise, conversational plain
+text that the assistant can say to the user — no Markdown, no raw JSON — and
+never claim an action completed without a tool result confirming it."""
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -123,40 +129,6 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
     await params.result_callback({"name": "The Golden Dragon"})
 
 
-@tool_options(cancel_on_interruption=False)
-async def delegate(params: FunctionCallParams, task: str):
-    """Hand a request that needs tools, current information or careful reasoning to the backend.
-
-    Args:
-        task (str): The complete request, including every detail the user gave.
-    """
-    logger.info(f"Delegating to the backend: {task!r}")
-
-    async def on_update(output: BackendOutput):
-        # The final answer comes back as this tool's result, below, so it is
-        # skipped here. Everything else is recorded as an intermediate result,
-        # and `speakable` decides whether the frontend says it now or merely
-        # knows it: running the LLM is what gives this pipeline a voice, the
-        # way the commentary channel does for a speech-to-speech frontend.
-        if output.is_final:
-            return
-        logger.info(f"Backend update (speakable={output.speakable}): {output.text!r}")
-        await params.result_callback(
-            {"text": output.text},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=output.speakable),
-        )
-
-    text = await run_backend_job(
-        params.pipeline_worker,
-        BACKEND_NAME,
-        task=task,
-        on_update=on_update,
-        timeout_secs=120,
-    )
-    logger.info(f"Backend result: {text!r}")
-    await params.result_callback(text)
-
-
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
@@ -174,6 +146,46 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
+
+    # The backend is handed the conversation rather than a request worded by
+    # the frontend, so it can read a short reply or a correction for itself.
+    # Only what it hasn't seen: its own context keeps the rest, and the count
+    # is per session, so it lives here rather than at module level.
+    delegated_through = 0
+
+    @tool_options(cancel_on_interruption=False)
+    async def delegate(params: FunctionCallParams):
+        """Hand the conversation to the backend, for anything needing tools, current information or careful reasoning."""
+        nonlocal delegated_through
+        messages = params.context.get_messages()
+        conversation = messages[delegated_through:]
+        first, delegated_through = delegated_through == 0, len(messages)
+        logger.info(f"Delegating to the backend: {len(conversation)} new message(s)")
+
+        async def on_update(output: BackendOutput):
+            # The final answer comes back as this tool's result, below, so it
+            # is skipped here. Everything else is recorded as an intermediate
+            # result, and `speakable` decides whether the frontend says it now
+            # or merely knows it: running the LLM is what gives this pipeline a
+            # voice, the way the commentary channel does for a speech-to-speech
+            # frontend.
+            if output.is_final:
+                return
+            logger.info(f"Backend update (speakable={output.speakable}): {output.text!r}")
+            await params.result_callback(
+                {"text": output.text},
+                properties=FunctionCallResultProperties(is_final=False, run_llm=output.speakable),
+            )
+
+        text = await run_backend_job(
+            params.pipeline_worker,
+            BACKEND_NAME,
+            request=render_transcript_request(conversation, first=first),
+            on_update=on_update,
+            timeout_secs=120,
+        )
+        logger.info(f"Backend result: {text!r}")
+        await params.result_callback(text)
 
     # The frontend's only tool is the handoff; the real tools live in the backend.
     context = LLMContext(
