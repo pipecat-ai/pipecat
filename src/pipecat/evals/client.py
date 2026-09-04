@@ -220,8 +220,10 @@ class _BotFrameSink(FrameProcessor):
                     await self._run_persona(LLMContextFrame(self._persona))
 
 
-# The event the relay appends for each response the persona completes.
+# The event the relay appends for each response the persona completes, and the
+# one the client appends when the bot ends the call by closing the connection.
 PERSONA_TURN_EVENT = "persona_turn"
+BOT_ENDED_EVENT = "bot_ended"
 
 
 class _PersonaTurnRelay(FrameProcessor):
@@ -382,6 +384,8 @@ class EvalClient:
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
+        # Set once stop() begins: a disconnect from then on is our own teardown.
+        self._stopping = False
         # Where the user's turns enter the pipeline (built with the processors).
         self._sink: _BotFrameSink | None = None
         self._run_task: asyncio.Task | None = None
@@ -420,7 +424,7 @@ class EvalClient:
     def for_simulation(
         cls, simulation: EvalSimulation, *, trigger_disconnect: bool = False, **kwargs
     ) -> "EvalClient":
-        """A client for a simulation: the persona hears the bot, and no assertions apply.
+        """A client for a simulation: the persona hears the bot, and the judge sees its tool calls.
 
         Args:
             simulation: The simulation being run.
@@ -433,6 +437,9 @@ class EvalClient:
             user_audio=simulation.user_audio,
             user_speech=simulation.user_speech,
             capture_bot_audio=simulation.bot_audio,
+            # The bot's function calls, with their arguments, are the judge's
+            # evidence of what the bot actually did.
+            report_level="full",
             trigger_disconnect=trigger_disconnect or simulation.trigger_disconnect,
             **kwargs,
         )
@@ -508,6 +515,14 @@ class EvalClient:
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
             self._bot_ready_event.set()
+
+        @transport.event_handler("on_disconnected")
+        async def _on_disconnected(_transport, _websocket):
+            # The bot ended the call (a Flows bot's end_conversation, an
+            # EndFrame) by closing the connection; our own teardown closes it
+            # too, and that is not the bot's doing.
+            if not self._stopping:
+                await self._stream.append({"type": BOT_ENDED_EVENT})
 
         pipeline = Pipeline(self._processors(transport))
         # The StartFrame's rates drive the in-pipeline services: the bot-audio STT
@@ -585,6 +600,7 @@ class EvalClient:
 
     async def stop(self) -> None:
         """Save the recording, optionally cancel the bot, and end the pipeline."""
+        self._stopping = True
         # Write the recording first: the recorder is harness-owned and fed raw
         # audio by the transport, so nothing below clears it, but writing here
         # lands it even if the teardown raises.

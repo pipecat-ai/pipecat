@@ -39,6 +39,7 @@ Example::
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,7 +92,9 @@ CONVERSATION_JUDGE_SYSTEM_INSTRUCTION = (
     "You are a strict but fair judge evaluating a complete conversation between a "
     "user and a bot under test. The 'user' messages are the user; the 'assistant' "
     "messages are the bot's replies. Judge the conversation as a whole against the "
-    "given criterion. "
+    "given criterion. The question may be followed by the list of tool calls the bot "
+    "made during the conversation; a call the bot completed is stronger evidence of "
+    "an action (a booking, a lookup) than the bot saying it did it. "
     "When the bot spoke its replies, the 'assistant' text is an automatic speech-to-text "
     "transcription, so it may contain homophones, misspellings, split or merged words, and "
     "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
@@ -228,9 +231,12 @@ class EvalJudge:
             justification. Cached by ``(criterion, conversation)`` so the same
             assertion over the same conversation hits the judge only once.
         """
-        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, JUDGE_ASK_TEMPLATE)
+        ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
 
-    async def evaluate_conversation(self, criterion: str) -> JudgeVerdict:
+    async def evaluate_conversation(
+        self, criterion: str, *, evidence: Sequence[str] = ()
+    ) -> JudgeVerdict:
         """Judge whether the whole conversation satisfies ``criterion``.
 
         For a simulation's goal and quality criteria, once the conversation is
@@ -239,17 +245,23 @@ class EvalJudge:
         Args:
             criterion: Natural-language description of what the conversation
                 should have achieved or exhibited.
+            evidence: The tool calls the bot made, in order, one line each; they
+                follow the question so the judge weighs what the bot did, not
+                only what it said.
 
         Returns:
             A :class:`JudgeVerdict`, cached like :meth:`evaluate`.
         """
-        return await self._evaluate(
-            criterion, CONVERSATION_JUDGE_SYSTEM_INSTRUCTION, CONVERSATION_JUDGE_ASK_TEMPLATE
-        )
+        ask = CONVERSATION_JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+        if evidence:
+            ask += "\n\nTool calls the bot made during the conversation, in order:\n" + "\n".join(
+                f"- {line}" for line in evidence
+            )
+        return await self._evaluate(criterion, CONVERSATION_JUDGE_SYSTEM_INSTRUCTION, ask)
 
     async def _evaluate(self, criterion: str, instruction: str, ask: str) -> JudgeVerdict:
         messages = self._context.get_messages()
-        key = _cache_key(ask + criterion, messages)
+        key = _cache_key(ask, messages)
         if key in self._cache:
             return self._cache[key]
         verdict = await self._call_judge(criterion, messages, instruction, ask)
@@ -260,10 +272,10 @@ class EvalJudge:
         self, criterion: str, messages: list, instruction: str, ask: str
     ) -> JudgeVerdict:
         """Single round-trip to the judge LLM over the conversation + a verdict ask."""
-        # Copy the conversation and append a transient verdict ask, so neither the
-        # ask nor the judge's answer ever lands in the persistent context.
+        # Copy the conversation and append the transient ask, so neither the ask
+        # nor the judge's answer ever lands in the persistent context.
         context = LLMContext(messages=list(messages))
-        context.add_message({"role": "user", "content": ask.format(criterion=criterion)})
+        context.add_message({"role": "user", "content": ask})
 
         # Log the conversation the judge is about to evaluate, before its verdict,
         # so the debug log shows exactly what the judge saw (handy when a terse or

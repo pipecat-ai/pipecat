@@ -129,6 +129,7 @@ class EvalResult:
 # How a simulation run came to an end, for :attr:`SimulationRunResult.ended_by`.
 SIMULATION_ENDINGS = (
     "end_call",  # the persona called its end_call tool
+    "bot",  # the bot ended the call (it closed the connection)
     "max_turns",  # the persona's turn cap was reached
     "max_duration",  # the run's wall-clock cap was reached
     "error",  # the run did not complete (see ``error``)

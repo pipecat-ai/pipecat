@@ -1,0 +1,30 @@
+name: restaurant_reservation
+
+# Text modality, against flows/restaurant_reservation.py: an autonomous caller
+# books a table. The bot collects the party size and the time, checks
+# availability (7 PM and 8 PM are taken), confirms, and ends the call itself,
+# so the run ends when the bot hangs up. The judge reads the bot's function
+# calls along with the conversation: collect_party_size, check_availability,
+# and end_conversation are what a booking looks like.
+
+simulator: !include ../scenarios/simulator.yaml
+
+judge: !include ../scenarios/judge_text.yaml
+
+persona: |
+  Jamie, calling to book a table for tonight. Friendly and to the point: gives
+  the party size and the time when asked, one detail per turn, and says goodbye
+  once the booking is confirmed.
+
+goal: "Book a table for two at 6 PM tonight, then end the call."
+
+success: "the bot confirmed a reservation for a party of two at 6 PM"
+
+metrics:
+  - name: efficiency
+    criterion: "the bot reached the confirmation without asking for the same information twice"
+  - name: politeness
+    criterion: "the bot stayed courteous and helpful throughout"
+
+max_turns: 8
+max_duration_s: 120

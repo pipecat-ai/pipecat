@@ -13,11 +13,12 @@ decide the goal and score each quality criterion over the whole conversation,
 assembling the run's :class:`~pipecat.evals.results.SimulationRunResult`.
 """
 
+import json
 import time
 from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseDriver
-from pipecat.evals.client import PERSONA_TURN_EVENT, EvalClient
+from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT, EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import END_CALL_FUNCTION, Persona
@@ -42,9 +43,10 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
 
     The persona runs inside the client's pipeline and answers the bot on its
     own. This driver only watches the conversation for its end: the persona's
-    ``end_call``, after which it hangs up, the cap on its turns, or the
-    wall-clock cap. Then it asks the judge whether the goal was achieved and
-    how the conversation scored on each quality criterion.
+    ``end_call``, after which it hangs up, the bot ending the call, the cap on
+    the persona's turns, or the wall-clock cap. Then it asks the judge, with
+    the bot's function calls as evidence, whether the goal was achieved and how
+    the conversation scored on each quality criterion.
     """
 
     def __init__(
@@ -105,6 +107,8 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
                 break
             if event["type"] == END_CALL_EVENT:
                 self._ended_by = "end_call"
+            elif event["type"] == BOT_ENDED_EVENT:
+                self._ended_by = "bot"
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 if self._turns >= simulation.max_turns:
@@ -148,6 +152,24 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
                 messages.append({"role": swapped[role], "content": content})
         return messages
 
+    def tool_calls(self) -> list[str]:
+        """The bot's function calls in order, one line each, as the judge's evidence.
+
+        A call the bot cancelled is listed as such: it is evidence that the
+        action did not happen.
+        """
+        lines = []
+        for event in self._stream.events_seen:
+            name = event.get("name") or "?"
+            if event["type"] == "function_call":
+                arguments = event.get("args") or {}
+                lines.append(f"{name}({json.dumps(arguments) if arguments else ''})")
+            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
+                "cancelled"
+            ):
+                lines.append(f"{name} was cancelled")
+        return lines
+
     async def _judge_conversation(self) -> None:
         """Decide the goal and score each quality criterion over the conversation."""
         if self._judge is None:
@@ -158,14 +180,19 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
                 self._judge.add_user_message(message["content"])
             else:
                 self._judge.add_assistant_message(message["content"])
-        verdict = await self._judge.evaluate_conversation(self._simulation.success)
+        evidence = self.tool_calls()
+        if evidence:
+            self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
+        verdict = await self._judge.evaluate_conversation(
+            self._simulation.success, evidence=evidence
+        )
         self._succeeded = verdict.verdict == "yes"
         self._reason = verdict.reason
         self._trace.log(
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {verdict.reason}"
         )
         for metric in self._simulation.metrics:
-            verdict = await self._judge.evaluate_conversation(metric.criterion)
+            verdict = await self._judge.evaluate_conversation(metric.criterion, evidence=evidence)
             score = 1.0 if verdict.verdict == "yes" else 0.0
             self._metrics.append(
                 SimulationMetric(

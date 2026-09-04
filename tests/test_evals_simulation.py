@@ -152,7 +152,7 @@ class TestSimulationRunResult(unittest.TestCase):
 import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
-from pipecat.evals.client import PERSONA_TURN_EVENT  # noqa: E402
+from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT  # noqa: E402
 from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
@@ -176,8 +176,9 @@ class _FakeConversationJudge:
     def add_assistant_message(self, text):
         self.messages.append({"role": "assistant", "content": text})
 
-    async def evaluate_conversation(self, criterion: str) -> JudgeVerdict:
+    async def evaluate_conversation(self, criterion: str, *, evidence=()) -> JudgeVerdict:
         self.criteria.append(criterion)
+        self.evidence = list(evidence)
         verdict = self.verdicts.pop(0)
         return JudgeVerdict(verdict=verdict, reason=f"because {criterion}", raw_response="")
 
@@ -333,6 +334,58 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.turns, 2)
         self.assertFalse(result.succeeded)
         self.assertIsNone(result.quality)  # no metrics
+
+    async def test_the_bot_hanging_up_ends_the_run(self):
+        judge = _FakeConversationJudge(["yes"])
+        driver, stream, _, client = _driver(_simulation(), judge)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Bye!"})
+            await stream.append({"type": BOT_ENDED_EVENT})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertTrue(client.hung_up)
+
+    async def test_the_bots_tool_calls_are_the_judges_evidence(self):
+        judge = _FakeConversationJudge(["yes"])
+        driver, stream, llm, _ = _driver(_simulation(), judge)
+
+        async def conversation():
+            await stream.append(
+                {"type": "function_call", "name": "check_availability", "args": {"time": "6:00 PM"}}
+            )
+            await stream.append(
+                {
+                    "type": "function_call_stopped",
+                    "name": "check_availability",
+                    "args": {"cancelled": False},
+                }
+            )
+            await stream.append({"type": "function_call", "name": "end_conversation", "args": {}})
+            await stream.append(
+                {
+                    "type": "function_call_stopped",
+                    "name": "end_conversation",
+                    "args": {"cancelled": True},
+                }
+            )
+            await _end_call(llm, success=True, reason="booked")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        self.assertEqual(
+            judge.evidence,
+            [
+                'check_availability({"time": "6:00 PM"})',
+                "end_conversation()",
+                "end_conversation was cancelled",
+            ],
+        )
 
     async def test_wall_clock_cap_ends_the_run(self):
         driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))

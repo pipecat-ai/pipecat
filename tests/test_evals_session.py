@@ -893,6 +893,9 @@ class _FakeRTVIServer:
         self.script: dict[str, list[str]] = {}
         # Sent right after bot-ready, like a bot that greets on connect.
         self.greeting: list[str] = []
+        # After replying to this send-text content, close the connection, like a
+        # bot that ends the call.
+        self.close_after: str | None = None
         self._server: websockets.WebSocketServer | None = None
 
     def on_text(self, content: str, *messages: str):
@@ -911,6 +914,9 @@ class _FakeRTVIServer:
                 case "send-text":
                     for out in self.script.get(msg["data"]["content"], []):
                         await ws.send(out)
+                    if msg["data"]["content"] == self.close_after:
+                        await ws.close()
+                        return
                 case "raw-audio":
                     # The harness streams the user's side continuously (silence
                     # around each utterance). A real bot transcribes the audio and
@@ -1705,7 +1711,7 @@ class _YesJudge:
     def add_assistant_message(self, text):
         self.messages.append({"role": "assistant", "content": text})
 
-    async def evaluate_conversation(self, criterion):
+    async def evaluate_conversation(self, criterion, *, evidence=()):
         self.criteria.append(criterion)
         return JudgeVerdict(verdict="yes", reason="fine", raw_response="")
 
@@ -1775,3 +1781,37 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(judge.criteria, ["the bot named Berlin", "stayed polite"])
+
+    async def test_the_bot_hanging_up_ends_the_run(self):
+        self.server.greeting = [
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "How many in your party?"}),
+            _rtvi("bot-llm-stopped"),
+        ]
+        self.server.on_text(
+            "Two, please.",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Booked. Goodbye!"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        self.server.close_after = "Two, please."
+        persona = _ScriptedPersonaLLM(
+            {"How many in your party?": "Two, please.", "Booked. Goodbye!": "Thanks!"}
+        )
+        simulation = EvalSimulation(
+            name="table",
+            persona="A diner.",
+            goal="Book a table for two.",
+            simulator={"service": "scripted"},
+            success="a table was booked",
+            max_turns=5,
+            max_duration_s=10.0,
+        )
+
+        result = await SimulationSession(
+            simulation, self.server.url, persona_llm=persona, judge=_YesJudge()
+        ).run()
+
+        self.assertIsNone(result.error, result.debug_log)
+        self.assertEqual(result.ended_by, "bot")
+        self.assertTrue(result.succeeded)
