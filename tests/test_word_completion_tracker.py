@@ -2939,5 +2939,103 @@ class TestWordCompletionTrackerResyncInsideTransform(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("3/15."))
 
 
+class TestPunctuationReportedOnItsOwn(unittest.TestCase):
+    """A provider that reports a punctuation mark as its own word-timestamp entry.
+
+    ``advance_by_alnums`` pulls trailing punctuation along with the word before it,
+    so by the time the mark's own event arrives the llm cursor is already past it.
+    Both cursors have to stay in step, and the unspoken tail has to keep the mark.
+    """
+
+    def test_mark_alone_leaves_the_two_remainders_in_step(self):
+        """'Yeah' then ',' then 'I': the comma travelled with 'Yeah'."""
+        text = "Yeah, I can help"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("Yeah", ",", "I"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "can help")
+        self.assertEqual(tracker.get_remaining_llm_text(), "can help")
+
+    def test_mark_between_two_words_leaves_the_remainders_in_step(self):
+        """'1' then '-' then '2': the hyphen travelled with '1'."""
+        text = "1-2 and more text"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("1", "-", "2"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "and more text")
+        self.assertEqual(tracker.get_remaining_llm_text(), "and more text")
+
+    def test_a_mark_not_yet_reported_stays_in_the_remainder(self):
+        """Ending the frame before the mark arrives: it is still unspoken.
+
+        Nothing has reported the mark, so it belongs to the text left to say. This
+        is the case a caller ending a frame early emits, and dropping it there
+        loses the tail from the conversation context.
+        """
+        text = "It is done. Next sentence here."
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("It", "is", "done"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), ". Next sentence here.")
+        self.assertEqual(tracker.get_remaining_llm_text(), ". Next sentence here.")
+
+    def test_a_mark_the_provider_spoke_is_not_owed_back(self):
+        """The usual case: the mark arrives inside its word, so nothing is outstanding.
+
+        The counterpart of the test above -- treating this period as unspoken would
+        drop it from the accumulated text and repeat it in the remainder.
+        """
+        text = "It is done. Next sentence here."
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("It", "is", "done."):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_accumulated_llm_text(), "It is done.")
+        self.assertEqual(tracker.get_remaining_llm_text(), "Next sentence here.")
+
+    def test_cjk_marks_reported_alone_keep_the_remainders_in_step(self):
+        """The token shape Cartesia reports for Japanese.
+
+        One entry per character, so every mark arrives on its own, and the service
+        merges the entries of a single message into one token ("きゅ" here).
+        """
+        text = "確認いたします…ゼロ、きゅう、ゼロ"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in (
+            "確",
+            "認",
+            "い",
+            "た",
+            "し",
+            "ま",
+            "す",
+            "…",
+            "ゼ",
+            "ロ",
+            "、",
+            "きゅ",
+            "う",
+        ):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "、ゼロ")
+        self.assertEqual(tracker.get_remaining_llm_text(), "、ゼロ")
+        self.assertEqual(
+            tracker.get_accumulated_llm_text(),
+            "確認いたします…ゼロ、きゅう",
+        )
+
+    def test_cjk_frame_ended_before_the_mark_is_reported(self):
+        """The provider stops reporting mid-turn, one character short of the mark.
+
+        The mark travelled with the character before it, so without it being owed
+        back the tail loses it and force_complete discards the whole tail.
+        """
+        text = "確認いたします…ゼロ、いち"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        for word in ("確", "認", "い", "た", "し", "ま", "す"):
+            tracker.add_word_and_check_complete(word)
+        self.assertEqual(tracker.get_remaining_tts_text(), "…ゼロ、いち")
+        self.assertEqual(tracker.get_remaining_llm_text(), "…ゼロ、いち")
+
+
 if __name__ == "__main__":
     unittest.main()

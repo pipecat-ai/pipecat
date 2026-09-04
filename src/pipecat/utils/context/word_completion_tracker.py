@@ -244,9 +244,13 @@ class WordCompletionTracker:
         if self.is_complete:
             self._llm_consumed = self._llm_text[llm_pos_before:]
             self._llm_pos = len(self._llm_text)
+            self._segment_map.clear_pending_llm_marks()
         elif self._segment_map.in_transformed_segment:
             self._llm_consumed = None
         elif self._llm_pos == llm_pos_before and self._segment_map.last_completed_segment is None:
+            if self._segment_map.consume_pending_llm_marks(word):
+                self._llm_consumed = None
+                return
             start = self._llm_pos
             while start < len(self._llm_text) and self._llm_text[start].isspace():
                 start += 1
@@ -345,7 +349,7 @@ class WordCompletionTracker:
         """
         if self._llm_text is None:
             return None
-        return self._llm_text[: self._llm_pos]
+        return self._llm_text[: self._llm_pos - len(self._segment_map.pending_llm_marks)]
 
     def get_remaining_tts_text(self, strip: bool = True) -> str:
         """Return what this frame still has left to speak.
@@ -370,7 +374,9 @@ class WordCompletionTracker:
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_pos :].strip()
+        remaining = self._llm_text[
+            self._llm_pos - len(self._segment_map.pending_llm_marks) :
+        ].strip()
         return remaining if remaining else None
 
     @property

@@ -14,6 +14,7 @@ from enum import Enum, auto
 
 from pipecat.utils.text.alnum_utils import (
     advance_by_alnums,
+    advance_by_alnums_with_marks,
     alnum_only,
     fold_for_matching,
     has_alnum,
@@ -141,6 +142,14 @@ class _Hop:
     kind: _HopKind
     segment_advance: int = 0
     word_consumed: int = 0
+
+
+def _trailing_marks(text: str) -> str:
+    """The run of punctuation ending *text* -- what advance_by_alnums walks past."""
+    end = len(text)
+    while end and not (text[end - 1].isalnum() or text[end - 1].isspace()):
+        end -= 1
+    return text[end:]
 
 
 class TextSegmentMap:
@@ -345,6 +354,8 @@ class TextSegmentMap:
         self._seg_raw_pos: int = 0
         self._user_facing_pos: int = 0
         self._llm_pos: int = 0
+        # Punctuation the llm cursor absorbed that the provider has not reported.
+        self._pending_llm_marks: str = ""
         self._last_completed: TextSegment | None = None
         self._last_overflow: str | None = None
         self._last_leading_duplicate: int = 0
@@ -646,7 +657,16 @@ class TextSegmentMap:
             # rather than a word later. Both sides are identical here, so that
             # offset is exact.
             self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
-        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
+        llm_before = self._llm_pos
+        self._llm_pos, walked_marks = advance_by_alnums_with_marks(
+            self._llm_text, self._llm_pos, n_alnum
+        )
+        if self._llm_pos != llm_before:
+            # Whatever the walk passed over beyond what this step actually spoke is
+            # unspoken and owed back. A punctuation-only step moves nothing, so it
+            # leaves the debt standing for the word event arriving now.
+            spoken_marks = _trailing_marks(seg.tts[self._seg_raw_pos : new_pos])
+            self._pending_llm_marks = walked_marks[len(spoken_marks) :]
 
     def _commit_transformed_span(self, seg: TextSegment) -> None:
         """Jump the other two cursors to the end of *seg*, now that it is done."""
@@ -838,6 +858,26 @@ class TextSegmentMap:
     def user_facing_pos(self) -> int:
         """How far into the user-facing text the spoken words have reached."""
         return self._user_facing_pos
+
+    @property
+    def pending_llm_marks(self) -> str:
+        """Punctuation the llm cursor passed that has not been reported as spoken."""
+        return self._pending_llm_marks
+
+    def consume_pending_llm_marks(self, word: str) -> bool:
+        """Account for *word* against the pending punctuation, if it is that.
+
+        True when the whole of *word* was already passed, so the caller must not
+        spend any more of ``llm_text`` on it.
+        """
+        if not self._pending_llm_marks or not self._pending_llm_marks.startswith(word):
+            return False
+        self._pending_llm_marks = self._pending_llm_marks[len(word) :]
+        return True
+
+    def clear_pending_llm_marks(self) -> None:
+        """Forget the pending punctuation, once nothing is left owed."""
+        self._pending_llm_marks = ""
 
     @property
     def llm_pos(self) -> int:
