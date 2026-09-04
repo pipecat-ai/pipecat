@@ -21,10 +21,15 @@ from pipecat.flows import FlowConfig
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "src/pipecat/flows/flow_config.schema.json"
 
+# Pydantic emits draft 2020-12 keywords; the declaration lets validators and
+# editors apply that draft's rules without guessing.
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
 
 def render_schema() -> str:
     """The schema file's content."""
-    return json.dumps(FlowConfig.model_json_schema(), indent=2) + "\n"
+    schema = {"$schema": JSON_SCHEMA_DIALECT, **FlowConfig.model_json_schema()}
+    return json.dumps(schema, indent=2) + "\n"
 
 
 if __name__ == "__main__":

@@ -180,7 +180,11 @@ class TestFlowConfigLoading(unittest.TestCase):
         # The package ships the schema for editors and flow builders. Regenerate
         # it with `uv run python scripts/flows/write_flow_config_schema.py`.
         path = Path(pipecat.flows.__file__).parent / "flow_config.schema.json"
-        expected = json.dumps(FlowConfig.model_json_schema(), indent=2) + "\n"
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            **FlowConfig.model_json_schema(),
+        }
+        expected = json.dumps(schema, indent=2) + "\n"
         self.assertEqual(
             path.read_text(encoding="utf-8"),
             expected,
