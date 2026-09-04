@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
@@ -128,6 +129,10 @@ class HarnessRecorder:
     def drop_bot_tail(self, num_bytes: int) -> None:
         """Drop the last ``num_bytes`` of the bot's audio: sent, but never played."""
         self._bot.drop_tail(num_bytes)
+
+    def drop_user_tail(self, num_bytes: int) -> None:
+        """Drop the last ``num_bytes`` of the user's audio: synthesized, but never sent."""
+        self._user.drop_tail(num_bytes)
 
     def has_audio(self) -> bool:
         """Whether any audio has been recorded on either side."""
@@ -260,6 +265,20 @@ class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
         """Cancel the send stream, then the transport."""
         await self._cancel_send_task()
         await super().cancel(frame)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame; an interruption drops the user audio not yet sent.
+
+        An interruption reaching this transport means the user side stopped
+        talking (a persona hearing the bot speak over it), so what the TTS
+        produced but the send stream hasn't paced out yet is dropped, and the
+        recorder drops the same bytes.
+        """
+        if isinstance(frame, InterruptionFrame) and self._pending:
+            if self._recorder is not None:
+                self._recorder.drop_user_tail(len(self._pending))
+            self._pending.clear()
+        await super().process_frame(frame, direction)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Enqueue the user audio; the send task paces it onto the wire.

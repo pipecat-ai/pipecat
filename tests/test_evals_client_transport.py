@@ -20,7 +20,12 @@ from pipecat.evals.client_transport import (
     HarnessRecorder,
     _RecorderTrack,
 )
-from pipecat.frames.frames import InputAudioRawFrame, InputTransportMessageFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    InputTransportMessageFrame,
+    InterruptionFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.websocket.client import WebsocketClientParams
 
 
@@ -74,6 +79,21 @@ class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"\x00" * self.CHUNK_BYTES, sent)  # silence keeps flowing
         # Real-time pacing: ~0.25s emits ~6 frames at 40ms, not hundreds.
         self.assertLess(len(sent), int(0.25 / FRAME_S) + 5)
+
+    async def test_interruption_drops_the_unsent_audio(self):
+        recorder = HarnessRecorder(self.SR)
+        out = EvalHarnessOutputTransport(
+            None, _fake_session(), WebsocketClientParams(audio_out_enabled=True), recorder=recorder
+        )
+        audio = b"\x01\x00" * (self.SR // 10)  # 100ms
+        recorder.add_user(audio, self.SR)
+        out._pending.extend(audio)
+        with patch.object(
+            client_transport.WebsocketClientOutputTransport, "process_frame", new=AsyncMock()
+        ):
+            await out.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        self.assertEqual(len(out._pending), 0)
+        self.assertEqual(recorder._user._chunks, [])
 
 
 class TestRecorderTrack(unittest.IsolatedAsyncioTestCase):

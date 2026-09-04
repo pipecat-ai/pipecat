@@ -33,8 +33,10 @@ from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 
-# The event the driver appends when the persona calls end_call.
+# The event the driver appends when the persona calls end_call, and the one the
+# client's sink appends each time it hands the bot's turn to the persona LLM.
 END_CALL_EVENT = "end_call"
+PERSONA_TURN_EVENT = "persona_turn"
 
 
 class SimulationDriver(BaseDriver[SimulationRunResult]):
@@ -42,9 +44,9 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
 
     The persona runs inside the client's pipeline and answers the bot on its
     own. This driver only watches the conversation for its end: the persona's
-    ``end_call``, the turn cap, or the wall-clock cap. Then it asks the judge
-    whether the goal was achieved and how the conversation scored on each
-    quality criterion.
+    ``end_call``, after which it hangs up, the cap on its turns, or the
+    wall-clock cap. Then it asks the judge whether the goal was achieved and
+    how the conversation scored on each quality criterion.
     """
 
     def __init__(
@@ -92,11 +94,9 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
         self._persona_llm.register_function(END_CALL_FUNCTION, self._on_end_call)
         await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
-        # The bot's finished turns; in audio mode the transcription of what it said.
-        turn_event = "response" if simulation.bot_audio else "llm_response"
         deadline = time.monotonic() + simulation.max_duration_s
         self._trace.log(
-            f"persona: listening (up to {simulation.max_turns} bot turn(s), "
+            f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s)"
         )
         while self._ended_by is None:
@@ -107,11 +107,14 @@ class SimulationDriver(BaseDriver[SimulationRunResult]):
                 break
             if event["type"] == END_CALL_EVENT:
                 self._ended_by = "end_call"
-            elif event["type"] == turn_event and event.get("text"):
+            elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 if self._turns >= simulation.max_turns:
                     self._ended_by = "max_turns"
-        self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} bot turn(s)")
+        # The persona has said its last word either way: nothing the bot says
+        # from here on gets an answer.
+        await self._client.hang_up()
+        self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
         await self._judge_conversation()
         return []
 

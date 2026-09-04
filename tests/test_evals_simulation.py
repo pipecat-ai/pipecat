@@ -156,7 +156,11 @@ from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.simulation import EvalSimulationMetric  # noqa: E402
-from pipecat.evals.simulation_driver import END_CALL_EVENT, SimulationDriver  # noqa: E402
+from pipecat.evals.simulation_driver import (  # noqa: E402
+    END_CALL_EVENT,
+    PERSONA_TURN_EVENT,
+    SimulationDriver,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
@@ -192,9 +196,13 @@ class _FakePersonaLLM:
 class _FakeClient:
     def __init__(self):
         self.instruction: str | None = None
+        self.hung_up = False
 
     async def configure_persona(self, instruction: str):
         self.instruction = instruction
+
+    async def hang_up(self):
+        self.hung_up = True
 
 
 def _simulation(**overrides) -> EvalSimulation:
@@ -274,7 +282,9 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
+            await stream.append({"type": PERSONA_TURN_EVENT})
             await stream.append({"type": "llm_response", "text": "Berlin."})
+            await stream.append({"type": PERSONA_TURN_EVENT})
             results = await _end_call(llm, success=True, reason="I got my answer")
             self.assertEqual(results[0][0], {"status": "call ended"})
             self.assertFalse(results[0][1].run_llm)
@@ -285,6 +295,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(failures, [])
         self.assertIn("A traveler.", client.instruction or "")
+        self.assertTrue(client.hung_up)
         self.assertEqual(
             judge.messages,
             [
@@ -313,8 +324,9 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         driver, stream, _, _ = _driver(_simulation(max_turns=2), _FakeConversationJudge(["no"]))
 
         async def conversation():
-            for text in ("one", "", "two", "three"):  # an empty response is not a turn
+            for text in ("one", "two", "three"):
                 await stream.append({"type": "llm_response", "text": text})
+                await stream.append({"type": PERSONA_TURN_EVENT})
 
         task = asyncio.create_task(conversation())
         await driver.run()
@@ -331,23 +343,20 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
         self.assertEqual(result.ended_by, "max_duration")
 
-    async def test_audio_mode_counts_the_transcribed_turns(self):
-        driver, stream, llm, _ = _driver(
-            _simulation(bot_audio=True, transcriber={"service": "moonshine"}),
-            _FakeConversationJudge(["yes"]),
-        )
+    async def test_only_persona_turns_count(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
 
         async def conversation():
-            await stream.append({"type": "llm_response", "text": "not counted in audio mode"})
-            await stream.append({"type": "response", "text": "counted"})
+            await stream.append({"type": "llm_response", "text": "the bot's turn"})
+            await stream.append({"type": "response", "text": "its transcription"})
+            await stream.append({"type": PERSONA_TURN_EVENT})
             await _end_call(llm, success=True, reason="done")
 
         task = asyncio.create_task(conversation())
         await driver.run()
         await task
-        self.assertEqual(
-            driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[]).turns, 1
-        )
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.turns, 1)
 
     async def test_a_run_level_failure_is_an_error_not_a_goal_failure(self):
         driver, _, _, _ = _driver(_simulation(), _FakeConversationJudge([]))

@@ -111,11 +111,14 @@ class _BotFrameSink(FrameProcessor):
     and the messages it reports about the harness) stop here; what passes is
     the pipeline's lifecycle and the aggregator's context frame.
 
-    It also stops the harness's *computed* interruptions here: the user aggregator
-    runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts an
-    ``InterruptionFrame`` downstream. Letting that reach the user TTS / output would
-    flush the user audio we're paced-sending (dropping a barge-in turn, and the
-    user's side of the recording), so the sink swallows it.
+    The harness's *computed* interruptions are decided here: the user aggregator
+    runs a VAD on the bot's incoming audio, so when the bot speaks it broadcasts
+    an ``InterruptionFrame`` downstream. For a scripted turn the sink swallows
+    it, since letting it reach the user TTS / output would flush the user audio
+    being paced out (dropping a barge-in turn, and the user's side of the
+    recording). For a persona it passes: a caller who hears the bot keep
+    talking stops, and the aggregator has the persona answer again once the bot
+    is done, with everything it said.
 
     The user's turns enter the pipeline here as well (:meth:`inject`), straight
     into the user-audio side. A turn queued at the pipeline head would first
@@ -123,28 +126,40 @@ class _BotFrameSink(FrameProcessor):
     resets its queue when the aggregator's interruption reaches it, dropping a
     turn still queued behind a slow transcription at that moment.
 
-    In a text-mode simulation the sink is also what hands the bot's turns to the
-    persona: with no audio there is no STT or aggregator to do it, so each
-    finished bot response is appended to the persona's context as a user message
-    and the context is pushed on for the persona LLM to answer. A response the
-    bot gives while one of its function calls is still running is held and
-    joined with the response that follows the call, so the persona answers the
-    bot's complete turn rather than its "let me check".
+    Every context frame that goes on to the persona LLM is one persona turn,
+    reported as a ``persona_turn`` event. In a text-mode simulation the sink is
+    also what hands the bot's turns to the persona: with no audio there is no
+    STT or aggregator to do it, so each finished bot response is appended to
+    the persona's context as a user message and the context is pushed on for
+    the persona LLM to answer. A response the bot gives while one of its
+    function calls is still running is held and joined with the response that
+    follows the call, so the persona answers the bot's complete turn rather
+    than its "let me check". Once the persona has hung up (:meth:`hang_up`),
+    nothing more reaches it.
     """
 
-    def __init__(self, stream: EvalEventStream, *, persona_feed: LLMContext | None = None):
+    def __init__(
+        self, stream: EvalEventStream, *, persona: LLMContext | None = None, feed: bool = False
+    ):
         """Initialize the sink.
 
         Args:
             stream: Where the bot's frames go as events.
-            persona_feed: In a text-mode simulation, the persona's context to
-                hand the bot's turns to; ``None`` otherwise.
+            persona: The persona's context in a simulation, else ``None``.
+            feed: Whether the sink hands the bot's finished responses to the
+                persona itself (a text-mode simulation, with no aggregator to).
         """
         super().__init__()
         self._stream = stream
-        self._persona_feed = persona_feed
+        self._persona = persona
+        self._feed = feed and persona is not None
+        self._hung_up = False
         self._held_response: list[str] = []
         self._calls_in_progress = 0
+
+    def hang_up(self) -> None:
+        """End the persona's part: no further bot turn reaches the persona LLM."""
+        self._hung_up = True
 
     async def inject(self, frame: Frame) -> None:
         """Push a user-turn frame downstream, into the user TTS and the output.
@@ -166,17 +181,30 @@ class _BotFrameSink(FrameProcessor):
         events = self._stream.frames_to_events(frame)
         for event in events:
             await self._stream.append(event)
-        if self._persona_feed is not None:
+        if self._feed and not self._hung_up:
             await self._feed_persona(events)
-        # The bot-audio VAD's interruption must not propagate into the user-audio
-        # path (user TTS + output); see the class docstring.
-        if isinstance(frame, (InterruptionFrame, *_BOT_FRAMES)):
+        if isinstance(frame, _BOT_FRAMES):
+            return
+        # The computed interruption stops here for a scripted turn (see the
+        # class docstring); a persona reacts to it like a caller.
+        if isinstance(frame, InterruptionFrame) and self._persona is None:
+            return
+        if isinstance(frame, LLMContextFrame):
+            # The aggregator asking the persona to answer (audio mode).
+            await self._run_persona(frame)
             return
         await self.push_frame(frame, direction)
 
+    async def _run_persona(self, frame: LLMContextFrame) -> None:
+        """Hand a context frame to the persona LLM: one persona turn, unless it hung up."""
+        if self._persona is None or self._hung_up:
+            return
+        await self._stream.append({"type": "persona_turn"})
+        await self.push_frame(frame)
+
     async def _feed_persona(self, events: list[dict]) -> None:
         """Hand a finished bot response to the persona, once its function calls are done."""
-        assert self._persona_feed is not None
+        assert self._persona is not None
         for event in events:
             match event["type"]:
                 case "function_call":
@@ -190,8 +218,8 @@ class _BotFrameSink(FrameProcessor):
                         continue
                     text = " ".join(self._held_response)
                     self._held_response = []
-                    self._persona_feed.add_message({"role": "user", "content": text})
-                    await self.push_frame(LLMContextFrame(self._persona_feed))
+                    self._persona.add_message({"role": "user", "content": text})
+                    await self._run_persona(LLMContextFrame(self._persona))
 
 
 class _PersonaTurnRelay(FrameProcessor):
@@ -598,6 +626,11 @@ class EvalClient:
             ).model_dump(),
         ).model_dump()
 
+    async def hang_up(self) -> None:
+        """End the persona's part of the conversation: it answers nothing more."""
+        assert self._sink is not None  # pipeline built before any send
+        self._sink.hang_up()
+
     async def configure_persona(self, instruction: str) -> None:
         """Give the persona LLM its instruction and tell it how its replies go out.
 
@@ -723,8 +756,11 @@ class EvalClient:
             processors += [self._bot_stt, user_aggregator]
         # With no STT there is no aggregator to hand the bot's turns to the
         # persona; the sink does it from the bot's text.
-        feed = self._persona_context if self._persona_llm and self._bot_stt is None else None
-        self._sink = _BotFrameSink(self._stream, persona_feed=feed)
+        self._sink = _BotFrameSink(
+            self._stream,
+            persona=self._persona_context if self._persona_llm is not None else None,
+            feed=self._bot_stt is None,
+        )
         processors.append(self._sink)
         if self._persona_llm is not None:
             processors.append(self._persona_llm)

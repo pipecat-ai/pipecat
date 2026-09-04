@@ -589,6 +589,10 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         sink.link(nxt)
         return sink, nxt
 
+    @staticmethod
+    def _events(sink: _BotFrameSink) -> list[str]:
+        return [e["type"] for e in sink._stream.events_seen]
+
     async def _push(self, sink, *frames):
         for frame in frames:
             await sink.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -610,23 +614,43 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
         )
         self.assertEqual(nxt.frames, [])
-        # ...while the aggregator's context frame goes on to the persona.
-        context = LLMContextFrame(LLMContext())
-        await self._push(sink, context)
-        self.assertEqual(nxt.frames, [context])
+
+    async def test_a_scripted_run_swallows_the_computed_interruption(self):
+        sink, nxt = self._sink()
+        await self._push(sink, InterruptionFrame(), LLMContextFrame(LLMContext()))
+        self.assertEqual(nxt.frames, [])  # no persona: nothing to interrupt or run
+
+    async def test_a_persona_is_interrupted_and_runs_per_context_frame(self):
+        context = LLMContext()
+        sink, nxt = self._sink(persona=context)
+        interruption = InterruptionFrame()
+        run = LLMContextFrame(context)
+        await self._push(sink, interruption, run)
+        self.assertEqual(nxt.frames, [interruption, run])
+        self.assertEqual(self._events(sink), ["persona_turn"])
+
+    async def test_hang_up_silences_the_persona(self):
+        context = LLMContext()
+        sink, nxt = self._sink(persona=context, feed=True)
+        sink.hang_up()
+        await self._push(sink, LLMContextFrame(context), *_bot_response("Anything else?"))
+        self.assertEqual(nxt.frames, [])
+        self.assertEqual(context.get_messages(), [])
+        self.assertNotIn("persona_turn", self._events(sink))
 
     async def test_text_feed_hands_the_bots_response_to_the_persona(self):
         context = LLMContext()
-        sink, nxt = self._sink(persona_feed=context)
+        sink, nxt = self._sink(persona=context, feed=True)
         await self._push(sink, *_bot_response("Hello ", "there"))
         self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello there"}])
         self.assertEqual(len(nxt.frames), 1)
         self.assertIsInstance(nxt.frames[0], LLMContextFrame)
         self.assertIs(nxt.frames[0].context, context)
+        self.assertEqual(self._events(sink), ["llm_started", "llm_response", "persona_turn"])
 
     async def test_text_feed_waits_for_the_bots_function_call(self):
         context = LLMContext()
-        sink, nxt = self._sink(persona_feed=context)
+        sink, nxt = self._sink(persona=context, feed=True)
         await self._push(
             sink,
             LLMFullResponseStartFrame(),
@@ -658,7 +682,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_feed_ignores_an_empty_response(self):
         context = LLMContext()
-        sink, nxt = self._sink(persona_feed=context)
+        sink, nxt = self._sink(persona=context, feed=True)
         await self._push(sink, *_bot_response())
         self.assertEqual(context.get_messages(), [])
         self.assertEqual(nxt.frames, [])
