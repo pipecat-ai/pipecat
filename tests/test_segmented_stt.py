@@ -25,8 +25,8 @@ from pipecat.tests.utils import run_test
 SAMPLE_RATE = 16000
 # Distinct, non-zero 16-bit samples so a misread WAV header would be obvious.
 PCM = bytes(range(0, 240)) * 4  # 960 bytes, even length
-# What the default trailing_silence_secs (0.3 s) appends, as 16-bit mono PCM.
-DEFAULT_SILENCE = bytes(int(SAMPLE_RATE * 0.3) * 2)
+# What the default trailing_silence_secs (0.5 s) appends, as 16-bit mono PCM.
+DEFAULT_SILENCE = bytes(int(SAMPLE_RATE * 0.5) * 2)
 
 
 def _make_capturing_service(wants_wav: bool | None = None, **kwargs) -> SegmentedSTTService:

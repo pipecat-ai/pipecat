@@ -820,7 +820,7 @@ class SegmentedSTTService(STTService):
         self,
         *,
         sample_rate: int | None = None,
-        trailing_silence_secs: float = 0.3,
+        trailing_silence_secs: float = 0.5,
         **kwargs,
     ):
         """Initialize the segmented STT service.
