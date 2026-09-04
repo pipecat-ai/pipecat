@@ -7,8 +7,13 @@
 import asyncio
 import dataclasses
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.flux.stt_base import (
@@ -384,6 +389,45 @@ async def test_connection_wait_returns_once_confirmed():
     service._connection_established_event.set()
 
     await service._await_connection_established()
+
+
+def _make_fake_connect_state(connect_error: Exception) -> SimpleNamespace:
+    """Just the state `_connect_websocket` touches, with the connect raising."""
+    return SimpleNamespace(
+        _websocket=None,
+        _connection_established_event=asyncio.Event(),
+        _user_is_speaking=True,
+        _websocket_url="wss://example.test",
+        _api_key="key",
+        _websocket_connect=AsyncMock(side_effect=connect_error),
+        push_error=AsyncMock(),
+        _call_event_handler=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_handshake_4xx_is_reported_permanent():
+    """A 4xx handshake rejection (bad key, exhausted credit) costs usability.
+
+    Mirrors DeepgramSTTService's handshake handling: this connect is one-shot,
+    so a rejection a retry cannot clear must mark the service unusable for a
+    failover strategy to act on (#5608).
+    """
+    fake = _make_fake_connect_state(InvalidStatus(Response(402, "", Headers())))
+
+    await DeepgramFluxSTTService._connect_websocket(fake)
+
+    assert fake.push_error.call_args.kwargs["force_treat_as_permanent"] is True
+
+
+@pytest.mark.asyncio
+async def test_handshake_network_failure_stays_transient():
+    """A connect failure without an HTTP status is no configuration verdict."""
+    fake = _make_fake_connect_state(TimeoutError("no route"))
+
+    await DeepgramFluxSTTService._connect_websocket(fake)
+
+    assert fake.push_error.call_args.kwargs["force_treat_as_permanent"] is False
 
 
 if __name__ == "__main__":
