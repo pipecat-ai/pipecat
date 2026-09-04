@@ -32,6 +32,7 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 ### Core flows
 
 - [`food_ordering.py`](./food_ordering.py) — restaurant order flow demonstrating node and edge functions
+- [`food_ordering_yaml.py`](./food_ordering_yaml.py) — the same order flow with its graph loaded from [`food_ordering.yaml`](./food_ordering.yaml) at runtime via `FlowConfig`, and its tools in [`food_ordering_tools.py`](./food_ordering_tools.py); the seam for configuring a deployed bot per session
 - [`restaurant_reservation.py`](./restaurant_reservation.py) — reservation system with availability checking
 - [`patient_intake.py`](./patient_intake.py) — medical intake system showing complex state management
 - [`insurance_quote.py`](./insurance_quote.py) — insurance quote system with data collection

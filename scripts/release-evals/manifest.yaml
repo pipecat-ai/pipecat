@@ -386,6 +386,8 @@ suite:
     scenarios: [hello_world]
   - bot: flows/food_ordering.py
     scenarios: [food_ordering_pizza]
+  - bot: flows/food_ordering_yaml.py
+    scenarios: [food_ordering_pizza]
   - bot: flows/food_ordering_advanced_functionschema.py
     scenarios: [food_ordering_sushi]
   - bot: flows/multi_worker_handoff.py
