@@ -54,12 +54,7 @@ from pipecat.services.openai.realtime.events import (
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import (
-    BackendLLMWorker,
-    BackendOutput,
-    delegate_to_backend,
-    render_transcript_request,
-)
+from pipecat.workers.llm import BackendLLMWorker, BackendOutput, delegate_to_backend
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -71,15 +66,14 @@ aloud, so keep them to one or two natural sentences without any formatting.
 
 Answer simple conversational questions yourself. Whenever the user asks for
 current information, such as the weather or a restaurant recommendation, or
-asks you to look something up, call the delegate tool. The backend reads the
-conversation, so you don't need to word the request — hand off as soon as
-you know it is for the backend. While it runs, keep the conversation going;
+asks you to look something up, call the delegate tool with a self-contained
+request: the user's goal, the exact details they gave (places, dates, names)
+and their latest correction. While it runs, keep the conversation going;
 when the result comes back, relay it in your own words."""
 
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Each message you receive
-is the recent voice conversation between the user and the assistant, as a
-transcript. Work out what is being asked from it and answer that. The
-transcript may contain transcription errors; use the most likely intent.
+is a request the assistant has handed you from a live voice conversation. It
+may contain transcription errors; use the most likely intent.
 
 Use the available tools to answer questions about the weather and
 restaurants. Reply with the verified result in concise, conversational plain
@@ -147,20 +141,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # The backend is handed the conversation and works out the request from
-    # it, so it can read a short reply or a correction for itself. Only what
-    # it hasn't seen: its own context keeps the rest. The count belongs to
-    # this session.
-    delegated_through = 0
-
+    # A speech-to-speech model responds to the audio, and the transcript of
+    # that audio reaches the context later. The turns that prompted a handoff
+    # may not be recorded yet when it runs, so the model words the request
+    # itself.
     @tool_options(cancel_on_interruption=False)
-    async def delegate(params: FunctionCallParams):
-        """Hand the conversation to the backend, for anything needing tools, current information or careful reasoning."""
-        nonlocal delegated_through
-        messages = params.context.get_messages()
-        conversation = messages[delegated_through:]
-        first, delegated_through = delegated_through == 0, len(messages)
-        logger.info(f"Delegating to the backend: {len(conversation)} new message(s)")
+    async def delegate(params: FunctionCallParams, task: str):
+        """Hand work to the backend, for anything needing tools, current information or careful reasoning.
+
+        Args:
+            task: What the backend should do, self-contained: the user's goal,
+                the details they gave and their latest correction.
+        """
+        logger.info(f"Delegating to the backend: {task!r}")
 
         async def on_update(output: BackendOutput):
             # The final answer comes back as this tool's result, below, so it
@@ -180,7 +173,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         text = await delegate_to_backend(
             params.pipeline_worker,
             BACKEND_NAME,
-            request=render_transcript_request(conversation, first=first),
+            request=task,
             on_update=on_update,
             timeout_secs=120,
         )
