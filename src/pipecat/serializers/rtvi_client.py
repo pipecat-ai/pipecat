@@ -18,9 +18,9 @@ It is the inverse of
 pipeline frames into server messages on the bot side.
 
 .. note::
-    This covers the messages a text-mode conversation needs (the LLM response
-    lifecycle, transcriptions, speaking/interruption signals, function calls). TTS
-    text, metrics, and inbound bot audio are added as the eval-simulation work
+    This covers the messages a conversation needs (the LLM response lifecycle,
+    the TTS's spoken text, transcriptions, speaking/interruption signals, function
+    calls). Metrics and inbound bot audio are added as the eval-simulation work
     progresses.
 """
 
@@ -46,8 +46,10 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
+    TTSTextFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.text.base_text_aggregator import AggregationType
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -129,6 +131,12 @@ class RTVIClientSerializer(FrameSerializer):
                 return LLMTextFrame(text=payload.get("text", ""))
             case "bot-llm-stopped":
                 return LLMFullResponseEndFrame()
+            case "bot-tts-text":
+                # The message carries only the text; how the bot's TTS aggregated
+                # it (sentence, word) isn't on the wire.
+                return TTSTextFrame(
+                    text=payload.get("text", ""), aggregated_by=AggregationType.SENTENCE
+                )
             case "bot-started-speaking":
                 return BotStartedSpeakingFrame()
             case "bot-stopped-speaking":
@@ -165,6 +173,6 @@ class RTVIClientSerializer(FrameSerializer):
                     return TranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
                 return InterimTranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
             case _:
-                # bot-ready (handshake) and not-yet-mapped messages (tts text,
-                # function calls, metrics, bot audio) are handled elsewhere / later.
+                # bot-ready (handshake) and not-yet-mapped messages (metrics, bot
+                # audio) are handled elsewhere / later.
                 return None
