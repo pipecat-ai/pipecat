@@ -69,7 +69,6 @@ from pipecat.workers.llm.backend_llm_worker import (
 from . import events
 
 DEFAULT_MODEL = "gpt-live-1-diamond-alpha"
-DEFAULT_VOICE = "marin"
 
 # Quiet time that ends a speaker's turn. The API emits transcript fragments on
 # 200 ms frame boundaries, so this has to clear ordinary gaps within speech.
@@ -89,15 +88,16 @@ class OpenAILiveLLMSettings(LLMSettings):
     """Settings for OpenAILiveLLMService.
 
     Parameters:
-        voice: Output voice name (for example ``marin`` or ``cedar``). Cannot
-            be changed once the session has started.
+        voice: Output voice name (for example ``marin`` or ``cedar``). ``None``
+            leaves the choice to the API. Cannot be changed once the session
+            has started.
         transcript_turn_gap_secs: How long a speaker's transcript must stay
             quiet before their turn is treated as over. The API emits timed
             fragments and no turn boundaries, so turns are grouped here; tune
             this against recordings for the languages and pacing you expect.
     """
 
-    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     transcript_turn_gap_secs: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -280,7 +280,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            voice=DEFAULT_VOICE,
+            voice=None,
             transcript_turn_gap_secs=DEFAULT_TURN_GAP_SECS,
         )
         if settings is not None:
@@ -520,11 +520,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if self._opening_instruction:
             history = history[:-1]
 
+        voice = assert_given(self._settings.voice)
         session = events.SessionConfig(
             model=self._session_model,
             instructions=params["instructions"],
-            audio=events.AudioConfig(
-                output=events.AudioOutputConfig(voice=assert_given(self._settings.voice))
+            audio=(
+                events.AudioConfig(output=events.AudioOutputConfig(voice=voice)) if voice else None
             ),
             delegation=self._delegation_config(params["tools"], params["tool_choice"]),
             input=history or None,

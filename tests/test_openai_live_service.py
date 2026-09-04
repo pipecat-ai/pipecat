@@ -225,6 +225,19 @@ async def test_initial_session_update_client_mode():
 
 
 @pytest.mark.asyncio
+async def test_no_voice_setting_leaves_the_choice_to_the_api():
+    """Without a voice, no audio config is sent and the API picks its default."""
+    service = _make_service()
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+
+    await service._handle_context(LLMContext([{"role": "system", "content": "Be brief."}]))
+
+    (start,) = recorder.of_type("session.start")
+    assert "audio" not in start["session"]
+
+
+@pytest.mark.asyncio
 async def test_initial_session_update_responses_mode():
     """Responses settings map onto delegation.responses; tools/tool_choice come from the context."""
     delegation = OpenAILiveLLMService.ResponsesDelegation(
