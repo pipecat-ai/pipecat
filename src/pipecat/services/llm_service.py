@@ -371,6 +371,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         base_si = self._settings.system_instruction
         self._base_system_instruction: str | None = base_si if isinstance(base_si, str) else None
         self._appended_system_instructions: list[str] = []
+        # The instruction as last composed, so a recomposition that changes
+        # nothing (every tool sync recomposes) is not logged again.
+        self._composed_system_instruction: str | None = None
         # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
         # don't need to spell out the generic parameter just to subclass
         # (backward compatibility for 3rd-party providers outside this repo).
@@ -620,7 +623,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
         guide), turn completion instructions (when enabled), and async tool
         cancellation instructions (when enabled). Safe to call repeatedly — it
-        always rebuilds from the base, so it never compounds.
+        always rebuilds from the base, so it never compounds, and it logs the
+        result only when it differs from the previous composition.
         """
         base = self._base_system_instruction
         parts = [base] if base else []
@@ -631,9 +635,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
         if self._has_async_tools():
             parts.append(ASYNC_TOOL_INSTRUCTIONS)
-        composed = "\n\n".join(p for p in parts if p)
-        self._settings.system_instruction = composed or None
-        logger.debug(f"{self}: System instruction composed: {self._settings.system_instruction}")
+        composed = "\n\n".join(p for p in parts if p) or None
+        self._settings.system_instruction = composed
+        if composed != self._composed_system_instruction:
+            self._composed_system_instruction = composed
+            logger.debug(f"{self}: System instruction composed: {composed}")
 
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Apply a settings delta, handling turn-completion fields.
