@@ -243,3 +243,53 @@ class TestSpeculativeResponseGateOrdering(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
+    async def test_a_new_response_supersedes_a_held_one(self):
+        # A withdrawal that arrives before the response it voids needs no
+        # memory: the response is held on arrival, and whatever answers the
+        # turn instead supersedes it.
+        gate = SpeculativeResponseGate()
+
+        await run_test(
+            gate,
+            frames_to_send=[
+                # Withdrawn before its response reached us.
+                EagerEndOfTurnCancelFrame("abc"),
+                SleepFrame(),
+                *response("abc", "Cancelling.", end=False),
+                SleepFrame(),
+                *response(None, "Rescheduling instead."),
+            ],
+            expected_down_frames=[
+                EagerEndOfTurnCancelFrame,
+                LLMFullResponseStartFrame,
+                LLMTextFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+        assert gate.state == SpeculationState.OPEN
+
+    async def test_a_held_response_does_not_swallow_the_one_that_supersedes_it(self):
+        # The held response never ends: its generation was cancelled mid-flight,
+        # so no end frame is coming and only a new response resolves it. Its
+        # frames are dropped, but the response that supersedes it has to pass
+        # through whole — nothing of the held one can still be queued behind a
+        # frame that arrived after it.
+        gate = SpeculativeResponseGate()
+
+        down, _ = await run_test(
+            gate,
+            frames_to_send=[
+                *response("abc", "Booking.", end=False),
+                SleepFrame(),
+                *response(None, "Something else entirely."),
+            ],
+            expected_down_frames=[
+                LLMFullResponseStartFrame,
+                LLMTextFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+        assert [f.text for f in down if isinstance(f, LLMTextFrame)] == ["Something else entirely."]
