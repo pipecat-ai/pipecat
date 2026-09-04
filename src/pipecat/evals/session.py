@@ -295,14 +295,8 @@ class EvalSession(BaseObject):
         try:
             await self._client.wait_for_bot()
         except (OSError, TimeoutError) as e:
-            failure = EvalAssertionFailure(
-                turn_index=-1,
-                expectation_index=-1,
-                event_name="<connect>",
-                reason=f"failed to connect to {self._bot_url}: {e.__class__.__name__}",
-                kind="connect_failed",
-            )
-            return self._result(started, [failure])
+            reason = f"failed to connect to {self._bot_url}: {e.__class__.__name__}"
+            return self._result(started, [self._failure("<connect>", reason, "connect_failed")])
 
         failures = await self._drive()
         self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
@@ -349,15 +343,7 @@ class EvalSession(BaseObject):
             await self._client.handshake()
         except TimeoutError as e:
             self._trace.log("handshake: failed (bot-ready not received)")
-            return [
-                EvalAssertionFailure(
-                    turn_index=-1,
-                    expectation_index=-1,
-                    event_name="<bot-ready>",
-                    reason=str(e),
-                    kind="handshake_timeout",
-                )
-            ]
+            return [self._failure("<bot-ready>", str(e), "handshake_timeout")]
         self._trace.log("handshake: ok (bot-ready)")
         return await self._driver.run()
 
@@ -371,18 +357,26 @@ class EvalSession(BaseObject):
         self._trace.log(f"error: {type(e).__name__}: {e}")
         for line in traceback.format_exc().rstrip().splitlines():
             self._trace.log(line)
-        failure = EvalAssertionFailure(
-            turn_index=self._trace.turn,
-            expectation_index=-1,
-            event_name="<error>",
-            reason=f"{type(e).__name__}: {e}",
-            kind="harness_error",
-        )
+        failure = self._failure("<error>", f"{type(e).__name__}: {e}", "harness_error")
         turns = self._driver.turns
         if 0 <= self._trace.turn < len(turns):
             turns[self._trace.turn].status = "failed"
             turns[self._trace.turn].failures.append(failure)
         return failure
+
+    def _failure(self, event_name: str, reason: str, kind: str) -> EvalAssertionFailure:
+        """A failure of the run itself rather than of an expectation.
+
+        It is scored against the trace's current turn: -1 before the driver has
+        started any (connecting, the handshake), else the turn under way.
+        """
+        return EvalAssertionFailure(
+            turn_index=self._trace.turn,
+            expectation_index=-1,
+            event_name=event_name,
+            reason=reason,
+            kind=kind,
+        )
 
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalTurnProgress], None]
