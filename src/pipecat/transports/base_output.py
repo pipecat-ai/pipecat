@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
@@ -563,6 +564,25 @@ class BaseOutputTransport(FrameProcessor):
             finally:
                 self._executor.shutdown(wait=False)
 
+        async def _flush_queued_tts_text(self):
+            """Forward TTSTextFrames already sitting in the audio queue.
+
+            A TTSTextFrame is only enqueued after its corresponding audio, so
+            any still in the queue at this point correspond to audio that's
+            already been sent. Call this before the queue is reset or
+            replaced so those frames aren't silently discarded.
+            """
+            kept = []
+            flushed = []
+            while not self._audio_queue.empty():
+                item = self._audio_queue.get_nowait()
+                (flushed if isinstance(item, TTSTextFrame) else kept).append(item)
+            for item in kept:
+                self._audio_queue.put_nowait(item)
+            for frame in flushed:
+                await self._handle_frame(frame)
+                await self._transport.push_frame(frame)
+
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
@@ -572,6 +592,8 @@ class BaseOutputTransport(FrameProcessor):
             # Cancel tasks.
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
+            await self._flush_queued_tts_text()
 
             if self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
