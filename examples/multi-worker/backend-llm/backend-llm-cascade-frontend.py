@@ -216,9 +216,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        # `delegate` is not something a client should see as a tool call: it is
-        # the handoff itself, not the work. The backend's own calls run in its
-        # worker's pipeline, out of this observer's sight.
+        # Whether a client sees the handoff as a tool call is the app's call:
+        # it is a real tool call, though it reports the handoff rather than the
+        # work behind it. This example hides it. (The backend's own calls run in
+        # its worker's pipeline, which this observer doesn't watch.)
         rtvi_observer_params=RTVIObserverParams(
             function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
         ),
