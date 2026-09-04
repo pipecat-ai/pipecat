@@ -31,7 +31,7 @@ uv run towncrier build --draft --version Unreleased
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
-pipecat eval suite scripts/release-evals/manifest.yaml -p <bot-pattern> -s <scenario>
+pipecat eval suite scripts/release-evals/manifest-evals.yaml -p <bot-pattern> -s <scenario>
 
 # Lint and format check
 uv run ruff check

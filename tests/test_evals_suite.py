@@ -199,3 +199,129 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Simulations in a manifest, and their results.jsonl records.
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+from pipecat.evals.results import SimulationMetric, SimulationRunResult  # noqa: E402
+from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
+
+SIMULATION = """
+name: {name}
+persona: "A caller."
+goal: "Get it done."
+simulator: {{service: openai}}
+success: "it got done"
+runs: {runs}
+pass_threshold: 0.5
+"""
+
+
+class TestManifestSimulations(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name)
+        (self.base / "simulations").mkdir()
+        (self.base / "scenarios").mkdir()
+        (self.base / "simulations" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
+        (self.base / "simulations" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
+        (self.base / "scenarios" / "greet.yaml").write_text("name: greet\nturns: []\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _manifest(self, text: str, **overrides) -> EvalManifest:
+        path = self.base / "manifest.yaml"
+        path.write_text(text)
+        return EvalManifest.load(path, **overrides)
+
+    def test_simulations_run_as_many_times_as_their_file_says(self):
+        manifest = self._manifest(
+            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n    simulations: [book, once]\n"
+        )
+        by_name = {}
+        for run in manifest.runs:
+            by_name.setdefault(run.scenario, []).append(run)
+        self.assertEqual([r.attempt for r in by_name["book"]], [1, 2, 3])
+        self.assertEqual([r.attempt for r in by_name["once"]], [1])
+        self.assertEqual([r.attempt for r in by_name["greet"]], [1])
+        book = by_name["book"][0]
+        self.assertEqual(book.kind, "simulation")
+        self.assertEqual(book.attempts, 3)
+        self.assertEqual(book.pass_threshold, 0.5)
+        self.assertEqual(book.scenario_path, self.base / "simulations" / "book.yaml")
+        greet = by_name["greet"][0]
+        self.assertEqual(greet.kind, "scenario")
+        self.assertEqual(greet.attempts, 1)
+        self.assertIsNone(greet.pass_threshold)
+        # Attempt-major: every evaluable's first attempt precedes any second one.
+        self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
+
+    def test_repeat_overrides_a_simulations_runs(self):
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    simulations: [book]\n", repeat=2)
+        self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
+        self.assertEqual(manifest.runs[0].attempts, 2)
+
+    def test_a_missing_simulation_still_gets_a_run(self):
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    simulations: [nope]\n")
+        self.assertEqual(len(manifest.runs), 1)
+        self.assertEqual(manifest.runs[0].kind, "simulation")
+        self.assertEqual(manifest.runs[0].attempts, 1)
+
+
+class TestSimulationRecords(unittest.TestCase):
+    def test_result_roundtrips_through_the_worker_json(self):
+        result = SimulationRunResult(
+            simulation_name="book",
+            succeeded=True,
+            reason="booked",
+            quality=0.5,
+            metrics=[SimulationMetric(name="politeness", score=1.0, reason="nice", weight=1.0)],
+            messages=[{"role": "user", "content": "hi"}],
+            turns=2,
+            ended_by="end_call",
+            end_call={"success": True, "reason": "done"},
+            duration_ms=1234,
+        )
+        import dataclasses
+
+        rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+
+    def test_results_jsonl_record_for_a_simulation_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind="simulation",
+                attempts=3,
+                pass_threshold=0.5,
+                attempt=2,
+                status="done",
+                duration_ms=1234,
+                result=SimulationRunResult(
+                    simulation_name="book",
+                    succeeded=False,
+                    reason="no table",
+                    quality=0.0,
+                    turns=3,
+                    ended_by="bot",
+                    events_seen=[{"type": "llm_started"}],
+                ),
+            )
+            _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["simulation"], "book")
+            self.assertEqual(record["attempt"], 2)
+            self.assertFalse(record["passed"])
+            self.assertFalse(record["succeeded"])
+            self.assertEqual(record["ended_by"], "bot")
+            self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
+            self.assertNotIn("scenario", record)

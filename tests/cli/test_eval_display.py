@@ -6,12 +6,20 @@
 
 """Tests for how `pipecat eval` renders a run's outcome."""
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
-from pipecat.cli.commands.eval import _expand_scenario_paths, _turn_tally
-from pipecat.evals.results import EvalResult, EvalTurnResult
+from pipecat.cli.commands.eval import (
+    _eval_verdict,
+    _expand_scenario_paths,
+    _finalize_evals,
+    _group_below_threshold,
+    _turn_tally,
+)
+from pipecat.evals.results import EvalResult, EvalTurnResult, SimulationRunResult
 from pipecat.evals.suite import EvalRun
 
 
@@ -81,3 +89,86 @@ class TestScenarioPathExpansion(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(Exception, "No \.yaml or \.yml scenario files found"):
                 _expand_scenario_paths([Path(tmp)])
+
+
+def _simulation_run(
+    succeeded: bool | None,
+    *,
+    attempt: int = 1,
+    attempts: int = 3,
+    threshold: float | None = 0.67,
+    quality: float | None = 1.0,
+) -> EvalRun:
+    """A finished simulation run; ``succeeded=None`` is one that errored out."""
+    if succeeded is None:
+        result = SimulationRunResult(
+            simulation_name="book", succeeded=False, error="bot never answered"
+        )
+    else:
+        result = SimulationRunResult(
+            simulation_name="book",
+            succeeded=succeeded,
+            reason="judged",
+            quality=quality,
+            ended_by="end_call" if succeeded else "max_turns",
+        )
+    return EvalRun(
+        bot="bot",
+        scenario="book",
+        scenario_path=Path("book.yaml"),
+        kind="simulation",
+        attempt=attempt,
+        attempts=attempts,
+        pass_threshold=threshold,
+        status="done",
+        result=result,
+    )
+
+
+class TestSimulationVerdicts(unittest.TestCase):
+    def test_a_simulation_run_reads_its_own_outcome(self):
+        self.assertEqual(_eval_verdict(_simulation_run(True)), "passed")
+        self.assertEqual(_eval_verdict(_simulation_run(False)), "failed")
+        self.assertEqual(_eval_verdict(_simulation_run(None)), "error")
+
+    def test_detail_is_quality_and_how_it_ended(self):
+        self.assertEqual(_turn_tally(_simulation_run(True)), "quality 1.00 · end_call")
+        self.assertEqual(_turn_tally(_simulation_run(False, quality=None)), "max_turns")
+
+    def test_rate_is_measured_against_the_threshold(self):
+        two_of_three = [_simulation_run(s, attempt=i) for i, s in enumerate((True, True, False), 1)]
+        self.assertFalse(_group_below_threshold(two_of_three))
+        one_of_three = [
+            _simulation_run(s, attempt=i) for i, s in enumerate((True, False, False), 1)
+        ]
+        self.assertTrue(_group_below_threshold(one_of_three))
+
+    def test_errored_runs_stay_out_of_the_rate(self):
+        # One success out of one completed run meets any threshold; the errors are
+        # reported on their own rather than counted as the bot failing.
+        group = [_simulation_run(s, attempt=i) for i, s in enumerate((True, None, None), 1)]
+        self.assertFalse(_group_below_threshold(group))
+        self.assertTrue(_group_below_threshold([_simulation_run(None)]))
+
+    def test_scenario_groups_have_no_threshold(self):
+        self.assertFalse(_group_below_threshold([_run(["failed"]), _run(["passed"])]))
+
+    def test_exit_code_follows_the_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                passing = [
+                    _simulation_run(s, attempt=i) for i, s in enumerate((True, True, False), 1)
+                ]
+                self.assertEqual(_finalize_evals(passing, Path(tmp), 1.0, False), 0)
+                failing = [
+                    _simulation_run(s, attempt=i) for i, s in enumerate((True, False, False), 1)
+                ]
+                self.assertEqual(_finalize_evals(failing, Path(tmp), 1.0, False), 1)
+                # A single-run simulation is judged on that run alone.
+                self.assertEqual(
+                    _finalize_evals([_simulation_run(False, attempts=1)], Path(tmp), 1.0, False),
+                    1,
+                )
+            self.assertIn("below 67%", out.getvalue())
+            self.assertIn("goal not achieved", out.getvalue())

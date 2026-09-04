@@ -1,0 +1,26 @@
+# Release simulations manifest: which simulations each bot runs.
+# Run with: pipecat eval suite scripts/release-evals/manifest-simulations.yaml
+#
+# A simulation puts an autonomous caller on the line with a bot and judges
+# whether the caller got what they came for; each runs as many times as its
+# file says and passes if its success rate meets its pass_threshold. The bots
+# here are the Flows examples, the task-oriented ones: together these check
+# that the framework still carries a conversation to its goal.
+
+bots_dir: ../../examples       # bot paths below are relative to this
+simulations_dir: simulations   # simulation names resolve to <dir>/<name>.yaml
+concurrency: 2                 # each run holds an LLM conversation; keep it light
+runs_dir: test-runs            # logs -> test-runs/<timestamp>/
+spawn: "{python} {bot} -t eval --port {port}"
+
+suite:
+  - bot: flows/restaurant_reservation.py
+    simulations: [book_table_available, book_table_flexible, book_table_impossible]
+  - bot: flows/patient_intake.py
+    simulations: [complete_patient_intake]
+  - bot: flows/food_ordering.py
+    simulations: [order_pizza]
+  - bot: flows/food_ordering_advanced_functionschema.py
+    simulations: [order_sushi]
+  - bot: flows/insurance_quote.py
+    simulations: [get_insurance_quote]

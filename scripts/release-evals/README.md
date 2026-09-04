@@ -16,7 +16,10 @@ expected results. For example the `capital_question` scenario asks "What is the
 capital of Germany?" and judges that the reply says Berlin. Scenarios are
 reusable, so one shared scenario covers many bots.
 
-[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs.
+[`manifest-evals.yaml`](manifest-evals.yaml) maps each bot to the scenarios it
+runs. A second manifest, [`manifest-simulations.yaml`](manifest-simulations.yaml),
+maps the task-oriented bots to *simulations*, where an autonomous caller
+pursues a goal instead of reading a script (see [Simulations](#simulations)).
 
 ## Prerequisites
 
@@ -79,7 +82,7 @@ the full per-pipeline debug logs are saved (see below), and forwards any extra
 flags:
 
 ```sh
-uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
+uv run python -m pipecat.evals suite -d manifest-evals.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
 ```
 
 Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
@@ -248,7 +251,50 @@ The bots pick their LLM from `$LLM_PROVIDER` (default `openai_responses`;
 (also `google`, `aws`). `llm_switching` needs OpenAI, Google, and Anthropic
 keys all set. `warm_transfer.py` (Daily + a live human agent) isn't covered.
 
+## Simulations
+
+A scenario scripts the user's side of the conversation. A **simulation** replaces
+the script with a *persona*: an LLM playing a caller with a goal, who says
+whatever the conversation calls for and hangs up (an `end_call` tool) when the
+goal is reached or clearly out of reach. A judge then reads the whole
+conversation, together with the tools the bot called, and decides whether the
+caller got what they came for. Simulations cover the Flows examples, because
+those are the bots with a job to finish: book a table, take a patient's intake,
+place an order, quote a policy.
+
+```sh
+./run-simulations.sh                       # every simulation in the manifest
+./run-simulations.sh -p restaurant         # only bots whose path contains "restaurant"
+./run-simulations.sh -s order_pizza -r 5   # one simulation, five runs
+```
+
+Each simulation file names how many times it runs (`runs`) and the success rate
+it needs (`pass_threshold`); a persona does not say the same thing twice, so a
+single run is an anecdote. The release set runs each three times and passes at
+two out of three. `--repeat` overrides the count for a sweep. The suite prints
+a per-simulation pass rate, mean quality, and a ✓ or ✗ against the threshold,
+and exits non-zero when any simulation misses it. A run that errored (the bot
+never came up, the persona's LLM failed) is reported but kept out of the rate.
+
+| Simulation                | Bot                                              | The caller                                                       |
+| ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| `book_table_available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
+| `book_table_flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
+| `book_table_impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
+| `complete_patient_intake` | `flows/patient_intake.py`                        | Gives a birthday, a prescription, an allergy, and a condition.   |
+| `order_pizza`             | `flows/food_ordering.py`                         | Orders a large pepperoni pizza and asks about delivery time.     |
+| `order_sushi`             | `flows/food_ordering_advanced_functionschema.py` | Orders three California rolls.                                   |
+| `get_insurance_quote`     | `flows/insurance_quote.py`                       | Gets a quote, then a second one with more coverage.              |
+
+The persona speaks in text (the `simulator:` block, an OpenAI model by default,
+so `OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
+the scenarios. `examples/simulations/` has audio-mode simulations and the file
+format; run one by hand with `pipecat eval simulate simulations/<name>.yaml
+--bot-url ws://localhost:7860 -v`.
+
 ## Adding coverage
 
-- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
+- New bot: add an entry to `manifest-evals.yaml` (`bot:` + the `scenarios:` it should run).
 - New behavior to test: add a `scenarios/<name>.yaml` and reference it from the manifest.
+- New goal to reach: add a `simulations/<name>.yaml` and reference it from
+  `manifest-simulations.yaml` under the bot that serves it.

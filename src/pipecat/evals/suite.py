@@ -69,7 +69,14 @@ import yaml
 from loguru import logger
 
 from pipecat.evals.eval_session import DEFAULT_EVENT_TIMEOUT_MS
-from pipecat.evals.results import EvalAssertionFailure, EvalResult, EvalTurnResult
+from pipecat.evals.results import (
+    EvalAssertionFailure,
+    EvalResult,
+    EvalTurnResult,
+    SimulationMetric,
+    SimulationRunResult,
+)
+from pipecat.evals.simulation import EvalSimulation
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900
@@ -171,7 +178,6 @@ def _append_result(
     of what the bot actually did, which is what a failure gets diagnosed from, and
     attaching it to passes would dwarf the file for no benefit.
     """
-    result = run.result
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
     for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
         path = logs_dir / f"{stem}{suffix}"
@@ -179,7 +185,19 @@ def _append_result(
             artifacts[key] = str(path)
     if record_dir is not None and (record_dir / f"{stem}.wav").exists():
         artifacts["recording"] = str(record_dir / f"{stem}.wav")
+    if run.kind == "simulation":
+        record = _simulation_record(run, artifacts)
+    else:
+        record = _scenario_record(run, artifacts)
 
+    with contextlib.suppress(OSError):
+        with results_path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+
+
+def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
+    """The results.jsonl record of a scenario run."""
+    result = run.result if isinstance(run.result, EvalResult) else None
     record = {
         "bot": run.bot,
         "scenario": run.scenario,
@@ -206,10 +224,59 @@ def _append_result(
     }
     if result is not None and not record["passed"]:
         record["events_seen"] = result.events_seen
+    return record
 
-    with contextlib.suppress(OSError):
-        with results_path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+
+def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
+    """The results.jsonl record of a simulation run.
+
+    Enough to compute a success rate and a mean quality, and to see how each
+    run ended and what the judge said; the conversation and, for a run that
+    did not pass, the events the bot emitted are attached for diagnosis.
+    """
+    result = run.result if isinstance(run.result, SimulationRunResult) else None
+    record = {
+        "bot": run.bot,
+        "simulation": run.scenario,
+        "attempt": run.attempt,
+        "passed": bool(result and result.passed),
+        "succeeded": bool(result and result.succeeded),
+        "error": run.error or (result.error if result else None),
+        "ended_by": result.ended_by if result else "error",
+        "turns": result.turns if result else 0,
+        "quality": result.quality if result else None,
+        "metrics": [
+            {"name": m.name, "score": m.score, "weight": m.weight, "reason": m.reason}
+            for m in (result.metrics if result else [])
+        ],
+        "reason": result.reason if result else "",
+        "end_call": result.end_call if result else None,
+        "duration_ms": run.duration_ms,
+        "messages": result.messages if result else [],
+        "artifacts": artifacts,
+    }
+    if result is not None and not record["passed"]:
+        record["events_seen"] = result.events_seen
+    return record
+
+
+def _simulation_result_from_dict(data: dict) -> SimulationRunResult:
+    """Rebuild a :class:`SimulationRunResult` from the JSON a harness worker writes back."""
+    return SimulationRunResult(
+        simulation_name=data["simulation_name"],
+        succeeded=data["succeeded"],
+        reason=data.get("reason", ""),
+        error=data.get("error"),
+        quality=data.get("quality"),
+        metrics=[SimulationMetric(**m) for m in data.get("metrics", [])],
+        messages=data.get("messages", []),
+        turns=data.get("turns", 0),
+        ended_by=data.get("ended_by", "error"),
+        end_call=data.get("end_call"),
+        duration_ms=data.get("duration_ms", 0),
+        events_seen=data.get("events_seen", []),
+        debug_log=data.get("debug_log", []),
+    )
 
 
 def _result_from_dict(data: dict) -> EvalResult:
@@ -239,14 +306,28 @@ def _result_from_dict(data: dict) -> EvalResult:
     )
 
 
+def _resolve_evaluable(name: str, base: Path, default_dir: Path) -> tuple[str, Path]:
+    """A manifest entry's display name and file: a bare name under ``default_dir``, or a path."""
+    if name.endswith(SCENARIO_SUFFIXES) or "/" in name:
+        return Path(name).stem, (base / name).resolve()
+    return name, (default_dir / f"{name}.yaml").resolve()
+
+
 @dataclass
 class EvalRun:
     """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
 
     Parameters:
         bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
-        scenario: Display name (the scenario, without ``.yaml``).
-        scenario_path: Path to the scenario file.
+        scenario: Display name (the scenario or simulation, without ``.yaml``).
+        scenario_path: Path to the scenario or simulation file.
+        kind: ``scenario`` (played by :class:`~pipecat.evals.eval_session.EvalSession`)
+            or ``simulation`` (:class:`~pipecat.evals.simulation_session.SimulationSession`).
+        attempts: How many times this (bot, scenario) pair runs in the sweep: the
+            manifest's ``repeat`` for a scenario, a simulation's ``runs``. Above 1,
+            each attempt's artifacts carry its number.
+        pass_threshold: For a simulation, the success rate over its attempts it
+            needs to pass; ``None`` for a scenario.
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
         runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
@@ -265,9 +346,12 @@ class EvalRun:
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
+    kind: str = "scenario"
+    attempts: int = 1
+    pass_threshold: float | None = None
     attempt: int = 1
     status: str = "pending"
-    result: EvalResult | None = None
+    result: EvalResult | SimulationRunResult | None = None
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
@@ -278,7 +362,7 @@ class EvalManifest:
     """A parsed eval-suite manifest.
 
     Parameters:
-        runs: The (bot, scenario) runs to execute.
+        runs: The (bot, scenario) and (bot, simulation) runs to execute.
         spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
         python: Interpreter used to spawn each bot.
         concurrency: How many runs to execute at once.
@@ -312,6 +396,7 @@ class EvalManifest:
         *,
         bots_dir: str | Path | None = None,
         scenarios_dir: str | Path | None = None,
+        simulations_dir: str | Path | None = None,
         runs_dir: str | Path | None = None,
         spawn: str | None = None,
         python: str | None = None,
@@ -333,11 +418,13 @@ class EvalManifest:
             path: Path to the manifest YAML.
             bots_dir: Override for the manifest's ``bots_dir`` (bot paths are relative to it).
             scenarios_dir: Override for the manifest's ``scenarios_dir``.
+            simulations_dir: Override for the manifest's ``simulations_dir``.
             runs_dir: Override for the manifest's ``runs_dir`` (base for run output).
             spawn: Override for the spawn command template.
             python: Override for the interpreter used to spawn bots.
             concurrency: Override for how many runs execute at once.
-            repeat: Override for how many times each (bot, scenario) pair runs.
+            repeat: Override for how many times each (bot, scenario) pair runs; it
+                also overrides each simulation's own ``runs``.
             base_port: Override for the first port assigned.
             record: Override for whether to record conversation audio.
             cache_dir: Override for the synthesized-audio cache directory.
@@ -358,6 +445,7 @@ class EvalManifest:
 
         bots_dir_p = dir_value(bots_dir, "bots_dir", ".")
         scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
+        simulations_dir_p = dir_value(simulations_dir, "simulations_dir", "simulations")
 
         if runs_dir is not None:
             runs_dir_p: Path | None = Path(runs_dir).resolve()
@@ -392,15 +480,7 @@ class EvalManifest:
             runner_body = item.get("runner_body")
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
-                scenario = str(scenario)
-                # A scenario may be a bare name (resolved under scenarios_dir) or a
-                # path/.yaml relative to the manifest.
-                if scenario.endswith(SCENARIO_SUFFIXES) or "/" in scenario:
-                    scenario_path = (base / scenario).resolve()
-                    name = Path(scenario).stem
-                else:
-                    scenario_path = (scenarios_dir_p / f"{scenario}.yaml").resolve()
-                    name = scenario
+                name, scenario_path = _resolve_evaluable(str(scenario), base, scenarios_dir_p)
                 runs.append(
                     EvalRun(
                         bot=bot,
@@ -408,6 +488,31 @@ class EvalManifest:
                         bot_path=bot_path,
                         scenario_path=scenario_path,
                         runner_body_path=runner_body_path,
+                        attempts=repeat,
+                    )
+                )
+            for simulation in item.get("simulations", []):
+                name, sim_path = _resolve_evaluable(str(simulation), base, simulations_dir_p)
+                # A simulation runs as many times as its file says (or the repeat
+                # override), for a success rate; a file that fails to load still
+                # gets its run, which reports the load error.
+                attempts, threshold = repeat, None
+                try:
+                    loaded = EvalSimulation.load(sim_path)
+                    attempts = repeat if repeat > 1 else loaded.runs
+                    threshold = loaded.pass_threshold
+                except (ValueError, FileNotFoundError):
+                    pass
+                runs.append(
+                    EvalRun(
+                        bot=bot,
+                        scenario=name,
+                        bot_path=bot_path,
+                        scenario_path=sim_path,
+                        runner_body_path=runner_body_path,
+                        kind="simulation",
+                        attempts=attempts,
+                        pass_threshold=threshold,
                     )
                 )
 
@@ -415,8 +520,14 @@ class EvalManifest:
         # EvalSuite.run pulls from it under a single semaphore with no per-attempt
         # barrier, so this ordering spreads each attempt across the sweep without
         # making fast bots wait on slow ones.
-        if repeat > 1:
-            runs = [replace(run, attempt=n) for n in range(1, repeat + 1) for run in runs]
+        most = max((run.attempts for run in runs), default=1)
+        if most > 1:
+            runs = [
+                replace(run, attempt=n)
+                for n in range(1, most + 1)
+                for run in runs
+                if n <= run.attempts
+            ]
 
         return cls(
             runs=runs,
@@ -615,7 +726,7 @@ class EvalSuite(BaseObject):
             # without it every attempt would write over the last one's artifacts.
             # The suffix is omitted for a single pass so filenames stay stable.
             safe = f"{run.bot.replace('/', '_')}__{run.scenario}"
-            if self.manifest.repeat > 1:
+            if run.attempts > 1:
                 safe += f"__{run.attempt:03d}"
             log_path = logs_dir / f"{safe}.log"
 
@@ -635,7 +746,7 @@ class EvalSuite(BaseObject):
                     run.error = f"bot not found: {run.bot_path}"
                     return
                 if not run.scenario_path.exists():
-                    run.error = f"scenario not found: {run.scenario_path}"
+                    run.error = f"{run.kind} not found: {run.scenario_path}"
                     return
                 if run.runner_body_path is not None and not run.runner_body_path.exists():
                     run.error = f"body not found: {run.runner_body_path}"
@@ -661,6 +772,7 @@ class EvalSuite(BaseObject):
                 # concurrent run. The worker writes its result (and, under --debug, its
                 # own <safe>.debug.log) so the suite just reads it back.
                 config = {
+                    "kind": run.kind,
                     "scenario_path": str(run.scenario_path),
                     "scenario_name": run.scenario,
                     "bot_url": f"ws://localhost:{port}",
@@ -707,7 +819,11 @@ class EvalSuite(BaseObject):
                         f"error: harness worker exited {worker.returncode} (see {safe}.harness.log)"
                     )
                     return
-                run.result = _result_from_dict(json.loads(result_path.read_text()))
+                data = json.loads(result_path.read_text())
+                if run.kind == "simulation":
+                    run.result = _simulation_result_from_dict(data)
+                else:
+                    run.result = _result_from_dict(data)
             except Exception as e:
                 # The worker returns assertion failures (and its own errors) as a
                 # structured result; this catches problems on the suite side (spawning

@@ -31,13 +31,28 @@ from pathlib import Path
 from loguru import logger
 
 from pipecat.evals.eval_session import EvalSession
-from pipecat.evals.results import EvalResult
+from pipecat.evals.results import EvalResult, SimulationRunResult
 from pipecat.evals.scenario import EvalScenario
+from pipecat.evals.simulation import EvalSimulation
+from pipecat.evals.simulation_session import SimulationSession
 from pipecat.evals.suite import capture_pipeline_logs
 
 
-async def _run(config: dict) -> EvalResult:
-    """Build and run the session described by ``config``."""
+async def _run(config: dict) -> EvalResult | SimulationRunResult:
+    """Build and run the session described by ``config``: a scenario's, or a simulation's."""
+    if config.get("kind") == "simulation":
+        simulation = EvalSimulation.load(Path(config["scenario_path"]))
+        session = SimulationSession.from_simulation(
+            simulation,
+            config["bot_url"],
+            connect_timeout_s=config["connect_timeout_s"],
+            record_path=config.get("record_path"),
+            cache_dir=config.get("cache_dir"),
+            use_cache=config["use_cache"],
+            stop_bot=config["stop_bot"],
+            trigger_disconnect=config.get("trigger_disconnect", False),
+        )
+        return await session.run()
     scenario = EvalScenario.load(Path(config["scenario_path"]))
     session = EvalSession.from_scenario(
         scenario,
