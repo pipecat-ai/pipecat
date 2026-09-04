@@ -79,11 +79,26 @@ class _BotFrameSink(FrameProcessor):
     ``InterruptionFrame`` downstream. Letting that reach the user TTS / output would
     flush the user audio we're paced-sending (dropping a barge-in turn, and the
     user's side of the recording), so the sink swallows it.
+
+    The user's turns enter the pipeline here as well (:meth:`inject`), straight
+    into the user-audio side. A turn queued at the pipeline head would first
+    cross the bot-audio side, and every processor there (this sink included)
+    resets its queue when the aggregator's interruption reaches it, dropping a
+    turn still queued behind a slow transcription at that moment.
     """
 
     def __init__(self, stream: EvalEventStream):
         super().__init__()
         self._stream = stream
+
+    async def inject(self, frame: Frame) -> None:
+        """Push a user-turn frame downstream, into the user TTS and the output.
+
+        Args:
+            frame: The frame to push (a ``TTSSpeakFrame``, or a spoken recording's
+                TTS-bracketed frames).
+        """
+        await self.push_frame(frame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -171,6 +186,8 @@ class EvalClient:
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
+        # Where the user's turns enter the pipeline (built with the processors).
+        self._sink: _BotFrameSink | None = None
         self._run_task: asyncio.Task | None = None
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
@@ -425,37 +442,39 @@ class EvalClient:
     async def say(self, text: str) -> None:
         """Speak ``text`` as the user by pushing a ``TTSSpeakFrame`` into the pipeline.
 
-        The user TTS (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to
-        audio (cached), which the output transport
+        The frame enters at the sink, on the user-audio side (see
+        :class:`_BotFrameSink`). The user TTS
+        (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to audio
+        (cached), which the output transport
         (:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`) paces
         to the bot as a continuous real-time stream.
 
         Args:
             text: What the user says.
         """
-        assert self._worker is not None  # pipeline built before any send
-        await self._worker.queue_frame(TTSSpeakFrame(text))
+        assert self._sink is not None  # pipeline built before any send
+        await self._sink.inject(TTSSpeakFrame(text))
 
     async def play(self, path: str) -> None:
         """Play a recording to the bot as the user's turn, in place of synthesizing it.
 
         The recording is spoken exactly like a user TTS utterance: one audio frame
         bracketed by ``TTSStartedFrame`` / ``TTSStoppedFrame``, pushed into the
-        pipeline. The output transport resamples it to the user-audio rate, paces
-        it to the bot, flushes its final partial chunk on the stop frame, and
-        records it.
+        pipeline at the sink like :meth:`say`. The output transport resamples it
+        to the user-audio rate, paces it to the bot, flushes its final partial
+        chunk on the stop frame, and records it.
 
         Args:
             path: Path to the audio file.
         """
-        assert self._worker is not None  # pipeline built before any send
+        assert self._sink is not None  # pipeline built before any send
         pcm, sample_rate = await load_user_audio(path)
         for frame in (
             TTSStartedFrame(),
             TTSAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
             TTSStoppedFrame(),
         ):
-            await self._worker.queue_frame(frame)
+            await self._sink.inject(frame)
 
     def _processors(self, transport: EvalHarnessTransport) -> list:
         """The eval pipeline's processors, in order (see the class docstring)."""
@@ -480,7 +499,8 @@ class EvalClient:
                     await self._stream.append({"type": "response", "text": message.content})
 
             processors += [self._bot_stt, user_aggregator]
-        processors.append(_BotFrameSink(self._stream))
+        self._sink = _BotFrameSink(self._stream)
+        processors.append(self._sink)
         if self._user_tts is not None:
             # The user TTS speaks only the harness's TTSSpeakFrames; the bot's text
             # flowing past it is passed through unspoken (see CachingTTSService), so

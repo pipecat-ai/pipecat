@@ -31,7 +31,7 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import EvalClient, _BotFrameSink
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.harness import EvalSession
 from pipecat.evals.matcher import ExpectationMatcher
@@ -52,12 +52,14 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -83,6 +85,18 @@ def _client(
     return EvalClient(
         scenario=scenario, bot_url=bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
     )
+
+
+def _capture_injected(client: EvalClient) -> list:
+    """Stand in for the client's sink, collecting the user-turn frames it is handed."""
+    injected: list = []
+
+    class _FakeSink:
+        async def inject(self, frame):
+            injected.append(frame)
+
+    client._sink = _FakeSink()
+    return injected
 
 
 class TestFramesToEvents(unittest.TestCase):
@@ -494,25 +508,34 @@ class TestTextContainsResolution(unittest.TestCase):
         self.assertIn("does not contain", failure.reason)
 
 
+class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
+    """The sink is where the user's turns enter the pipeline, on the user-audio side."""
+
+    async def test_inject_pushes_downstream(self):
+        received: list = []
+
+        class _Next(FrameProcessor):
+            async def queue_frame(self, frame, direction=FrameDirection.DOWNSTREAM, callback=None):
+                received.append((frame, direction))
+
+        sink = _BotFrameSink(_stream(bot_audio=True))
+        sink.link(_Next())
+        frame = TTSSpeakFrame("hello")
+        await sink.inject(frame)
+        self.assertEqual(received, [(frame, FrameDirection.DOWNSTREAM)])
+
+
 class TestAudioSender(unittest.IsolatedAsyncioTestCase):
-    """User audio is spoken by pushing a TTSSpeakFrame into the pipeline."""
+    """User audio is spoken by pushing a TTSSpeakFrame into the pipeline at the sink."""
 
-    async def test_send_user_audio_queues_tts_speak_frame(self):
-        from pipecat.frames.frames import TTSSpeakFrame
-
+    async def test_send_user_audio_injects_tts_speak_frame(self):
         s = _client(bot_audio=True)
-        queued: list = []
-
-        class _FakeWorker:
-            async def queue_frame(self, frame):
-                queued.append(frame)
-
-        s._worker = _FakeWorker()
+        injected = _capture_injected(s)
         await s.say("hello world")
 
-        self.assertEqual(len(queued), 1)
-        self.assertIsInstance(queued[0], TTSSpeakFrame)
-        self.assertEqual(queued[0].text, "hello world")
+        self.assertEqual(len(injected), 1)
+        self.assertIsInstance(injected[0], TTSSpeakFrame)
+        self.assertEqual(injected[0].text, "hello world")
 
 
 class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
@@ -529,17 +552,6 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         sf.write(str(path), data, sample_rate)
         return tone
 
-    @staticmethod
-    def _capture_queued(session) -> list:
-        queued: list = []
-
-        class _FakeWorker:
-            async def queue_frame(self, frame):
-                queued.append(frame)
-
-        session._worker = _FakeWorker()
-        return queued
-
     async def test_file_is_spoken_as_one_tts_utterance_at_its_own_rate(self):
         from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 
@@ -547,17 +559,17 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         tone = self._write_tone(d / "hi.wav", sample_rate=16000, seconds=2.0)
 
         s = _client(bot_audio=True)
-        queued = self._capture_queued(s)
+        injected = _capture_injected(s)
         await s.play(str(d / "hi.wav"))
 
         # Bracketed like the user TTS's output, so the output transport flushes
         # the utterance's final partial chunk on the stop frame.
         self.assertEqual(
-            [type(f) for f in queued], [TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame]
+            [type(f) for f in injected], [TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame]
         )
-        self.assertEqual(queued[1].sample_rate, 16000)
-        self.assertEqual(queued[1].num_channels, 1)
-        self.assertEqual(queued[1].audio, tone.tobytes())
+        self.assertEqual(injected[1].sample_rate, 16000)
+        self.assertEqual(injected[1].num_channels, 1)
+        self.assertEqual(injected[1].audio, tone.tobytes())
 
     async def test_non_native_rate_is_preserved(self):
         # The frame carries the file's rate (the output transport resamples it),
@@ -566,11 +578,11 @@ class TestAudioFileSender(unittest.IsolatedAsyncioTestCase):
         self._write_tone(d / "hi.wav", sample_rate=44100, seconds=0.5)
 
         s = _client(bot_audio=True)
-        queued = self._capture_queued(s)
+        injected = _capture_injected(s)
         await s.play(str(d / "hi.wav"))
 
-        self.assertEqual(len(queued), 3)
-        self.assertEqual(queued[1].sample_rate, 44100)
+        self.assertEqual(len(injected), 3)
+        self.assertEqual(injected[1].sample_rate, 44100)
 
     async def test_stereo_is_downmixed_to_mono(self):
         d = Path(tempfile.mkdtemp())
