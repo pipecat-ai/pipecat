@@ -21,6 +21,7 @@ from .exceptions import (
     FlowTransitionError,
     InvalidFunctionError,
 )
+from .flow import Flow
 from .manager import FlowManager
 from .types import (
     NO_RESPONSE,
@@ -51,6 +52,7 @@ __all__ = [
     "FlowManager",
     # Declarative config
     "FlowConfig",
+    "Flow",
     # Types
     "ActionConfig",
     "ContextStrategy",

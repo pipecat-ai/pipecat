@@ -10,7 +10,7 @@ A :class:`FlowConfig` describes a conversation flow as data: the nodes, what
 each one says, which tools each node offers, and where each tool leads. It
 contains no Python callables. Every tool a node references is a Flows direct
 function that lives in the application's code and is resolved by name when the
-config is bound to the application's tools.
+config is bound to the application's tools with :meth:`FlowConfig.bind`.
 
 The config loads from YAML, JSON, or a plain dict, and is validated
 structurally on load: the initial node exists, every transition names a node,
@@ -51,14 +51,18 @@ Example YAML::
 """
 
 import json
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pipecat.flows.types import ContextStrategy
 from pipecat.utils.yaml import include_loader
+
+if TYPE_CHECKING:
+    from pipecat.flows.flow import Flow
 
 
 class FlowConfig(BaseModel):
@@ -223,6 +227,35 @@ class FlowConfig(BaseModel):
         for func in self.global_functions:
             _check_targets(func, self.nodes, "global_functions")
         return self
+
+    def bind(
+        self,
+        *,
+        tools: Mapping[str, Callable] | Any,
+        variables: Mapping[str, Any] | None = None,
+    ) -> "Flow":
+        """Bind this config to the application's tools.
+
+        Args:
+            tools: Where tool and action-handler names resolve. A mapping of
+                names to callables, or any object whose attributes are the
+                callables, typically a module. Only the names this config
+                references are looked up.
+            variables: Values for the ``{{ variable }}`` placeholders in
+                messages and action text.
+
+        Returns:
+            A :class:`~pipecat.flows.Flow` whose node configs are ready for
+            :class:`~pipecat.flows.FlowManager`.
+
+        Raises:
+            ~pipecat.flows.FlowError: If a referenced tool or handler is
+                missing, a tool is not a valid direct function, or a template
+                variable has no value.
+        """
+        from pipecat.flows.flow import Flow
+
+        return Flow(self, tools=tools, variables=variables)
 
     @classmethod
     def from_yaml(cls, text: str, *, base_dir: Path | None = None) -> "FlowConfig":
