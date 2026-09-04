@@ -848,15 +848,18 @@ class InworldTTSService(WebsocketTTSService):
         return word_times
 
     async def _close_context(self, context_id: str | None):
-        if not context_id:
+        if not context_id or context_id not in self._sent_context_ids:
             return
+
+        # Claim the close before awaiting the provider so concurrent terminal
+        # lifecycle paths cannot close the same context twice.
+        self._sent_context_ids.discard(context_id)
         if self._websocket:
             logger.info(f"{self}: Closing context {context_id} due to interruption or completion")
             try:
                 await self._send_close_context(context_id)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        self._sent_context_ids.discard(context_id)
 
     async def on_turn_context_completed(self):
         """Close the server-side context at end of turn.
@@ -993,7 +996,7 @@ class InworldTTSService(WebsocketTTSService):
                 audio_contexts = self.get_audio_contexts()
                 if audio_contexts:
                     for ctx_id in audio_contexts:
-                        await self._send_close_context(ctx_id)
+                        await self._close_context(ctx_id)
                 await self._websocket.close()
                 logger.debug("Disconnected from Inworld WebSocket TTS")
         except Exception as e:
