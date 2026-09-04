@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-import uuid
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -20,10 +19,7 @@ from typing_extensions import override
 
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
     EndFrame,
-    InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
@@ -33,6 +29,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
@@ -176,7 +173,7 @@ class DeepgramFluxSTTSettings(STTSettings):
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class DeepgramFluxSTTBase(STTService):
+class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     """Base class for Deepgram Flux STT services across transports.
 
     Contains all shared Flux protocol logic (message handling, turn detection,
@@ -278,9 +275,6 @@ class DeepgramFluxSTTBase(STTService):
         self._register_event_handler("on_start_of_turn")
         self._register_event_handler("on_turn_resumed")
         self._register_event_handler("on_end_of_turn")
-        # The eager end of turn in flight, if any. Named on the frames so a
-        # withdrawal can be matched to what was generated from the prediction.
-        self._speculation_id: str | None = None
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
 
@@ -815,9 +809,7 @@ class DeepgramFluxSTTBase(STTService):
             event: The event type string for logging purposes.
         """
         logger.trace(f"Received event TurnResumed: {event}")
-        if self._speculation_id:
-            await self.push_frame(EagerEndOfTurnCancelFrame(self._speculation_id))
-            self._speculation_id = None
+        await self._cancel_eager_end_of_turn()
         await self._call_event_handler("on_turn_resumed")
 
     def _calculate_average_confidence(self, transcript_data) -> float | None:
@@ -871,7 +863,7 @@ class DeepgramFluxSTTBase(STTService):
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
         # The turn is committed, so any eager prediction it followed is resolved.
-        self._speculation_id = None
+        self._clear_eager_end_of_turn()
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
@@ -920,31 +912,14 @@ class DeepgramFluxSTTBase(STTService):
         have a response generated here and discarded if either happens.
 
         Args:
-            transcript: The interim transcript text that triggered the EagerEndOfTurn event.
+            transcript: The predicted transcript for the turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.trace(f"EagerEndOfTurn - {transcript}")
-        # Also pushed as an interim transcript, which is what this event was
-        # surfaced as before the eager end of turn had a frame of its own.
-        await self.push_frame(
-            InterimTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._primary_detected_language(data),
-                result=data,
-            )
-        )
-        self._speculation_id = str(uuid.uuid4())
-        await self.push_frame(
-            EagerEndOfTurnTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._speculation_id,
-                self._primary_detected_language(data),
-                result=data,
-            )
+        await self._push_eager_end_of_turn(
+            transcript,
+            user_id=self._user_id,
+            language=self._primary_detected_language(data),
+            result=data,
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 

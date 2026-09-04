@@ -10,7 +10,6 @@ import asyncio
 import json
 import time
 import urllib.parse
-import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +35,7 @@ from pipecat.services.cartesia.stt import _prepare_keyterms
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -60,7 +60,7 @@ class CartesiaTurnsSTTSettings(STTSettings):
     keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class CartesiaTurnsSTTService(WebsocketSTTService):
+class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
     """Speech-to-text service using the Cartesia Streaming ASR v2 (Ink-2) API.
 
     Speaks the v2 turn-based wire protocol exposed by
@@ -172,9 +172,6 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
         self._last_audio_chunk_duration: float = 0.0
-        # The eager end of turn in flight, if any. Named on the frames so a
-        # withdrawal can be matched to what was generated from the prediction.
-        self._speculation_id: str | None = None
 
         self._register_event_handler("on_turn_start")
         self._register_event_handler("on_turn_update")
@@ -540,26 +537,15 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         have a response generated here and discarded if either happens.
         """
         transcript = data.get("transcript", "")
-        logger.trace(f"Cartesia Ink-2 ASR turn.eager_end: {transcript}")
-        self._speculation_id = str(uuid.uuid4())
-        await self.push_frame(
-            EagerEndOfTurnTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._speculation_id,
-                self._language,
-                result=data,
-            )
+        await self._push_eager_end_of_turn(
+            transcript, user_id=self._user_id, language=self._language, result=data
         )
         await self._call_event_handler("on_turn_eager_end", transcript)
 
     async def _handle_turn_resume(self, data: dict):
         """Handle the user resuming a turn that was eagerly predicted to have ended."""
         logger.trace("Cartesia Ink-2 ASR turn.resume")
-        if self._speculation_id:
-            await self.push_frame(EagerEndOfTurnCancelFrame(self._speculation_id))
-            self._speculation_id = None
+        await self._cancel_eager_end_of_turn()
         await self._call_event_handler("on_turn_resume")
 
     async def _handle_turn_end(self, data: dict):
@@ -567,7 +553,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         logger.debug(f"Cartesia Ink-2 ASR turn.end: {transcript}")
         self._user_is_speaking = False
         # The turn is committed, so any eager prediction it followed is resolved.
-        self._speculation_id = None
+        self._clear_eager_end_of_turn()
         # The watchdog injects silence to force turn.end when audio stops
         # mid-turn, so a turn that captured only silence/noise can end with
         # an empty transcript. Skip the TranscriptionFrame in that case to
