@@ -327,7 +327,7 @@ class SpeechmaticsSTTService(STTService):
             api_key: Speechmatics API key for authentication. Uses environment variable
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
-                or defaults to `wss://eu2.rt.speechmatics.com/v2`.
+                or defaults to `wss://global.rt.speechmatics.com/v2/agent`.
             sample_rate: Optional audio sample rate in Hz.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
@@ -346,7 +346,7 @@ class SpeechmaticsSTTService(STTService):
         # Service parameters
         self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
         self._base_url: str = (
-            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2"
+            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://global.rt.speechmatics.com/v2/agent"
         )
 
         # Check we have required attributes
