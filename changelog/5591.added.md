@@ -1,0 +1,1 @@
+- Added bounded lookback support to `replace_text` for cross-token TTS replacements.

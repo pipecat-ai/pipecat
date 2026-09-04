@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
     Any,
+    Protocol,
+    runtime_checkable,
 )
 
 from loguru import logger
@@ -87,6 +89,8 @@ class TextAggregationMode(StrEnum):
             Produces more natural speech but adds latency (~200-300ms per sentence).
         TOKEN: Stream text tokens directly to TTS as they arrive.
             Reduces latency but may affect speech quality depending on the TTS provider.
+            A transform configured with bounded lookback can retain a short suffix
+            to match text across token boundaries.
     """
 
     SENTENCE = "sentence"
@@ -94,6 +98,16 @@ class TextAggregationMode(StrEnum):
 
     def __str__(self):
         return self.value
+
+
+@runtime_checkable
+class _TextTransformWithLookback(Protocol):
+    """Text transform that can identify stable prefixes in a token stream."""
+
+    @property
+    def lookback_max_chars(self) -> int: ...
+
+    def safe_prefix_length(self, text: str, max_prefix_length: int) -> int: ...
 
 
 @dataclass
@@ -239,7 +253,9 @@ class TTSService(AIService):
             text_transforms: A list of callables to transform text before just before sending it
                 to TTS. Each callable takes the aggregated text and its type, and returns the
                 transformed text. To register, provide a list of tuples of
-                (aggregation_type | '*', transform_function).
+                (aggregation_type | '*', transform_function). In TOKEN mode,
+                :func:`~pipecat.utils.text.transforms.replace_text` supports bounded
+                cross-token matching through its ``lookback_max_chars`` argument.
 
             text_filters: Sequence of text filters to apply after aggregation.
             transport_destination: Destination for generated audio frames.
@@ -332,6 +348,8 @@ class TTSService(AIService):
         self._text_transforms: list[
             tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = text_transforms or []
+        self._token_transform_buffer: str = ""
+        self._token_transform_buffer_includes_inter_frame_spaces: bool = False
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: str | None = transport_destination
@@ -800,6 +818,13 @@ class TTSService(AIService):
                         else remaining.text,
                     )
                 )
+            token_remaining = self._flush_token_transform_buffer()
+            if token_remaining:
+                text, includes_inter_frame_spaces = token_remaining
+                await self._push_tts_frames(
+                    AggregatedTextFrame(text, AggregationType.TOKEN, raw_text=text),
+                    includes_inter_frame_spaces,
+                )
 
             # Force-promote any sentence still pending in the sequencer (streaming
             # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1033,6 +1058,8 @@ class TTSService(AIService):
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
         await self._text_aggregator.handle_interruption()
+        self._token_transform_buffer = ""
+        self._token_transform_buffer_includes_inter_frame_spaces = False
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1090,21 +1117,81 @@ class TTSService(AIService):
         if self._pause_frame_processing:
             await self.resume_processing_frames()
 
+    def _token_lookback_transforms(self) -> list[_TextTransformWithLookback]:
+        """Return bounded transforms that apply to token aggregations."""
+        return [
+            transform
+            for aggregation_type, transform in self._text_transforms
+            if (aggregation_type == AggregationType.TOKEN or aggregation_type == "*")
+            and isinstance(transform, _TextTransformWithLookback)
+            and transform.lookback_max_chars > 0
+        ]
+
+    def _buffer_token_transform_text(
+        self, text: str, includes_inter_frame_spaces: bool
+    ) -> tuple[str, bool] | None:
+        """Buffer token text and return the stable prefix available for transformation."""
+        if not self._token_transform_buffer:
+            self._token_transform_buffer_includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._token_transform_buffer += text
+
+        transforms = self._token_lookback_transforms()
+        if not transforms:
+            prefix_length = len(self._token_transform_buffer)
+        else:
+            lookback_max_chars = max(transform.lookback_max_chars for transform in transforms)
+            prefix_length = len(self._token_transform_buffer) - lookback_max_chars
+            if prefix_length <= 0:
+                return None
+            for transform in transforms:
+                prefix_length = min(
+                    prefix_length,
+                    transform.safe_prefix_length(self._token_transform_buffer, prefix_length),
+                )
+                if prefix_length == 0:
+                    return None
+
+        result = self._token_transform_buffer[:prefix_length]
+        result_includes_inter_frame_spaces = (
+            self._token_transform_buffer_includes_inter_frame_spaces
+        )
+        self._token_transform_buffer = self._token_transform_buffer[prefix_length:]
+        # A retained suffix begins inside the same continuous source stream as the
+        # emitted prefix, so downstream concatenation must not insert a space.
+        self._token_transform_buffer_includes_inter_frame_spaces = True
+        return result, result_includes_inter_frame_spaces
+
+    def _flush_token_transform_buffer(self) -> tuple[str, bool] | None:
+        """Remove and return any token text retained for bounded transformations."""
+        if not self._token_transform_buffer:
+            return None
+        result = (
+            self._token_transform_buffer,
+            self._token_transform_buffer_includes_inter_frame_spaces,
+        )
+        self._token_transform_buffer = ""
+        self._token_transform_buffer_includes_inter_frame_spaces = False
+        return result
+
     async def _process_text_frame(self, frame: TextFrame):
         async for aggregate in self._text_aggregator.aggregate(frame.text):
-            includes_inter_frame_spaces = (
-                frame.includes_inter_frame_spaces
-                if aggregate.type == AggregationType.TOKEN
-                else False
-            )
+            aggregate_text = aggregate.text
+            includes_inter_frame_spaces = False
+            if aggregate.type == AggregationType.TOKEN:
+                buffered = self._buffer_token_transform_text(
+                    aggregate.text, frame.includes_inter_frame_spaces
+                )
+                if buffered is None:
+                    continue
+                aggregate_text, includes_inter_frame_spaces = buffered
             if aggregate.type != AggregationType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
             raw_text = (
-                aggregate.full_match if isinstance(aggregate, PatternMatch) else aggregate.text
+                aggregate.full_match if isinstance(aggregate, PatternMatch) else aggregate_text
             )
             await self._push_tts_frames(
-                AggregatedTextFrame(aggregate.text, aggregate.type, raw_text=raw_text),
+                AggregatedTextFrame(aggregate_text, aggregate.type, raw_text=raw_text),
                 includes_inter_frame_spaces,
             )
 
