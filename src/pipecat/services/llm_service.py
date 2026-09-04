@@ -95,7 +95,9 @@ class FunctionCallResultCallback(Protocol):
     Used for both final results and intermediate updates. Pass
     ``properties=FunctionCallResultProperties(is_final=False)`` to send an
     intermediate update (only valid for async function calls registered with
-    ``cancel_on_interruption=False``).
+    ``cancel_on_interruption=False``). An intermediate update doesn't settle the
+    call, so it leaves any ``timeout_secs`` deadline running: the handler still
+    has to finish inside the budget it was given.
     """
 
     async def __call__(
@@ -912,7 +914,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
             cancellable_by_llm: Whether the LLM may cancel this call while it runs,
                 through the ``cancel_<name>`` tool advertised alongside it. Pair it with
@@ -1024,7 +1028,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
         """
         self._register_direct_function(
@@ -1618,8 +1624,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if is_final:
                 runner_item.settled = True
 
-            # Cancel timeout task if it exists
-            if timeout_task and not timeout_task.done():
+            # Only a final result disarms the deadline. It bounds the handler's
+            # whole execution, so an intermediate update — which deliberately
+            # doesn't settle the call — leaves the clock running, and doesn't
+            # restart it either: the budget belongs to the call, not to the gap
+            # between updates.
+            if is_final and timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
 
             await self.broadcast_frame(

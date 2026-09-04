@@ -749,6 +749,116 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(frames[-1].result, {"ok": True})
 
+    async def test_intermediate_result_does_not_disarm_the_deadline(self):
+        """An update isn't a result, so it can't buy the handler more time."""
+        service, frames = self._service()
+        side_effects = []
+        rolled_back = []
+
+        async def progress_then_hang(params: FunctionCallParams):
+            try:
+                await params.result_callback(
+                    "working", properties=FunctionCallResultProperties(is_final=False)
+                )
+                await asyncio.sleep(self.HANDLER_DURATION)
+                side_effects.append(params.tool_call_id)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "progress",
+            progress_then_hang,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "progress")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(side_effects, [])
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertFalse(frames[2].properties.is_final)
+        self.assertTrue(frames[-1].run_llm)
+
+    async def test_a_hanging_async_tool_times_out_without_any_update(self):
+        """Control for the test above, differing only in the missing update."""
+        service, frames = self._service()
+        rolled_back = []
+
+        async def hang(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "hang", hang, cancel_on_interruption=False, timeout_secs=self.TIMEOUT
+        )
+        await self._run_call(service, "hang")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertTrue(frames[-1].run_llm)
+
+    async def test_a_final_result_after_an_update_disarms_the_deadline(self):
+        """The update left the clock running; the final result stops it.
+
+        The handler deliberately outlives the deadline after reporting: a timer
+        left armed would cancel a call that has already delivered its result.
+        """
+        service, frames = self._service()
+        finished = []
+
+        async def progress_then_finish(params: FunctionCallParams):
+            await params.result_callback(
+                "working", properties=FunctionCallResultProperties(is_final=False)
+            )
+            await params.result_callback({"ok": True})
+            await asyncio.sleep(self.HANDLER_DURATION)
+            finished.append(params.tool_call_id)
+
+        service.register_function(
+            "progress",
+            progress_then_finish,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "progress")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(finished, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallResultFrame,
+            ],
+        )
+        self.assertFalse(frames[2].properties.is_final)
+        self.assertEqual(frames[-1].result, {"ok": True})
+
     async def test_timeout_settles_a_call_with_no_task_left_to_cancel(self):
         """The handler can finish while the deadline is being processed.
 
