@@ -125,25 +125,25 @@
     },
     {
       "subject": "EvalScenario",
-      "module": "pipecat.evals.scenario",
+      "module": "pipecat.evals.script",
       "kind": "class",
       "deprecated_in": "1.9.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "EvalScriptScenario",
       "message": "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptScenario` instead.",
-      "location": "pipecat/evals/scenario.py"
+      "location": "pipecat/evals/script.py"
     },
     {
       "subject": "EvalTurn",
-      "module": "pipecat.evals.scenario",
+      "module": "pipecat.evals.script",
       "kind": "class",
       "deprecated_in": "1.9.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
       "replacement": "EvalScriptTurn",
       "message": "`EvalTurn` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurn` instead.",
-      "location": "pipecat/evals/scenario.py"
+      "location": "pipecat/evals/script.py"
     },
     {
       "subject": "EvalScriptSession.from_scenario.on_progress",

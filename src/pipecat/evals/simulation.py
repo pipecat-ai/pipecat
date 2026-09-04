@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Simulation file format for persona-driven Pipecat evaluations.
+"""Simulated scenario file format for Pipecat behavioral evaluations.
 
 A simulation describes a *caller* rather than a script: who they are, what they
 want, and how the outcome is judged. An autonomous persona LLM holds the
@@ -12,7 +12,7 @@ conversation with the bot, so the path through it is the bot's and the persona's
 to make, not the file's. It is the other kind of scenario file: a manifest lists
 simulations under ``scenarios:`` like scripted ones, and ``pipecat eval run``
 takes either; a file with a ``persona:`` is a simulation (see
-:func:`load_scenario_file`). Example::
+:func:`~pipecat.evals.scenario.load_scenario_file`). Example::
 
     name: capital_curious
     persona: |
@@ -41,7 +41,7 @@ Fields:
     ``end_call`` tool.
 
 ``user``, ``judge``
-    the blocks scenarios use (see :mod:`pipecat.evals.scenario`):
+    the blocks scenarios use (see :mod:`pipecat.evals.script`):
     ``user.modality`` and ``user.speech`` decide whether the persona's turns
     reach the bot as synthesized speech or as text; ``judge.modality``,
     ``judge.transcription`` and ``judge.eval`` decide whether the bot speaks and
@@ -70,19 +70,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pipecat.evals.scenario import (
+from pipecat.evals.scenario_config import (
     _CFG_EVAL,
     _CFG_LIMIT,
     _DEFAULT_JUDGE,
-    EvalScriptScenario,
     _config_lines,
     _ConfigLine,
     _judge_segments,
-    _load_mapping,
     _parse_judge_block,
     _parse_user_block,
     _user_segments,
 )
+from pipecat.evals.scenario_loader import _load_mapping
 
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
@@ -208,40 +207,6 @@ class EvalSimulationScenario:
         )
 
 
-def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationScenario:
-    """Load a scenario file as whichever kind it is.
-
-    A file with a ``persona:`` is a simulation; one with ``turns:`` is a scripted
-    scenario. This is what a manifest's ``scenarios:`` entries and ``pipecat eval
-    run`` load through, so the two kinds mix freely in one list.
-
-    Args:
-        path: Path to a scenario or simulation YAML file.
-
-    Returns:
-        The parsed :class:`EvalSimulationScenario` or
-        :class:`~pipecat.evals.scenario.EvalScriptScenario`.
-
-    Raises:
-        ValueError: If the file is neither kind, claims to be both, or is
-            invalid for its kind.
-        FileNotFoundError: If the path doesn't exist.
-    """
-    path = Path(path)
-    data = _load_mapping(path)
-    if "persona" in data and "turns" in data:
-        raise ValueError(
-            f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
-        )
-    if "persona" in data:
-        return EvalSimulationScenario.load(path)
-    if "turns" in data:
-        return EvalScriptScenario.load(path)
-    raise ValueError(
-        f"{path}: a scenario file needs 'turns:' (scripted) or 'persona:' (a simulation)"
-    )
-
-
 def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:
     """Parse the ``metrics:`` list."""
     if raw is None:
@@ -282,7 +247,7 @@ def _positive_number(data: dict, key: str, default: float, path: Path) -> float:
 def describe_simulation(simulation: EvalSimulationScenario, *, color: bool = False) -> str:
     """Three-line summary of a simulation's user config, judge config, and goal, for pre-run logs.
 
-    The lines of :func:`~pipecat.evals.scenario.describe_config`, the ``user`` line
+    The lines of :func:`~pipecat.evals.scenario_config.describe_config`, the ``user`` line
     also naming the persona LLM that plays the user and the run's caps, then the
     caller's goal, e.g.::
 

@@ -12,8 +12,12 @@ from pathlib import Path
 
 from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import EvalSimulationResult
-from pipecat.evals.scenario import EvalScriptScenario
-from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation, load_scenario_file
+from pipecat.evals.scenario import (
+    EvalScriptScenario,
+    EvalSimulationScenario,
+    describe_simulation,
+    load_scenario_file,
+)
 
 MINIMAL = """
 name: capital_curious
@@ -181,7 +185,7 @@ from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT  # noqa: E4
 from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
-from pipecat.evals.simulation import EvalSimulationMetric  # noqa: E402
+from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402

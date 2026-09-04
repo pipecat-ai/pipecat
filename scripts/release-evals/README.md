@@ -179,7 +179,7 @@ DTMF keys with `dtmf:` (mutually exclusive with `user:`), or is
 observation-only (neither field) and just asserts — used for bot-first turns
 like an opening greeting. The full file
 format (events, expectations, `send_after:`, `image:`, ...) is documented in the
-[`pipecat.evals.scenario`](../../src/pipecat/evals/scenario.py) module docstring.
+[`pipecat.evals.script`](../../src/pipecat/evals/script.py) module docstring.
 
 Two things worth knowing when authoring:
 

@@ -28,7 +28,7 @@ from pipecat.evals.results import (
     EvalScriptTurnResult,
     EvalTrace,
 )
-from pipecat.evals.scenario import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
+from pipecat.evals.script import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01

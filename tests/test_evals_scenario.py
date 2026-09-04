@@ -25,6 +25,27 @@ def _write(yaml_text: str) -> Path:
     return Path(f.name)
 
 
+class TestScenarioFacade(unittest.TestCase):
+    def test_both_kinds_and_the_released_names_import_from_scenario(self):
+        import pipecat.evals.scenario as scenario
+
+        for name in (
+            "EvalScriptScenario",
+            "EvalScriptTurn",
+            "EvalExpectation",
+            "EvalFunctionCall",
+            "EvalSendAfter",
+            "EvalSimulationScenario",
+            "EvalSimulationMetric",
+            "describe_config",
+            "describe_simulation",
+            "load_scenario_file",
+            "EvalScenario",
+            "EvalTurn",
+        ):
+            self.assertTrue(hasattr(scenario, name), name)
+
+
 class TestEvalsScenarioParser(unittest.TestCase):
     def test_minimal_valid(self):
         s = EvalScriptScenario.load(

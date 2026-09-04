@@ -29,9 +29,13 @@ from rich.table import Table
 from rich.text import Text
 
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress, EvalSimulationResult
-from pipecat.evals.scenario import describe_config
+from pipecat.evals.scenario import (
+    EvalSimulationScenario,
+    describe_config,
+    describe_simulation,
+    load_scenario_file,
+)
 from pipecat.evals.script_session import EvalScriptSession
-from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation, load_scenario_file
 from pipecat.evals.simulation_session import EvalSimulationSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,

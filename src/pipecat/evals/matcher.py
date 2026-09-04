@@ -18,7 +18,7 @@ from loguru import logger
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
-from pipecat.evals.scenario import FUNCTION_CALL_EVENTS, EvalExpectation
+from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 
 
 class ExpectationMatcher:

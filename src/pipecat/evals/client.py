@@ -32,7 +32,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.scenario import EvalScriptScenario
+from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.serializer import (
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,

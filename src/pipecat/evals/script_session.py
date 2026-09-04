@@ -6,7 +6,7 @@
 
 """Eval session: runs a scripted scenario against a bot and asserts on its behavior.
 
-An :class:`EvalScriptSession` runs an :class:`~pipecat.evals.scenario.EvalScriptScenario`
+An :class:`EvalScriptSession` runs an :class:`~pipecat.evals.script.EvalScriptScenario`
 over the :class:`~pipecat.evals.base_session.BaseEvalSession` runtime with the
 :class:`~pipecat.evals.script_driver.EvalScriptDriver`, which plays the scenario's turns
 and matches each turn's expectations, and returns an
@@ -38,7 +38,8 @@ from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
-from pipecat.evals.scenario import EvalScriptScenario, describe_config
+from pipecat.evals.scenario_config import describe_config
+from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
 from pipecat.evals.tts import CachingTTSService
@@ -52,7 +53,7 @@ DEFAULT_EVENT_TIMEOUT_MS = 60000
 
 
 class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
-    """Runs one :class:`~pipecat.evals.scenario.EvalScriptScenario` against a bot.
+    """Runs one :class:`~pipecat.evals.script.EvalScriptScenario` against a bot.
 
     Connects as an RTVI client, drives each turn (sending ``send-text``,
     ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and

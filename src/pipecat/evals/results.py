@@ -83,7 +83,7 @@ class EvalScriptTurnResult:
         turn_index: Index of the turn in the scenario.
         status: One of ``TURN_STATUSES``. ``not_run`` means the run ended before
             reaching this turn — see
-            :attr:`~pipecat.evals.scenario.EvalScriptScenario.stop_on_failure`.
+            :attr:`~pipecat.evals.script.EvalScriptScenario.stop_on_failure`.
         failures: The turn's failed assertions, in order; empty unless ``status``
             is ``failed``.
         duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the

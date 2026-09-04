@@ -40,7 +40,7 @@ Manifest format (YAML)::
 
 A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
 simulation, and the file says which (see
-:func:`~pipecat.evals.simulation.load_scenario_file`). A simulation runs as many
+:func:`~pipecat.evals.scenario.load_scenario_file`). A simulation runs as many
 times as its ``runs:`` says and passes if its success rate over them meets its
 ``pass_threshold:``.
 
@@ -84,8 +84,9 @@ from pipecat.evals.results import (
     EvalSimulationMetricScore,
     EvalSimulationResult,
 )
+from pipecat.evals.scenario import load_scenario_file
 from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS
-from pipecat.evals.simulation import EvalSimulationScenario, load_scenario_file
+from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900

@@ -31,8 +31,9 @@ from pathlib import Path
 from loguru import logger
 
 from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
+from pipecat.evals.scenario import load_scenario_file
 from pipecat.evals.script_session import EvalScriptSession
-from pipecat.evals.simulation import EvalSimulationScenario, load_scenario_file
+from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.evals.simulation_session import EvalSimulationSession
 from pipecat.evals.suite import capture_pipeline_logs
 

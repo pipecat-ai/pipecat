@@ -1665,7 +1665,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
-from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
+from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
