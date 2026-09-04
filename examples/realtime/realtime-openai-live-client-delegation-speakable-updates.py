@@ -4,15 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Live (gpt-live-1) where the backend decides what the user hears.
+"""OpenAI Live (gpt-live-1) where the backend decides which updates are spoken.
 
-A ``BackendLLMWorker`` marks the lines it wants spoken, and ``transform_output``
-turns that convention into the ``speakable`` flag the live model acts on: marked
-lines are relayed aloud, everything else — notes to self, reasoning summaries,
-the final wrap-up — stays silent context the model can draw on if asked.
+``transform_output`` sets the ``speakable`` flag on each thing the backend
+produces. Here the backend marks the lines it wants heard and the transform
+reads that convention; an app can decide any other way it likes. Marked lines
+are relayed aloud, and the rest — notes to self, reasoning summaries, the final
+wrap-up — stays silent context the live model can draw on if asked.
 
-This suits a backend that works for a while and wants to narrate its own
-progress, rather than have every response it produces read out.
+This suits a backend that works for a while and narrates its own progress.
 """
 
 import os
