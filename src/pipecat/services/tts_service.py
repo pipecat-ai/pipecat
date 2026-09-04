@@ -446,6 +446,18 @@ class TTSService(AIService):
             return
         await super().start_tts_usage_metrics(text)
 
+    async def _flush_streamed_tts_usage(self):
+        """Emit aggregated TOKEN-mode usage metrics for text already sent to TTS.
+
+        Token streaming skips per-call ``start_tts_usage_metrics`` and instead
+        accumulates into ``_streamed_text``. This reports that accumulator
+        (LLM tokens and ``TTSSpeakFrame`` text alike) and clears it.
+        """
+        if self._streamed_text:
+            logger.debug(f"{self}: Generating TTS [{self._streamed_text}]")
+            await super().start_tts_usage_metrics(self._streamed_text)
+            self._streamed_text = ""
+
     async def start_text_aggregation_metrics(self):
         """Start text aggregation metrics if not already started.
 
@@ -814,11 +826,7 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            # Log accumulated streamed text and emit aggregated usage metric.
-            if self._streamed_text:
-                logger.debug(f"{self}: Generating TTS [{self._streamed_text}]")
-                await super().start_tts_usage_metrics(self._streamed_text)
-                self._streamed_text = ""
+            await self._flush_streamed_tts_usage()
 
             # Reset aggregator state
             self._processing_text = False
@@ -1037,7 +1045,7 @@ class TTSService(AIService):
             await filter.handle_interruption()
 
         self._llm_response_started = False
-        self._streamed_text = ""
+        await self._flush_streamed_tts_usage()
         self._text_aggregation_metrics_started = False
         self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
         self._pending_llm_response_end_frames.clear()
