@@ -1499,6 +1499,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._push_context_on_bot_stopped_speaking: bool = False
 
         self._assistant_turn_start_timestamp = ""
+        self._aggregation_has_deferred_marker = False
+        self._aggregation_has_context_text = False
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
@@ -1551,6 +1553,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def reset(self):
         """Reset the aggregation state."""
         await super().reset()
+        self._aggregation_has_deferred_marker = False
+        self._aggregation_has_context_text = False
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
 
@@ -1705,7 +1709,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return ""
 
         aggregation = self.aggregation_string()
+        has_deferred_marker = self._aggregation_has_deferred_marker
+        has_context_text = self._aggregation_has_context_text
         await self.reset()
+
+        # A turn-completion marker without response text carries no useful
+        # assistant context and teaches the LLM to repeat the invalid shape.
+        if has_deferred_marker and not has_context_text:
+            return ""
 
         self._context.add_message({"role": "assistant", "content": aggregation})
 
@@ -2090,6 +2101,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             if isinstance(frame, AggregatedTextFrame) and frame.raw_text
             else frame.text
         )
+        if text.strip():
+            self._aggregation_has_context_text = True
         self._aggregation.append(
             TextPartForConcatenation(
                 text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
@@ -2119,6 +2132,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # from the transcript via
         # `_maybe_strip_turn_completion_markers` so consumers see
         # clean text.
+        self._aggregation_has_deferred_marker = True
         self._aggregation.append(
             TextPartForConcatenation(frame.marker, includes_inter_part_spaces=False)
         )
