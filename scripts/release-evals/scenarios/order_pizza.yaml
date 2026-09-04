@@ -5,9 +5,9 @@ name: order_pizza
 # select_pizza_order, get_delivery_estimate, and complete_order calls along
 # with the conversation.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Alex, ordering dinner. Casual and quick: wants a large pepperoni pizza, asks

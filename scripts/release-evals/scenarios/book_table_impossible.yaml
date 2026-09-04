@@ -7,9 +7,9 @@ name: book_table_impossible
 # the caller never accepted, and lets the call end without a reservation. The
 # persona's own end_call will report that it gave up; that is expected.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Casey, calling to book a table for tonight. Polite but constrained: gives the

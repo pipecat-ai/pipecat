@@ -16,10 +16,11 @@ expected results. For example the `capital_question` scenario asks "What is the
 capital of Germany?" and judges that the reply says Berlin. Scenarios are
 reusable, so one shared scenario covers many bots.
 
-[`manifest-evals.yaml`](manifest-evals.yaml) maps each bot to the scenarios it
-runs. A second manifest, [`manifest-simulations.yaml`](manifest-simulations.yaml),
-maps the task-oriented bots to *simulations*, where an autonomous caller
-pursues a goal instead of reading a script (see [Simulations](#simulations)).
+[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs. There
+are two kinds of scenario: a *scripted* scenario like the one above, and a
+*simulated* one, where an autonomous caller pursues a goal instead of reading
+a script (see [Simulations](#simulations)). The manifest lists both the same
+way; the file says which it is.
 
 ## Prerequisites
 
@@ -82,7 +83,7 @@ the full per-pipeline debug logs are saved (see below), and forwards any extra
 flags:
 
 ```sh
-uv run python -m pipecat.evals suite -d manifest-evals.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
+uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
 ```
 
 Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
@@ -138,7 +139,7 @@ A repeated sweep always exits 0: it reports a rate, and what rate is acceptable 
 your policy, not the harness's.
 
 Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
-its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
+its `kind` (`scenario` or `simulation`), its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
 status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
 and paths to its artifacts — appended as each run finishes, so an interrupted sweep
 keeps everything already done. It's the machine-readable counterpart to the printed
@@ -253,19 +254,21 @@ keys all set. `warm_transfer.py` (Daily + a live human agent) isn't covered.
 
 ## Simulations
 
-A scenario scripts the user's side of the conversation. A **simulation** replaces
-the script with a *persona*: an LLM playing a caller with a goal, who says
-whatever the conversation calls for and hangs up (an `end_call` tool) when the
-goal is reached or clearly out of reach. A judge then reads the whole
-conversation, together with the tools the bot called, and decides whether the
-caller got what they came for. Simulations cover the Flows examples, because
-those are the bots with a job to finish: book a table, take a patient's intake,
-place an order, quote a policy.
+A scripted scenario scripts the user's side of the conversation. A **simulated**
+scenario, a *simulation* for short, replaces the script with a *persona*: an
+LLM playing a caller with a goal, who says whatever the conversation calls for
+and hangs up (an `end_call` tool) when the goal is reached or clearly out of
+reach. A judge then reads the whole conversation, together with the tools the
+bot called, and decides whether the caller got what they came for. A simulation
+is a `scenarios/<name>.yaml` like any other, told apart by its `persona:`; the
+release simulations sit at the end of the manifest and cover the Flows
+examples, because those are the bots with a job to finish: book a table, take a
+patient's intake, place an order, quote a policy.
 
 ```sh
-./run-simulations.sh                       # every simulation in the manifest
-./run-simulations.sh -p restaurant         # only bots whose path contains "restaurant"
-./run-simulations.sh -s order_pizza -r 5   # one simulation, five runs
+./run.sh -p flows                  # the Flows bots: their scripted scenarios and simulations
+./run.sh -s book_table_available   # one simulation, as many runs as its file says
+./run.sh -s order_pizza -r 5       # one simulation, five runs
 ```
 
 Each simulation file names how many times it runs (`runs`) and the success rate
@@ -289,12 +292,12 @@ never came up, the persona's LLM failed) is reported but kept out of the rate.
 The persona speaks in text (the `simulator:` block, an OpenAI model by default,
 so `OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
 the scenarios. `examples/simulations/` has audio-mode simulations and the file
-format; run one by hand with `pipecat eval simulate simulations/<name>.yaml
---bot-url ws://localhost:7860 -v`.
+format; run one by hand with `pipecat eval run scenarios/<name>.yaml --bot-url
+ws://localhost:7860 -v`, the same command as a scripted scenario.
 
 ## Adding coverage
 
-- New bot: add an entry to `manifest-evals.yaml` (`bot:` + the `scenarios:` it should run).
+- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
 - New behavior to test: add a `scenarios/<name>.yaml` and reference it from the manifest.
-- New goal to reach: add a `simulations/<name>.yaml` and reference it from
-  `manifest-simulations.yaml` under the bot that serves it.
+- New goal to reach: add a `scenarios/<name>.yaml` with a `persona:` and reference
+  it from the manifest's simulations section under the bot that serves it.

@@ -5,9 +5,9 @@ name: get_insurance_quote
 # collect_age, collect_marital_status, calculate_quote, update_coverage, and
 # end_quote calls along with the conversation.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Morgan, shopping for insurance. Direct and organized: 30 years old, married.

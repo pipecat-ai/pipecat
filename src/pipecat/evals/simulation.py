@@ -9,7 +9,10 @@
 A simulation describes a *caller* rather than a script: who they are, what they
 want, and how the outcome is judged. An autonomous persona LLM holds the
 conversation with the bot, so the path through it is the bot's and the persona's
-to make, not the file's. Example::
+to make, not the file's. It is the other kind of scenario file: a manifest lists
+simulations under ``scenarios:`` like scripted ones, and ``pipecat eval run``
+takes either; a file with a ``persona:`` is a simulation (see
+:func:`load_scenario_file`). Example::
 
     name: capital_curious
     persona: |
@@ -67,14 +70,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from pipecat.evals.scenario import (
     _DEFAULT_JUDGE,
-    _add_include_constructor,
+    EvalScenario,
+    _load_mapping,
     _parse_judge_block,
     _parse_user_block,
-    _ScenarioLoader,
     describe_config,
 )
 
@@ -158,15 +159,7 @@ class EvalSimulation:
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
-
-        class _Loader(_ScenarioLoader):
-            pass
-
-        _add_include_constructor(_Loader, path.parent)
-        with path.open() as f:
-            data = yaml.load(f, _Loader)
-        if not isinstance(data, dict):
-            raise ValueError(f"{path}: top level must be a mapping")
+        data = _load_mapping(path)
 
         def text(key: str) -> str:
             value = data.get(key)
@@ -208,6 +201,40 @@ class EvalSimulation:
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
         )
+
+
+def load_scenario_file(path: str | Path) -> EvalScenario | EvalSimulation:
+    """Load a scenario file as whichever kind it is.
+
+    A file with a ``persona:`` is a simulation; one with ``turns:`` is a scripted
+    scenario. This is what a manifest's ``scenarios:`` entries and ``pipecat eval
+    run`` load through, so the two kinds mix freely in one list.
+
+    Args:
+        path: Path to a scenario or simulation YAML file.
+
+    Returns:
+        The parsed :class:`EvalSimulation` or
+        :class:`~pipecat.evals.scenario.EvalScenario`.
+
+    Raises:
+        ValueError: If the file is neither kind, claims to be both, or is
+            invalid for its kind.
+        FileNotFoundError: If the path doesn't exist.
+    """
+    path = Path(path)
+    data = _load_mapping(path)
+    if "persona" in data and "turns" in data:
+        raise ValueError(
+            f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
+        )
+    if "persona" in data:
+        return EvalSimulation.load(path)
+    if "turns" in data:
+        return EvalScenario.load(path)
+    raise ValueError(
+        f"{path}: a scenario file needs 'turns:' (scripted) or 'persona:' (a simulation)"
+    )
 
 
 def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:

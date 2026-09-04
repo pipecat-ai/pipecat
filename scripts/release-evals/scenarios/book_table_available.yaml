@@ -7,9 +7,9 @@ name: book_table_available
 # calls along with the conversation: collect_party_size, check_availability,
 # and end_conversation are what a booking looks like.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Jamie, calling to book a table for tonight. Friendly and to the point: gives

@@ -7,9 +7,9 @@ name: book_table_flexible
 # which of the offered times fits. The judge reads the check_availability calls
 # along with the conversation.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Sam, calling to book a table for tonight. Easygoing: gives the party size and

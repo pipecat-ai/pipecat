@@ -7,8 +7,9 @@
 """Multi-bot eval suite runner.
 
 An :class:`EvalManifest` lists bots to spawn and the scenarios to run against
-each; an :class:`EvalSuite` spawns each bot with its eval transport on its own
-port and drives it with the harness, running several concurrently. Each harness
+each, scripted scenarios and simulations alike; an :class:`EvalSuite` spawns each
+bot with its eval transport on its own port and drives it with the harness,
+running several concurrently. Each harness
 runs in its own subprocess (:mod:`pipecat.evals._session_subprocess`) so its
 STT/VAD/turn models load on their own GIL -- in one shared process those loads
 would stall the event loop that paces every other concurrent run's real-time
@@ -34,6 +35,14 @@ Manifest format (YAML)::
       - bot: examples/vision/vision-openai.py
         runner_body: scenarios/vision-cat.json   # passed to the bot as --runner-body
         scenarios: [vision_describe]
+      - bot: examples/flows/restaurant_reservation.py
+        scenarios: [book_table]                  # a simulation: its file has a persona
+
+A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
+simulation, and the file says which (see
+:func:`~pipecat.evals.simulation.load_scenario_file`). A simulation runs as many
+times as its ``runs:`` says and passes if its success rate over them meets its
+``pass_threshold:``.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
 passed to the bot as ``--runner-body``, supplying runner-args data it would
@@ -76,7 +85,7 @@ from pipecat.evals.results import (
     SimulationMetric,
     SimulationRunResult,
 )
-from pipecat.evals.simulation import EvalSimulation
+from pipecat.evals.simulation import EvalSimulation, load_scenario_file
 from pipecat.utils.base_object import BaseObject
 
 DEFAULT_BASE_PORT = 7900
@@ -201,6 +210,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     record = {
         "bot": run.bot,
         "scenario": run.scenario,
+        "kind": run.kind,
         "attempt": run.attempt,
         "passed": bool(result and result.passed and not result.skipped),
         "skipped": result.skipped if result else None,
@@ -237,7 +247,8 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, SimulationRunResult) else None
     record = {
         "bot": run.bot,
-        "simulation": run.scenario,
+        "scenario": run.scenario,
+        "kind": run.kind,
         "attempt": run.attempt,
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
@@ -306,7 +317,7 @@ def _result_from_dict(data: dict) -> EvalResult:
     )
 
 
-def _resolve_evaluable(name: str, base: Path, default_dir: Path) -> tuple[str, Path]:
+def _resolve_scenario(name: str, base: Path, default_dir: Path) -> tuple[str, Path]:
     """A manifest entry's display name and file: a bare name under ``default_dir``, or a path."""
     if name.endswith(SCENARIO_SUFFIXES) or "/" in name:
         return Path(name).stem, (base / name).resolve()
@@ -396,7 +407,6 @@ class EvalManifest:
         *,
         bots_dir: str | Path | None = None,
         scenarios_dir: str | Path | None = None,
-        simulations_dir: str | Path | None = None,
         runs_dir: str | Path | None = None,
         spawn: str | None = None,
         python: str | None = None,
@@ -418,7 +428,6 @@ class EvalManifest:
             path: Path to the manifest YAML.
             bots_dir: Override for the manifest's ``bots_dir`` (bot paths are relative to it).
             scenarios_dir: Override for the manifest's ``scenarios_dir``.
-            simulations_dir: Override for the manifest's ``simulations_dir``.
             runs_dir: Override for the manifest's ``runs_dir`` (base for run output).
             spawn: Override for the spawn command template.
             python: Override for the interpreter used to spawn bots.
@@ -445,7 +454,6 @@ class EvalManifest:
 
         bots_dir_p = dir_value(bots_dir, "bots_dir", ".")
         scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
-        simulations_dir_p = dir_value(simulations_dir, "simulations_dir", "simulations")
 
         if runs_dir is not None:
             runs_dir_p: Path | None = Path(runs_dir).resolve()
@@ -480,7 +488,20 @@ class EvalManifest:
             runner_body = item.get("runner_body")
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
-                name, scenario_path = _resolve_evaluable(str(scenario), base, scenarios_dir_p)
+                name, scenario_path = _resolve_scenario(str(scenario), base, scenarios_dir_p)
+                # The file says whether it is a scripted scenario or a simulation. A
+                # simulation runs as many times as its file says (or the repeat
+                # override), for a success rate. A file that fails to load still
+                # gets its run, which reports the load error.
+                kind, attempts, threshold = "scenario", repeat, None
+                try:
+                    loaded = load_scenario_file(scenario_path)
+                except (ValueError, FileNotFoundError):
+                    loaded = None
+                if isinstance(loaded, EvalSimulation):
+                    kind = "simulation"
+                    attempts = repeat if repeat > 1 else loaded.runs
+                    threshold = loaded.pass_threshold
                 runs.append(
                     EvalRun(
                         bot=bot,
@@ -488,29 +509,7 @@ class EvalManifest:
                         bot_path=bot_path,
                         scenario_path=scenario_path,
                         runner_body_path=runner_body_path,
-                        attempts=repeat,
-                    )
-                )
-            for simulation in item.get("simulations", []):
-                name, sim_path = _resolve_evaluable(str(simulation), base, simulations_dir_p)
-                # A simulation runs as many times as its file says (or the repeat
-                # override), for a success rate; a file that fails to load still
-                # gets its run, which reports the load error.
-                attempts, threshold = repeat, None
-                try:
-                    loaded = EvalSimulation.load(sim_path)
-                    attempts = repeat if repeat > 1 else loaded.runs
-                    threshold = loaded.pass_threshold
-                except (ValueError, FileNotFoundError):
-                    pass
-                runs.append(
-                    EvalRun(
-                        bot=bot,
-                        scenario=name,
-                        bot_path=bot_path,
-                        scenario_path=sim_path,
-                        runner_body_path=runner_body_path,
-                        kind="simulation",
+                        kind=kind,
                         attempts=attempts,
                         pass_threshold=threshold,
                     )
@@ -772,7 +771,6 @@ class EvalSuite(BaseObject):
                 # concurrent run. The worker writes its result (and, under --debug, its
                 # own <safe>.debug.log) so the suite just reads it back.
                 config = {
-                    "kind": run.kind,
                     "scenario_path": str(run.scenario_path),
                     "scenario_name": run.scenario,
                     "bot_url": f"ws://localhost:{port}",

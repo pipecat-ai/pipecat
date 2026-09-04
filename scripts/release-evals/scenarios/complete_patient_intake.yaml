@@ -6,9 +6,9 @@ name: complete_patient_intake
 # completes the intake. The judge reads the record_* and complete_intake calls
 # along with the conversation.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Chad Bailey, a patient checking in for an appointment. Cooperative and brief:

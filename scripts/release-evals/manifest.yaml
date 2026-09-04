@@ -1,8 +1,10 @@
 # Release evals manifest: which scenarios each bot runs.
-# Run with: pipecat eval suite scripts/release-evals/manifest-evals.yaml
+# Run with: pipecat eval suite scripts/release-evals/manifest.yaml
 #
 # Scenarios live in scenarios/<name>.yaml and are reusable, so one shared
-# scenario covers many bots.
+# scenario covers many bots. A scenario is scripted (a `turns:` list) or a
+# simulation (a `persona:`, an autonomous caller); the simulations are listed
+# last.
 
 bots_dir: ../../examples       # bot paths below are relative to this
 scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
@@ -420,3 +422,23 @@ suite:
   # only the audio reaches the main worker.
   - bot: multi-worker/local-handoff/local-handoff-two-agents-tts.py
     scenarios: [acme_handoff_voices]
+
+  #
+  # Simulations: an autonomous caller, an LLM playing a persona with a goal
+  # (OpenAI by default, so OPENAI_API_KEY must be set), holds the conversation
+  # with the Flows bots, and the judge reads the whole exchange together with
+  # the tools the bot called. These check that the framework still carries a
+  # task-oriented conversation to its goal. Each file names how many times it
+  # runs and the success rate it needs: a persona does not say the same thing
+  # twice, so one run is an anecdote.
+  #
+  - bot: flows/restaurant_reservation.py
+    scenarios: [book_table_available, book_table_flexible, book_table_impossible]
+  - bot: flows/patient_intake.py
+    scenarios: [complete_patient_intake]
+  - bot: flows/food_ordering.py
+    scenarios: [order_pizza]
+  - bot: flows/food_ordering_advanced_functionschema.py
+    scenarios: [order_sushi]
+  - bot: flows/insurance_quote.py
+    scenarios: [get_insurance_quote]

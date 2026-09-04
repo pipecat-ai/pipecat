@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# Simulations in a manifest, and their results.jsonl records.
+# Simulations in a manifest's scenarios: list, and their results.jsonl records.
 # ---------------------------------------------------------------------------
 
 import json  # noqa: E402
@@ -225,10 +225,9 @@ class TestManifestSimulations(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.base = Path(self._tmp.name)
-        (self.base / "simulations").mkdir()
         (self.base / "scenarios").mkdir()
-        (self.base / "simulations" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
-        (self.base / "simulations" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
+        (self.base / "scenarios" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
+        (self.base / "scenarios" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
         (self.base / "scenarios" / "greet.yaml").write_text("name: greet\nturns: []\n")
 
     def tearDown(self):
@@ -239,10 +238,8 @@ class TestManifestSimulations(unittest.TestCase):
         path.write_text(text)
         return EvalManifest.load(path, **overrides)
 
-    def test_simulations_run_as_many_times_as_their_file_says(self):
-        manifest = self._manifest(
-            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n    simulations: [book, once]\n"
-        )
+    def test_the_file_says_which_kind_a_scenario_is_and_how_often_it_runs(self):
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book, once]\n")
         by_name = {}
         for run in manifest.runs:
             by_name.setdefault(run.scenario, []).append(run)
@@ -253,24 +250,26 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual(book.kind, "simulation")
         self.assertEqual(book.attempts, 3)
         self.assertEqual(book.pass_threshold, 0.5)
-        self.assertEqual(book.scenario_path, self.base / "simulations" / "book.yaml")
+        self.assertEqual(book.scenario_path, self.base / "scenarios" / "book.yaml")
         greet = by_name["greet"][0]
         self.assertEqual(greet.kind, "scenario")
         self.assertEqual(greet.attempts, 1)
         self.assertIsNone(greet.pass_threshold)
-        # Attempt-major: every evaluable's first attempt precedes any second one.
+        # Attempt-major: every scenario's first attempt precedes any second one.
         self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
 
     def test_repeat_overrides_a_simulations_runs(self):
-        manifest = self._manifest("suite:\n  - bot: bot.py\n    simulations: [book]\n", repeat=2)
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=2)
         self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
         self.assertEqual(manifest.runs[0].attempts, 2)
 
-    def test_a_missing_simulation_still_gets_a_run(self):
-        manifest = self._manifest("suite:\n  - bot: bot.py\n    simulations: [nope]\n")
+    def test_a_missing_scenario_still_gets_a_run(self):
+        """Its kind can't be read, so it runs once as a scenario and reports the error."""
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")
         self.assertEqual(len(manifest.runs), 1)
-        self.assertEqual(manifest.runs[0].kind, "simulation")
+        self.assertEqual(manifest.runs[0].kind, "scenario")
         self.assertEqual(manifest.runs[0].attempts, 1)
+        self.assertIsNone(manifest.runs[0].pass_threshold)
 
 
 class TestSimulationRecords(unittest.TestCase):
@@ -317,11 +316,11 @@ class TestSimulationRecords(unittest.TestCase):
             )
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
             record = json.loads((base / "results.jsonl").read_text())
-            self.assertEqual(record["simulation"], "book")
+            self.assertEqual(record["scenario"], "book")
+            self.assertEqual(record["kind"], "simulation")
             self.assertEqual(record["attempt"], 2)
             self.assertFalse(record["passed"])
             self.assertFalse(record["succeeded"])
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
-            self.assertNotIn("scenario", record)

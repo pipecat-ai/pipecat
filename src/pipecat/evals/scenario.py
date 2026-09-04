@@ -21,6 +21,11 @@ The runner (see :mod:`pipecat.evals.eval_session`) loads the scenario, connects 
 the bot's eval transport over RTVI, drives each turn, collects the RTVI events
 the bot emits, and asserts on them in order.
 
+This is the *scripted* kind of scenario file. A file with a ``persona:`` instead
+of ``turns:`` is a simulation, where an LLM plays the user (see
+:mod:`pipecat.evals.simulation`); :func:`~pipecat.evals.simulation.load_scenario_file`
+loads either kind.
+
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
@@ -233,6 +238,28 @@ yaml.add_implicit_resolver(
     list("-+0123456789"),
     Loader=_ScenarioLoader,
 )
+
+
+def _load_mapping(path: Path) -> dict:
+    """Load a scenario file's top-level mapping, resolving ``!include`` tags.
+
+    Includes resolve relative to the file's directory. The constructor is
+    registered on a private loader subclass (not the global SafeLoader) so it
+    has no global side effects.
+
+    Raises:
+        ValueError: If the top level is not a mapping.
+    """
+
+    class _Loader(_ScenarioLoader):
+        pass
+
+    _add_include_constructor(_Loader, path.parent)
+    with path.open() as f:
+        data = yaml.load(f, _Loader)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+    return data
 
 
 def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
@@ -550,21 +577,7 @@ class EvalScenario:
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
-
-        # Support `judge: !include judge_audio.yaml` (and `user:`, etc.) so
-        # scenarios can share judge/user config. Includes resolve relative to the
-        # scenario file's directory. Register the constructor on a private loader
-        # subclass (not the global SafeLoader) so it has no global side effects.
-        class _Loader(_ScenarioLoader):
-            pass
-
-        _add_include_constructor(_Loader, path.parent)
-
-        with path.open() as f:
-            data = yaml.load(f, _Loader)
-
-        if not isinstance(data, dict):
-            raise ValueError(f"{path}: top level must be a mapping")
+        data = _load_mapping(path)
 
         name = data.get("name")
         if not name or not isinstance(name, str):

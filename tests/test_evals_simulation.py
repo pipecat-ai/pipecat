@@ -12,7 +12,8 @@ from pathlib import Path
 
 from pipecat.evals.persona import END_CALL_FUNCTION, Persona
 from pipecat.evals.results import SimulationRunResult
-from pipecat.evals.simulation import EvalSimulation, describe_simulation
+from pipecat.evals.scenario import EvalScenario
+from pipecat.evals.simulation import EvalSimulation, describe_simulation, load_scenario_file
 
 MINIMAL = """
 name: capital_curious
@@ -117,6 +118,23 @@ judge:
         self.assertIn("user  -> modality: text", text)
         self.assertIn("judge -> modality: text | eval: ollama/", text)
         self.assertIn("llm   -> service: openai/gpt-4o-mini | max_turns: 20", text)
+
+
+class TestLoadScenarioFile(unittest.TestCase):
+    def test_a_persona_makes_a_simulation(self):
+        self.assertIsInstance(load_scenario_file(_write(MINIMAL)), EvalSimulation)
+
+    def test_turns_make_a_scripted_scenario(self):
+        self.assertIsInstance(load_scenario_file(_write("name: greet\nturns: []\n")), EvalScenario)
+
+    def test_a_file_is_one_kind_or_the_other(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario_file(_write("name: nothing\n"))
+        self.assertIn("'turns:'", str(cm.exception))
+        self.assertIn("'persona:'", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            load_scenario_file(_write(MINIMAL + "turns: []\n"))
+        self.assertIn("not both", str(cm.exception))
 
 
 class TestPersona(unittest.TestCase):

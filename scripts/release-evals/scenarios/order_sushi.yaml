@@ -4,9 +4,9 @@ name: order_sushi
 # same ordering flow as order_pizza, built from explicit function schemas, with
 # a caller who wants sushi.
 
-simulator: !include ../scenarios/simulator.yaml
+simulator: !include simulator.yaml
 
-judge: !include ../scenarios/judge_text.yaml
+judge: !include judge_text.yaml
 
 persona: |
   Riley, ordering dinner. Casual and quick: wants three California rolls and

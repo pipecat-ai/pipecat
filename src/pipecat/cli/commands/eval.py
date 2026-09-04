@@ -30,8 +30,8 @@ from rich.text import Text
 
 from pipecat.evals.eval_session import EvalSession
 from pipecat.evals.results import EvalResult, EvalTurnProgress, SimulationRunResult
-from pipecat.evals.scenario import EvalScenario, describe_config
-from pipecat.evals.simulation import EvalSimulation, describe_simulation
+from pipecat.evals.scenario import describe_config
+from pipecat.evals.simulation import EvalSimulation, describe_simulation, load_scenario_file
 from pipecat.evals.simulation_session import SimulationSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
@@ -133,6 +133,28 @@ def _print_progress(session: EvalSession, p: EvalTurnProgress) -> None:
         print(line)
 
 
+def _print_simulation_detail(result: SimulationRunResult) -> None:
+    """Print what a simulation's one-line verdict leaves out (verbose mode).
+
+    The judge's reason, each metric's score and reason, the persona's own claim
+    from its ``end_call``, how many turns it took, and the conversation.
+    """
+    if result.error:
+        return
+    print(f"    {_dim('judge:')} {result.reason}")
+    for metric in result.metrics:
+        print(f"    {_dim(metric.name + ':')} {metric.score:g}  {_dim(metric.reason)}")
+    if result.end_call is not None:
+        claim = "succeeded" if result.end_call.get("success") else "gave up"
+        print(f"    {_dim('persona:')} {claim}: {result.end_call.get('reason', '')}")
+    print(f"    {_dim('turns:')} {result.turns} persona turn(s), ended by {result.ended_by}")
+    if result.messages:
+        print("    Conversation:")
+        for message in result.messages:
+            who = "user" if message["role"] == "user" else "bot"
+            print(f"      {_dim(who + ':')} {message['content']}")
+
+
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
     """Per-scenario recording path under ``record_dir``, or None when recording is off."""
     if not record_dir:
@@ -164,23 +186,26 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
+    """Build an EvalRun per scenario file, scripted or a simulation, run against ``bot_url``.
 
-    A scenario that fails to load becomes an EvalRun already marked done with an
+    A file that fails to load becomes an EvalRun already marked done with an
     error, so it shows in the dashboard and the final tally like any other failure.
     """
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            scenario = EvalScenario.load(path)
+            loaded = load_scenario_file(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
+        kind = "simulation" if isinstance(loaded, EvalSimulation) else "scenario"
         runs.append(
-            EvalRun(bot=bot_url, scenario=scenario.name, scenario_path=path, bot_url=bot_url)
+            EvalRun(
+                bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
+            )
         )
     return runs
 
@@ -199,7 +224,9 @@ async def _execute_scenario(
     trigger_disconnect: bool,
     verbose: bool,
 ) -> None:
-    """Run one scenario against its ``bot_url``, updating ``run`` in place.
+    """Run one scenario file, scripted or a simulation, against its ``bot_url``.
+
+    Updates ``run`` in place.
 
     The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
     URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``)
@@ -210,21 +237,33 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        scenario = EvalScenario.load(run.scenario_path)
+        loaded = load_scenario_file(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            session = EvalSession.from_scenario(
-                scenario,
-                url,
-                default_timeout_ms=default_timeout_ms,
-                record_path=record_path,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                stop_bot=stop_bot,
-                trigger_disconnect=trigger_disconnect,
-            )
-            if verbose:
-                session.add_event_handler("on_progress", _print_progress)
+            session: EvalSession | SimulationSession
+            if isinstance(loaded, EvalSimulation):
+                session = SimulationSession.from_simulation(
+                    loaded,
+                    url,
+                    record_path=record_path,
+                    cache_dir=cache_dir,
+                    use_cache=use_cache,
+                    stop_bot=stop_bot,
+                    trigger_disconnect=trigger_disconnect,
+                )
+            else:
+                session = EvalSession.from_scenario(
+                    loaded,
+                    url,
+                    default_timeout_ms=default_timeout_ms,
+                    record_path=record_path,
+                    cache_dir=cache_dir,
+                    use_cache=use_cache,
+                    stop_bot=stop_bot,
+                    trigger_disconnect=trigger_disconnect,
+                )
+                if verbose:
+                    session.add_event_handler("on_progress", _print_progress)
             run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
@@ -232,9 +271,9 @@ async def _execute_scenario(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
-        # Errors raised inside EvalSession.run() are caught there and returned as
-        # a structured result; this catches the rest (scenario load, building the
-        # judge/speech/transcriber). Keep the exception type and stash the full
+        # Errors raised inside the session's run() are caught there and returned
+        # as a structured result; this catches the rest (the file's load, building
+        # the judge/persona/speech/transcriber). Keep the exception type and stash the full
         # traceback in <scenario>.eval.log, mirroring the suite's behavior.
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
@@ -263,8 +302,9 @@ async def _run_scenarios_all(
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
 
-    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines) or
-    a piped stdout fall back to streamed result lines instead.
+    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines, and
+    a simulation's verdict detail and conversation) or a piped stdout fall back to
+    streamed result lines instead.
     """
 
     async def go(run: EvalRun, verbose: bool) -> None:
@@ -292,12 +332,15 @@ async def _run_scenarios_all(
             if run.status != "done":
                 await go(run, verbose)
             _print_eval_line(run)
+            if verbose and isinstance(run.result, SimulationRunResult):
+                _print_simulation_detail(run.result)
 
 
 @eval_app.command("run")
 def run(
     scenarios: list[Path] = typer.Argument(
-        ..., help="One or more scenario YAML files, or directories of them."
+        ...,
+        help="One or more scenario YAML files (scripted, or simulations), or directories of them.",
     ),
     bot_url: str = typer.Option(
         "ws://localhost:7860",
@@ -308,7 +351,8 @@ def run(
         False,
         "--verbose",
         "-v",
-        help="Print a line for each turn and expectation as it resolves.",
+        help="Print a line for each turn and expectation as it resolves; for a "
+        "simulation, the judge's reasons and the conversation once it ends.",
     ),
     audio: bool = typer.Option(
         False,
@@ -363,12 +407,14 @@ def run(
         "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
     ),
 ) -> None:
-    """Run one or more evals against an already-running bot.
+    """Run one or more scenarios, scripted or simulations, against an already-running bot.
 
     A list of scenarios is treated as a one-bot suite: configs are printed up
     front, then a live dashboard (or streamed lines when piped / ``--verbose``)
     shows each scenario's status and timing, the running tally, and the total
-    time, sharing the display with ``pipecat eval suite``.
+    time, sharing the display with ``pipecat eval suite``. A simulation runs once
+    here: a success rate over several runs is the suite's job, since each run
+    needs a fresh bot.
     """
     # pipecat's own logs are captured to <scenario>.debug.log under --debug; either
     # way, silence the console sink so it can't corrupt the live display.
@@ -724,14 +770,11 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
                 print(heading)
             seen.add(r.scenario)
             try:
-                if kind == "simulation":
-                    cfg = describe_simulation(
-                        EvalSimulation.load(r.scenario_path), color=sys.stdout.isatty()
-                    )
+                loaded = load_scenario_file(r.scenario_path)
+                if isinstance(loaded, EvalSimulation):
+                    cfg = describe_simulation(loaded, color=sys.stdout.isatty())
                 else:
-                    cfg = describe_config(
-                        EvalScenario.load(r.scenario_path), color=sys.stdout.isatty()
-                    )
+                    cfg = describe_config(loaded, color=sys.stdout.isatty())
             except Exception as e:  # noqa: BLE001
                 cfg = f"(failed to load: {e})"
             print(f"  {_color(r.scenario + ':', '1;36')}")
@@ -940,14 +983,12 @@ async def _run_suite_all(
 @eval_app.command("suite")
 def suite(
     manifest_path: Path = typer.Argument(
-        ..., help="Manifest YAML listing bots + their scenarios and/or simulations."
+        ..., help="Manifest YAML listing bots + their scenarios (scripted, or simulations)."
     ),
     pattern: str = typer.Option(
         None, "-p", "--pattern", help="Only bots whose path contains this."
     ),
-    scenario: str = typer.Option(
-        None, "-s", "--scenario", help="Only this scenario or simulation name."
-    ),
+    scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     name: str = typer.Option(
         None, "-n", "--name", help="Run subdir name under runs_dir (default a timestamp)."
     ),
@@ -960,9 +1001,6 @@ def suite(
     bots_dir: Path = typer.Option(None, "--bots-dir", help="Override manifest bots_dir."),
     scenarios_dir: Path = typer.Option(
         None, "--scenarios-dir", help="Override manifest scenarios_dir."
-    ),
-    simulations_dir: Path = typer.Option(
-        None, "--simulations-dir", help="Override manifest simulations_dir."
     ),
     concurrency: int = typer.Option(
         None, "-c", "--concurrency", help="Override manifest concurrency."
@@ -999,10 +1037,11 @@ def suite(
         help="Also save <run>.debug.log with the harness's full per-pipeline logs.",
     ),
 ) -> None:
-    """Spawn the bots in a manifest and run their scenarios and simulations concurrently.
+    """Spawn the bots in a manifest and run their scenarios concurrently.
 
     Everything except the ``suite:`` list can be set in the manifest or overridden
     here (the command line wins), so a manifest can be just a ``suite:`` list. A
+    scenario file is scripted or a simulation, and the file says which; a
     simulation runs as many times as its file says and passes if its success
     rate meets its threshold.
     """
@@ -1010,7 +1049,6 @@ def suite(
         manifest_path,
         bots_dir=bots_dir,
         scenarios_dir=scenarios_dir,
-        simulations_dir=simulations_dir,
         runs_dir=runs_dir,
         spawn=spawn,
         python=python,
@@ -1054,178 +1092,3 @@ def suite(
         runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )
     raise typer.Exit(code=exit_code)
-
-
-#
-# `pipecat eval simulate` — run one simulation against an already-running bot.
-#
-
-
-async def _execute_simulation(
-    simulation: EvalSimulation,
-    bot_url: str,
-    *,
-    audio: bool,
-    record_dir: str,
-    cache_dir: str | None,
-    use_cache: bool,
-    logs_dir: str,
-    debug: bool,
-    stop_bot: bool,
-    trigger_disconnect: bool,
-) -> SimulationRunResult | None:
-    """Run one simulation against ``bot_url`` and write its logs.
-
-    Always writes the decision trace (``<simulation>.eval.log``) and, under
-    ``--debug``, the combined ``<simulation>.debug.log``. Returns ``None`` when
-    the session could not even be built (a persona LLM or judge that fails to
-    construct); the traceback is in the eval log.
-    """
-    logs = Path(logs_dir)
-    record_path = _record_path(record_dir, simulation.name) if audio else None
-    try:
-        with capture_pipeline_logs(logs, simulation.name, name=simulation.name, enabled=debug):
-            session = SimulationSession.from_simulation(
-                simulation,
-                bot_url,
-                record_path=record_path,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                stop_bot=stop_bot,
-                trigger_disconnect=trigger_disconnect,
-            )
-            result = await session.run()
-        if result.debug_log:
-            logs.mkdir(parents=True, exist_ok=True)
-            (logs / f"{simulation.name}.eval.log").write_text("\n".join(result.debug_log) + "\n")
-        return result
-    except Exception as e:  # noqa: BLE001
-        print(
-            f"  {_red('✗')} {_color(simulation.name, '36')} {_dim(f'error: {type(e).__name__}: {e}')}"
-        )
-        with contextlib.suppress(OSError):
-            logs.mkdir(parents=True, exist_ok=True)
-            (logs / f"{simulation.name}.eval.log").write_text(traceback.format_exc())
-        return None
-
-
-def _print_simulation_result(result: SimulationRunResult, elapsed: float, verbose: bool) -> None:
-    """Print a run's outcome: the goal verdict, quality, metrics, and (verbose) the conversation."""
-    name = _color(result.simulation_name, "36")
-    if result.error:
-        print(f"  {_red('✗')} {name} {_dim('error: ' + result.error)}")
-        return
-    glyph = _green("✓") if result.succeeded else _red("✗")
-    outcome = "goal achieved" if result.succeeded else "goal not achieved"
-    quality = f" · quality {result.quality:.2f}" if result.quality is not None else ""
-    how = f"{_fmt_duration(elapsed)}, {result.turns} persona turn(s), ended by {result.ended_by}"
-    print(f"  {glyph} {name} {outcome}{quality} {_dim('(' + how + ')')}")
-    print(f"    {_dim('judge:')} {result.reason}")
-    for metric in result.metrics:
-        print(f"    {_dim(metric.name + ':')} {metric.score:g}  {_dim(metric.reason)}")
-    if result.end_call is not None:
-        claim = "succeeded" if result.end_call.get("success") else "gave up"
-        print(f"    {_dim('persona:')} {claim}: {result.end_call.get('reason', '')}")
-    if verbose and result.messages:
-        print("  Conversation:")
-        for message in result.messages:
-            who = "user" if message["role"] == "user" else "bot"
-            print(f"    {_dim(who + ':')} {message['content']}")
-
-
-@eval_app.command("simulate")
-def simulate(
-    simulation: Path = typer.Argument(..., help="A simulation YAML file."),
-    bot_url: str = typer.Option(
-        "ws://localhost:7860",
-        "--bot-url",
-        help="WebSocket URL of the bot's eval transport.",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Also print the conversation once the run ends.",
-    ),
-    audio: bool = typer.Option(
-        False,
-        "-a",
-        "--audio",
-        help="Record the conversation audio (audio-mode simulations).",
-    ),
-    record_dir: str = typer.Option(
-        "recordings",
-        "--record-dir",
-        help="Directory for --audio recordings: <record-dir>/<simulation>.wav.",
-    ),
-    cache_dir: str = typer.Option(
-        None,
-        "--cache-dir",
-        help="Directory for cached synthesized user audio (default <user-cache-dir>/pipecat/tts).",
-    ),
-    no_cache: bool = typer.Option(
-        False,
-        "--no-cache",
-        help="Disable the user-audio cache: re-synthesize every turn (no reads or writes).",
-    ),
-    logs_dir: str = typer.Option(
-        ".",
-        "--logs-dir",
-        help="Directory for the run's logs: <logs-dir>/<simulation>.eval.log (+ .debug.log).",
-    ),
-    debug: bool = typer.Option(
-        False,
-        "-d",
-        "--debug",
-        help="Also save <simulation>.debug.log with the harness's full per-pipeline logs.",
-    ),
-    stop_bot: bool = typer.Option(
-        False,
-        "--stop-bot",
-        help="Cancel the bot's pipeline (exit it) after the run. By default the "
-        "bot is left running.",
-    ),
-    trigger_disconnect: bool = typer.Option(
-        False,
-        "--trigger-disconnect",
-        help="Fire the bot's on_client_disconnected handler when the eval client "
-        "disconnects. A simulation's 'trigger_disconnect:' field opts in on its own.",
-    ),
-) -> None:
-    """Run one simulation against an already-running bot.
-
-    The persona LLM holds the conversation with the bot on its own; the judge
-    then decides from the whole conversation whether the goal was achieved and
-    scores the quality criteria. One run per invocation: a success rate over
-    several runs is the suite's job, since each run needs a fresh bot.
-    """
-    logger.remove()
-    try:
-        loaded = EvalSimulation.load(simulation)
-    except (ValueError, FileNotFoundError) as e:
-        print(f"error: {e}")
-        raise typer.Exit(code=2)
-    print("Simulation:")
-    print(f"  {loaded.name}:")
-    for line in describe_simulation(loaded, color=_supports_color()).splitlines():
-        print(f"    {line}")
-    print()
-    started = time.monotonic()
-    result = asyncio.run(
-        _execute_simulation(
-            loaded,
-            bot_url,
-            audio=audio,
-            record_dir=record_dir,
-            cache_dir=cache_dir,
-            use_cache=not no_cache,
-            logs_dir=logs_dir,
-            debug=debug,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
-        )
-    )
-    if result is not None:
-        _print_simulation_result(result, time.monotonic() - started, verbose)
-    print(f"\n  logs: {Path(logs_dir).resolve()}")
-    raise typer.Exit(code=0 if result is not None and result.passed else 1)

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Subprocess worker that runs a single eval scenario in its own process.
+"""Subprocess worker that runs a single scenario, scripted or a simulation, in its own process.
 
 The suite (:mod:`pipecat.evals.suite`) spawns one of these per (bot, scenario)
 run so each harness loads its STT/VAD/turn models in its own interpreter. That
@@ -32,18 +32,17 @@ from loguru import logger
 
 from pipecat.evals.eval_session import EvalSession
 from pipecat.evals.results import EvalResult, SimulationRunResult
-from pipecat.evals.scenario import EvalScenario
-from pipecat.evals.simulation import EvalSimulation
+from pipecat.evals.simulation import EvalSimulation, load_scenario_file
 from pipecat.evals.simulation_session import SimulationSession
 from pipecat.evals.suite import capture_pipeline_logs
 
 
 async def _run(config: dict) -> EvalResult | SimulationRunResult:
-    """Build and run the session described by ``config``: a scenario's, or a simulation's."""
-    if config.get("kind") == "simulation":
-        simulation = EvalSimulation.load(Path(config["scenario_path"]))
+    """Build and run the session for the scenario file in ``config``, whichever kind it is."""
+    loaded = load_scenario_file(Path(config["scenario_path"]))
+    if isinstance(loaded, EvalSimulation):
         session = SimulationSession.from_simulation(
-            simulation,
+            loaded,
             config["bot_url"],
             connect_timeout_s=config["connect_timeout_s"],
             record_path=config.get("record_path"),
@@ -53,9 +52,8 @@ async def _run(config: dict) -> EvalResult | SimulationRunResult:
             trigger_disconnect=config.get("trigger_disconnect", False),
         )
         return await session.run()
-    scenario = EvalScenario.load(Path(config["scenario_path"]))
     session = EvalSession.from_scenario(
-        scenario,
+        loaded,
         config["bot_url"],
         connect_timeout_s=config["connect_timeout_s"],
         default_timeout_ms=config["default_timeout_ms"],

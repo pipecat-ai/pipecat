@@ -8,8 +8,9 @@ bot scored on the quality criteria you name. It answers "can my bot get this
 caller what they need?", the question a scripted scenario (which only replays
 fixed turns) cannot.
 
-Simulations are run with `pipecat eval simulate` against a bot started with its
-eval transport. Any of the example bots will do.
+A simulation is the second kind of scenario file, told apart from a scripted one
+by its `persona:`, and runs with the same `pipecat eval run` against a bot
+started with its eval transport. Any of the example bots will do.
 
 ## Setup
 
@@ -38,13 +39,13 @@ Start a bot with its eval transport, then run a simulation against it:
 
 ```bash
 uv run python examples/voice/voice-cartesia.py -t eval --port 7860
-uv run pipecat eval simulate examples/simulations/capital_curious.yaml --bot-url ws://localhost:7860 -v
+uv run pipecat eval run examples/simulations/capital_curious.yaml --bot-url ws://localhost:7860 -v
 ```
 
-The run prints the goal verdict, the quality score with each metric's reason,
-the caller's own view of how it went, and (with `-v`) the conversation. Add `-d`
-to keep the harness's full logs and `-a` to record the audio of an audio-mode
-run.
+The run prints the verdict with the quality score and how the call ended; with
+`-v` it adds the judge's reason, each metric's reason, the caller's own view of
+how it went, and the conversation. Add `-d` to keep the harness's full logs and
+`-a` to record the audio of an audio-mode run.
 
 ## Files
 
