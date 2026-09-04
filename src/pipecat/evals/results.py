@@ -96,7 +96,7 @@ class EvalTurnResult:
 
 @dataclass
 class EvalResult:
-    """Outcome of running a scenario in an :class:`~pipecat.evals.session.EvalSession`.
+    """Outcome of running a scenario in an :class:`~pipecat.evals.eval_session.EvalSession`.
 
     Parameters:
         scenario_name: Name of the scenario that was run.

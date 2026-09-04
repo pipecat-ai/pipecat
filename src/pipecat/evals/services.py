@@ -116,7 +116,7 @@ def tts_service_from_config(
     :class:`~pipecat.evals.tts.CachingTTSService` so the scripted user utterances
     are synthesized once and reused across runs. To use a fully custom setup,
     construct ``CachingTTSService`` directly with your own inner ``TTSService`` and
-    pass it to :meth:`pipecat.evals.session.EvalSession.from_scenario`.
+    pass it to :meth:`pipecat.evals.eval_session.EvalSession.from_scenario`.
 
     The ``user_audio`` sample rate isn't applied here: the pipeline's ``StartFrame``
     configures the wrapper and its inner service (the harness sets it from the

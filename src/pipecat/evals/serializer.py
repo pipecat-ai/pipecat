@@ -6,7 +6,7 @@
 
 """Frame serializer that bridges the eval harness to a bot over RTVI.
 
-The eval harness (:mod:`pipecat.evals.session`) talks to a bot using the RTVI
+The eval harness (:mod:`pipecat.evals.base_session`) talks to a bot using the RTVI
 protocol over a plain WebSocket (``SingleClientWebsocketServerTransport``). This serializer
 is the only glue needed:
 

@@ -28,10 +28,11 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from pipecat.evals.eval_session import EvalSession
 from pipecat.evals.results import EvalTurnProgress, SimulationRunResult
 from pipecat.evals.scenario import EvalScenario, describe_config
-from pipecat.evals.session import EvalSession, SimulationSession
 from pipecat.evals.simulation import EvalSimulation, describe_simulation
+from pipecat.evals.simulation_session import SimulationSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,

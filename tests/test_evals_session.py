@@ -32,6 +32,7 @@ import websockets
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client import EvalClient, _BotFrameSink, _PersonaTurnRelay
+from pipecat.evals.eval_session import EvalSession
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import EvalTrace
@@ -42,7 +43,6 @@ from pipecat.evals.scenario import (
     EvalSendAfter,
     EvalTurn,
 )
-from pipecat.evals.session import EvalSession
 from pipecat.frames.frames import (
     AggregationType,
     BotStartedSpeakingFrame,
@@ -1596,8 +1596,8 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 from pipecat.evals.judge import JudgeVerdict  # noqa: E402
-from pipecat.evals.session import SimulationSession  # noqa: E402
 from pipecat.evals.simulation import EvalSimulation, EvalSimulationMetric  # noqa: E402
+from pipecat.evals.simulation_session import SimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.settings import LLMSettings  # noqa: E402

@@ -80,37 +80,37 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "EvalSession.from_scenario.on_progress",
+      "module": "pipecat.evals.eval_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/eval_session.py"
+    },
+    {
+      "subject": "EvalSession.on_progress",
+      "module": "pipecat.evals.eval_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/eval_session.py"
+    },
+    {
       "subject": "pipecat.evals.harness",
       "module": "pipecat.evals.harness",
       "kind": "module",
       "deprecated_in": "1.9.0",
       "removed_in": "2.0.0",
       "relation": "move",
-      "replacement": "pipecat.evals.session",
-      "message": "Moved to :mod:`pipecat.evals.session`. Will be removed in 2.0.0.",
+      "replacement": "pipecat.evals.eval_session",
+      "message": "Moved to :mod:`pipecat.evals.eval_session`. Will be removed in 2.0.0.",
       "location": "pipecat/evals/harness.py"
-    },
-    {
-      "subject": "EvalSession.from_scenario.on_progress",
-      "module": "pipecat.evals.session",
-      "kind": "parameter",
-      "deprecated_in": "1.9.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "on_progress",
-      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
-      "location": "pipecat/evals/session.py"
-    },
-    {
-      "subject": "EvalSession.on_progress",
-      "module": "pipecat.evals.session",
-      "kind": "parameter",
-      "deprecated_in": "1.9.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "on_progress",
-      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
-      "location": "pipecat/evals/session.py"
     },
     {
       "subject": "EvalSuite.run.on_update",

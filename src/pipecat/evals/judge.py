@@ -163,7 +163,7 @@ class EvalJudge:
         and returning a pipecat LLM service with ``run_inference()``); otherwise
         dispatches on the ``service`` name (default ``"ollama"``). Add providers by
         extending this. To use a fully custom judge, construct ``EvalJudge``
-        directly and pass it to :meth:`pipecat.evals.session.EvalSession.from_scenario`.
+        directly and pass it to :meth:`pipecat.evals.eval_session.EvalSession.from_scenario`.
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
