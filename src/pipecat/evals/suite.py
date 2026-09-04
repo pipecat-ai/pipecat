@@ -98,6 +98,7 @@ PIPELINE_LOG_LABELS = {
     "speech": "user speech logs",
     "transcription": "bot speech transcription logs",
     "judge": "judge logs",
+    "persona": "persona LLM logs",
     "harness": "harness logs",
 }
 PIPELINE_LOG_CATEGORIES = tuple(PIPELINE_LOG_LABELS)
