@@ -39,7 +39,7 @@ class SpeculationState(Enum):
     DROPPING = "dropping"
 
 
-class SpeculativeResponseGate(FrameProcessor):
+class UserTurnSpeculationGate(FrameProcessor):
     """Holds a speculative bot response until the user turn it answers is confirmed.
 
     A speculative response is generated from an eager end of turn — a

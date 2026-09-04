@@ -1208,7 +1208,7 @@ class UserStoppedSpeakingFrame(SystemFrame):
     Parameters:
         speculation_id: Set when the turn ended on an eager end of turn that
             held, naming the speculative response that answers it. The
-            :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`
+            :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
             releases that response on this frame. None on every other turn end,
             including one where the eager prediction missed — a response held
             for a speculation this frame doesn't name is never released by it.
@@ -1225,7 +1225,7 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
     of turn, or when the committed transcript doesn't match the eager one. Every
     consumer of the speculation drops it: the LLM service stops generating, the
     TTS service stops synthesizing, and
-    :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`
+    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
     discards what it buffered.
 
     A system frame so it overtakes the speculative output it cancels.

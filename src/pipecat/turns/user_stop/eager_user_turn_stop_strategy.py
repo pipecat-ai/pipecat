@@ -33,7 +33,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
     Nothing the speculation produces reaches the user or the context. The
     inference runs against a provisional context, and its response is held by a
-    :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`,
+    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`,
     which must be in the pipeline before the output transport. The turn ends
     normally: the user message written to the context is always the committed
     transcript, never the eager one.

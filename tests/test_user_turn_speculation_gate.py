@@ -5,6 +5,9 @@
 #
 
 import unittest
+from unittest.mock import AsyncMock, patch
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
@@ -16,11 +19,14 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.filters.speculative_response_gate import (
+from pipecat.processors.filters.user_turn_speculation_gate import (
     SpeculationState,
-    SpeculativeResponseGate,
+    UserTurnSpeculationGate,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import TransportParams
 
 
 def response(speculation_id: str | None, *texts: str, end: bool = True):
@@ -35,9 +41,9 @@ def response(speculation_id: str | None, *texts: str, end: bool = True):
     return frames
 
 
-class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
+class TestUserTurnSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_non_speculative_response_passes_through(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -50,7 +56,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_speculative_response_is_held_until_the_turn_ends(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         down, _ = await run_test(
             gate,
@@ -76,7 +82,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
         assert gate.state == SpeculationState.OPEN
 
     async def test_withdrawn_speculation_is_discarded(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -101,7 +107,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
     async def test_withdrawal_arriving_before_the_response_it_cancels(self):
         # A cancellation is a system frame, so it can overtake the response
         # frames it withdraws.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -120,7 +126,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_withdrawal_leaves_a_different_speculation_alone(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -142,7 +148,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_tts_audio_is_held_with_the_response(self):
         # The gate placed after the TTS service holds synthesized audio too.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
         audio = TTSAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1)
 
         await run_test(
@@ -157,7 +163,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_interruption_discards_the_speculation(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -170,7 +176,7 @@ class TestSpeculativeResponseGate(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_unresolved_speculation_is_discarded_after_the_buffer_timeout(self):
-        gate = SpeculativeResponseGate(max_buffer_duration=0.2)
+        gate = UserTurnSpeculationGate(max_buffer_duration=0.2)
 
         await run_test(
             gate,
@@ -205,11 +211,11 @@ class TestEagerMatchPolicies(unittest.IsolatedAsyncioTestCase):
         assert not policy.matches("i want to cancel", "I want to reschedule.")
 
 
-class TestSpeculativeResponseGateOrdering(unittest.IsolatedAsyncioTestCase):
+class TestUserTurnSpeculationGateOrdering(unittest.IsolatedAsyncioTestCase):
     async def test_turn_ending_without_confirming_the_speculation_releases_nothing(self):
         # The mismatch path ends the turn and withdraws the speculation, and the
         # two signals can arrive in either order.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -224,7 +230,7 @@ class TestSpeculativeResponseGateOrdering(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_confirmation_arriving_before_the_response(self):
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -251,7 +257,7 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
         # A withdrawal that arrives before the response it voids needs no
         # memory: the response is held on arrival, and whatever answers the
         # turn instead supersedes it.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -278,7 +284,7 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
         # frames are dropped, but the response that supersedes it has to pass
         # through whole — nothing of the held one can still be queued behind a
         # frame that arrived after it.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         down, _ = await run_test(
             gate,
@@ -310,7 +316,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         # An async tool started in an earlier turn can return while a
         # speculation is held. Its result belongs to that earlier work and is
         # guaranteed delivery, so discarding the speculation around it keeps it.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         down, _ = await run_test(
             gate,
@@ -330,7 +336,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
     async def test_a_tool_result_is_held_in_order_with_the_response(self):
         # Uninterruptible frames are ordered like any other, so one that arrives
         # mid-response is released in the position it arrived in.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         down, _ = await run_test(
             gate,
@@ -351,7 +357,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
     async def test_a_tool_result_is_not_dropped_with_a_response_being_dropped(self):
         # Nothing is held back while dropping a withdrawn response's tail, so an
         # uninterruptible frame passes on in order rather than being dropped.
-        gate = SpeculativeResponseGate()
+        gate = UserTurnSpeculationGate()
 
         await run_test(
             gate,
@@ -369,3 +375,33 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
                 FunctionCallResultFrame,
             ],
         )
+
+
+class TestUnheldSpeculationWarning(unittest.IsolatedAsyncioTestCase):
+    async def test_the_output_transport_reports_a_speculation_nothing_held(self):
+        # Speculating without a gate speaks unconfirmed responses, which is the
+        # outcome the feature exists to avoid, so it is reported where it does
+        # the harm rather than failing silently.
+        transport = BaseOutputTransport(TransportParams())
+        transport._handle_frame = AsyncMock()
+
+        start = LLMFullResponseStartFrame()
+        start.speculation_id = "abc"
+
+        with patch.object(logger, "error") as error:
+            await transport.process_frame(start, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(start, FrameDirection.DOWNSTREAM)
+
+        # Reported once: a line per turn would not tell anyone anything new.
+        assert error.call_count == 1
+        assert "UserTurnSpeculationGate" in error.call_args[0][0]
+        assert transport._handle_frame.await_count == 2
+
+    async def test_an_ordinary_response_is_not_reported(self):
+        transport = BaseOutputTransport(TransportParams())
+        transport._handle_frame = AsyncMock()
+
+        with patch.object(logger, "error") as error:
+            await transport.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+
+        assert error.call_count == 0

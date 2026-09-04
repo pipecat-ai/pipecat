@@ -13,7 +13,7 @@ waiting for one.
 Deepgram Flux predicts an end of turn (EagerEndOfTurn) ahead of committing to
 one (EndOfTurn), and withdraws the prediction (TurnResumed) if the user turns
 out to be mid-sentence. `EagerUserTurnStrategies` answers the prediction; the
-`SpeculativeResponseGate` holds that response until the turn is confirmed, and
+`UserTurnSpeculationGate` holds that response until the turn is confirmed, and
 discards it if the user resumes speaking or the committed transcript differs
 from the predicted one. Nothing unconfirmed is spoken or written to the context.
 
@@ -38,7 +38,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.filters.speculative_response_gate import SpeculativeResponseGate
+from pipecat.processors.filters.user_turn_speculation_gate import UserTurnSpeculationGate
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -122,7 +122,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             tts,
             # Anywhere before transport.output(): nothing past this point can be
             # unspoken again.
-            SpeculativeResponseGate(),
+            UserTurnSpeculationGate(),
             transport.output(),
             assistant_aggregator,
         ]

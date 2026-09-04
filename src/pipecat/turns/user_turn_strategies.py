@@ -176,7 +176,7 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
     Requires a
-    :class:`~pipecat.processors.filters.speculative_response_gate.SpeculativeResponseGate`
+    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
     in the pipeline, before the output transport — without it, an unconfirmed
     response is spoken as it is generated.
 
