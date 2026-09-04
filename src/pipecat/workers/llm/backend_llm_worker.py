@@ -32,7 +32,12 @@ from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame
 from pipecat.pipeline.job_context import JobEvent, JobParams
 from pipecat.pipeline.job_decorator import job
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+    LLMStandardMessage,
+)
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
@@ -134,7 +139,7 @@ DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the c
 
 
 def render_transcript_request(
-    conversation: Sequence[LLMStandardMessage],
+    conversation: Sequence[LLMContextMessage],
     *,
     instruction: str = DEFAULT_TRANSCRIPT_INSTRUCTION,
     first: bool = True,
@@ -147,8 +152,9 @@ def render_transcript_request(
     own.
 
     Only user and assistant text crosses today: tool calls, tool results,
-    images and other non-text content are skipped, and say so at debug level.
-    Carrying more is a question of how to render it.
+    images, other non-text content and messages in a service's own format are
+    skipped, and say so at debug level. Carrying more is a question of how to
+    render it.
 
     Args:
         conversation: The conversation the user is having with the frontend,
@@ -171,7 +177,10 @@ def render_transcript_request(
             else "Voice conversation since the previous delegation:"
         )
         for message in conversation:
-            role = message.get("role")  # type: ignore[attr-defined]
+            if isinstance(message, LLMSpecificMessage):
+                logger.debug(f"Skipping delegated message in {message.llm} format")
+                continue
+            role = message.get("role")
             text = message_text(message)
             if role in ("user", "assistant") and text:
                 lines.append(f"{str(role).upper()}: {text}")

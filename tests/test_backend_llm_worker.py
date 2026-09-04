@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
@@ -398,6 +398,7 @@ def test_render_transcript_request_flattens_what_a_transcript_can_hold():
                 ],
             },
             {"role": "tool", "tool_call_id": "call_1", "content": '{"seen": true}'},
+            LLMSpecificMessage(llm="anthropic", message={"type": "thought", "text": "hmm"}),
         ],
     )
     assert rendered == (

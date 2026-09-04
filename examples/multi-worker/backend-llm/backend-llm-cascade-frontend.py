@@ -45,6 +45,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frameworks.rtvi import (
+    RTVIFunctionCallReportLevel,
+    RTVIObserverParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
@@ -211,6 +215,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
+        ),
+        # `delegate` is not something a client should see as a tool call: it is
+        # the handoff itself, not the work. The backend's own calls run in its
+        # worker's pipeline, out of this observer's sight.
+        rtvi_observer_params=RTVIObserverParams(
+            function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
