@@ -98,6 +98,87 @@ def _prepare_language_hints(hints: list[Language] | None) -> list[str]:
     return prepared
 
 
+# Deepgram caps a connection at 100 keyterms of 100 characters each.
+_MAX_KEYTERMS = 100
+_MAX_KEYTERM_CHARS = 100
+
+
+def _prepare_keyterms(keyterms: list) -> list:
+    """Normalize keyterms to what Deepgram accepts on a connection.
+
+    Drops blank keyterms, drops keyterms over :data:`_MAX_KEYTERM_CHARS`
+    characters and truncates to :data:`_MAX_KEYTERMS` terms, warning about
+    whatever is dropped. Keeping the list within those limits keeps it from
+    failing the connection outright.
+
+    Args:
+        keyterms: Keyterms from settings.
+
+    Returns:
+        The keyterms to send, stripped, in the order given.
+    """
+    # Blanks go first, and before the length filter rather than after it. Deepgram refuses the
+    # connection for an empty keyterm ("Query included a keyterm that was the empty string"), and a
+    # blank is under the character limit, so it would otherwise pass through the guard that exists
+    # to protect the connection. CartesiaSTTService._prepare_keyterms strips for the same reason.
+    terms = [stripped for term in keyterms if (stripped := str(term).strip())]
+    if len(terms) < len(keyterms):
+        logger.warning(
+            f"Deepgram refuses a connection carrying an empty keyterm; "
+            f"dropping {len(keyterms) - len(terms)} blank keyterm(s)"
+        )
+
+    prepared = [term for term in terms if len(term) <= _MAX_KEYTERM_CHARS]
+    if len(prepared) < len(terms):
+        logger.warning(
+            f"Deepgram accepts keyterms of at most {_MAX_KEYTERM_CHARS} characters; "
+            f"dropping {len(terms) - len(prepared)} keyterm(s)"
+        )
+
+    if len(prepared) > _MAX_KEYTERMS:
+        logger.warning(
+            f"Deepgram accepts at most {_MAX_KEYTERMS} keyterms; "
+            f"dropping {len(prepared) - _MAX_KEYTERMS} keyterm(s)"
+        )
+        prepared = prepared[:_MAX_KEYTERMS]
+
+    return prepared
+
+
+# Flux accepts an eager threshold in this range and at or below the end-of-turn
+# threshold, which it defaults to 0.7 when a connection sets none.
+_EAGER_EOT_THRESHOLD_RANGE = (0.3, 0.9)
+_DEFAULT_EOT_THRESHOLD = 0.7
+
+
+def _prepare_eager_eot_threshold(eager: float | None, eot: float | None) -> float | None:
+    """Drop an eager end-of-turn threshold Flux would refuse the connection for.
+
+    Dropping leaves eager end-of-turn off, which is its default, rather than
+    losing the connection to a value Flux will not accept.
+
+    Args:
+        eager: Eager end-of-turn threshold from settings.
+        eot: End-of-turn threshold from settings, if any.
+
+    Returns:
+        The eager threshold to send, or None to leave it unset.
+    """
+    if eager is None:
+        return None
+
+    low, high = _EAGER_EOT_THRESHOLD_RANGE
+    ceiling = min(high, eot if eot is not None else _DEFAULT_EOT_THRESHOLD)
+    if not low <= eager <= ceiling:
+        logger.warning(
+            f"eager_eot_threshold ({eager}) must be between {low} and {ceiling}; "
+            "dropping eager_eot_threshold"
+        )
+        return None
+
+    return eager
+
+
 def _code_to_pipecat_language(code: str) -> Language | None:
     """Convert a Deepgram-returned language code to a Pipecat Language."""
     try:
@@ -140,13 +221,20 @@ class DeepgramFluxSTTSettings(STTSettings):
     """Settings for DeepgramFluxSTTService.
 
     Parameters:
-        eager_eot_threshold: EagerEndOfTurn/TurnResumed threshold. Off by default.
+        eager_eot_threshold: EagerEndOfTurn/TurnResumed threshold, 0.3-0.9. Off by
+            default.
             Lower values = more aggressive (faster response, more LLM calls).
             Higher values = more conservative (slower response, fewer LLM calls).
-        eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
+            Must not exceed ``eot_threshold``, which Flux defaults to 0.7 when
+            unset; a value above it is dropped with a warning, since Flux refuses
+            the connection outright for it.
+        eot_threshold: End-of-turn confidence required to finish a turn, 0.5-1.0
+            (default 0.7).
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
-            confidence (default 5000).
+            confidence, 500-60000 (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
+            Deepgram accepts at most 100 keyterms of 100 characters each on a
+            connection; anything beyond that is dropped with a warning.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
             Read only from the connection URL, so an update is applied by
@@ -388,11 +476,16 @@ class DeepgramFluxSTTBase(STTService):
             f"encoding={self._encoding}",
         ]
 
-        if self._settings.eager_eot_threshold is not None:
-            params.append(f"eager_eot_threshold={self._settings.eager_eot_threshold}")
+        eot_threshold = assert_given(self._settings.eot_threshold)
+        eager_eot_threshold = _prepare_eager_eot_threshold(
+            assert_given(self._settings.eager_eot_threshold), eot_threshold
+        )
 
-        if self._settings.eot_threshold is not None:
-            params.append(f"eot_threshold={self._settings.eot_threshold}")
+        if eager_eot_threshold is not None:
+            params.append(f"eager_eot_threshold={eager_eot_threshold}")
+
+        if eot_threshold is not None:
+            params.append(f"eot_threshold={eot_threshold}")
 
         if self._settings.eot_timeout_ms is not None:
             params.append(f"eot_timeout_ms={self._settings.eot_timeout_ms}")
@@ -410,7 +503,7 @@ class DeepgramFluxSTTBase(STTService):
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
         # Add keyterm parameters (can have multiple)
-        for keyterm in assert_given(self._settings.keyterm):
+        for keyterm in _prepare_keyterms(assert_given(self._settings.keyterm)):
             params.append(urlencode({"keyterm": keyterm}))
 
         # Add tag parameters (can have multiple)
@@ -555,6 +648,8 @@ class DeepgramFluxSTTBase(STTService):
 
         message: dict[str, Any] = {"type": "Configure"}
 
+        # Sent as given: Flux answers a Configure it won't accept with
+        # ConfigureFailure and keeps the stream on its previous configuration.
         if "keyterm" in fields:
             message["keyterms"] = self._settings.keyterm
 
