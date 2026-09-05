@@ -14,9 +14,12 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
+from pipecat.frames.frames import OutputAudioRawFrame
+from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
+    FastAPIWebsocketOutputTransport,
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
     _WebSocketMessageIterator,
@@ -328,3 +331,91 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAudioPacingWhenTheSerializerEmitsNothing(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #5592.
+
+    ``_write_audio_sleep`` is a clock: it advances ``_next_send_time`` by one send interval per
+    call so the transport emulates an audio device. A stream resampler accumulates across calls
+    and emits nothing for most of them, so the serializer returns no payload for a frame it
+    accepted. Skipping the clock on those frames lets the output queue, and the
+    ``TTSStoppedFrame`` behind it, drain faster than playout.
+    """
+
+    class _BufferingSerializer(FrameSerializer):
+        """Emits a payload only every ``emit_every`` calls, as a stream resampler does."""
+
+        def __init__(self, emit_every: int | None):
+            super().__init__()
+            self._emit_every = emit_every
+            self.calls = 0
+
+        async def serialize(self, frame):
+            self.calls += 1
+            if self._emit_every is None:
+                return None
+            return b"payload" if self.calls % self._emit_every == 0 else None
+
+        async def deserialize(self, data):
+            return None
+
+    def _make_output(self, emit_every):
+        client = AsyncMock()
+        type(client).is_closing = PropertyMock(return_value=False)
+        type(client).is_connected = PropertyMock(return_value=True)
+
+        serializer = self._BufferingSerializer(emit_every)
+
+        params = FastAPIWebsocketParams(audio_out_enabled=True, serializer=serializer)
+        output = FastAPIWebsocketOutputTransport(
+            transport=AsyncMock(), client=client, params=params
+        )
+        output._send_interval = 0.04
+        output._next_send_time = 0
+        return output
+
+    async def _write(self, output, count):
+        paced = 0
+
+        async def counting_sleep():
+            nonlocal paced
+            paced += 1
+
+        output._write_audio_sleep = counting_sleep
+
+        results = []
+        for _ in range(count):
+            results.append(
+                await output.write_audio_frame(
+                    OutputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=8000, num_channels=1)
+                )
+            )
+        return paced, results
+
+    async def test_a_frame_with_no_payload_is_still_paced(self):
+        output = self._make_output(None)
+
+        paced, results = await self._write(output, 3)
+
+        self.assertEqual(paced, 3, "the clock must advance for every frame the transport took")
+        # The frame did not reach the wire on this call, and #5424 is right that the return
+        # value should say so. Pacing and delivery are separate questions.
+        self.assertEqual(results, [False, False, False])
+
+    async def test_a_frame_that_is_sent_is_still_paced(self):
+        output = self._make_output(1)
+
+        paced, results = await self._write(output, 3)
+
+        self.assertEqual(paced, 3)
+        self.assertEqual(results, [True, True, True])
+
+    async def test_every_frame_is_paced_when_the_resampler_emits_one_in_three(self):
+        """The reported shape: most calls accumulate, one in N flushes a larger block."""
+        output = self._make_output(3)
+
+        paced, results = await self._write(output, 6)
+
+        self.assertEqual(paced, 6, "all six frames were accepted, so all six must be paced")
+        self.assertEqual(results, [False, False, True, False, False, True])
