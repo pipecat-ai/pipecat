@@ -184,7 +184,7 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
         print(f"    {_bold('metrics:')}")
         for metric in result.metrics:
             score = (_green if metric.score else _red)(f"{metric.score:.2f}")
-            print(f"      {_color(metric.name + ':', '36')} {score}{_dim(' -> ' + metric.reason)}")
+            print(f"      {_color(metric.name + ':', '36')} {score}{_dim(' | ' + metric.reason)}")
     if result.end_call is not None:
         print()
         claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")
