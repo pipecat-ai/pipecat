@@ -616,7 +616,9 @@ class AggregatedFrameSequencer:
                 break  # spoken but not yet complete — wait
         return frames
 
-    def force_complete(self, context_id: str, last_word_pts: int) -> list[Frame]:
+    def force_complete(
+        self, context_id: str, last_word_pts: int, *, suppress_in_context: bool = False
+    ) -> list[Frame]:
         """Force-complete a context's incomplete spoken slots and flush skipped frames.
 
         Called at the end of an audio context to handle TTS providers that silently drop
@@ -637,6 +639,10 @@ class AggregatedFrameSequencer:
             context_id: The audio context that has ended.
             last_word_pts: PTS of the last received word frame, used as the PTS for
                 force-completed frames and forwarded to :meth:`flush`.
+            suppress_in_context: When True, force-completed remainder frames are
+                stamped ``append_to_context=False`` regardless of the context's
+                configured value. Used when the context produced no audio at all —
+                text the user never heard must not enter the LLM context.
 
         Returns:
             Combined list of TTSTextFrames (for incomplete spoken slots) and
@@ -665,6 +671,7 @@ class AggregatedFrameSequencer:
                                 last_word_pts,
                                 slot.context_id,
                                 raw_text=raw_remaining,
+                                suppress_in_context=suppress_in_context,
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
                         )
