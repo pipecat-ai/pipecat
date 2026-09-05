@@ -23,6 +23,7 @@ from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalProgress,
     EvalScriptResult,
     EvalScriptTurnProgress,
     EvalScriptTurnResult,
@@ -52,7 +53,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -64,7 +65,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             stream: The bot's output as events.
             judge: The judge for ``eval:`` assertions, or ``None``.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns and
+            progress: Awaited with an :class:`~pipecat.evals.results.EvalProgress` as turns and
                 expectations resolve.
         """
         super().__init__(
