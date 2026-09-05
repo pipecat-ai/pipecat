@@ -433,8 +433,9 @@ class EvalManifest:
             spawn: Override for the spawn command template.
             python: Override for the interpreter used to spawn bots.
             concurrency: Override for how many runs execute at once.
-            repeat: Override for how many times each (bot, scenario) pair runs; it
-                also overrides each simulation's own ``runs``.
+            repeat: Override for how many times each (bot, scenario) pair runs.
+                Set here or in the manifest, it also replaces each simulation's
+                own ``runs``, a repeat of 1 included.
             base_port: Override for the first port assigned.
             record: Override for whether to record conversation audio.
             cache_dir: Override for the synthesized-audio cache directory.
@@ -470,6 +471,10 @@ class EvalManifest:
             if concurrency is not None
             else int(data.get("concurrency", DEFAULT_CONCURRENCY))
         )
+        # A repeat set anywhere, the command line or the manifest, decides every
+        # run's attempts, a simulation's included, even when it is 1; absent, a
+        # simulation runs as many times as its file says.
+        repeat_given = repeat is not None or "repeat" in data
         repeat = repeat if repeat is not None else int(data.get("repeat", 1))
         if repeat < 1:
             raise ValueError(f"{path}: 'repeat' must be at least 1")
@@ -501,7 +506,7 @@ class EvalManifest:
                     loaded = None
                 if isinstance(loaded, EvalSimulationScenario):
                     kind = "simulation"
-                    attempts = repeat if repeat > 1 else loaded.runs
+                    attempts = repeat if repeat_given else loaded.runs
                     threshold = loaded.pass_threshold
                 runs.append(
                     EvalRun(

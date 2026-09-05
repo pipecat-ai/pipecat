@@ -263,6 +263,13 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
         self.assertEqual(manifest.runs[0].attempts, 2)
 
+    def test_a_repeat_of_one_is_an_override_too(self):
+        """Set on the command line or in the manifest, 1 means one run, not the file's three."""
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=1)
+        self.assertEqual([r.attempt for r in manifest.runs], [1])
+        manifest = self._manifest("repeat: 1\nsuite:\n  - bot: bot.py\n    scenarios: [book]\n")
+        self.assertEqual([r.attempt for r in manifest.runs], [1])
+
     def test_a_missing_scenario_still_gets_a_run(self):
         """Its kind can't be read, so it runs once as a scenario and reports the error."""
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")

@@ -1022,8 +1022,8 @@ def suite(
         "-r",
         "--repeat",
         help="Run each (bot, scenario) this many times, to measure flakiness, and "
-        "each simulation this many times instead of its own runs. Attempts "
-        "interleave across bots and each writes its own logs.",
+        "each simulation this many times instead of its own runs (1 included). "
+        "Attempts interleave across bots and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
