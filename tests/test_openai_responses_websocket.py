@@ -507,52 +507,100 @@ class TestReceiveResponseEventsFunctionCalls:
 # ---------------------------------------------------------------------------
 
 
+async def _terminal_error_msg(event):
+    """Run one terminal event through the receive loop and return the pushed error."""
+    service = _make_service()
+    service.stop_ttfb_metrics = AsyncMock()
+    service.start_llm_usage_metrics = AsyncMock()
+    service.push_error = AsyncMock()
+    service._websocket = _ws_events(event)
+
+    context = MagicMock(spec=LLMContext)
+    await service._receive_response_events(context, [])
+
+    service.push_error.assert_called_once()
+    return service.push_error.call_args.kwargs["error_msg"]
+
+
 class TestReceiveResponseEventsErrors:
+    """A terminal response event must report the reason the server gave.
+
+    A failure carries it on `error` and a truncation on `incomplete_details`,
+    so the two events read different fields. The messages match the HTTP
+    variant's exactly, so a log or a failover reads the same on either
+    transport.
+    """
+
     @pytest.mark.asyncio
     async def test_response_failed_pushes_error(self):
-        service = _make_service()
-        service.stop_ttfb_metrics = AsyncMock()
-        service.start_llm_usage_metrics = AsyncMock()
-        service.push_error = AsyncMock()
-
-        ws = _ws_events(
+        error_msg = await _terminal_error_msg(
             {
                 "type": "response.failed",
                 "response": {
                     "id": "resp_1",
-                    "status_details": {
-                        "error": {"message": "Content filter triggered"},
-                    },
+                    "error": {"code": "server_error", "message": "Content filter triggered"},
                 },
             },
         )
-        service._websocket = ws
 
-        context = MagicMock(spec=LLMContext)
-        await service._receive_response_events(context, [])
+        assert error_msg == "LLM response error: Content filter triggered"
 
-        service.push_error.assert_called_once()
-        assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
+    @pytest.mark.asyncio
+    async def test_response_failed_without_error_details(self):
+        """A server may omit the error object on a failed response.
+
+        The handler must still push an error rather than raise on the missing
+        key.
+        """
+        error_msg = await _terminal_error_msg(
+            {
+                "type": "response.failed",
+                "response": {"id": "resp_1"},
+            },
+        )
+
+        assert error_msg == "LLM response error: Response failed"
+
+    @pytest.mark.asyncio
+    async def test_response_failed_with_empty_error_message(self):
+        """A server may send an error object whose message is empty.
+
+        The generic fallback must still apply, so the pushed error is never
+        just the bare prefix.
+        """
+        error_msg = await _terminal_error_msg(
+            {
+                "type": "response.failed",
+                "response": {"id": "resp_1", "error": {"code": "server_error", "message": ""}},
+            },
+        )
+
+        assert error_msg == "LLM response error: Response failed"
 
     @pytest.mark.asyncio
     async def test_response_incomplete_pushes_error(self):
-        service = _make_service()
-        service.stop_ttfb_metrics = AsyncMock()
-        service.start_llm_usage_metrics = AsyncMock()
-        service.push_error = AsyncMock()
-
-        ws = _ws_events(
+        error_msg = await _terminal_error_msg(
             {
                 "type": "response.incomplete",
-                "response": {"id": "resp_1", "status_details": None},
+                "response": {
+                    "id": "resp_1",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                },
             },
         )
-        service._websocket = ws
 
-        context = MagicMock(spec=LLMContext)
-        await service._receive_response_events(context, [])
+        assert error_msg == "LLM response error: max_output_tokens"
 
-        service.push_error.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_response_incomplete_without_details(self):
+        error_msg = await _terminal_error_msg(
+            {
+                "type": "response.incomplete",
+                "response": {"id": "resp_1", "incomplete_details": None},
+            },
+        )
+
+        assert error_msg == "LLM response error: Response incomplete"
 
     @pytest.mark.asyncio
     async def test_previous_response_not_found_raises(self):
