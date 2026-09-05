@@ -7,6 +7,7 @@
 import asyncio
 import dataclasses
 import unittest
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -384,6 +385,130 @@ async def test_connection_wait_returns_once_confirmed():
     service._connection_established_event.set()
 
     await service._await_connection_established()
+
+
+# ---------------------------------------------------------------------------
+# Connection parameter limits
+#
+# Flux refuses the whole connection for a value outside the limits it documents,
+# which costs the session its STT. Values it would refuse are normalized before
+# they reach the connection URL.
+# ---------------------------------------------------------------------------
+
+
+def _query_params(**settings) -> dict[str, list[str]]:
+    """Build the connection query string for the given settings, parsed.
+
+    Constructing the service opens no connection and starts no task, so the
+    instance needs no teardown.
+    """
+    service = DeepgramFluxSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        settings=DeepgramFluxSTTService.Settings(**settings),
+    )
+    # sample_rate is normally set during setup, which these tests skip.
+    service._sample_rate = 16000
+    return parse_qs(service._build_query_string())
+
+
+def test_query_string_drops_eager_threshold_above_eot_threshold():
+    """Flux refuses the connection for it, so it is dropped rather than sent."""
+    params = _query_params(eot_threshold=0.85, eager_eot_threshold=0.9)
+
+    assert "eager_eot_threshold" not in params
+    assert params["eot_threshold"] == ["0.85"]
+
+
+def test_query_string_drops_eager_threshold_above_the_default_eot_threshold():
+    """Flux compares against its own default when the connection sets no eot_threshold.
+
+    Turning eager end-of-turn on without setting eot_threshold is the documented
+    way to use it, so this is the configuration most likely to be refused.
+    """
+    params = _query_params(eager_eot_threshold=0.8)
+
+    assert "eager_eot_threshold" not in params
+    assert "eot_threshold" not in params
+
+
+def test_query_string_drops_eager_threshold_below_the_accepted_range():
+    """Flux refuses the connection for it, the same as for one above the range."""
+    assert "eager_eot_threshold" not in _query_params(eager_eot_threshold=0.2)
+
+
+def test_query_string_drops_eager_threshold_above_the_accepted_range():
+    """The range applies even when eot_threshold leaves room above it."""
+    params = _query_params(eot_threshold=1.0, eager_eot_threshold=0.95)
+
+    assert "eager_eot_threshold" not in params
+    assert params["eot_threshold"] == ["1.0"]
+
+
+def test_query_string_keeps_eager_threshold_at_the_range_bounds():
+    """The bounds are inclusive, so a value on either is sent as given."""
+    assert _query_params(eager_eot_threshold=0.3)["eager_eot_threshold"] == ["0.3"]
+    assert _query_params(eot_threshold=1.0, eager_eot_threshold=0.9)["eager_eot_threshold"] == [
+        "0.9"
+    ]
+
+
+def test_query_string_truncates_keyterms_to_the_connection_limit():
+    """An oversized list is truncated instead of failing the connection."""
+    terms = [f"term{i}" for i in range(150)]
+
+    assert _query_params(keyterm=terms)["keyterm"] == terms[:100]
+
+
+def test_query_string_keeps_keyterms_at_the_connection_limit():
+    """A list at the limit is sent whole."""
+    terms = [f"term{i}" for i in range(100)]
+
+    assert _query_params(keyterm=terms)["keyterm"] == terms
+
+
+def test_query_string_truncates_one_keyterm_over_the_connection_limit():
+    """The limit is a maximum, not a threshold one term above it."""
+    terms = [f"term{i}" for i in range(101)]
+
+    assert _query_params(keyterm=terms)["keyterm"] == terms[:100]
+
+
+def test_query_string_drops_keyterms_over_the_character_limit():
+    """Flux refuses the connection for an over-long keyterm, so it is dropped."""
+    params = _query_params(keyterm=["a" * 100, "b" * 101, "fine"])
+
+    assert params["keyterm"] == ["a" * 100, "fine"]
+
+
+def test_query_string_drops_a_blank_keyterm():
+    """Flux refuses the connection for an empty keyterm, and a blank is under the length limit.
+
+    The character filter alone lets "" through, so the guard meant to protect the connection
+    would have been what killed it. Deepgram answers HTTP 400 "Query included a keyterm that was
+    the empty string".
+    """
+    params = _query_params(keyterm=["alpha", "", "   ", "beta"])
+
+    assert params["keyterm"] == ["alpha", "beta"]
+
+
+def test_query_string_strips_surrounding_whitespace_from_a_keyterm():
+    """Stripping is what makes a whitespace-only term blank, so the sent term is the stripped one."""
+    assert _query_params(keyterm=["  alpha  "])["keyterm"] == ["alpha"]
+
+
+def test_query_string_applies_both_guards_on_one_connection():
+    """An invalid threshold and an oversized keyterm list are handled together."""
+    params = _query_params(
+        eot_threshold=0.85,
+        eager_eot_threshold=0.9,
+        keyterm=[f"term{i}" for i in range(150)],
+    )
+
+    assert "eager_eot_threshold" not in params
+    assert params["eot_threshold"] == ["0.85"]
+    assert len(params["keyterm"]) == 100
 
 
 if __name__ == "__main__":
