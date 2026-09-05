@@ -81,6 +81,20 @@ class TestScenarioPathExpansion(unittest.TestCase):
 
         self.assertEqual(paths, [directory / "alpha.yaml", directory / "beta.yml"])
 
+    def test_include_fragments_are_left_out(self):
+        """The judge, user, and simulator blocks a directory's scenarios include have no name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "alpha.yaml").write_text("name: alpha\nturns: []\n")
+            (directory / "judge_text.yaml").write_text("modality: text\n")
+            (directory / "simulator.yaml").write_text("service: openai\n")
+            # Not valid YAML: still taken, so the run reports it instead of hiding it.
+            (directory / "broken.yaml").write_text("name: [broken\n")
+
+            paths = _expand_scenario_paths([directory])
+
+        self.assertEqual(paths, [directory / "alpha.yaml", directory / "broken.yaml"])
+
     def test_file_arguments_are_preserved(self):
         scenario = Path("scenario.yaml")
         self.assertEqual(_expand_scenario_paths([scenario]), [scenario])

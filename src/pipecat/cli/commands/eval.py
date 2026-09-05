@@ -33,6 +33,7 @@ from pipecat.evals.scenario import (
     EvalSimulationScenario,
     describe_config,
     describe_simulation,
+    is_scenario_file,
     load_scenario_file,
 )
 from pipecat.evals.script_session import EvalScriptSession
@@ -170,7 +171,9 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
     """Expand directory arguments into sorted YAML scenario paths.
 
     Both YAML suffixes are taken, matching the scenario names a manifest
-    resolves.
+    resolves. The fragments scenarios ``!include`` (judge, user, and simulator
+    blocks, which have no ``name:``) are left out; a file given explicitly is
+    always taken.
     """
     expanded: list[Path] = []
     for path in paths:
@@ -181,7 +184,9 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
         scenario_paths = sorted(
             scenario_path
             for scenario_path in path.iterdir()
-            if scenario_path.suffix in SCENARIO_SUFFIXES and scenario_path.is_file()
+            if scenario_path.suffix in SCENARIO_SUFFIXES
+            and scenario_path.is_file()
+            and is_scenario_file(scenario_path)
         )
         if not scenario_paths:
             raise typer.BadParameter(f"No .yaml or .yml scenario files found in {path}")
