@@ -273,13 +273,16 @@ order, quote a policy.
 ./run.sh -s order_pizza -r 5       # one simulation, five runs
 ```
 
-Each simulation file names how many times it runs (`runs`) and the success rate
-it needs (`pass_threshold`); a persona does not say the same thing twice, so a
-single run is an anecdote. The release set runs each three times and passes at
-two out of three. `--repeat` overrides the count for a sweep. The suite prints
-a per-simulation pass rate, mean quality, and a ✓ or ✗ against the threshold,
-and exits non-zero when any simulation misses it. A run that errored (the bot
-never came up, the persona's LLM failed) is reported but kept out of the rate.
+Each simulation file names how many times it runs (`runs`), and every run must
+pass; a persona does not say the same thing twice, so a single run is an
+anecdote and the release set runs each three times. A run passes when the judge
+says the bot did its job (`success`) and no metric with a `min_quality` scored
+below it; a run that fails says which of those gave way. The suite prints a
+per-simulation pass rate, mean quality, and a ✓ or ✗ for whether every run
+passed, and exits non-zero when one did not. `--repeat` turns the whole thing
+into a measurement: rates are reported and the exit code stays 0. A run that
+errored (the bot never came up, the persona's LLM failed) is reported but kept
+out of the rate.
 
 | Simulation                | Bot                                              | The caller                                                       |
 | ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |

@@ -166,19 +166,24 @@ SIMULATION_ENDINGS = (
 
 @dataclass
 class EvalSimulationMetricScore:
-    """One judged quality criterion's outcome for a simulation run.
+    """One quality metric's outcome for a simulation run.
 
     Parameters:
         name: The metric's name, from the simulation file.
-        score: 1.0 if the judge said the criterion held, else 0.0.
+        score: 1.0 if the judge said the criterion held, else 0.0; ``None``
+            when nothing could be scored.
+        passed: Whether the metric let the run pass: its score reached its
+            ``min_quality``, or it has none.
         reason: The judge's justification.
-        weight: The metric's weight in :attr:`EvalSimulationResult.quality`.
+        min_quality: The score the metric needed, or ``None`` when it only
+            reports.
     """
 
     name: str
-    score: float
+    score: float | None
+    passed: bool = True
     reason: str = ""
-    weight: float = 1.0
+    min_quality: float | None = None
 
 
 @dataclass
@@ -192,8 +197,10 @@ class EvalSimulationResult:
         error: When set, the run did not complete (a failed connect, a harness
             error); ``succeeded`` is then False and the run is neither a goal
             success nor a goal failure.
-        quality: Weighted mean of the metrics' scores, or None without metrics.
-        metrics: The judged quality criteria's outcomes.
+        quality: Plain mean of the metrics' scores, or None without metrics. It
+            is reported and trended; what gates the run is each metric's own
+            ``passed``.
+        metrics: The quality metrics' outcomes.
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use).
         turns: How many turns the persona took.
@@ -221,8 +228,21 @@ class EvalSimulationResult:
 
     @property
     def passed(self) -> bool:
-        """Whether the run completed and achieved its goal."""
-        return self.error is None and self.succeeded
+        """Whether the run completed, achieved its goal, and no metric fell short."""
+        return self.error is None and self.succeeded and all(m.passed for m in self.metrics)
+
+    @property
+    def failure(self) -> str | None:
+        """Why the run did not pass, or ``None``: the error, the goal, or the first failed metric."""
+        if self.error is not None:
+            return self.error
+        if not self.succeeded:
+            return f"goal not met: {self.reason}"
+        for metric in self.metrics:
+            if not metric.passed:
+                score = "unscored" if metric.score is None else f"{metric.score:.2f}"
+                return f"{metric.name} {score} below {metric.min_quality:.2f}: {metric.reason}"
+        return None
 
 
 @dataclass

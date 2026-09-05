@@ -26,6 +26,7 @@ takes either; a file with a ``persona:`` is a simulation (see
     metrics:
       - name: politeness
         criterion: "the bot stayed courteous throughout"
+        min_quality: 1
     max_turns: 10
 
 Fields:
@@ -49,21 +50,27 @@ Fields:
     since every persona turn is synthesized.
 
 ``success``
-    the goal criterion the judge decides over the whole conversation; the run
+    what counts as the bot having done its job, judged over the whole
+    conversation; prose, as long as it needs to be. It is the bot's side of the
+    ``goal``: usually that the caller got what they asked for, but where the
+    right outcome is to refuse, to qualify, or to escalate, it says so. The run
     succeeded if the judge says yes.
 
 ``metrics``
-    judged quality criteria, each with ``name``, ``criterion`` and an optional
-    ``weight`` (default 1). Each scores 1 (the judge says yes) or 0, and they
-    roll up into the run's ``quality`` as a weighted mean.
+    judged quality criteria, each with ``name``, ``criterion``, and an optional
+    ``min_quality`` in 0..1. Each scores 1 (the judge says yes) or 0, and a
+    metric with a ``min_quality`` fails the run when its score is below it; one
+    without is reported and never fails anything. The run's ``quality`` is the
+    plain mean of the scores.
 
 ``max_turns``, ``max_duration_s``
     backstops on the persona's turns (default 20) and on the run's wall clock
     (default 300 s). A run they end has not succeeded.
 
-``runs``, ``pass_threshold``
-    how many times the suite runs the simulation (default 1) and the success
-    rate it needs to pass (default 1.0).
+``runs``
+    how many times the suite runs the simulation (default 1). Every run must
+    pass: a persona does not say the same thing twice, so one run is an
+    anecdote and three are a check.
 """
 
 from dataclasses import dataclass, field
@@ -93,13 +100,14 @@ class EvalSimulationMetric:
 
     Parameters:
         name: The metric's name in the results.
-        criterion: What the judge decides over the whole conversation.
-        weight: Its weight in the run's ``quality``.
+        criterion: What the judge decides.
+        min_quality: The score, in 0..1, below which the metric fails the run;
+            ``None`` reports the score without gating.
     """
 
     name: str
     criterion: str
-    weight: float = 1.0
+    min_quality: float | None = None
 
 
 @dataclass
@@ -112,7 +120,7 @@ class EvalSimulationScenario:
         goal: What the caller wants from the call.
         simulator: The persona LLM config (``service``, ``model``, optional
             ``endpoint`` / ``extra``), the same shape as ``judge.eval``.
-        success: The goal criterion the judge decides over the conversation.
+        success: What counts as the bot having done its job, for the judge.
         metrics: The judged quality criteria.
         judge: Judge LLM config, as for a scenario.
         bot_audio: Whether the bot speaks (``judge.modality: audio``).
@@ -123,8 +131,7 @@ class EvalSimulationScenario:
             audio modality, else None.
         max_turns: Cap on the persona's turns.
         max_duration_s: Cap on the run's wall clock, in seconds.
-        runs: How many times the suite runs the simulation.
-        pass_threshold: Success rate the suite needs to pass the simulation.
+        runs: How many times the suite runs the simulation; every run must pass.
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when the connection ends.
         source_path: Path the simulation was loaded from, for error messages.
@@ -144,7 +151,6 @@ class EvalSimulationScenario:
     max_turns: int = DEFAULT_MAX_TURNS
     max_duration_s: float = DEFAULT_MAX_DURATION_S
     runs: int = 1
-    pass_threshold: float = 1.0
     trigger_disconnect: bool = False
     source_path: Path | None = None
 
@@ -201,7 +207,6 @@ class EvalSimulationScenario:
             max_turns=_positive_int(data, "max_turns", DEFAULT_MAX_TURNS, path),
             max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
             runs=_positive_int(data, "runs", 1, path),
-            pass_threshold=_positive_number(data, "pass_threshold", 1.0, path),
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
         )
@@ -223,10 +228,22 @@ def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:
             raise ValueError(f"{path}: metric #{idx} needs a 'name:'")
         if not criterion or not isinstance(criterion, str):
             raise ValueError(f"{path}: metric {name!r} needs a 'criterion:' for the judge")
-        weight = item.get("weight", 1.0)
-        if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
-            raise ValueError(f"{path}: metric {name!r} 'weight:' must be a positive number")
-        metrics.append(EvalSimulationMetric(name=name, criterion=criterion, weight=float(weight)))
+        if name in {m.name for m in metrics}:
+            raise ValueError(f"{path}: metric {name!r} is listed twice")
+        min_quality = item.get("min_quality")
+        if min_quality is not None and (
+            isinstance(min_quality, bool)
+            or not isinstance(min_quality, (int, float))
+            or not 0 <= min_quality <= 1
+        ):
+            raise ValueError(f"{path}: metric {name!r} 'min_quality:' must be a number in 0..1")
+        metrics.append(
+            EvalSimulationMetric(
+                name=name,
+                criterion=criterion,
+                min_quality=None if min_quality is None else float(min_quality),
+            )
+        )
     return metrics
 
 

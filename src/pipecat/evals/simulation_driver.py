@@ -208,12 +208,20 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         for metric in self._simulation.metrics:
             verdict = await self._judge.evaluate_conversation(metric.criterion, evidence=evidence)
             score = 1.0 if verdict.verdict == "yes" else 0.0
+            passed = metric.min_quality is None or score >= metric.min_quality
             self._metrics.append(
                 EvalSimulationMetricScore(
-                    name=metric.name, score=score, reason=verdict.reason, weight=metric.weight
+                    name=metric.name,
+                    score=score,
+                    passed=passed,
+                    reason=verdict.reason,
+                    min_quality=metric.min_quality,
                 )
             )
-            self._trace.log(f"judge: {metric.name} = {score:g}: {verdict.reason}")
+            self._trace.log(
+                f"judge: {metric.name} = {score:.2f}"
+                f"{'' if passed else f' (below {metric.min_quality:.2f})'}: {verdict.reason}"
+            )
 
     def result(
         self,
@@ -226,8 +234,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     ) -> EvalSimulationResult:
         """The run's result; a run-level failure makes it an error, not a goal failure."""
         error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
-        weights = sum(m.weight for m in self._metrics)
-        quality = sum(m.score * m.weight for m in self._metrics) / weights if weights else None
+        scores = [m.score for m in self._metrics if m.score is not None]
+        quality = sum(scores) / len(scores) if scores else None
         return EvalSimulationResult(
             simulation_name=self._simulation.name,
             succeeded=self._succeeded and error is None,

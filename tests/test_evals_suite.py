@@ -217,7 +217,6 @@ goal: "Get it done."
 simulator: {{service: openai}}
 success: "it got done"
 runs: {runs}
-pass_threshold: 0.5
 """
 
 
@@ -249,12 +248,12 @@ class TestManifestSimulations(unittest.TestCase):
         book = by_name["book"][0]
         self.assertEqual(book.kind, "simulation")
         self.assertEqual(book.attempts, 3)
-        self.assertEqual(book.pass_threshold, 0.5)
+        self.assertFalse(book.sweep)  # its runs are a requirement
         self.assertEqual(book.scenario_path, self.base / "scenarios" / "book.yaml")
         greet = by_name["greet"][0]
         self.assertEqual(greet.kind, "script")
         self.assertEqual(greet.attempts, 1)
-        self.assertIsNone(greet.pass_threshold)
+        self.assertFalse(greet.sweep)
         # Attempt-major: every scenario's first attempt precedes any second one.
         self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
 
@@ -262,6 +261,8 @@ class TestManifestSimulations(unittest.TestCase):
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=2)
         self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
         self.assertEqual(manifest.runs[0].attempts, 2)
+        # A repeat makes the suite a measurement.
+        self.assertTrue(all(r.sweep for r in manifest.runs))
 
     def test_a_repeat_of_one_is_an_override_too(self):
         """Set on the command line or in the manifest, 1 means one run, not the file's three."""
@@ -276,7 +277,6 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual(len(manifest.runs), 1)
         self.assertEqual(manifest.runs[0].kind, "script")
         self.assertEqual(manifest.runs[0].attempts, 1)
-        self.assertIsNone(manifest.runs[0].pass_threshold)
 
 
 class TestSimulationRecords(unittest.TestCase):
@@ -286,9 +286,7 @@ class TestSimulationRecords(unittest.TestCase):
             succeeded=True,
             reason="booked",
             quality=0.5,
-            metrics=[
-                EvalSimulationMetricScore(name="politeness", score=1.0, reason="nice", weight=1.0)
-            ],
+            metrics=[EvalSimulationMetricScore(name="politeness", score=1.0, reason="nice")],
             messages=[{"role": "user", "content": "hi"}],
             turns=2,
             ended_by="end_call",
@@ -309,7 +307,6 @@ class TestSimulationRecords(unittest.TestCase):
                 scenario_path=base / "book.yaml",
                 kind="simulation",
                 attempts=3,
-                pass_threshold=0.5,
                 attempt=2,
                 status="done",
                 duration_ms=1234,

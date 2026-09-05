@@ -41,8 +41,7 @@ Manifest format (YAML)::
 A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
 simulation, and the file says which (see
 :func:`~pipecat.evals.scenario.load_scenario_file`). A simulation runs as many
-times as its ``runs:`` says and passes if its success rate over them meets its
-``pass_threshold:``.
+times as its ``runs:`` says, and every run must pass.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
 passed to the bot as ``--runner-body``, supplying runner-args data it would
@@ -241,8 +240,8 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     """The results.jsonl record of a simulation run.
 
-    Enough to compute a success rate and a mean quality, and to see how each
-    run ended and what the judge said; the conversation and, for a run that
+    Enough to compute a pass rate and a mean quality, and to see how each
+    run ended, what the judge said, and which metric fell short; the conversation and, for a run that
     did not pass, the events the bot emitted are attached for diagnosis.
     """
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
@@ -258,7 +257,13 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "turns": result.turns if result else 0,
         "quality": result.quality if result else None,
         "metrics": [
-            {"name": m.name, "score": m.score, "weight": m.weight, "reason": m.reason}
+            {
+                "name": m.name,
+                "score": m.score,
+                "passed": m.passed,
+                "min_quality": m.min_quality,
+                "reason": m.reason,
+            }
             for m in (result.metrics if result else [])
         ],
         "reason": result.reason if result else "",
@@ -335,11 +340,12 @@ class EvalRun:
         scenario_path: Path to the scenario or simulation file.
         kind: ``script`` (played by :class:`~pipecat.evals.script_session.EvalScriptSession`)
             or ``simulation`` (:class:`~pipecat.evals.simulation_session.EvalSimulationSession`).
-        attempts: How many times this (bot, scenario) pair runs in the sweep: the
-            manifest's ``repeat`` for a scenario, a simulation's ``runs``. Above 1,
-            each attempt's artifacts carry its number.
-        pass_threshold: For a simulation, the success rate over its attempts it
-            needs to pass; ``None`` for a scenario.
+        attempts: How many times this (bot, scenario) pair runs: the manifest's
+            ``repeat``, or a simulation's own ``runs``. Above 1, each attempt's
+            artifacts carry its number.
+        sweep: Whether the attempts come from a ``repeat`` (a measurement: the
+            suite reports a rate and a failure is data) rather than from a
+            simulation's ``runs`` (a requirement: every attempt must pass).
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
         runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
@@ -360,7 +366,7 @@ class EvalRun:
     runner_body_path: Path | None = None
     kind: str = "script"
     attempts: int = 1
-    pass_threshold: float | None = None
+    sweep: bool = False
     attempt: int = 1
     status: str = "pending"
     result: EvalScriptResult | EvalSimulationResult | None = None
@@ -496,10 +502,11 @@ class EvalManifest:
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, scenarios_dir_p)
                 # The file says whether it is a scripted scenario or a simulation. A
-                # simulation runs as many times as its file says (or the repeat
-                # override), for a success rate. A file that fails to load still
-                # gets its run, which reports the load error.
-                kind, attempts, threshold = "script", repeat, None
+                # simulation runs as many times as its file says, every one of them
+                # to pass, unless a repeat makes the whole suite a measurement. A
+                # file that fails to load still gets its run, which reports the
+                # load error.
+                kind, attempts = "script", repeat
                 try:
                     loaded = load_scenario_file(scenario_path)
                 except (ValueError, FileNotFoundError):
@@ -507,7 +514,6 @@ class EvalManifest:
                 if isinstance(loaded, EvalSimulationScenario):
                     kind = "simulation"
                     attempts = repeat if repeat_given else loaded.runs
-                    threshold = loaded.pass_threshold
                 runs.append(
                     EvalRun(
                         bot=bot,
@@ -517,7 +523,7 @@ class EvalManifest:
                         runner_body_path=runner_body_path,
                         kind=kind,
                         attempts=attempts,
-                        pass_threshold=threshold,
+                        sweep=repeat_given,
                     )
                 )
 

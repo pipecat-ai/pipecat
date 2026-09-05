@@ -16,7 +16,7 @@ from pipecat.cli.commands.eval import (
     _eval_verdict,
     _expand_scenario_paths,
     _finalize_evals,
-    _group_below_threshold,
+    _group_outcome,
     _print_progress,
     _turn_tally,
 )
@@ -116,7 +116,7 @@ def _simulation_run(
     *,
     attempt: int = 1,
     attempts: int = 3,
-    threshold: float | None = 0.67,
+    sweep: bool = False,
     quality: float | None = 1.0,
 ) -> EvalRun:
     """A finished simulation run; ``succeeded=None`` is one that errored out."""
@@ -139,7 +139,7 @@ def _simulation_run(
         kind="simulation",
         attempt=attempt,
         attempts=attempts,
-        pass_threshold=threshold,
+        sweep=sweep,
         status="done",
         result=result,
     )
@@ -173,40 +173,32 @@ class TestSimulationVerdicts(unittest.TestCase):
         self.assertEqual(_turn_tally(_simulation_run(True)), "quality 1.00 · end_call")
         self.assertEqual(_turn_tally(_simulation_run(False, quality=None)), "max_turns")
 
-    def test_rate_is_measured_against_the_threshold(self):
-        two_of_three = [_simulation_run(s, attempt=i) for i, s in enumerate((True, True, False), 1)]
-        self.assertFalse(_group_below_threshold(two_of_three))
-        one_of_three = [
-            _simulation_run(s, attempt=i) for i, s in enumerate((True, False, False), 1)
-        ]
-        self.assertTrue(_group_below_threshold(one_of_three))
-
     def test_errored_runs_stay_out_of_the_rate(self):
-        # One success out of one completed run meets any threshold; the errors are
-        # reported on their own rather than counted as the bot failing.
+        # The errors are reported on their own rather than counted as the bot failing.
         group = [_simulation_run(s, attempt=i) for i, s in enumerate((True, None, None), 1)]
-        self.assertFalse(_group_below_threshold(group))
-        self.assertTrue(_group_below_threshold([_simulation_run(None)]))
+        self.assertEqual(_group_outcome(group)[:3], (1, 1, 2))
 
-    def test_scenario_groups_have_no_threshold(self):
-        self.assertFalse(_group_below_threshold([_run(["failed"]), _run(["passed"])]))
-
-    def test_exit_code_follows_the_threshold(self):
+    def test_every_required_run_must_pass_and_a_sweep_only_measures(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                passing = [
+                required = [
+                    _simulation_run(s, attempt=i) for i, s in enumerate((True, True, True), 1)
+                ]
+                self.assertEqual(_finalize_evals(required, Path(tmp), 1.0, False), 0)
+                one_failed = [
                     _simulation_run(s, attempt=i) for i, s in enumerate((True, True, False), 1)
                 ]
-                self.assertEqual(_finalize_evals(passing, Path(tmp), 1.0, False), 0)
-                failing = [
-                    _simulation_run(s, attempt=i) for i, s in enumerate((True, False, False), 1)
+                self.assertEqual(_finalize_evals(one_failed, Path(tmp), 1.0, False), 1)
+                # The same runs as a --repeat sweep are data, not a break.
+                sweep = [
+                    _simulation_run(s, attempt=i, sweep=True)
+                    for i, s in enumerate((True, True, False), 1)
                 ]
-                self.assertEqual(_finalize_evals(failing, Path(tmp), 1.0, False), 1)
+                self.assertEqual(_finalize_evals(sweep, Path(tmp), 1.0, False), 0)
                 # A single-run simulation is judged on that run alone.
                 self.assertEqual(
                     _finalize_evals([_simulation_run(False, attempts=1)], Path(tmp), 1.0, False),
                     1,
                 )
-            self.assertIn("below 67%", out.getvalue())
-            self.assertIn("goal not achieved", out.getvalue())
+            self.assertIn("goal not met", out.getvalue())

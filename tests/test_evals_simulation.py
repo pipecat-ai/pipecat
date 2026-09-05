@@ -49,7 +49,6 @@ class TestSimulationLoader(unittest.TestCase):
         self.assertEqual(s.max_turns, 20)
         self.assertEqual(s.max_duration_s, 300.0)
         self.assertEqual(s.runs, 1)
-        self.assertEqual(s.pass_threshold, 1.0)
         self.assertEqual(s.judge["service"], "ollama")
 
     def test_metrics_and_caps(self):
@@ -60,20 +59,32 @@ class TestSimulationLoader(unittest.TestCase):
 metrics:
   - name: politeness
     criterion: "stayed courteous"
-  - {name: accuracy, criterion: "no invented facts", weight: 2}
+  - {name: accuracy, criterion: "no invented facts", min_quality: 0.8}
 max_turns: 5
 max_duration_s: 42
 runs: 3
-pass_threshold: 0.8
 """
             )
         )
         self.assertEqual([m.name for m in s.metrics], ["politeness", "accuracy"])
-        self.assertEqual([m.weight for m in s.metrics], [1.0, 2.0])
+        self.assertEqual([m.min_quality for m in s.metrics], [None, 0.8])
         self.assertEqual(s.max_turns, 5)
         self.assertEqual(s.max_duration_s, 42.0)
         self.assertEqual(s.runs, 3)
-        self.assertEqual(s.pass_threshold, 0.8)
+
+    def test_min_quality_is_a_share_and_names_are_unique(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalSimulationScenario.load(
+                _write(MINIMAL + "metrics:\n  - {name: a, criterion: x, min_quality: 2}\n")
+            )
+        self.assertIn("0..1", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            EvalSimulationScenario.load(
+                _write(
+                    MINIMAL + "metrics:\n  - {name: a, criterion: x}\n  - {name: a, criterion: y}\n"
+                )
+            )
+        self.assertIn("twice", str(cm.exception))
 
     def test_audio_modalities(self):
         s = EvalSimulationScenario.load(
@@ -308,8 +319,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         )
         judge = _FakeConversationJudge(["yes", "yes", "no"])
         metrics = [
-            EvalSimulationMetric("politeness", "stayed polite", weight=1.0),
-            EvalSimulationMetric("brevity", "kept it short", weight=3.0),
+            EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0),
+            EvalSimulationMetric("brevity", "kept it short"),
         ]
         driver, stream, llm, client = _driver(_simulation(metrics=metrics), judge, context)
 
@@ -349,9 +360,32 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
         self.assertEqual([m.score for m in result.metrics], [1.0, 0.0])
-        self.assertAlmostEqual(result.quality or -1, 1.0 / 4.0)
+        # brevity scored 0 but gates nothing, so the run still passes.
+        self.assertEqual([m.passed for m in result.metrics], [True, True])
+        self.assertAlmostEqual(result.quality or -1, 0.5)
+        self.assertIsNone(result.failure)
         self.assertEqual(result.messages, judge.messages)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
+
+    async def test_a_metric_below_its_min_quality_fails_the_run(self):
+        judge = _FakeConversationJudge(["yes", "no"])
+        metrics = [EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0)]
+        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "What do you want."})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "The capital of Germany?"})
+            await _end_call(llm, success=True, reason="rude but answered")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        self.assertTrue(result.succeeded)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failure, "politeness 0.00 below 1.00: because stayed polite")
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []

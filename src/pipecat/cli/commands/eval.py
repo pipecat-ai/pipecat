@@ -183,8 +183,14 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
         print()
         print(f"    {_bold('metrics:')}")
         for metric in result.metrics:
-            score = (_green if metric.score else _red)(f"{metric.score:.2f}")
-            print(f"      {_color(metric.name + ':', '36')} {score}{_dim(' | ' + metric.reason)}")
+            score = (_green if metric.passed else _red)(
+                "unscored" if metric.score is None else f"{metric.score:.2f}"
+            )
+            bound = f" (min {metric.min_quality:.2f})" if metric.min_quality is not None else ""
+            print(
+                f"      {_color(metric.name + ':', '36')} {score}{_dim(bound)}"
+                f"{_dim(' | ' + metric.reason)}"
+            )
     if result.end_call is not None:
         print()
         claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")
@@ -692,8 +698,7 @@ class _EvalDashboard:
     def _render_grouped(self) -> Group:
         """One row per (bot, scenario), showing that pair's pass rate and pace.
 
-        A simulation's row also carries its mean quality, and its final ✓ or ✗ is
-        measured against its ``pass_threshold`` rather than every attempt passing.
+        A simulation's row also carries its mean quality.
         """
         table = Table.grid(padding=(0, 2))
         table.add_column()  # status
@@ -713,11 +718,7 @@ class _EvalDashboard:
             # long sweep are waiting, and animating those too would leave nothing for
             # movement to mean.
             if len(done) == len(group):
-                if group[0].pass_threshold is not None:
-                    ok = not _group_below_threshold(group)
-                else:
-                    ok = passed == len(group)
-                glyph, style, _ = _EVAL_GLYPH["passed" if ok else "failed"]
+                glyph, style, _ = _EVAL_GLYPH["passed" if passed == len(group) else "failed"]
                 status = Text(glyph, style=style)
             elif any(r.status == "running" for r in group):
                 status = Spinner("dots", style="cyan")
@@ -866,7 +867,7 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
                 print(f"{header} {_dim('— ' + result.error)}")
             else:
                 print(header)
-                print(f"      {_red('•')} goal not achieved {_dim(tally)} — {result.reason}")
+                print(f"      {_red('•')} {result.failure} {_dim(tally)}")
         elif r.result is not None:
             print(header)
             for f in r.result.failures:
@@ -897,24 +898,14 @@ def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int, float | None]:
     return passed, completed, errored, quality
 
 
-def _group_below_threshold(group: list[EvalRun]) -> bool:
-    """Whether a simulation group's success rate misses its ``pass_threshold``."""
-    threshold = group[0].pass_threshold
-    if threshold is None:
-        return False
-    passed, completed, _, _ = _group_outcome(group)
-    # Compared at the precision the rate is printed at, so two of three meets a
-    # threshold written as 0.67 rather than missing it by a rounding error.
-    return completed == 0 or round(passed / completed, 2) < threshold
-
-
 def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_rates: bool) -> None:
     """Print per-(bot, scenario) pass rates and every failure.
 
     A repeated sweep is measuring a rate, not a verdict, so the useful output is
-    how often each pair passed and which runs account for the rest. A simulation's
-    rate is measured against its ``pass_threshold``, marked ✓ or ✗ beside it, with
-    its mean quality and how many runs errored (those are outside the rate).
+    how often each pair passed and which runs account for the rest. A simulation
+    running its own ``runs`` is a requirement instead, marked ✓ or ✗ beside its
+    rate: every run had to pass. Either way the mean quality and how many runs
+    errored (those are outside the rate) follow.
     ``show_rates`` is False when the live dashboard ran: its final frame is already
     a per-(bot, scenario) rate table, so repeating it here would just duplicate it.
     """
@@ -935,12 +926,8 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
                 extra.append(f"quality {quality:.2f}")
             extra.append(_mean_duration(group))
             mark = ""
-            threshold = group[0].pass_threshold
-            if threshold is not None:
-                below = _group_below_threshold(group)
-                mark = f"  {_red('✗') if below else _green('✓')}"
-                if below:
-                    extra.append(f"below {int(threshold * 100)}%")
+            if not group[0].sweep:
+                mark = f"  {_green('✓') if passed == len(group) else _red('✗')}"
             print(
                 f"  {bot:{bot_w}s}  {_color(f'{scenario:{scenario_w}s}', '36')}  {rate}{mark}  "
                 f"{_dim(' · '.join(e for e in extra if e))}"
@@ -968,11 +955,10 @@ def _finalize_evals(
         print(f"  results: {runs_dir / 'results.jsonl'}")
         print()
         # A repeated sweep measures a pass rate; what counts as acceptable is the
-        # caller's policy, so failures here are data rather than a build break.
-        # A simulation carries its policy as its pass_threshold, and a rate below
-        # it is a break.
-        below = [g for g in _grouped_runs(runs).values() if _group_below_threshold(g)]
-        return 1 if below else 0
+        # caller's policy, so failures there are data rather than a build break.
+        # A simulation's own runs are a requirement, and one of them failing is
+        # a break.
+        return 1 if any(not r.sweep for r in failed) else 0
     _print_failures(failed, len(runs), show_attempt=False)
     print()
     # When the live dashboard ran, its last frame already shows the tally and the
@@ -1058,8 +1044,9 @@ def suite(
         "-r",
         "--repeat",
         help="Run each (bot, scenario) this many times, to measure flakiness, and "
-        "each simulation this many times instead of its own runs (1 included). "
-        "Attempts interleave across bots and each writes its own logs.",
+        "each simulation this many times instead of its own runs (1 included); a "
+        "repeated sweep reports rates and exits 0. Attempts interleave across bots "
+        "and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
