@@ -32,6 +32,7 @@ from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxConnectionNotConfirmedError,
+    FluxTurnDetection,
 )
 
 
@@ -58,6 +59,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     requests ``ExternalUserTurnStrategies`` automatically (at start, via the
     ``STTMetadataFrame`` it broadcasts); pass your own ``user_turn_strategies`` only to
     override that.
+
+    Pass ``turn_detection=FluxTurnDetection.MANUAL`` to hand turn decisions to
+    the pipeline's own user turn strategies instead, with local VAD asking Flux
+    to finalize each segment. No recommendation is made in that mode.
 
     Requirements:
 
@@ -101,6 +106,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         mip_opt_out: bool | None = None,
         tag: list | None = None,
         should_interrupt: bool = True,
+        turn_detection: FluxTurnDetection = FluxTurnDetection.AUTOMATIC,
         watchdog_min_timeout: float = 0.5,
         settings: Settings | None = None,
         **kwargs,
@@ -121,6 +127,11 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 this service recommends, which own the interruption; a
                 user-supplied ``user_turn_strategies`` overrides the
                 recommendation and this setting with it. Defaults to True.
+                Ignored under ``FluxTurnDetection.MANUAL``, where the turn start
+                strategy owns interruptions.
+            turn_detection: Who decides when a user turn ends. Defaults to
+                ``FluxTurnDetection.AUTOMATIC`` (Flux decides). See
+                :class:`~pipecat.services.deepgram.flux.stt_base.FluxTurnDetection`.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings.
@@ -150,6 +161,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            turn_detection=turn_detection,
             watchdog_min_timeout=watchdog_min_timeout,
             settings=default_settings,
             sample_rate=sample_rate,
