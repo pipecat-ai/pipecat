@@ -718,8 +718,7 @@ class _EvalDashboard:
         table.add_column()  # scenario
         table.add_column(justify="right")  # pass rate
         table.add_column(justify="right")  # mean quality (simulations)
-        table.add_column(justify="right")  # remaining
-        table.add_column(justify="right")  # mean run time
+        table.add_column(justify="right")  # remaining, then the mean run time
 
         for (bot, scenario), group in _grouped_runs(self.runs).items():
             done = [r for r in group if r.status == "done"]
@@ -737,8 +736,9 @@ class _EvalDashboard:
             else:
                 status = Text("·", style="dim")
             # The rate is over attempts that finished, so it reads as a real rate
-            # while the sweep is still going; what's left is its own column rather
-            # than a second denominator competing with it.
+            # while the sweep is still going; what's left is its own cell rather
+            # than a second denominator competing with it, and the pace takes that
+            # cell over once every attempt is in.
             remaining = len(group) - len(done)
             table.add_row(
                 status,
@@ -746,8 +746,7 @@ class _EvalDashboard:
                 Text(scenario, style="cyan"),
                 Text(_pass_rate(passed, len(done)), style=_rate_level(passed, len(done))),
                 Text(f"quality {quality:.2f}" if quality is not None else "", style="dim"),
-                Text(f"{remaining} left" if remaining else "", style="dim"),
-                Text(_mean_duration(done), style="dim"),
+                Text(f"{remaining} left" if remaining else _mean_duration(done), style="dim"),
             )
 
         total = len(self.runs)
