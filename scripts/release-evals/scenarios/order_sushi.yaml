@@ -18,9 +18,13 @@ success: "the bot took an order for three California rolls and completed the ord
 
 metrics:
   - name: accuracy
-    criterion: "the order the bot read back was three California rolls"
+    criterion: "the reply never misstates the order, three California rolls"
+    min_quality: 1
   - name: politeness
-    criterion: "the bot stayed friendly and helpful throughout"
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 5
 
 max_turns: 8
 max_duration_s: 120

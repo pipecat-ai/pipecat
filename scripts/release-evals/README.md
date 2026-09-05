@@ -268,6 +268,7 @@ bots with a job to finish: book a table, take a patient's intake, place an
 order, quote a policy.
 
 ```sh
+./run.sh -k simulation             # every simulation, nothing scripted
 ./run.sh -p flows                  # the Flows bots: their scripted scenarios and simulations
 ./run.sh -s book_table_available   # one simulation, as many runs as its file says
 ./run.sh -s order_pizza -r 5       # one simulation, five runs

@@ -20,9 +20,13 @@ success: "the bot gave a quote with a monthly premium, and then an updated quote
 
 metrics:
   - name: clarity
-    criterion: "the bot stated the premium amounts plainly, both for the first quote and the updated one"
+    criterion: "the reply never gives a quote without stating the monthly premium as a plain amount"
+    min_quality: 1
   - name: politeness
-    criterion: "the bot stayed courteous and helpful throughout"
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 5
 
 max_turns: 8
 max_duration_s: 120

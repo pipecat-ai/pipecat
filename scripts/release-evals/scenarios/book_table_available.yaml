@@ -22,9 +22,13 @@ success: "the bot confirmed a reservation for a party of two at 6 PM"
 
 metrics:
   - name: efficiency
-    criterion: "the bot reached the confirmation without asking for the same information twice"
+    criterion: "the reply does not ask the caller to repeat information they already gave (confirming it back is fine)"
+    min_quality: 1
   - name: politeness
-    criterion: "the bot stayed courteous and helpful throughout"
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 5
 
 max_turns: 8
 max_duration_s: 120

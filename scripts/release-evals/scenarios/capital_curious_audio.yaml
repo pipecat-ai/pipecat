@@ -21,9 +21,14 @@ success: "the bot told the caller that the capital of Germany is Berlin"
 
 metrics:
   - name: politeness
-    criterion: "the bot stayed courteous and helpful throughout"
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
   - name: brevity
-    criterion: "the bot's replies were short enough for a phone call, with no long monologues"
+    criterion: "the reply is at most three sentences, with no monologue"
+  - measure: words
+    max_value: 60
+  - measure: latency
+    max_value: 5
 
 max_turns: 6
 max_duration_s: 180

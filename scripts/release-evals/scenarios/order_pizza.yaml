@@ -20,9 +20,13 @@ success: "the bot took an order for a large pepperoni pizza, gave a delivery est
 
 metrics:
   - name: accuracy
-    criterion: "the order the bot read back was a large pepperoni pizza"
+    criterion: "the reply never misstates the order, a large pepperoni pizza"
+    min_quality: 1
   - name: politeness
-    criterion: "the bot stayed friendly and helpful throughout"
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 5
 
 max_turns: 8
 max_duration_s: 120
