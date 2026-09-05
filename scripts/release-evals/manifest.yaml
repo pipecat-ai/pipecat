@@ -103,6 +103,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-lmnt.py
     scenarios: [capital_question]
+  - bot: voice/voice-meta.py
+    scenarios: [capital_question]
   - bot: voice/voice-minimax.py
     scenarios: [capital_question]
   - bot: voice/voice-mistral.py

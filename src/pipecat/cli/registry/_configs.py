@@ -69,6 +69,7 @@ SERVICE_CONFIGS = {
     ),
     "gradium_stt": 'GradiumSTTService(api_key=os.getenv("GRADIUM_API_KEY"))',
     "groq_stt": 'GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))',
+    "meta_stt": 'MetaSTTService(api_key=os.getenv("META_API_KEY"))',
     "mistral_stt": 'MistralSTTService(api_key=os.getenv("MISTRAL_API_KEY"))',
     "nvidia_stt": 'NvidiaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))',
     "nvidia_sagemaker_stt": (

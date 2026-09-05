@@ -72,6 +72,7 @@ IMPORTS = {
     "google_stt": ["from pipecat.services.google.stt import GoogleSTTService"],
     "gradium_stt": ["from pipecat.services.gradium.stt import GradiumSTTService"],
     "groq_stt": ["from pipecat.services.groq.stt import GroqSTTService"],
+    "meta_stt": ["from pipecat.services.meta.stt import MetaSTTService"],
     "mistral_stt": ["from pipecat.services.mistral.stt import MistralSTTService"],
     "nvidia_stt": ["from pipecat.services.nvidia.stt import NvidiaSTTService"],
     "nvidia_sagemaker_stt": [
