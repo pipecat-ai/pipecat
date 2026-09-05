@@ -66,12 +66,12 @@ class BaseEvalSession(BaseObject, Generic[R]):
         self._bot_url = bot_url
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._trace = EvalTrace()
-        self._register_event_handler("on_progress")
         # Built by the subclass: the bot's output as events, the connection to
         # the bot, and what drives the conversation.
         self._stream: EvalEventStream
         self._client: EvalClient
         self._driver: BaseEvalDriver[R]
+        self._register_event_handler("on_progress")
 
     @abstractmethod
     def _describe(self) -> str:
