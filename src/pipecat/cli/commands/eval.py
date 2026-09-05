@@ -171,15 +171,20 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
     """
     if result.error:
         return
+    # A blank line sets each section apart, and one more before the verdict line.
+    print()
     print(f"    {_bold('judge:')} {result.reason}")
     if result.metrics:
+        print()
         print(f"    {_bold('metrics:')}")
         for metric in result.metrics:
             score = (_green if metric.score else _red)(f"{metric.score:g}")
             print(f"      {_color(metric.name + ':', '36')} {score}  {_dim(metric.reason)}")
     if result.end_call is not None:
+        print()
         claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")
         print(f"    {_bold('persona:')} {claim}: {result.end_call.get('reason', '')}")
+    print()
 
 
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
