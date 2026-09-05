@@ -21,7 +21,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMSummarizeContextFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.context.llm_context_summarization import (
@@ -125,8 +129,36 @@ class LLMContextSummarizer(BaseObject):
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
 
+        # Number of leading messages excluded from the message-count trigger:
+        # the preserved system message (if any), and, once a summary has been
+        # applied, the injected summary message on top of that.
+        self._messages_since_summary_baseline = self._leading_system_message_count(context.messages)
+
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
+
+    @staticmethod
+    def _leading_system_message_count(messages: list[LLMContextMessage]) -> int:
+        """Return 1 if the first message is a system message, else 0.
+
+        Mirrors the messages[0] system-message check used elsewhere when
+        selecting messages to summarize and when reconstructing the context
+        after a summary, so the baseline stays consistent with what those
+        steps actually preserve.
+
+        Args:
+            messages: The context messages to check.
+
+        Returns:
+            1 if ``messages[0]`` is a system message, otherwise 0.
+        """
+        if (
+            messages
+            and not isinstance(messages[0], LLMSpecificMessage)
+            and messages[0].get("role") == "system"
+        ):
+            return 1
+        return 0
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the summarizer.
@@ -229,7 +261,7 @@ class LLMContextSummarizer(BaseObject):
         token_limit_exceeded = token_limit is not None and total_tokens >= token_limit
 
         # Check if we've exceeded max unsummarized messages
-        messages_since_summary = len(self._context.messages) - 1
+        messages_since_summary = len(self._context.messages) - self._messages_since_summary_baseline
         message_threshold = self._auto_config.max_unsummarized_messages
         message_threshold_exceeded = (
             message_threshold is not None and messages_since_summary >= message_threshold
@@ -420,13 +452,8 @@ class LLMContextSummarizer(BaseObject):
         # Only messages[0] is treated as the system preamble — system messages at
         # other positions are mid-conversation injections and are not preserved
         # separately (they will be part of the summary or the recent messages).
-        first_system_msg = None
-        if (
-            messages
-            and not isinstance(messages[0], LLMSpecificMessage)
-            and messages[0].get("role") == "system"
-        ):
-            first_system_msg = messages[0]
+        num_system_preserved = self._leading_system_message_count(messages)
+        first_system_msg = messages[0] if num_system_preserved else None
 
         # Get recent messages to keep
         recent_messages = messages[last_summarized_index + 1 :]
@@ -445,8 +472,12 @@ class LLMContextSummarizer(BaseObject):
 
         # Update context
         original_message_count = len(messages)
-        num_system_preserved = 1 if first_system_msg else 0
         self._context.set_messages(new_messages)
+
+        # Reset the message-count trigger baseline: the preserved system
+        # message and the newly injected summary message don't count toward
+        # max_unsummarized_messages.
+        self._messages_since_summary_baseline = num_system_preserved + 1
 
         # Messages actually summarized = index range minus the preserved system message
         summarized_count = last_summarized_index + 1 - num_system_preserved
