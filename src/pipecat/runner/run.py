@@ -140,12 +140,22 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.runner.vonage import configure as configure_vonage
+from pipecat.utils.file_storage import FileStorage, LocalFileStorage
 from pipecat.utils.security.allowed_origins import is_origin_allowed
 
 try:
     import uvicorn
     from dotenv import load_dotenv
-    from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
+    from fastapi import (
+        BackgroundTasks,
+        FastAPI,
+        File,
+        Header,
+        HTTPException,
+        Request,
+        UploadFile,
+        WebSocket,
+    )
     from fastapi.encoders import jsonable_encoder
     from fastapi.exceptions import RequestValidationError
     from fastapi.middleware.cors import CORSMiddleware
@@ -183,6 +193,7 @@ TRANSPORT_INSTALL_HINTS = {
 PIPECAT_ROOM_EXP_HOURS = 4.0
 
 RUNNER_DOWNLOADS_FOLDER: str | None = None
+RUNNER_FILE_STORAGE: FileStorage | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
@@ -638,6 +649,7 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
+    _setup_file_uploads_route(app)
 
 
 def _setup_unified_start_route(
@@ -1483,6 +1495,38 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
         await _handle_telephony_ws(websocket, path_token=token)
 
 
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _setup_file_uploads_route(app: FastAPI):
+    @app.post("/files")
+    async def upload_file(file: UploadFile = File(...)):  # noqa: B008
+        """Handle file uploads from clients. Requires --uploads-folder to be set."""
+        if RUNNER_FILE_STORAGE is None:
+            raise HTTPException(
+                503,
+                "File upload is disabled: start the runner with -u/--uploads-folder to set the uploads directory.",
+            )
+        contents = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(contents) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"File exceeds {_MAX_UPLOAD_BYTES} byte limit")
+        try:
+            file_id = await RUNNER_FILE_STORAGE.save(file.filename or "", contents)
+        except OSError as e:
+            logger.error(f"Failed to save upload: {e}")
+            raise HTTPException(500, "Failed to save file") from e
+        # Use original filename only for format/mime in response
+        original_name = Path(file.filename or "").name
+        media_type, _ = mimetypes.guess_type(original_name, strict=False)
+        media_type = media_type or file.content_type or "application/octet-stream"
+        # Return the file as a URL that can be used in the client, matching the format of RTVIFile
+        return {
+            "name": original_name,
+            "source": {"type": "id", "id": file_id},
+            "format": media_type,
+        }
+
+
 async def _run_daily_direct(args: argparse.Namespace):
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
@@ -1658,6 +1702,15 @@ def runner_downloads_folder() -> str | None:
     return RUNNER_DOWNLOADS_FOLDER
 
 
+def runner_file_storage() -> FileStorage | None:
+    """Returns the storage backend for client uploads, or None if uploads are disabled.
+
+    Pass this to ``RTVIProcessor(file_storage=...)`` so it resolves the same
+    ``pipecat:<id>`` references produced by the runner's ``POST /files`` endpoint.
+    """
+    return RUNNER_FILE_STORAGE
+
+
 def runner_host() -> str:
     """Returns the host name of this runner."""
     return RUNNER_HOST
@@ -1689,7 +1742,10 @@ def main(parser: argparse.ArgumentParser | None = None):
          all transports.
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
-       - -f/--folder: Path to downloads folder
+       - -f/--downloads-folder: Path to folder for files available for download
+       - -u/--uploads-folder: Path to folder for client uploads (short-lived; default:
+         the PIPECAT_UPLOADS_FOLDER env var)
+       - --uploads-folder-max-files: Max files in uploads folder (default: 10)
        - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
          (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
@@ -1705,7 +1761,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             ones. Custom args are accessible via `runner_args.cli_args`.
 
     """
-    global RUNNER_DOWNLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
+    global RUNNER_DOWNLOADS_FOLDER, RUNNER_FILE_STORAGE, RUNNER_HOST, RUNNER_PORT
 
     if not parser:
         parser = argparse.ArgumentParser(description="Pipecat Development Runner")
@@ -1739,7 +1795,38 @@ def main(parser: argparse.ArgumentParser | None = None):
         default=False,
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
-    parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
+    parser.add_argument(
+        "-f",
+        "--downloads-folder",
+        type=str,
+        dest="downloads_folder",
+        help="Path to folder for files available for download",
+    )
+    # left in for backward compatibility but deprecated in favor of --downloads-folder
+    parser.add_argument(
+        "--folder",
+        type=str,
+        dest="downloads_folder",
+        help="Path to folder for files available for download. (Deprecated: use --downloads-folder instead)",
+    )
+    parser.add_argument(
+        "-u",
+        "--uploads-folder",
+        type=str,
+        dest="uploads_folder",
+        default=os.getenv("PIPECAT_UPLOADS_FOLDER"),
+        help=(
+            "Path to folder for client uploads (short-lived; max files enforced). "
+            "Defaults to the PIPECAT_UPLOADS_FOLDER environment variable."
+        ),
+    )
+    parser.add_argument(
+        "--uploads-folder-max-files",
+        type=int,
+        default=10,
+        dest="uploads_folder_max_files",
+        help="Max files to keep in uploads folder; oldest removed (default: 10)",
+    )
     parser.add_argument(
         "--runner-body",
         type=str,
@@ -1988,7 +2075,9 @@ def main(parser: argparse.ArgumentParser | None = None):
         print()
         return
 
-    RUNNER_DOWNLOADS_FOLDER = args.folder
+    RUNNER_DOWNLOADS_FOLDER = args.downloads_folder
+    if args.uploads_folder:
+        RUNNER_FILE_STORAGE = LocalFileStorage(args.uploads_folder, args.uploads_folder_max_files)
     RUNNER_HOST = args.host
     RUNNER_PORT = args.port
 

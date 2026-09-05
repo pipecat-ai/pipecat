@@ -28,8 +28,19 @@ from pipecat.frames.frames import (
 )
 from pipecat.utils.deprecation import deprecated
 
+RTVIFileSourceType = Literal["bytes", "url", "id"]
+"""Source type for an RTVI ``send-file`` message.
+
+Broader than :data:`~pipecat.frames.frames.FileSourceType`: ``"id"`` refers to
+a file already stored locally and addressed by ID via a
+:class:`~pipecat.utils.file_storage.FileStorage` backend, a concept specific
+to the RTVI protocol. ``RTVIProcessor`` resolves it to raw bytes before
+constructing a :class:`~pipecat.frames.frames.UserFileRawFrame`, so ``"id"``
+never reaches the frame layer.
+"""
+
 # -- Constants --
-PROTOCOL_VERSION = "2.1.0"
+PROTOCOL_VERSION = "2.2.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -239,6 +250,63 @@ class SendTextData(BaseModel):
 
     content: str
     options: SendTextOptions | None = None
+
+
+class FileSource(BaseModel):
+    """Base class for RTVI file sources."""
+
+    type: RTVIFileSourceType
+
+
+class FileBytes(FileSource):
+    """File source as base64-encoded bytes."""
+
+    type: RTVIFileSourceType = "bytes"
+    bytes: str  # base64-encoded string
+    width: int | None = None
+    height: int | None = None
+
+
+class FileUrl(FileSource):
+    """File source as a URL."""
+
+    type: RTVIFileSourceType = "url"
+    url: str
+    public: bool = True
+
+
+class FileId(FileSource):
+    """File source as a file ID."""
+
+    type: RTVIFileSourceType = "id"
+    id: str
+
+
+class File(BaseModel):
+    """File data structure for RTVI file sending."""
+
+    format: str  # Mime format of the file, e.g., 'application/pdf'
+    name: str | None = None
+    source: FileBytes | FileUrl | FileId
+
+
+class SendFileOptions(BaseModel):
+    """Options for sending a file to the LLM."""
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: dict | None = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class SendFileData(BaseModel):
+    """Data format for sending a file to the LLM.
+
+    Contains the information of the file to send and any options for how the pipeline should process it.
+    """
+
+    content: str  # Text to accompany the file
+    file: File
+    options: SendFileOptions | None = None
 
 
 class DTMFInputData(BaseModel):
