@@ -551,6 +551,14 @@ class InworldHttpTTSService(TTSService):
             )
 
 
+# Settings sent in the per-context create_config (tts.py `_send_context`) rather
+# than at connection time. A change to any of these only needs a new context,
+# not a new websocket.
+_CONTEXT_SCOPED_SETTINGS = frozenset(
+    {"voice", "model", "language", "speaking_rate", "temperature", "delivery_mode"}
+)
+
+
 class InworldTTSService(WebsocketTTSService):
     """Inworld AI WebSocket-based TTS service.
 
@@ -941,17 +949,36 @@ class InworldTTSService(WebsocketTTSService):
         await self._disconnect_websocket()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta.
+        """Apply a settings delta, re-minting the turn context if needed.
 
-        Settings are stored but not applied to the active connection.
+        Voice, model, language, and generation parameters are locked per Inworld
+        context. If any of these change mid-turn, the current context is
+        finalized, flushed, and closed, and a fresh turn context id is minted so
+        the next sentence opens a new context with the updated settings — on the
+        same websocket, no reconnect required.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if changed.keys() & _CONTEXT_SCOPED_SETTINGS and self._turn_context_id:
+            old_ctx = self._turn_context_id
+            await self._push_sequencer_frames(
+                await self._aggregated_frame_sequencer.finalize(old_ctx),
+                old_ctx,
+            )
+            if self.audio_context_available(old_ctx):
+                await self.flush_audio(context_id=old_ctx)
+            await self._close_context(old_ctx)
+            self._reset_generation_timing()
+            self._turn_context_id = self.create_context_id()
 
         return changed
 
