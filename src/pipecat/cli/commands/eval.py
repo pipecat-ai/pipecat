@@ -130,6 +130,14 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
+def _bold(s: str) -> str:
+    return _color(s, "1")
+
+
+# The speakers in a simulation's conversation: the bot green, the persona cyan.
+_SPEAKER_COLOR = {"bot": "32", "user": "36"}
+
+
 def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
     """Print a progress record as it arrives (verbose mode).
 
@@ -140,7 +148,7 @@ def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
         if p.status == "ended":
             print(f"      {_dim(f'ended by {p.text} after {p.turn} persona turn(s)')}")
         else:
-            print(f"      {_dim(p.status + ':')} {p.text}")
+            print(f"      {_color(p.status + ':', _SPEAKER_COLOR[p.status])} {p.text}")
     elif p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
         print(f"      {_dim(f'turn {p.turn_index}')} → {label}")
@@ -155,20 +163,23 @@ def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
 
 
 def _print_simulation_detail(result: EvalSimulationResult) -> None:
-    """Print what a simulation's one-line verdict leaves out (verbose mode).
+    """Print a simulation's verdict detail (verbose mode), under the conversation.
 
     The judge's reason, each metric's score and reason, and the persona's own
     claim from its ``end_call``. The conversation itself was printed as it
-    happened.
+    happened, and the one-line verdict follows.
     """
     if result.error:
         return
-    print(f"    {_dim('judge:')} {result.reason}")
-    for metric in result.metrics:
-        print(f"    {_dim(metric.name + ':')} {metric.score:g}  {_dim(metric.reason)}")
+    print(f"    {_bold('judge:')} {result.reason}")
+    if result.metrics:
+        print(f"    {_bold('metrics:')}")
+        for metric in result.metrics:
+            score = (_green if metric.score else _red)(f"{metric.score:g}")
+            print(f"      {_color(metric.name + ':', '36')} {score}  {_dim(metric.reason)}")
     if result.end_call is not None:
-        claim = "succeeded" if result.end_call.get("success") else "gave up"
-        print(f"    {_dim('persona:')} {claim}: {result.end_call.get('reason', '')}")
+        claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")
+        print(f"    {_bold('persona:')} {claim}: {result.end_call.get('reason', '')}")
 
 
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
@@ -284,6 +295,8 @@ async def _execute_scenario(
                 )
             if verbose:
                 session.add_event_handler("on_progress", _print_progress)
+                if isinstance(loaded, EvalSimulationScenario):
+                    print(f"    {_bold('conversation:')}")
             run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
@@ -351,9 +364,11 @@ async def _run_scenarios_all(
         for run in runs:
             if run.status != "done":
                 await go(run, verbose)
-            _print_eval_line(run)
+            # A simulation's detail closes the conversation above it; the verdict
+            # line comes last, as a scripted scenario's does after its turns.
             if verbose and isinstance(run.result, EvalSimulationResult):
                 _print_simulation_detail(run.result)
+            _print_eval_line(run)
 
 
 @eval_app.command("run")
