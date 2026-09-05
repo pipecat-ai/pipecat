@@ -44,6 +44,7 @@ from pipecat.runner.types import (
     ExotelCallData,
     LiveKitRunnerArguments,
     MOQRunnerArguments,
+    SIPRunnerArguments,
     SmallWebRTCRunnerArguments,
     TelnyxCallData,
     VonageRunnerArguments,
@@ -739,6 +740,22 @@ async def create_transport(
             host=runner_args.host,
             port=runner_args.port,
         )
+    elif isinstance(runner_args, SIPRunnerArguments):
+        params = _get_transport_params("sip", transport_params)
+
+        from pipecat.transports.sip.connection import SIPConnection
+        from pipecat.transports.sip.transport import SIPTransport
+
+        connection = SIPConnection(
+            user=runner_args.user,
+            domain=runner_args.domain,
+            password=runner_args.password,
+            transport=runner_args.transport,
+            audio_codecs=runner_args.audio_codecs,
+            auth_user=runner_args.auth_user,
+            reg_interval=runner_args.reg_interval,
+        )
+        return SIPTransport(connection, params=params)
     elif isinstance(runner_args, VonageRunnerArguments):
         from pipecat.transports.vonage.video_connector import (
             VonageVideoConnectorTransport,

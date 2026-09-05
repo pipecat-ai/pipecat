@@ -135,6 +135,7 @@ from pipecat.runner.types import (
     LiveKitRunnerArguments,
     MOQRunnerArguments,
     RunnerArguments,
+    SIPRunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
@@ -169,6 +170,7 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
     "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
     "moq": ("moq", "cryptography"),
+    "sip": ("baresip",),
 }
 TRANSPORT_INSTALL_HINTS = {
     "daily": "install pipecat-ai[daily]",
@@ -177,6 +179,7 @@ TRANSPORT_INSTALL_HINTS = {
     "telephony": "install pipecat-ai[websocket]",
     "websocket": "install pipecat-ai[websocket]",
     "moq": "install pipecat-ai[moq]",
+    "sip": "install pipecat-ai[sip]",
 }
 
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
@@ -268,7 +271,7 @@ def _runner_url(args: argparse.Namespace) -> str:
 
 def _transport_status_lists() -> tuple[list[str], list[str]]:
     """Return enabled and disabled transport labels for the startup banner."""
-    transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq"]
+    transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq", "sip"]
     enabled = []
     disabled = []
 
@@ -1537,6 +1540,54 @@ async def _run_eval(args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
+async def _run_sip(args: argparse.Namespace):
+    """Run a bot with the SIP transport (no FastAPI server).
+
+    baresip registers with the SIP server itself, so there is no HTTP
+    signaling route. The account is read from the ``SIP_USER``, ``SIP_PASS``,
+    ``SIP_DOMAIN``, and ``SIP_TRANSPORT`` environment variables — plus
+    ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
+    ``SIP_AUTH_USER`` (credential-list digest username), and
+    ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode) — and the
+    bot function is invoked directly.
+    """
+    logger.info("Running with SIP transport...")
+
+    user = os.getenv("SIP_USER")
+    domain = os.getenv("SIP_DOMAIN")
+    if not user or not domain:
+        logger.error("SIP transport requires the SIP_USER and SIP_DOMAIN environment variables.")
+        return
+
+    codecs = os.getenv("SIP_AUDIO_CODECS")
+    runner_args = SIPRunnerArguments(
+        user=user,
+        domain=domain,
+        password=os.getenv("SIP_PASS", ""),
+        transport=os.getenv("SIP_TRANSPORT", "udp"),
+        audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip()) if codecs else None,
+        auth_user=os.getenv("SIP_AUTH_USER"),
+        reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
+        session_id=str(uuid.uuid4()),
+    )
+    runner_args.handle_sigint = True
+    runner_args.cli_args = args
+
+    # A bot may need session data it would normally receive in the /start
+    # request body (e.g. a dial-out destination). The SIP transport has no
+    # such endpoint, so the body is read from a JSON file passed with
+    # --runner-body.
+    if args.runner_body:
+        runner_args.body = json.loads(Path(args.runner_body).read_text())
+
+    bot_module = _get_bot_module()
+
+    print(f"📞 SIP account: {user}@{domain}")
+    print()
+
+    await bot_module.bot(runner_args)
+
+
 async def _run_vonage():
     """Run Vonage bot (no FastAPI server)."""
     logger.info("Running Vonage transport...")
@@ -1720,6 +1771,7 @@ def main(parser: argparse.ArgumentParser | None = None):
             "eval",
             "livekit",
             "moq",
+            "sip",
             "vonage",
             "webrtc",
             "websocket",
@@ -1979,6 +2031,13 @@ def main(parser: argparse.ArgumentParser | None = None):
         print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
         print()
         asyncio.run(_run_eval(args))
+        return
+
+    # Handle SIP transport (no FastAPI server — baresip registers with the
+    # SIP server itself)
+    if args.transport == "sip":
+        print()
+        asyncio.run(_run_sip(args))
         return
 
     # Print startup message
