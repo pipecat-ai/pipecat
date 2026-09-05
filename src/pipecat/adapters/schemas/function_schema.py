@@ -36,6 +36,7 @@ class FunctionSchema:
         properties: dict[str, Any],
         required: list[str],
         handler: "FunctionCallHandler | None" = None,
+        strict: bool | None = None,
     ) -> None:
         """Initialize the function schema.
 
@@ -50,12 +51,18 @@ class FunctionSchema:
                 ``register_function`` call unnecessary. Decorate the handler with
                 ``@tool_options`` to override its default call options
                 (``cancel_on_interruption``, ``timeout_secs``).
+            strict: Whether to request the provider's strict function-calling
+                mode, where arguments are guaranteed to match the schema.
+                ``None`` leaves the choice to the provider. Only providers whose
+                adapter reads it are affected; like ``handler``, it is not part
+                of the default provider payload.
         """
         self._name = name
         self._description = description
         self._properties = properties
         self._required = required
         self._handler = handler
+        self._strict = strict
 
     def to_default_dict(self) -> dict[str, Any]:
         """Converts the function schema to a dictionary.
@@ -108,6 +115,21 @@ class FunctionSchema:
             List of required parameter names.
         """
         return self._required
+
+    @property
+    def strict(self) -> bool | None:
+        """Get the requested strict-mode setting, if any.
+
+        Read by the adapters of providers that support strict function calling.
+        Like :attr:`handler`, it is deliberately absent from
+        :meth:`to_default_dict`, because that dict is passed on to providers
+        that have no such field.
+
+        Returns:
+            ``True`` or ``False`` to request or decline strict mode, or ``None``
+            to leave the choice to the provider.
+        """
+        return self._strict
 
     @property
     def handler(self) -> "FunctionCallHandler | None":

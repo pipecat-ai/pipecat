@@ -427,6 +427,112 @@ class TestFunctionAdapters(unittest.TestCase):
         ]
         assert OpenAIResponsesLLMAdapter().to_provider_tools_format(self.tools_def) == expected
 
+    def test_openai_responses_adapter_requests_strict_mode(self):
+        """A strict schema carries strict: True and closes the parameters object.
+
+        OpenAI rejects a strict request whose parameters omit
+        `additionalProperties: false`, so the flag alone is not usable.
+        """
+        function_def = FunctionSchema(
+            name="get_weather",
+            description="Get the weather in a given location",
+            properties={"location": {"type": "string"}},
+            required=["location"],
+            strict=True,
+        )
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }
+        ]
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        assert OpenAIResponsesLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_responses_adapter_closes_nested_objects_for_strict(self):
+        """Strict mode needs the key on every object, including nested and in arrays."""
+        function_def = FunctionSchema(
+            name="book",
+            description="Book a trip",
+            properties={
+                "address": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+                "legs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"code": {"type": "string"}},
+                        "required": ["code"],
+                    },
+                },
+            },
+            required=["address", "legs"],
+            strict=True,
+        )
+        tools = OpenAIResponsesLLMAdapter().to_provider_tools_format(
+            ToolsSchema(standard_tools=[function_def])
+        )
+        params = tools[0]["parameters"]
+        assert params["additionalProperties"] is False
+        assert params["properties"]["address"]["additionalProperties"] is False
+        assert params["properties"]["legs"]["items"]["additionalProperties"] is False
+        # The array itself is not an object and must not gain the key.
+        assert "additionalProperties" not in params["properties"]["legs"]
+
+    def test_openai_responses_adapter_strict_leaves_a_parameter_named_properties_alone(self):
+        """Keys inside `properties` are parameter names, not schema keywords.
+
+        A parameter called `properties` would otherwise look like a nested
+        object, and the mapping would gain an `additionalProperties` parameter.
+        """
+        function_def = FunctionSchema(
+            name="configure",
+            description="Configure a thing",
+            properties={"properties": {"type": "string"}},
+            required=["properties"],
+            strict=True,
+        )
+        tools = OpenAIResponsesLLMAdapter().to_provider_tools_format(
+            ToolsSchema(standard_tools=[function_def])
+        )
+        params = tools[0]["parameters"]
+        assert params["properties"] == {"properties": {"type": "string"}}
+        assert params["additionalProperties"] is False
+
+    def test_strict_stays_out_of_the_default_dict(self):
+        """`strict` must not reach providers that have no such field.
+
+        `to_default_dict()` is passed on whole by the Gemini adapter (into
+        `function_declarations`), by the OpenAI Chat Completions adapter, and by
+        the bus serializer, so a key added there would travel to all of them.
+        Like `handler`, `strict` is read off the schema instead.
+        """
+        function_def = FunctionSchema(
+            name="get_weather",
+            description="Get the weather in a given location",
+            properties={"location": {"type": "string"}},
+            required=["location"],
+            strict=True,
+        )
+        assert "strict" not in function_def.to_default_dict()
+
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        gemini = GeminiLLMAdapter().to_provider_tools_format(tools_def)
+        declarations = gemini[0]["function_declarations"]
+        assert "strict" not in declarations[0]
+        assert "additionalProperties" not in declarations[0]["parameters"]
+
     def test_openai_realtime_adapter_with_custom_tools(self):
         """Test OpenAI Realtime adapter appends custom tools."""
         tool_search = {"type": "tool_search"}
