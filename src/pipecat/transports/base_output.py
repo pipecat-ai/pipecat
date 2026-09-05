@@ -443,8 +443,13 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_buffer = bytearray()
             self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
 
-            # This will be used to resample incoming audio to the output sample rate.
-            self._resampler = create_stream_resampler()
+            # This will be used to resample incoming audio to the output sample
+            # rate. Speech boundaries are signalled explicitly (see
+            # `_enqueue_flushed_audio_buffer` and `_bot_stopped_speaking`), so
+            # the resampler must not discard its filter tail on its own: it runs
+            # ahead of playback and would otherwise treat the pause between two
+            # TTS chunks as the end of the stream.
+            self._resampler = create_stream_resampler(clear_after_secs=None)
 
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
@@ -720,27 +725,43 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
         async def _enqueue_flushed_audio_buffer(self):
-            """Pad any unsent trailing audio with silence and queue it for playback.
+            """Queue every bit of audio still held back at the end of a speech run.
 
-            Turns whatever is left in `_audio_buffer` into a frame of the same
-            type (e.g. `TTSAudioRawFrame`) as the audio it was buffered from,
-            and puts it on `_audio_queue`, so it goes through the normal
-            playback path (write, error handling, bot speaking tracking) like
-            any other chunk, in order relative to whatever is queued after it
-            (e.g. a TTSStoppedFrame).
+            That means both what the resampler is holding in its filter and
+            what is left in `_audio_buffer`, padded with silence to a full
+            chunk. The audio goes out as frames of the same type (e.g.
+            `TTSAudioRawFrame`) as the audio it was buffered from, on
+            `_audio_queue`, so it takes the normal playback path (write, error
+            handling, bot speaking tracking) like any other chunk, in order
+            relative to whatever is queued after it (e.g. a TTSStoppedFrame).
             """
+            # The resampler holds the tail of the audio it was fed, which
+            # belongs at the end of this speech run.
+            self._audio_buffer.extend(await self._resampler.flush())
+
             if not self._audio_buffer:
                 return
 
-            padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
+            # The flushed tail can be longer than a chunk, so send whole chunks
+            # first and pad only what's left over.
+            while len(self._audio_buffer) >= self._audio_chunk_size:
+                await self._enqueue_audio_chunk(bytes(self._audio_buffer[: self._audio_chunk_size]))
+                self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
+
+            if self._audio_buffer:
+                padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
+                await self._enqueue_audio_chunk(bytes(self._audio_buffer) + padding)
+
+            self._audio_buffer = bytearray()
+
+        async def _enqueue_audio_chunk(self, audio: bytes):
+            """Queue one full chunk of output-rate audio for playback."""
             frame = self._audio_buffer_cls(
-                bytes(self._audio_buffer) + padding,
+                audio,
                 sample_rate=self._sample_rate,
                 num_channels=self._params.audio_out_channels,
             )
             frame.transport_destination = self._destination
-            self._audio_buffer = bytearray()
-
             await self._audio_queue.put(frame)
 
         async def _bot_stopped_speaking(self):
@@ -752,8 +773,11 @@ class BaseOutputTransport(FrameProcessor):
             self._tts_audio_received = False
 
             # Any remaining leftover here (e.g. from an interruption) is
-            # discarded rather than flushed, since it's no longer wanted.
+            # discarded rather than flushed, since it's no longer wanted. The
+            # same goes for the audio still inside the resampler, which would
+            # otherwise be prepended to whatever the bot says next.
             self._audio_buffer = bytearray()
+            await self._resampler.reset()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
