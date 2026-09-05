@@ -22,7 +22,7 @@ success: "the bot completed the intake: it verified the date of birth, collected
 
 metrics:
   - name: accuracy
-    criterion: "the reply never misstates information the patient gave"
+    criterion: "when the reply repeats information the patient gave, it matches what they said; a reply that repeats nothing passes"
     min_quality: 1
   - name: efficiency
     criterion: "the reply does not ask the patient to repeat information they already gave (confirming it back is fine)"

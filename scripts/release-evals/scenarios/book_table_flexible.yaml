@@ -23,7 +23,7 @@ success: "the bot said 7 PM was not available, offered alternative times, and co
 
 metrics:
   - name: recovery
-    criterion: "the reply never turns down a requested time without offering concrete alternative times"
+    criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
     min_quality: 1
   - name: politeness
     criterion: "the reply is courteous and helpful, never curt or dismissive"

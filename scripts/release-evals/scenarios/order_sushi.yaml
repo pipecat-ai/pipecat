@@ -18,7 +18,7 @@ success: "the bot took an order for three California rolls and completed the ord
 
 metrics:
   - name: accuracy
-    criterion: "the reply never misstates the order, three California rolls"
+    criterion: "when the reply states the order, it is three California rolls; a reply that does not state the order passes"
     min_quality: 1
   - name: politeness
     criterion: "the reply is courteous and helpful, never curt or dismissive"
