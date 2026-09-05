@@ -323,14 +323,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
         """A measure's value for this run, and the phrase that reports it."""
-        events = self._stream.events_seen
         if measure == "turns":
             return float(self._turns), f"{self._turns} persona turn(s)"
         if measure == "duration":
             return self._duration_s, f"{self._duration_s:.1f} s"
-        if measure == "interruptions":
-            count = sum(1 for e in events if e["type"] == "bot_interrupted")
-            return float(count), f"{count} interruption(s)"
         if measure == "words":
             longest = max(
                 (

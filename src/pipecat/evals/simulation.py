@@ -73,8 +73,7 @@ Fields:
     value from the run, no judge involved, and the metric scores 1 inside the
     range and 0 outside, which fails the run. ``turns`` is the persona's
     turns, ``duration`` the conversation's seconds from its first line to the
-    hang-up, ``interruptions`` how often the bot reported being cut off,
-    ``words`` the longest bot reply in words, and ``latency`` the slowest
+    hang-up, ``words`` the longest bot reply in words, and ``latency`` the slowest
     reply in seconds: from the persona's send to the reply's first token in
     text mode, from the bot noticing the persona stop to its first spoken
     sentence in audio mode. The per-reply measures bound every reply.
@@ -110,7 +109,7 @@ DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
 
 # What a measured metric can measure, computed by the harness from the run.
-SIMULATION_MEASURES = ("turns", "duration", "interruptions", "words", "latency")
+SIMULATION_MEASURES = ("turns", "duration", "words", "latency")
 
 
 @dataclass

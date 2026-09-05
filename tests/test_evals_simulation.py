@@ -460,7 +460,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             EvalSimulationMetric("latency", measure="latency", max_value=1.0),
             EvalSimulationMetric("words", measure="words", max_value=3),
             EvalSimulationMetric("turns", measure="turns", max_value=5),
-            EvalSimulationMetric("interruptions", measure="interruptions", max_value=0),
             EvalSimulationMetric("duration", measure="duration", min_value=0),
         ]
         driver, stream, llm, _ = _driver(
@@ -502,9 +501,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_name["latency"].reason, "slowest reply 1.40 s, at most 1")
         self.assertEqual((by_name["words"].value, by_name["words"].passed), (5.0, False))
         self.assertEqual((by_name["turns"].value, by_name["turns"].passed), (2.0, True))
-        self.assertEqual(
-            (by_name["interruptions"].value, by_name["interruptions"].passed), (1.0, False)
-        )
         self.assertTrue(by_name["duration"].passed)
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
