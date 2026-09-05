@@ -802,6 +802,12 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().process_frame(frame, direction)
 
         if await self._maybe_mute_frame(frame):
+            # The frame is suppressed — no strategy sees it and it is not pushed
+            # downstream — but "the user stopped speaking" is a state transition
+            # rather than a turn decision. Discarding one latches the controller's
+            # `_user_speaking` True for the rest of the call, which permanently
+            # blocks turn finalization. See `process_muted_frame`.
+            await self._user_turn_controller.process_muted_frame(frame)
             return
 
         if isinstance(frame, StartFrame):
@@ -1498,6 +1504,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # Same idea for the user: a function call result that settles while the
+        # user is speaking must not be dropped, because nothing would ever
+        # re-evaluate it. Defer the push to `UserStoppedSpeakingFrame` instead.
+        self._push_context_on_user_stopped_speaking: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -1553,6 +1564,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -1634,15 +1646,31 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            if self._push_context_on_user_stopped_speaking:
+                if self._bot_speaking:
+                    # Hand the deferral over rather than dropping it.
+                    self._push_context_on_user_stopped_speaking = False
+                    self._push_context_on_bot_stopped_speaking = True
+                else:
+                    logger.debug(f"{self}: User stopped speaking — pushing deferred context frame!")
+                    await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
-            if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
-                logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+            if self._push_context_on_bot_stopped_speaking:
+                if self._user_speaking:
+                    # The user started speaking while this push was deferred.
+                    # Hand the deferral over to the user-stopped path instead of
+                    # dropping it: the bot is not guaranteed to speak again, so
+                    # this flag would otherwise never be re-evaluated.
+                    self._push_context_on_bot_stopped_speaking = False
+                    self._push_context_on_user_stopped_speaking = True
+                else:
+                    logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
+                    await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
             # broadcast reaches both halves. The assistant only needs the flag
@@ -1726,6 +1754,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1869,7 +1898,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 else:
                     run_llm = True
 
-        if run_llm and not self._user_speaking:
+        if run_llm:
             await self._maybe_push_context_after_function_result()
 
         # Call the `on_context_updated` callback once the function call result
@@ -1900,6 +1929,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
             logger.debug(
                 f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
             )
+        elif self._user_speaking:
+            # Defer until the user stops speaking, rather than dropping the push.
+            # Whatever the LLM would say now is about to be superseded by what the
+            # user is still saying, so pushing immediately is wrong — but so is
+            # discarding it, because this is the only signal that re-invokes the
+            # LLM with the tool result in scope. If it is dropped and the user
+            # then falls silent, no inference is ever run and the bot never
+            # speaks again.
+            #
+            # Checked before `_bot_speaking` on purpose: when both are set, the
+            # bot-stopped path below would refuse the push anyway (it also
+            # requires the user to be quiet), and the bot is not guaranteed to
+            # speak again, so the user-stopped path is the one certain to fire.
+            logger.debug(f"{self}: User is speaking — deferring context frame push.")
+            self._push_context_on_user_stopped_speaking = True
         elif self._bot_speaking:
             # Defer the context frame push until the bot finishes speaking. If multiple
             # function call results arrive while the bot is speaking, they all accumulate

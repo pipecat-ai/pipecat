@@ -295,6 +295,52 @@ class UserTurnController(BaseObject):
         # We have received a transcription, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
+    async def process_muted_frame(self, frame: Frame):
+        """Apply speaking-state transitions from a frame suppressed by a mute strategy.
+
+        Mute strategies stop a muted user from driving turn *decisions*, and that
+        is the behaviour we want to keep: no strategy runs here, so a muted user
+        can still never start, stop or interrupt a turn.
+
+        ``_user_speaking``, however, is not a decision. It is edge-triggered
+        derived state, rebuilt by accumulating speaking frames, and it is
+        consulted as a guard in three places that can each end a conversation:
+
+        - :meth:`_trigger_user_turn_stop` refuses to finalize a turn while it is
+          set,
+        - :meth:`_user_turn_stop_timeout_task_handler` — the watchdog meant to
+          catch exactly that case — is gated on it as well,
+        - the assistant aggregator uses its own copy to decide whether a
+          function-call result may re-invoke the LLM.
+
+        Dropping a *start* edge is harmless: the flag stays ``False``, which is
+        the permissive value. Dropping a *stop* edge is not, because nothing in
+        the system ever re-derives the flag from ground truth. It latches
+        ``True`` with no path back to ``False``, and every guard above fails
+        closed, forever.
+
+        That is reachable whenever a mute window opens while the user is still
+        speaking — a function-call mute is the common case, since the same mute
+        also suppresses ``InputAudioRawFrame`` and so starves the VAD into
+        emitting its stop frame *inside* the window that discards it.
+
+        Applying only the ``False`` transition keeps the mute's purpose intact
+        while removing the latch: the muted user still cannot influence any turn
+        decision, but the state the rest of the pipeline reads stays truthful.
+        """
+        if isinstance(
+            frame,
+            (
+                UserStoppedSpeakingFrame,
+                ProposedUserStoppedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
+            ),
+        ):
+            self._user_speaking = False
+            # Re-arm the stop watchdog. Without this the turn could be finalized
+            # by a timeout measured from before the user had actually stopped.
+            self._user_turn_stop_timeout_event.set()
+
     async def _on_push_frame(
         self,
         strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
