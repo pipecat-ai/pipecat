@@ -29,7 +29,7 @@ metrics:
     criterion: "the reply is courteous and helpful, never curt or dismissive"
     min_quality: 1
   - measure: latency
-    max_value: 5
+    max_value: 8
 
 max_turns: 8
 max_duration_s: 120

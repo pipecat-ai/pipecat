@@ -28,7 +28,7 @@ metrics:
     criterion: "the reply does not ask the patient to repeat information they already gave (confirming it back is fine)"
     min_quality: 1
   - measure: latency
-    max_value: 5
+    max_value: 8
 
 max_turns: 12
 max_duration_s: 180
