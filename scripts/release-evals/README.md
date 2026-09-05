@@ -8,19 +8,26 @@ example automatically.
 
 Each example is a Pipecat **bot**. We run it with its eval transport
 (`-t eval`), and the **eval harness** (`pipecat.evals`) connects to it as an RTVI
-client, plays the user's turns (synthesizing audio when a scenario is in audio
-mode), transcribes the bot's speech, and judges the response with an LLM.
+client, plays the user's side of a conversation (synthesizing audio when a
+scenario is in audio mode), transcribes the bot's speech, and judges what the
+bot did with an LLM.
 
-A scenario (`scenarios/scripted/<name>.yaml`) is a scripted conversation plus the
-expected results. For example the `capital_question` scenario asks "What is the
-capital of Germany?" and judges that the reply says Berlin. Scenarios are
-reusable, so one shared scenario covers many bots.
+A **scenario** is one such check: a YAML file describing a conversation to hold
+with the bot and how to decide whether it behaved properly. There are two
+kinds:
 
-[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs. There
-are two kinds of scenario: a *scripted* scenario like the one above, and a
-*simulated* one, where an autonomous caller pursues a goal instead of reading
-a script (see [Simulations](#simulations)). The manifest lists both the same
-way; the file says which it is.
+- A **scripted** scenario (`scenarios/scripted/<name>.yaml`) writes the user's
+  turns out, each with the results expected of the bot. `capital_question` asks
+  "What is the capital of Germany?" and judges that the reply says Berlin. See
+  [Scripted scenarios](#scripted-scenarios).
+- A **simulated** scenario (`scenarios/simulated/<name>.yaml`) hands the user's
+  side to an LLM playing a caller with a goal, and a judge decides from the
+  whole conversation whether the bot did its job. See
+  [Simulations](#simulations).
+
+Scenarios are reusable, so one shared scenario covers many bots.
+[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs, both
+kinds listed the same way; the file says which it is.
 
 ## Prerequisites
 
@@ -30,7 +37,8 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
 - **A judge LLM.** Scenarios judge with [Ollama](https://ollama.com) by default
   (`http://localhost:11434`). Install Ollama, start it, and pull the model the
   scenarios use: `ollama pull gemma4:12b`. The judge is called once per `eval:`
-  expectation and every concurrent run shares one resident copy of it, so judge
+  expectation of a scripted scenario and once per run of a simulation, and every
+  concurrent run shares one resident copy of it, so judge
   latency sets the pace of the whole suite — a judge has to be accurate *and*
   fast, and has to return the same verdict on the same input. `gemma4:12b`
   answers in under a second and is stable across repeats. Smaller judges keep up
@@ -46,14 +54,17 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   run — while eating into the token budget the verdict itself needs. Leaving it
   on is both slower and less accurate. (A scenario's `judge:` block can point at
   OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
-- **Local audio models** (audio-mode scenarios only). The user's voice is
-  synthesized with Kokoro TTS and the bot's speech is transcribed with
-  [Moonshine](https://github.com/moonshine-ai/moonshine) (Whisper is available
-  as an alternative via the scenario's `transcription:` block). All run from
-  local ONNX/model files that download once on first use (cached under
-  `~/.cache/pipecat/evals/tts`). No keys, no per-run cost. Non-English
-  transcription needs a multilingual model, which the English-only defaults
-  aren't — `language_switch_audio` pulls Whisper's `tiny` (75MB).
+- **Local audio models** (audio-mode scenarios only). By default the user's
+  voice is synthesized with Kokoro TTS and the bot's speech is transcribed with
+  [Moonshine](https://github.com/moonshine-ai/moonshine); a scenario's
+  `user.speech:` and `judge.transcription:` blocks can name another service
+  (Whisper, Cartesia, or any Pipecat service through a `factory:`). The default
+  models run from local ONNX files that download once on first use into
+  Pipecat's model cache (`~/.cache/pipecat/`), and the synthesized user turns
+  are cached under `~/.cache/pipecat/evals/tts` so a repeated scenario does not
+  synthesize them again. No keys, no per-run cost. Non-English transcription
+  needs a multilingual model, which the English-only defaults aren't —
+  `language_switch_audio` pulls Whisper's `tiny` (75MB).
 - **Node.js** (MCP bot only). `mcp/mcp-stdio.py` spawns its memory MCP server
   with `npx`; the server package downloads on first use.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
@@ -165,16 +176,17 @@ and can be put on the GPU with `device: cuda` if you have headroom.
 
 ## Running one scenario against an already-running bot
 
-If you already have a bot running with `-t eval`, run a scenario directly
-(handy while iterating on a scenario or a single bot):
+If you already have a bot running with `-t eval`, run a scenario of either
+kind directly (handy while iterating on a scenario or a single bot):
 
 ```sh
 pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860
+pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860 -v
 ```
 
-## Scenarios
+## Scripted scenarios
 
-A scenario is a sequence of `turns`. A turn sends a `user` utterance, presses
+A scripted scenario is a sequence of `turns`. A turn sends a `user` utterance, presses
 DTMF keys with `dtmf:` (mutually exclusive with `user:`), or is
 observation-only (neither field) and just asserts — used for bot-first turns
 like an opening greeting. The full file
@@ -196,15 +208,16 @@ Two things worth knowing when authoring:
   user-first scenarios lead with a bot-first turn that expects the greeting.
 
 Shared `judge:`/`user:` config lives in small fragment files
-(`judge_audio.yaml`, `judge_text.yaml`, `user_audio.yaml`) that scenarios pull in
-with `!include` (resolved relative to the scenario file):
+(`judge_audio.yaml`, `judge_text.yaml`, `user_audio.yaml`, and `simulator.yaml`
+for simulations) in `scenarios/`, beside the two folders, which scenarios pull
+in with `!include` (resolved relative to the scenario file):
 
 ```yaml
-user: !include user_audio.yaml
-judge: !include judge_audio.yaml
+user: !include ../user_audio.yaml
+judge: !include ../judge_audio.yaml
 ```
 
-## Vision (image input)
+### Vision (image input)
 
 Some bots need session data they'd normally get from a `/start` request body,
 such as a vision bot's image. The eval transport has no such endpoint, so a
@@ -227,7 +240,7 @@ For function-calling-video bots, a turn can instead register an `image:` that th
 eval transport serves when the bot requests a user image mid-conversation (see
 `describe_image`).
 
-## Flows
+### Flows
 
 The `flows/` bots have their own scenario set asserting on Flows behavior:
 which functions fire, with which args, and what the bot says back. Each
@@ -259,14 +272,11 @@ scenario, a *simulation* for short, replaces the script with a *persona*: an
 LLM playing a caller with a goal, who says whatever the conversation calls for
 and hangs up (an `end_call` tool) when the goal is reached or clearly out of
 reach. A judge then reads the whole conversation, together with the tools the
-bot called, and decides whether the caller got what they came for. A simulation
-is a scenario like any other, told apart by its `persona:` and kept in
-`scenarios/simulated/`; the
-release simulations sit at the end of the manifest. A plain voice bot takes a
-curious caller in text and in audio, which checks the simulation machinery
-itself in both modes; the rest cover the Flows examples, because those are the
-bots with a job to finish: book a table, take a patient's intake, place an
-order, quote a policy.
+bot called, and decides whether the caller got what they came for. A plain
+voice bot takes a curious caller in text and in audio, which checks the
+simulation machinery itself in both modes; the rest cover the Flows examples,
+because those are the bots with a job to finish: book a table, take a patient's
+intake, place an order, quote a policy.
 
 ```sh
 ./run.sh -k simulation             # every simulation, nothing scripted
@@ -314,10 +324,10 @@ out of the rate.
 
 The persona LLM is the `simulator:` block (an OpenAI model by default, so
 `OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
-the scripted scenarios. In audio mode the persona's turns are synthesized by
-Kokoro and the bot's speech transcribed by Moonshine, as for a scripted audio
-scenario, so `capital_curious_audio` exercises the bot's STT, TTS, and turn
-taking against an autonomous caller. The file format is documented in the
+the scripted scenarios. In audio mode the persona's turns are synthesized and
+the bot's speech transcribed by the same services as a scripted audio scenario,
+Kokoro and Moonshine by default, so `capital_curious_audio` exercises the bot's
+STT, TTS, and turn taking against an autonomous caller. The file format is documented in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
 docstring; run one by hand with `pipecat eval run scenarios/simulated/<name>.yaml
 --bot-url ws://localhost:7860 -v`, the same command as a scripted scenario,
@@ -329,4 +339,4 @@ which prints the conversation as it happens.
 - New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
   manifest as `scripted/<name>`.
 - New goal to reach: add a `scenarios/simulated/<name>.yaml` with a `persona:` and reference
-  it from the manifest's simulations section under the bot that serves it.
+  it from the manifest as `simulated/<name>` under the bot that serves it.

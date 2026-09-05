@@ -170,7 +170,7 @@ def kokoro_service(voice_cfg: dict) -> TTSService:
 
     Kokoro runs an ONNX model locally (no API key, no per-run cost), so the eval
     suite synthesizes user audio for free. The model files are downloaded once
-    on first use and cached under ``~/.cache/kokoro-onnx``. The pipeline's
+    on first use and cached under ``~/.cache/pipecat/kokoro-onnx``. The pipeline's
     ``StartFrame`` configures its sample rate.
 
     Args:
