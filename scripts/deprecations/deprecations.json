@@ -377,6 +377,17 @@
       "location": "pipecat/metrics/metrics.py"
     },
     {
+      "subject": "LatencyBreakdown.chronological_events",
+      "module": "pipecat.observers.user_bot_latency_observer",
+      "kind": "method",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "LatencyBreakdown.contribution_lines",
+      "message": "`LatencyBreakdown.chronological_events` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `LatencyBreakdown.contribution_lines` instead.",
+      "location": "pipecat/observers/user_bot_latency_observer.py"
+    },
+    {
       "subject": "resolve_job_params",
       "module": "pipecat.pipeline.job_context",
       "kind": "function",
