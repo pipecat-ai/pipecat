@@ -1277,9 +1277,9 @@ class AssemblyAISyncSTTSettings(STTSettings):
     """Settings for :class:`AssemblyAISyncSTTService`.
 
     Parameters:
-        prompt: Custom transcription instruction prepended to the model's system
-            prompt. When set, ``language`` is ignored — state the language in the
-            prompt instead.
+        prompt: A natural-language description of what the audio is about: the
+            domain, the scenario, or details of the conversation. Prepended to the
+            model's system prompt to guide transcription.
         keyterms_prompt: Key terms or phrases to bias the decoder toward.
         conversation_context: Prior turns from the same conversation, oldest
             first, giving the model the surrounding dialogue for better continuity
@@ -1287,6 +1287,15 @@ class AssemblyAISyncSTTSettings(STTSettings):
             string is treated as one turn. Setting this explicitly turns off the
             service's automatic context buffer and sends exactly this value; leave
             it unset to let the service manage context (see ``max_context_turns``).
+        language_codes: Declared audio languages for multilingual or
+            code-switching audio (e.g. ``[Language.EN, Language.ES]``). A
+            single-element list pins one language. Bound in preference to the
+            single ``language`` setting when both are set. Defaults to unset (the
+            single ``language`` is used).
+        timestamps: Whether to compute per-word ``start``/``end`` timestamps,
+            returned on the ``words`` of the transcription result, at a small
+            added latency. Left unset by default, so the API default of ``False``
+            (no timestamps) applies.
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1294,6 +1303,8 @@ class AssemblyAISyncSTTSettings(STTSettings):
     conversation_context: str | list[str] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISyncSTTService(SegmentedSTTService):
@@ -1381,6 +1392,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             prompt=None,
             keyterms_prompt=None,
             conversation_context=None,
+            language_codes=None,
+            timestamps=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -1437,10 +1450,13 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         """Assemble the optional ``config`` part from the current settings."""
         config: dict[str, Any] = {}
 
+        # ``language_codes`` (multilingual / code-switching) wins over the single
+        # ``language`` when both are set; either way the wire field is a list.
+        language_codes = self._settings.language_codes
         language = self._settings.language
-        if is_given(language) and language is not None:
-            # ``language_codes`` accepts a string or a list; a single
-            # language goes as a one-element list.
+        if is_given(language_codes) and language_codes:
+            config["language_codes"] = self._resolve_language_codes(language_codes)
+        elif is_given(language) and language is not None:
             config["language_codes"] = [language]
 
         prompt = self._settings.prompt
@@ -1451,12 +1467,29 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         if is_given(keyterms_prompt) and keyterms_prompt:
             config["keyterms_prompt"] = list(keyterms_prompt)
 
+        timestamps = self._settings.timestamps
+        if is_given(timestamps) and timestamps is not None:
+            config["timestamps"] = timestamps
+
         if self._context_is_manual():
             config["conversation_context"] = self._settings.conversation_context
         elif self._context_turns:
             config["conversation_context"] = list(self._context_turns)
 
         return config
+
+    @staticmethod
+    def _resolve_language_codes(language_codes: list[Language | str]) -> list[str]:
+        """Resolve declared languages to AssemblyAI codes, deduped in order.
+
+        Accepts ``Language`` enums (regional variants resolve to their base code)
+        or raw strings, dropping duplicates while preserving declaration order.
+        """
+        resolved = [
+            language_to_assemblyai_language(lang) if isinstance(lang, Language) else lang
+            for lang in language_codes
+        ]
+        return list(dict.fromkeys(resolved))
 
     def _context_is_manual(self) -> bool:
         """Whether conversation_context was supplied explicitly in settings."""
