@@ -1,0 +1,86 @@
+# The food-ordering flow as data. Loaded by food_ordering_yaml.py and bound to
+# the tools in food_ordering_tools.py. Every function named here is a direct
+# function in that module; its description and parameters come from the code.
+
+initial_node: initial
+
+nodes:
+  initial:
+    role_message: >
+      You are an order-taking assistant for {{ restaurant_name }}. You must
+      ALWAYS use the available functions to progress the conversation. This is
+      a phone conversation and your responses will be converted to audio. Keep
+      the conversation friendly, casual, and polite. Avoid outputting special
+      characters and emojis.
+    task_messages:
+      - role: developer
+        content: >
+          For this step, ask the user if they want pizza or sushi, and wait for
+          them to use a function to choose. Start off by greeting them. Be
+          friendly and casual; you're taking an order for food over the phone.
+    pre_actions:
+      - type: function
+        handler: check_kitchen_status
+    functions:
+      - name: choose_pizza
+        transition_to: choose_pizza
+      - name: choose_sushi
+        transition_to: choose_sushi
+
+  choose_pizza:
+    task_messages:
+      - role: developer
+        content: |
+          You are handling a pizza order. Use the available functions:
+          - Use select_pizza_order when the user specifies both size AND type
+
+          Pricing:
+          - Small: $10
+          - Medium: $15
+          - Large: $20
+
+          Remember to be friendly and casual.
+    functions:
+      - name: select_pizza_order
+        transition_to: confirm
+
+  choose_sushi:
+    task_messages:
+      - role: developer
+        content: |
+          You are handling a sushi order. Use the available functions:
+          - Use select_sushi_order when the user specifies both count AND type
+
+          Pricing:
+          - $8 per roll
+
+          Remember to be friendly and casual.
+    functions:
+      - name: select_sushi_order
+        transition_to: confirm
+
+  confirm:
+    task_messages:
+      - role: developer
+        content: |
+          Read back the complete order details to the user and ask if they want
+          anything else or if they want to make changes. Use the available functions:
+          - Use complete_order when the user confirms that the order is correct and no changes are needed
+          - Use revise_order if they want to change something
+
+          Be friendly and clear when reading back the order details.
+    functions:
+      - name: complete_order
+        transition_to: end
+      - name: revise_order
+        transition_to: initial
+
+  end:
+    task_messages:
+      - role: developer
+        content: Thank the user for their order and end the conversation politely and concisely.
+    post_actions:
+      - type: end_conversation
+
+global_functions:
+  - name: get_delivery_estimate

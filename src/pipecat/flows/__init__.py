@@ -13,6 +13,7 @@ Pipecat Flows determines conversation structure at runtime, supporting function
 calling, action execution, and seamless transitions between conversation states.
 """
 
+from .config import FlowConfig
 from .exceptions import (
     ActionError,
     FlowError,
@@ -20,6 +21,7 @@ from .exceptions import (
     FlowTransitionError,
     InvalidFunctionError,
 )
+from .flow import Flow
 from .manager import FlowManager
 from .types import (
     NO_RESPONSE,
@@ -48,6 +50,9 @@ from .types import (
 __all__ = [
     # Flow Manager
     "FlowManager",
+    # Declarative config
+    "FlowConfig",
+    "Flow",
     # Types
     "ActionConfig",
     "ContextStrategy",

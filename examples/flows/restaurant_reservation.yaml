@@ -1,0 +1,72 @@
+# The restaurant reservation flow as data. Loaded by restaurant_reservation_yaml.py
+# and joined to the tools in restaurant_reservation_tools.py. Every function
+# named here is a direct function in that module; its description and
+# parameters come from the code.
+
+initial_node: initial
+
+nodes:
+  initial:
+    role_message: >
+      You are a restaurant reservation assistant for {{ restaurant_name }}, an
+      upscale French restaurant. Be casual and friendly. This is a voice
+      conversation, so avoid special characters and emojis.
+    task_messages:
+      - role: developer
+        content: >
+          Warmly greet the customer and ask how many people are in their party.
+          This is your only job for now; if the customer asks for something
+          else, politely remind them you can't do it.
+    functions:
+      - name: collect_party_size
+        transition_to: get_time
+
+  get_time:
+    task_messages:
+      - role: developer
+        content: Ask what time they'd like to dine. Restaurant is open 5 PM to 10 PM.
+    functions:
+      - name: check_availability
+        transition_to:
+          field: status
+          cases:
+            available: confirm
+            unavailable: no_availability
+
+  confirm:
+    task_messages:
+      - role: developer
+        content: >
+          Confirm the reservation details and ask if they need anything else.
+          When the customer says they're all set or have nothing else, call the
+          end_conversation function to wrap up. If they still need something,
+          help them and then ask again whether there's anything else.
+    functions:
+      - name: end_conversation
+        transition_to: end
+
+  no_availability:
+    task_messages:
+      - role: developer
+        content: >
+          Apologize that the requested time is not available. Suggest the
+          alternative times that check_availability returned. Ask if they'd
+          like to try one of these times. If they pick a time, check its
+          availability. If they'd rather not book after all, call the
+          end_conversation function to wrap up.
+    functions:
+      - name: check_availability
+        transition_to:
+          field: status
+          cases:
+            available: confirm
+            unavailable: no_availability
+      - name: end_conversation
+        transition_to: end
+
+  end:
+    task_messages:
+      - role: developer
+        content: Thank them and end the conversation.
+    post_actions:
+      - type: end_conversation

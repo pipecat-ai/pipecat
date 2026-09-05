@@ -218,6 +218,8 @@ where = ["src"]
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 "pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx"]
+# JSON Schema for FlowConfig, for editors and flow builders.
+"pipecat.flows" = ["flow_config.schema.json"]
 # CLI project-scaffolding templates (jinja + client TS/JS/JSON/CSS trees). The
 # `.gitignore` patterns are listed explicitly because glob `*` does not match dotfiles.
 "pipecat.cli" = [

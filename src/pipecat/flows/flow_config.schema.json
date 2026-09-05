@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Action": {
+      "additionalProperties": true,
+      "description": "A pre- or post-action on a node.\n\nBuilt-in action types (``tts_say``, ``end_conversation``) need nothing\nelse. The ``function`` type names a handler in the tools a\n:class:`~pipecat.flows.Flow` is constructed with. Custom\ntypes registered with ``FlowManager.register_action`` are referenced by\ntype alone. Any additional keys pass through to the action handler.\n\nParameters:\n    type: Action type identifier.\n    handler: For the ``function`` type, the name of the handler.",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "handler": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handler"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Action",
+      "type": "object"
+    },
+    "Branch": {
+      "additionalProperties": false,
+      "description": "A transition chosen by a field of the tool's result.\n\nParameters:\n    field: Key of the tool's result whose value selects the case.\n    cases: Result value to node name.\n    default: Node to transition to when the value matches no case.\n        When omitted, an unmatched value stays on the current node.",
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "cases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Cases",
+          "type": "object"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        }
+      },
+      "required": [
+        "field",
+        "cases"
+      ],
+      "title": "Branch",
+      "type": "object"
+    },
+    "Function": {
+      "additionalProperties": false,
+      "description": "A tool offered at a node, referenced by name.\n\nParameters:\n    name: Name of a Flows direct function in the tools a\n        :class:`~pipecat.flows.Flow` is constructed with. The\n        tool's description and parameters come from that function.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "transition_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/Branch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transition To"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Function",
+      "type": "object"
+    },
+    "Message": {
+      "additionalProperties": false,
+      "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ variable }}`` placeholders\n        substituted when a :class:`~pipecat.flows.Flow` is constructed.",
+      "properties": {
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "title": "Message",
+      "type": "object"
+    },
+    "Node": {
+      "additionalProperties": false,
+      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
+      "properties": {
+        "task_messages": {
+          "items": {
+            "$ref": "#/$defs/Message"
+          },
+          "title": "Task Messages",
+          "type": "array"
+        },
+        "role_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Message"
+        },
+        "functions": {
+          "items": {
+            "$ref": "#/$defs/Function"
+          },
+          "title": "Functions",
+          "type": "array"
+        },
+        "pre_actions": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "title": "Pre Actions",
+          "type": "array"
+        },
+        "post_actions": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "title": "Post Actions",
+          "type": "array"
+        },
+        "context_strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "append",
+                "reset"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Strategy"
+        },
+        "respond_immediately": {
+          "default": true,
+          "title": "Respond Immediately",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task_messages"
+      ],
+      "title": "Node",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A conversation flow described as data.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.",
+  "properties": {
+    "initial_node": {
+      "title": "Initial Node",
+      "type": "string"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Node"
+      },
+      "minProperties": 1,
+      "title": "Nodes",
+      "type": "object"
+    },
+    "global_functions": {
+      "items": {
+        "$ref": "#/$defs/Function"
+      },
+      "title": "Global Functions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "initial_node",
+    "nodes"
+  ],
+  "title": "FlowConfig",
+  "type": "object"
+}
