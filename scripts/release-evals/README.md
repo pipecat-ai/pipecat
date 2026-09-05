@@ -278,9 +278,21 @@ Each simulation file names how many times it runs (`runs`), and every run must
 pass; a persona does not say the same thing twice, so a single run is an
 anecdote and the release set runs each three times. A run passes when the judge
 says the bot did its job (`success`), no judged metric with a `min_quality`
-scored below it, and no measured one (a `measure` such as `latency` or `turns`
-with a range) fell outside its range; a run that fails says which of those
-gave way. The suite prints a
+scored below it, and no measured one fell outside its range; a run that fails
+says which of those gave way.
+
+A judged metric's `criterion` says what every reply of the bot should be, and
+the judge decides it for each bot turn in one call over the whole transcript,
+the bot's tool calls in place; the score is the share of turns that passed, so
+`min_quality: 1` means never, and `0.8` allows one slip in five. Write a rule
+as a condition with what a reply outside it does ("when the reply turns down a
+time, it offers alternatives; a reply that turns down no time passes"), or the
+judge reads a "never" as an "always". Something the bot must do once belongs
+in `success`. A measured metric (`measure: turns`, `duration`, `words`, or
+`latency`, with `min_value` and/or `max_value`) is computed from the run: the
+per-reply ones bound every reply, so `latency` is the slowest reply and
+`words` the longest. `results.jsonl` carries each metric's score, value, and
+the verdict on every turn. The suite prints a
 per-simulation pass rate, mean quality, and a ✓ or ✗ for whether every run
 passed, and exits non-zero when one did not. `--repeat` turns the whole thing
 into a measurement: rates are reported and the exit code stays 0. A run that
