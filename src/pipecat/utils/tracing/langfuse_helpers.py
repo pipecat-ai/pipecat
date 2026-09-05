@@ -10,19 +10,67 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 if TYPE_CHECKING:
     from opentelemetry.trace import Span
 
 
+_trace_public_resolver: Callable[[], bool] | None = None
+
+
+def set_trace_public_resolver(resolver: Callable[[], bool] | None) -> None:
+    """Install a per-span policy for Langfuse trace visibility.
+
+    Pipecat on its own exports to a single Langfuse project, so one env flag
+    describes the whole deployment. An embedding app that fans spans out to
+    several projects — one per tenant — has no single answer, and registers a
+    resolver here to decide per span instead.
+
+    Args:
+        resolver: Called with no arguments as each traced span starts; returns
+            True to mark that span's trace public. Pass None to fall back to
+            ``LANGFUSE_TRACES_PUBLIC``.
+    """
+    global _trace_public_resolver
+    _trace_public_resolver = resolver
+
+
+def traces_public_from_env() -> bool:
+    """Read the deployment-wide ``LANGFUSE_TRACES_PUBLIC`` opt-in.
+
+    Returns:
+        True when the env var opts in to public traces.
+    """
+    return os.getenv("LANGFUSE_TRACES_PUBLIC", "").strip().lower() in ("1", "true", "yes")
+
+
 def mark_trace_public(span: Span) -> None:
     """Mark the current trace as public for Langfuse sharing.
 
-    Public traces are readable by anyone with the URL, no login required, so
-    this is opt-in via ``LANGFUSE_TRACES_PUBLIC``.
+    Public traces are readable by anyone holding the URL, with no login, so
+    this is opt-in: through the resolver from :func:`set_trace_public_resolver`
+    when one is installed, otherwise through ``LANGFUSE_TRACES_PUBLIC``. A
+    resolver that raises leaves the trace private — visibility fails closed.
+
+    Args:
+        span: The span to mark. Every span of a trace carries the attribute,
+            because whichever one reaches Langfuse first creates the trace.
     """
-    if os.getenv("LANGFUSE_TRACES_PUBLIC", "").strip().lower() not in ("1", "true", "yes"):
+    resolver = _trace_public_resolver
+    if resolver is None:
+        should_mark = traces_public_from_env()
+    else:
+        try:
+            should_mark = resolver()
+        except Exception as e:
+            logger.warning(f"Trace visibility resolver failed, keeping trace private: {e}")
+            should_mark = False
+
+    if not should_mark:
         return
     span.set_attribute("langfuse.trace.public", True)
 
