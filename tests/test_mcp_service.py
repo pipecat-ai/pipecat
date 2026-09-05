@@ -25,17 +25,21 @@ from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
 
-def _tool(name, properties=None, required=None, description="A tool."):
-    """Build a fake MCP server tool as returned by ``session.list_tools()``."""
+def _tool(name, properties=None, required=None, description="A tool.", schema_field="inputSchema"):
+    """Build a fake MCP server tool as returned by ``session.list_tools()``.
+
+    ``schema_field`` selects which spelling of the schema attribute the tool
+    carries: the SDK spells it inputSchema on 1.x and input_schema on 2.x.
+    """
     return SimpleNamespace(
         name=name,
         description=description,
-        inputSchema={"properties": properties or {}, "required": required or []},
+        **{schema_field: {"properties": properties or {}, "required": required or []}},
     )
 
 
 class _FakeTransport:
-    """Fake streamablehttp_client context manager; records enter/exit tasks."""
+    """Fake streamable-HTTP transport; records enter/exit tasks."""
 
     def __init__(self, record, exit_error=None, connect_delay=0):
         self._record = record
@@ -110,7 +114,7 @@ class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
         session = _FakeSession(tools, record, fail_initializes, cancel_initialize)
         ctx = patch.multiple(
             "pipecat.services.mcp_service",
-            streamablehttp_client=lambda **kwargs: _FakeTransport(
+            _streamable_http_transport=lambda params: _FakeTransport(
                 record, transport_exit_error, connect_delay
             ),
             ClientSession=lambda read, write: session,
@@ -152,6 +156,26 @@ class TestTools(MCPClientTestBase):
         for schema in tools_schema.standard_tools:
             self.assertIsNotNone(schema.handler)
         await client.close()
+
+    async def test_tools_reads_either_schema_field_spelling(self):
+        """The SDK spells the schema field inputSchema in 1.x, input_schema in 2.x."""
+        for schema_field in ("inputSchema", "input_schema"):
+            with self.subTest(schema_field=schema_field):
+                client, _, _ = self._make_client(
+                    [
+                        _tool(
+                            "tool_a",
+                            properties={"x": {"type": "string"}},
+                            required=["x"],
+                            schema_field=schema_field,
+                        )
+                    ]
+                )
+                tools_schema = await client.tools()
+                schema = tools_schema.standard_tools[0]
+                self.assertEqual(schema.properties, {"x": {"type": "string"}})
+                self.assertEqual(schema.required, ["x"])
+                await client.close()
 
     async def test_tools_is_idempotent_on_connection(self):
         client, session, record = self._make_client([_tool("tool_a")])

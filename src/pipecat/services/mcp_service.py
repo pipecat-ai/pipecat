@@ -8,8 +8,10 @@
 
 import asyncio
 import json
+import sys
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import timedelta
 from typing import Any, TypeAlias
 
 from loguru import logger
@@ -27,13 +29,50 @@ try:
     from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use an MCP client, you need to `uv add "pipecat-ai[mcp]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
+
+
+@asynccontextmanager
+async def _streamable_http_transport(params: StreamableHttpParameters):
+    """Open a streamable-HTTP transport, owning the HTTP client it runs on.
+
+    The transport takes its HTTP settings as a prepared client and leaves that
+    client's lifetime to its caller.
+
+    Args:
+        params: Connection parameters for the MCP server.
+
+    Yields:
+        The transport's streams, read stream first.
+    """
+    # The client class has to come from the httpx family the SDK itself is built
+    # on, which follows the SDK's major version, so take it from the transport's
+    # own module rather than importing a family directly.
+    transport_module = sys.modules[streamable_http_client.__module__]
+    http = getattr(transport_module, "httpx2", None) or transport_module.httpx
+    async with http.AsyncClient(
+        headers=params.headers,
+        timeout=http.Timeout(
+            _timeout_seconds(params.timeout), read=_timeout_seconds(params.sse_read_timeout)
+        ),
+        # Matches the client the SDK builds when given none.
+        follow_redirects=True,
+    ) as client:
+        async with streamable_http_client(
+            params.url, http_client=client, terminate_on_close=params.terminate_on_close
+        ) as streams:
+            yield streams
+
+
+def _timeout_seconds(value: float | timedelta) -> float:
+    """Read a timeout as seconds, whichever way the SDK models it."""
+    return value.total_seconds() if isinstance(value, timedelta) else value
 
 
 def _connect_failure_cause(*candidates: BaseException | None) -> Exception | None:
@@ -220,9 +259,12 @@ class MCPClient(BaseObject):
                     sse_client(**self._server_params.model_dump())
                 )
             else:  # StreamableHttpParameters (validated in __init__)
-                read_stream, write_stream, _ = await exit_stack.enter_async_context(
-                    streamablehttp_client(**self._server_params.model_dump())
+                # Indexed rather than unpacked: the transport yields three
+                # stream elements on the SDK's 1.x line and two on 2.x.
+                streams = await exit_stack.enter_async_context(
+                    _streamable_http_transport(self._server_params)
                 )
+                read_stream, write_stream = streams[0], streams[1]
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
@@ -503,9 +545,13 @@ class MCPClient(BaseObject):
 
             try:
                 # Convert the schema
+                # The SDK spells this field inputSchema on 1.x, input_schema on 2.x.
+                input_schema = (
+                    tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
+                )
                 function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
-                    {"description": tool.description, "input_schema": tool.inputSchema},
+                    {"description": tool.description, "input_schema": input_schema},
                     handler=self._tool_wrapper_with_cleanup if attach_handlers else None,
                 )
 
