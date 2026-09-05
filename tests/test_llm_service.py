@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -992,6 +993,25 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("G1")
         service.append_system_instruction("G2")
         self.assertEqual(service._settings.system_instruction, "APP\n\nG1\n\nG2")
+
+    def test_composition_is_logged_only_when_it_changes(self):
+        service = self._service("APP")
+        logged: list[str] = []
+        handler_id = logger.add(
+            lambda message: logged.append(str(message)), level="DEBUG", format="{message}"
+        )
+        try:
+            service.append_system_instruction("GUIDE")
+            # Every tool sync recomposes; an unchanged instruction stays quiet.
+            service._compose_system_instruction()
+            service._compose_system_instruction()
+            service.append_system_instruction("MORE")
+        finally:
+            logger.remove(handler_id)
+        composed = [line for line in logged if "System instruction composed" in line]
+        self.assertEqual(len(composed), 2)
+        self.assertIn("APP\n\nGUIDE\n", composed[0])
+        self.assertIn("MORE", composed[1])
 
     async def test_appended_guide_survives_turn_completion_toggle(self):
         service = self._service("APP")
