@@ -1032,6 +1032,9 @@ def suite(
         None, "-p", "--pattern", help="Only bots whose path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
+    kind: str = typer.Option(
+        None, "-k", "--kind", help="Only scenarios of this kind: script or simulation."
+    ),
     name: str = typer.Option(
         None, "-n", "--name", help="Run subdir name under runs_dir (default a timestamp)."
     ),
@@ -1104,7 +1107,9 @@ def suite(
     )
 
     suite = EvalSuite(manifest)
-    runs = suite.filter(pattern=pattern, scenario=scenario)
+    if kind is not None and kind not in ("script", "simulation"):
+        raise typer.BadParameter("--kind is script or simulation")
+    runs = suite.filter(pattern=pattern, scenario=scenario, kind=kind)
     if not runs:
         print("No runs match.")
         raise typer.Exit(code=1)

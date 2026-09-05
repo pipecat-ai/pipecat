@@ -609,8 +609,14 @@ class EvalSuite(BaseObject):
         # that fails before it spawns reaches "done" with no await in between.
         self._register_event_handler("on_update", sync=True)
 
-    def filter(self, *, pattern: str | None = None, scenario: str | None = None) -> list[EvalRun]:
-        """Subset the suite's runs by bot-name substring and/or scenario name.
+    def filter(
+        self,
+        *,
+        pattern: str | None = None,
+        scenario: str | None = None,
+        kind: str | None = None,
+    ) -> list[EvalRun]:
+        """Subset the suite's runs by bot-name substring, scenario name, and/or kind.
 
         Narrows :attr:`runs` in place (and returns it) so only matching runs are
         executed and displayed.
@@ -618,6 +624,7 @@ class EvalSuite(BaseObject):
         Args:
             pattern: Keep only runs whose bot name contains this substring.
             scenario: Keep only runs for this exact scenario name.
+            kind: Keep only runs of this kind, ``script`` or ``simulation``.
 
         Returns:
             The matching runs, in their original order.
@@ -627,6 +634,8 @@ class EvalSuite(BaseObject):
             runs = [r for r in runs if pattern in r.bot]
         if scenario:
             runs = [r for r in runs if r.scenario == scenario]
+        if kind:
+            runs = [r for r in runs if r.kind == kind]
         self.runs = runs
         return runs
 

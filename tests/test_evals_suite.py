@@ -275,6 +275,14 @@ class TestManifestSimulations(unittest.TestCase):
         manifest = self._manifest("repeat: 1\nsuite:\n  - bot: bot.py\n    scenarios: [book]\n")
         self.assertEqual([r.attempt for r in manifest.runs], [1])
 
+    def test_the_suite_filters_by_kind(self):
+        from pipecat.evals.suite import EvalSuite
+
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book]\n")
+        runs = EvalSuite(manifest).filter(kind="simulation")
+        self.assertEqual({r.scenario for r in runs}, {"book"})
+        self.assertEqual(len(runs), 3)
+
     def test_a_missing_scenario_still_gets_a_run(self):
         """Its kind can't be read, so it runs once as a scenario and reports the error."""
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")
