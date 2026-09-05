@@ -6,7 +6,7 @@
 
 """Unit tests for OpenAI LLM error handling."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import openai
@@ -187,6 +187,44 @@ async def test_openai_llm_stream_closed_on_cancellation():
 
         # Verify stream was closed despite the cancellation
         assert stream_closed, "Stream should be closed even when CancelledError occurs"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_usage_metrics_report_response_service_tier():
+    """Chat Completions usage metrics use the tier echoed by OpenAI's response."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+
+    usage = MagicMock()
+    usage.prompt_tokens = 10
+    usage.completion_tokens = 5
+    usage.total_tokens = 15
+    usage.prompt_tokens_details = None
+    usage.completion_tokens_details = None
+    chunk = MagicMock()
+    chunk.usage = usage
+    chunk.service_tier = "fast"
+    chunk.model = None
+    chunk.choices = []
+
+    class MockAsyncStream:
+        def __aiter__(self):
+            async def iterator():
+                yield chunk
+
+            return iterator()
+
+        async def close(self):
+            pass
+
+    service.get_chat_completions = AsyncMock(return_value=MockAsyncStream())
+    service.start_ttfb_metrics = AsyncMock()
+    service.start_llm_usage_metrics = AsyncMock()
+
+    await service._process_context(LLMContext(messages=[{"role": "user", "content": "Hello"}]))
+
+    tokens = service.start_llm_usage_metrics.call_args.args[0]
+    assert tokens.service_tier == "fast"
 
 
 @pytest.mark.asyncio
