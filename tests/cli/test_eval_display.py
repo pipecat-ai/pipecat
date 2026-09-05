@@ -26,6 +26,7 @@ from pipecat.evals.results import (
     EvalSimulationProgress,
     EvalSimulationResult,
 )
+from pipecat.evals.scenario import EvalKind
 from pipecat.evals.suite import EvalRun
 
 
@@ -136,7 +137,7 @@ def _simulation_run(
         bot="bot",
         scenario="book",
         scenario_path=Path("book.yaml"),
-        kind="simulation",
+        kind=EvalKind.SIMULATION,
         attempt=attempt,
         attempts=attempts,
         sweep=sweep,

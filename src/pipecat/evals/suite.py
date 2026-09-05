@@ -87,7 +87,7 @@ from pipecat.evals.results import (
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
-from pipecat.evals.scenario import load_scenario_file
+from pipecat.evals.scenario import EvalKind, load_scenario_file
 from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
@@ -198,7 +198,7 @@ def _append_result(
             artifacts[key] = str(path)
     if record_dir is not None and (record_dir / f"{stem}.wav").exists():
         artifacts["recording"] = str(record_dir / f"{stem}.wav")
-    if run.kind == "simulation":
+    if run.kind == EvalKind.SIMULATION:
         record = _simulation_record(run, artifacts)
     else:
         record = _scenario_record(run, artifacts)
@@ -384,7 +384,7 @@ class EvalRun:
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
-    kind: str = "script"
+    kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
     attempt: int = 1
@@ -526,13 +526,13 @@ class EvalManifest:
                 # to pass, unless a repeat makes the whole suite a measurement. A
                 # file that fails to load still gets its run, which reports the
                 # load error.
-                kind, attempts = "script", repeat
+                kind, attempts = EvalKind.SCRIPT, repeat
                 try:
                     loaded = load_scenario_file(scenario_path)
                 except (ValueError, FileNotFoundError):
                     loaded = None
                 if isinstance(loaded, EvalSimulationScenario):
-                    kind = "simulation"
+                    kind = EvalKind.SIMULATION
                     attempts = repeat if repeat_given else loaded.runs
                 runs.append(
                     EvalRun(
@@ -623,7 +623,7 @@ class EvalSuite(BaseObject):
         *,
         pattern: str | None = None,
         scenario: str | None = None,
-        kind: str | None = None,
+        kind: EvalKind | None = None,
     ) -> list[EvalRun]:
         """Subset the suite's runs by bot-name substring, scenario name, and/or kind.
 
@@ -633,7 +633,7 @@ class EvalSuite(BaseObject):
         Args:
             pattern: Keep only runs whose bot name contains this substring.
             scenario: Keep only runs for this exact scenario name.
-            kind: Keep only runs of this kind, ``script`` or ``simulation``.
+            kind: Keep only runs of this kind.
 
         Returns:
             The matching runs, in their original order.
@@ -859,7 +859,7 @@ class EvalSuite(BaseObject):
                     )
                     return
                 data = json.loads(result_path.read_text())
-                if run.kind == "simulation":
+                if run.kind == EvalKind.SIMULATION:
                     run.result = _simulation_result_from_dict(data)
                 else:
                     run.result = _result_from_dict(data)

@@ -37,6 +37,7 @@ from pipecat.evals.results import (
     EvalSimulationResult,
 )
 from pipecat.evals.scenario import (
+    EvalKind,
     EvalSimulationScenario,
     describe_config,
     describe_simulation,
@@ -257,7 +258,9 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        kind = "simulation" if isinstance(loaded, EvalSimulationScenario) else "script"
+        kind = (
+            EvalKind.SIMULATION if isinstance(loaded, EvalSimulationScenario) else EvalKind.SCRIPT
+        )
         runs.append(
             EvalRun(
                 bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
@@ -817,8 +820,8 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
     display, with a trailing blank line separating it from the runs.
     """
     for kind, heading in (
-        ("script", "Scripted scenarios:"),
-        ("simulation", "Simulated scenarios:"),
+        (EvalKind.SCRIPT, "Scripted scenarios:"),
+        (EvalKind.SIMULATION, "Simulated scenarios:"),
     ):
         seen: set[str] = set()
         for r in runs:
@@ -1032,9 +1035,7 @@ def suite(
         None, "-p", "--pattern", help="Only bots whose path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
-    kind: str = typer.Option(
-        None, "-k", "--kind", help="Only scenarios of this kind: script or simulation."
-    ),
+    kind: EvalKind = typer.Option(None, "-k", "--kind", help="Only scenarios of this kind."),
     name: str = typer.Option(
         None, "-n", "--name", help="Run subdir name under runs_dir (default a timestamp)."
     ),
@@ -1107,8 +1108,6 @@ def suite(
     )
 
     suite = EvalSuite(manifest)
-    if kind is not None and kind not in ("script", "simulation"):
-        raise typer.BadParameter("--kind is script or simulation")
     runs = suite.filter(pattern=pattern, scenario=scenario, kind=kind)
     if not runs:
         print("No runs match.")

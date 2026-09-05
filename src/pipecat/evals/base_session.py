@@ -29,6 +29,7 @@ from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
+from pipecat.evals.scenario import EvalKind
 from pipecat.utils.base_object import BaseObject
 
 R = TypeVar("R")
@@ -51,11 +52,11 @@ class BaseEvalSession(BaseObject, Generic[R]):
       before it returns.
     """
 
-    def __init__(self, *, kind: str, name: str, bot_url: str):
+    def __init__(self, *, kind: EvalKind, name: str, bot_url: str):
         """Initialize the session's runtime.
 
         Args:
-            kind: The scenario kind being run (``script`` or ``simulation``), for the trace.
+            kind: The scenario kind being run, for the trace.
             name: The scenario's or simulation's name.
             bot_url: WebSocket URL of the bot's eval transport.
         """

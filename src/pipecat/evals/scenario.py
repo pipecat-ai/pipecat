@@ -26,6 +26,7 @@ whichever kind it is, and :func:`is_scenario_file` tells a scenario from a
 fragment it includes.
 """
 
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -53,6 +54,7 @@ __all__ = [
     "FUNCTION_CALL_EVENTS",
     "JUDGEABLE_EVENTS",
     "EvalConfigured",
+    "EvalKind",
     "EvalExpectation",
     "EvalFunctionCall",
     "EvalScenario",
@@ -67,6 +69,13 @@ __all__ = [
     "is_scenario_file",
     "load_scenario_file",
 ]
+
+
+class EvalKind(StrEnum):
+    """The two kinds of scenario, as a run, a session, and a results record name them."""
+
+    SCRIPT = "script"
+    SIMULATION = "simulation"
 
 
 def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationScenario:

@@ -212,6 +212,7 @@ from pipecat.evals.results import (  # noqa: E402
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
+from pipecat.evals.scenario import EvalKind  # noqa: E402
 from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
 
 SIMULATION = """
@@ -287,7 +288,7 @@ class TestManifestSimulations(unittest.TestCase):
         from pipecat.evals.suite import EvalSuite
 
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book]\n")
-        runs = EvalSuite(manifest).filter(kind="simulation")
+        runs = EvalSuite(manifest).filter(kind=EvalKind.SIMULATION)
         self.assertEqual({r.scenario for r in runs}, {"book"})
         self.assertEqual(len(runs), 3)
 
@@ -337,7 +338,7 @@ class TestSimulationRecords(unittest.TestCase):
                 bot="flows/x.py",
                 scenario="book",
                 scenario_path=base / "book.yaml",
-                kind="simulation",
+                kind=EvalKind.SIMULATION,
                 attempts=3,
                 attempt=2,
                 status="done",

@@ -30,6 +30,7 @@ from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalSimulationResult
+from pipecat.evals.scenario import EvalKind
 from pipecat.evals.services import (
     llm_service_from_config,
     stt_service_from_config,
@@ -88,7 +89,7 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
             bot_stt: The STT that transcribes the bot's audio for the persona in
                 audio mode, or ``None`` for text mode.
         """
-        super().__init__(kind="simulation", name=simulation.name, bot_url=bot_url)
+        super().__init__(kind=EvalKind.SIMULATION, name=simulation.name, bot_url=bot_url)
         self._simulation = simulation
         persona = EvalPersona(simulation.persona, simulation.goal)
         persona_context = persona.context()

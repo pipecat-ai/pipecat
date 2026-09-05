@@ -38,6 +38,7 @@ from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
+from pipecat.evals.scenario import EvalKind
 from pipecat.evals.scenario_config import describe_config
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
@@ -123,7 +124,7 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
                 ``response`` event (added to the eval pipeline in audio mode), or
                 ``None`` when unused.
         """
-        super().__init__(kind="script", name=scenario.name, bot_url=bot_url)
+        super().__init__(kind=EvalKind.SCRIPT, name=scenario.name, bot_url=bot_url)
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
