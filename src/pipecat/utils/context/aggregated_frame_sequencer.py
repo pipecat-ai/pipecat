@@ -675,6 +675,29 @@ class AggregatedFrameSequencer:
         self._streaming_contexts.pop(context_id, None)
         return frames
 
+    def discard_context(self, context_id: str, last_word_pts: int | None = None) -> list[Frame]:
+        """Discard pending spoken text for a context and flush unblocked skipped frames.
+
+        Use this when synthesis ends without a result that can be treated as spoken.
+        Skipped frames remain in the sequence because they were not intended for TTS.
+
+        Args:
+            context_id: The context whose spoken slots must be removed.
+            last_word_pts: Optional PTS to apply to skipped frames that become unblocked.
+
+        Returns:
+            AggregatedTextFrames that are no longer blocked by the discarded slots.
+        """
+        self._slots = [
+            slot for slot in self._slots if not (slot.spoken and slot.context_id == context_id)
+        ]
+        self._buffered_words = [
+            word for word in self._buffered_words if word.context_id != context_id
+        ]
+        self._context_append_to_context.pop(context_id, None)
+        self._streaming_contexts.pop(context_id, None)
+        return self.flush(last_word_pts=last_word_pts)
+
     def clear(self) -> None:
         """Clear all slots and context metadata (called on interruption/reset)."""
         self._slots.clear()

@@ -581,6 +581,20 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seq.force_complete("ctx1", last_word_pts=10), [])
 
 
+class TestDiscardContext(unittest.IsolatedAsyncioTestCase):
+    async def test_discards_spoken_text_and_flushes_skipped_frames(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        skipped = _skipped_frame("code")
+        await seq.register_skipped(skipped, "ctx1", None)
+
+        result = seq.discard_context("ctx1", last_word_pts=20)
+
+        self.assertFalse(any(isinstance(frame, TTSTextFrame) for frame in result))
+        self.assertEqual(result, [skipped])
+        self.assertEqual(skipped.pts, 20)
+
+
 # ---------------------------------------------------------------------------
 # clear
 # ---------------------------------------------------------------------------
