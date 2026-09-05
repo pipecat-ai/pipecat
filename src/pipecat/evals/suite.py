@@ -40,7 +40,10 @@ Manifest format (YAML)::
 
 A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
 simulation, and the file says which (see
-:func:`~pipecat.evals.scenario.load_scenario_file`). A simulation runs as many
+:func:`~pipecat.evals.scenario.load_scenario_file`). A name resolves under
+``scenarios_dir`` with ``.yaml`` added and may carry a folder, as
+``scripted/greeting``; a name ending in ``.yaml`` is a path relative to the
+manifest instead. A simulation runs as many
 times as its ``runs:`` says, and every run must pass.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
@@ -335,10 +338,16 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
 
 
 def _resolve_scenario(name: str, base: Path, default_dir: Path) -> tuple[str, Path]:
-    """A manifest entry's display name and file: a bare name under ``default_dir``, or a path."""
-    if name.endswith(SCENARIO_SUFFIXES) or "/" in name:
+    """A manifest entry's display name and file.
+
+    A name ending in a YAML suffix is a path relative to the manifest. Anything
+    else names a file under ``default_dir`` with ``.yaml`` added, and may carry
+    a folder (``scripted/greeting``); the display name is the bare stem either
+    way.
+    """
+    if name.endswith(SCENARIO_SUFFIXES):
         return Path(name).stem, (base / name).resolve()
-    return name, (default_dir / f"{name}.yaml").resolve()
+    return Path(name).name, (default_dir / f"{name}.yaml").resolve()
 
 
 @dataclass

@@ -275,6 +275,14 @@ class TestManifestSimulations(unittest.TestCase):
         manifest = self._manifest("repeat: 1\nsuite:\n  - bot: bot.py\n    scenarios: [book]\n")
         self.assertEqual([r.attempt for r in manifest.runs], [1])
 
+    def test_a_folder_in_a_name_stays_under_the_scenarios_dir(self):
+        (self.base / "scenarios" / "scripted").mkdir()
+        (self.base / "scenarios" / "scripted" / "greet.yaml").write_text("name: greet\nturns: []\n")
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [scripted/greet]\n")
+        run = manifest.runs[0]
+        self.assertEqual(run.scenario, "greet")
+        self.assertEqual(run.scenario_path, self.base / "scenarios" / "scripted" / "greet.yaml")
+
     def test_the_suite_filters_by_kind(self):
         from pipecat.evals.suite import EvalSuite
 

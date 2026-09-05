@@ -1,0 +1,36 @@
+name: book_table_flexible
+
+# Text modality, against flows/restaurant_reservation.py: the caller wants
+# 7 PM, which the restaurant has no table at (7 PM and 8 PM are taken), but any
+# time from 6 PM to 9 PM works for them. The bot must say 7 PM is unavailable,
+# offer the alternatives, and book the one the caller picks; the persona decides
+# which of the offered times fits. The judge reads the check_availability calls
+# along with the conversation.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+persona: |
+  Sam, calling to book a table for tonight. Easygoing: gives the party size and
+  the time when asked, one detail per turn. Would like 7 PM, but any time from
+  6 PM to 9 PM works; picks one of those if offered, declines anything earlier
+  or later, and says goodbye once the booking is confirmed.
+
+goal: "Book a table for four tonight, ideally at 7 PM, otherwise at any time between 6 PM and 9 PM, then end the call."
+
+success: "the bot said 7 PM was not available, offered alternative times, and confirmed a reservation for four at a time between 6 PM and 9 PM"
+
+metrics:
+  - name: recovery
+    criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
+    min_quality: 1
+  - name: politeness
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 8
+
+max_turns: 8
+max_duration_s: 120
+runs: 3

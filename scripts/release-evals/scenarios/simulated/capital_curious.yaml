@@ -1,0 +1,33 @@
+name: capital_curious
+
+# Text modality: a curious caller works out one fact from the bot and hangs up.
+# The persona LLM holds the conversation on its own; the judge decides from the
+# whole conversation whether the caller got the answer, and scores the bot's
+# manner. The smallest simulation that exercises the loop end to end.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+persona: |
+  A friendly, curious traveler planning a trip to Europe. Polite and concise:
+  asks one question at a time, and thanks the assistant once satisfied.
+
+goal: "Find out what the capital of Germany is, then end the call."
+
+success: "the bot told the caller that the capital of Germany is Berlin"
+
+metrics:
+  - name: politeness
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - name: brevity
+    criterion: "the reply is at most three sentences, with no monologue"
+  - measure: words
+    max_value: 60
+  - measure: latency
+    max_value: 5
+
+max_turns: 6
+max_duration_s: 120
+runs: 3

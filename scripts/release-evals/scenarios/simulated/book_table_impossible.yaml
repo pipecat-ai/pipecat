@@ -1,0 +1,39 @@
+name: book_table_impossible
+
+# Text modality, against flows/restaurant_reservation.py: the caller can only
+# make 7 PM or 8 PM, and the restaurant has no table at either. The caller's
+# goal cannot be met, so success here is the bot handling that correctly: it
+# says the times are unavailable, offers the ones it has, does not book a time
+# the caller never accepted, and lets the call end without a reservation. The
+# persona's own end_call will report that it gave up; that is expected.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+persona: |
+  Casey, calling to book a table for tonight. Polite but constrained: gives the
+  party size and the time when asked, one detail per turn. Can only make 7 PM
+  or 8 PM; asks for the other one if the first is unavailable, and if neither
+  works, thanks the assistant and ends the call without booking anything.
+
+goal: "Book a table for two tonight at 7 PM or 8 PM; if neither is available, end the call without a reservation."
+
+success: "the bot said neither 7 PM nor 8 PM was available, offered other times, and did not book a table at a time the caller had not accepted; the call ended without a reservation"
+
+metrics:
+  - name: honesty
+    criterion: "the reply does not say a table is booked or reserved unless a check_availability call confirmed that time and the caller accepted it; a reply that says nothing about a booking passes"
+    min_quality: 1
+  - name: recovery
+    criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
+    min_quality: 1
+  - name: politeness
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - measure: latency
+    max_value: 8
+
+max_turns: 8
+max_duration_s: 120
+runs: 3

@@ -11,7 +11,7 @@ Each example is a Pipecat **bot**. We run it with its eval transport
 client, plays the user's turns (synthesizing audio when a scenario is in audio
 mode), transcribes the bot's speech, and judges the response with an LLM.
 
-A scenario (`scenarios/<name>.yaml`) is a scripted conversation plus the
+A scenario (`scenarios/scripted/<name>.yaml`) is a scripted conversation plus the
 expected results. For example the `capital_question` scenario asks "What is the
 capital of Germany?" and judges that the reply says Berlin. Scenarios are
 reusable, so one shared scenario covers many bots.
@@ -169,7 +169,7 @@ If you already have a bot running with `-t eval`, run a scenario directly
 (handy while iterating on a scenario or a single bot):
 
 ```sh
-pipecat eval run scenarios/capital_question.yaml --bot-url ws://localhost:7860
+pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860
 ```
 
 ## Scenarios
@@ -260,7 +260,8 @@ LLM playing a caller with a goal, who says whatever the conversation calls for
 and hangs up (an `end_call` tool) when the goal is reached or clearly out of
 reach. A judge then reads the whole conversation, together with the tools the
 bot called, and decides whether the caller got what they came for. A simulation
-is a `scenarios/<name>.yaml` like any other, told apart by its `persona:`; the
+is a scenario like any other, told apart by its `persona:` and kept in
+`scenarios/simulated/`; the
 release simulations sit at the end of the manifest. A plain voice bot takes a
 curious caller in text and in audio, which checks the simulation machinery
 itself in both modes; the rest cover the Flows examples, because those are the
@@ -318,13 +319,14 @@ Kokoro and the bot's speech transcribed by Moonshine, as for a scripted audio
 scenario, so `capital_curious_audio` exercises the bot's STT, TTS, and turn
 taking against an autonomous caller. The file format is documented in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
-docstring; run one by hand with `pipecat eval run scenarios/<name>.yaml
+docstring; run one by hand with `pipecat eval run scenarios/simulated/<name>.yaml
 --bot-url ws://localhost:7860 -v`, the same command as a scripted scenario,
 which prints the conversation as it happens.
 
 ## Adding coverage
 
 - New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
-- New behavior to test: add a `scenarios/<name>.yaml` and reference it from the manifest.
-- New goal to reach: add a `scenarios/<name>.yaml` with a `persona:` and reference
+- New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
+  manifest as `scripted/<name>`.
+- New goal to reach: add a `scenarios/simulated/<name>.yaml` with a `persona:` and reference
   it from the manifest's simulations section under the bot that serves it.
