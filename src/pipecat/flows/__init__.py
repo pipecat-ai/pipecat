@@ -18,6 +18,8 @@ from .exceptions import (
     ActionError,
     FlowError,
     FlowInitializationError,
+    FlowProblem,
+    FlowReferenceError,
     FlowTransitionError,
     InvalidFunctionError,
 )
@@ -40,6 +42,7 @@ from .types import (
     flows_direct_function,
     flows_tool_options,
 )
+from .validation import FlowIssue, FlowReport, validate_flow
 
 # NOTE: In Pipecat, we typically don't do this sort of re-exporting of nested
 # modules, but this is how we did it in the previous standalone pipecat-flows
@@ -53,6 +56,9 @@ __all__ = [
     # Declarative config
     "FlowConfig",
     "Flow",
+    "FlowIssue",
+    "FlowReport",
+    "validate_flow",
     # Types
     "ActionConfig",
     "ContextStrategy",
@@ -72,6 +78,8 @@ __all__ = [
     # Exceptions
     "FlowError",
     "FlowInitializationError",
+    "FlowProblem",
+    "FlowReferenceError",
     "FlowTransitionError",
     "InvalidFunctionError",
     "ActionError",

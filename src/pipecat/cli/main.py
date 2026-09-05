@@ -74,6 +74,7 @@ def _build_app():
     from rich.console import Console
 
     from pipecat.cli.commands.eval import eval_app
+    from pipecat.cli.commands.flows import flows_app
     from pipecat.cli.commands.init import init_command
 
     app = typer.Typer(
@@ -115,6 +116,7 @@ def _build_app():
 
     # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
     app.add_typer(eval_app, name="eval")
+    app.add_typer(flows_app, name="flows")
 
     # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point group
     # is intentionally still named "pipecat_cli.extensions" for backward compatibility

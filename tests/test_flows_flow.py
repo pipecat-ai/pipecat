@@ -19,6 +19,7 @@ from pipecat.flows import (
     FlowConfig,
     FlowError,
     FlowManager,
+    FlowReferenceError,
     FlowsFunctionSchema,
     NodeConfig,
     flows_tool_options,
@@ -239,6 +240,21 @@ class TestConstruction(unittest.TestCase):
         with self.assertRaises(FlowError) as cm:
             make_flow(single_node({"name": "wrong_first_param"}))
         self.assertIn("flow_manager", str(cm.exception))
+
+    def test_every_problem_is_reported_together(self):
+        cfg = single_node(
+            {"name": "no_such_tool"},
+            pre_actions=[{"type": "function", "handler": "no_such_handler"}],
+            role_message="Hi {{ nobody }}",
+        )
+        with self.assertRaises(FlowReferenceError) as cm:
+            make_flow(cfg, variables={})
+        codes = [p.code for p in cm.exception.problems]
+        self.assertEqual(codes, ["missing_variable", "missing_tool", "missing_handler"])
+        self.assertEqual(cm.exception.problems[1].node, "a")
+        self.assertEqual(cm.exception.problems[1].function, "no_such_tool")
+        self.assertIn("3 problems", str(cm.exception))
+        self.assertIn("no_such_handler", str(cm.exception))
 
     def test_missing_variable(self):
         with self.assertRaises(FlowError) as cm:
