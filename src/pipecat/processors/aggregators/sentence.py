@@ -10,7 +10,13 @@ This module provides a frame processor that accumulates text frames into
 complete sentences, only outputting when a sentence-ending pattern is detected.
 """
 
-from pipecat.frames.frames import EndFrame, Frame, InterimTranscriptionFrame, TextFrame
+from pipecat.frames.frames import (
+    EagerEndOfTurnTranscriptionFrame,
+    EndFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    TextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import match_endofsentence
 
@@ -46,8 +52,8 @@ class SentenceAggregator(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        # We ignore interim description at this point.
-        if isinstance(frame, InterimTranscriptionFrame):
+        # We ignore interim and eager (provisional) transcriptions at this point.
+        if isinstance(frame, (InterimTranscriptionFrame, EagerEndOfTurnTranscriptionFrame)):
             return
 
         if isinstance(frame, TextFrame):

@@ -23,6 +23,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
     FrameProcessorSetup,
 )
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -230,7 +231,9 @@ class UserTurnProcessor(FrameProcessor):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            await self.broadcast_frame(UserStoppedSpeakingFrame)
+            await self.broadcast_frame(
+                UserStoppedSpeakingFrame, speculation_id=params.speculation_id
+            )
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
@@ -246,6 +249,7 @@ class UserTurnProcessor(FrameProcessor):
         self,
         controller: UserTurnController,
         strategy: BaseUserTurnStopStrategy,
+        speculation: UserTurnSpeculation | None,
     ):
         logger.debug(f"{self}: User turn inference triggered (strategy: {strategy})")
         await self._call_event_handler("on_user_turn_inference_triggered", strategy)

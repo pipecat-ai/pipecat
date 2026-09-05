@@ -20,7 +20,6 @@ from typing_extensions import override
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
@@ -30,6 +29,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
@@ -173,7 +173,7 @@ class DeepgramFluxSTTSettings(STTSettings):
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class DeepgramFluxSTTBase(STTService):
+class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     """Base class for Deepgram Flux STT services across transports.
 
     Contains all shared Flux protocol logic (message handling, turn detection,
@@ -801,13 +801,15 @@ class DeepgramFluxSTTBase(STTService):
         """Handle TurnResumed events from Deepgram Flux.
 
         TurnResumed events indicate that speech has resumed after a brief pause
-        within the same turn. This is primarily used for logging and debugging
-        purposes and doesn't trigger any significant processing changes.
+        within the same turn, which withdraws the EagerEndOfTurn that preceded
+        it: whatever was generated from that prediction no longer answers the
+        turn the user is still speaking.
 
         Args:
             event: The event type string for logging purposes.
         """
         logger.trace(f"Received event TurnResumed: {event}")
+        await self._cancel_eager_end_of_turn()
         await self._call_event_handler("on_turn_resumed")
 
     def _calculate_average_confidence(self, transcript_data) -> float | None:
@@ -860,6 +862,8 @@ class DeepgramFluxSTTBase(STTService):
         """
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
+        # The turn is committed, so any eager prediction it followed is resolved.
+        self._clear_eager_end_of_turn()
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
@@ -899,44 +903,23 @@ class DeepgramFluxSTTBase(STTService):
         """Handle EagerEndOfTurn events from Deepgram Flux.
 
         EagerEndOfTurn events are fired when the end-of-turn confidence reaches the
-        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn threshold.
-        These provide interim transcripts that can be used for faster response
-        generation while still allowing the user to continue speaking.
+        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn
+        threshold, so a response can be generated during the gap.
 
-        EagerEndOfTurn events enable more responsive conversational AI by allowing
-        the LLM to start processing likely final transcripts before the turn
-        is definitively ended.
+        The prediction may not hold: the user may resume speaking, or the
+        committed transcript may differ from this one. Pair the service with
+        :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` to
+        have a response generated here and discarded if either happens.
 
         Args:
-            transcript: The interim transcript text that triggered the EagerEndOfTurn event.
+            transcript: The predicted transcript for the turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.trace(f"EagerEndOfTurn - {transcript}")
-        # Deepgram's EagerEndOfTurn feature enables lower-latency voice agents by sending
-        # medium-confidence transcripts before EndOfTurn certainty, allowing LLM processing to
-        # begin early.
-        #
-        # However, if speech resumes or the transcripts differ from the final EndOfTurn, the
-        # EagerEndOfTurn response should be cancelled to avoid incorrect or partial responses.
-        #
-        # Pipecat doesn't yet provide built-in Gate/control mechanisms to:
-        # 1. Start LLM/TTS processing early on EagerEndOfTurn events
-        # 2. Cancel in-flight processing when TurnResumed occurs
-        #
-        # By pushing EagerEndOfTurn transcripts as InterimTranscriptionFrame, we enable
-        # developers to implement custom EagerEndOfTurn handling in their applications while
-        # maintaining compatibility with existing interim transcription workflows.
-        #
-        # TODO: Implement proper EagerEndOfTurn support with cancellable processing pipeline
-        # that can start response generation on EagerEndOfTurn and cancel or confirm it.
-        await self.push_frame(
-            InterimTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._primary_detected_language(data),
-                result=data,
-            )
+        await self._push_eager_end_of_turn(
+            transcript,
+            user_id=self._user_id,
+            language=self._primary_detected_language(data),
+            result=data,
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 

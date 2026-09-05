@@ -4,16 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Example 22: Filter Incomplete Turns
+"""Eager End of Turn
 
-Demonstrates LLM-based turn completion detection to suppress bot responses when
-the user was cut off mid-thought. The LLM outputs one of three markers:
-- ● (complete): User finished their thought, respond normally
-- ◐ (incomplete short): User was cut off, wait ~5s then prompt
-- ○ (incomplete long): User needs time to think, wait ~10s then prompt
+Answers a predicted end of turn while the user turn is still open, so the gap
+before the service commits to it is spent generating a response instead of
+waiting for one.
 
-When incomplete is detected, the bot's response is suppressed. After the timeout
-expires, the LLM is automatically prompted to re-engage the user.
+Deepgram Flux predicts an end of turn (EagerEndOfTurn) ahead of committing to
+one (EndOfTurn), and withdraws the prediction (TurnResumed) if the user turns
+out to be mid-sentence. `EagerUserTurnStrategies` answers the prediction; the
+`UserTurnSpeculationGate` holds that response until the turn is confirmed, and
+discards it if the user resumes speaking or the committed transcript differs
+from the predicted one. Nothing unconfirmed is spoken or written to the context.
+
+The gate sits after the TTS service here, so a confirmed response is already
+synthesized and starts playing immediately. Move it before the TTS service to
+avoid paying for synthesis that may be discarded.
 """
 
 import os
@@ -21,7 +27,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -33,15 +38,16 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
+from pipecat.processors.filters.user_turn_speculation_gate import UserTurnSpeculationGate
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -72,12 +78,23 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = DeepgramFluxSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramFluxSTTService.Settings(
+            # EagerEndOfTurn is off by default. Lower values predict earlier,
+            # which buys more latency but misses more often.
+            eager_eot_threshold=0.5,
+        ),
+    )
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            system_instruction=(
+                "You are a helpful assistant in a voice conversation. Your responses will be "
+                "spoken aloud, so avoid emojis, bullet points, or other formatting that can't "
+                "be spoken. Respond to what the user said in a creative, helpful, and brief way."
+            ),
         ),
     )
 
@@ -89,40 +106,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    # `FilterIncompleteUserTurnStrategies` pairs the default detector
-    # chain with `LLMTurnCompletionUserTurnStopStrategy`: detectors
-    # trigger LLM inference but the public `on_user_turn_stopped` event
-    # fires only when the LLM confirms ●. The LLM marks each response
-    # with one of:
-    # ● = complete (respond normally)
-    # ◐ = incomplete short (wait 5s, then prompt)
-    # ○ = incomplete long (wait 10s, then prompt)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
-            user_turn_strategies=FilterIncompleteUserTurnStrategies(
-                # Optional: customize turn completion behavior
-                # config=UserTurnCompletionConfig(
-                #     incomplete_short_timeout=5.0,
-                #     incomplete_long_timeout=10.0,
-                #     incomplete_short_prompt="Custom prompt...",
-                #     incomplete_long_prompt="Custom prompt...",
-                #     instructions="Custom turn completion instructions...",
-                # ),
-            ),
+            user_turn_strategies=EagerUserTurnStrategies(),
         ),
     )
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
+            transport.input(),
             stt,
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            user_aggregator,
+            llm,
+            tts,
+            # Anywhere before transport.output(): nothing past this point can be
+            # unspoken again.
+            UserTurnSpeculationGate(),
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -143,11 +145,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
         context.add_message(
             {
                 "role": "developer",
-                "content": "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go and why?'",
+                "content": (
+                    "Please introduce yourself to the user, then ask them where they would "
+                    "travel if they could go anywhere right now, and why."
+                ),
             }
         )
         await worker.queue_frames([LLMRunFrame()])
@@ -157,17 +161,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
+    @stt.event_handler("on_eager_end_of_turn")
+    async def on_eager_end_of_turn(service, transcript):
+        logger.info(f"Eager end of turn: {transcript}")
+
+    @stt.event_handler("on_turn_resumed")
+    async def on_turn_resumed(service):
+        logger.info("Turn resumed: the eager end of turn was withdrawn")
+
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
-        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
-        line = f"{timestamp}user: {message.content}"
-        logger.info(f"Transcript: {line}")
+        logger.info(f"Transcript: user: {message.content}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
-        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
-        line = f"{timestamp}assistant: {message.content}"
-        logger.info(f"Transcript: {line}")
+        logger.info(f"Transcript: assistant: {message.content}")
 
     await runner.run()
 

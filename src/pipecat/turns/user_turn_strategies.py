@@ -16,6 +16,8 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    EagerMatchPolicy,
+    EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
     LLMTurnCompletionUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
@@ -161,3 +163,49 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
         gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
         gated.append(LLMTurnCompletionUserTurnStopStrategy(config=self.config))
         self.stop = gated
+
+
+@dataclass
+class EagerUserTurnStrategies(ExternalUserTurnStrategies):
+    """Strategies for a service that predicts the end of a turn before committing.
+
+    Answers the prediction while the turn is still open, so the gap before the
+    committed end of turn is spent generating a response instead of waiting for
+    one. The response is discarded if the user resumes speaking or the committed
+    transcript differs from the eager one. See
+    :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
+
+    Requires a
+    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
+    in the pipeline, before the output transport — without it, an unconfirmed
+    response is spoken as it is generated.
+
+    The service owns turn detection here, so this replaces the detector chain
+    rather than extending it: a local detector running alongside would trigger a
+    second inference for the same turn.
+
+    Parameters:
+        match_policy: Decides whether the committed transcript is close enough to
+            the eager one to keep the speculative response. Defaults to
+            :class:`~pipecat.turns.user_stop.NormalizedMatch`, since services
+            commonly format the transcript they commit (capitalization,
+            punctuation) while leaving the eager one raw. Pass
+            :class:`~pipecat.turns.user_stop.ExactMatch` to require the two to
+            be identical.
+        enable_interruptions: Whether to broadcast an interruption when a
+            proposal starts a turn. Services route their ``should_interrupt``
+            setting here.
+
+    Example::
+
+        user_turn_strategies=EagerUserTurnStrategies()
+
+        # Require the committed transcript to match the eager one exactly:
+        user_turn_strategies=EagerUserTurnStrategies(match_policy=ExactMatch())
+    """
+
+    match_policy: EagerMatchPolicy | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stop = [EagerUserTurnStopStrategy(match_policy=self.match_policy)]
