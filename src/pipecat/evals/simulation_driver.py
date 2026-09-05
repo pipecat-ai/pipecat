@@ -87,6 +87,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._context = persona_context
         self._turns = 0
         self._ended_by: str | None = None
+        self._duration_s = 0.0
         self._end_call: dict | None = None
         self._succeeded = False
         self._reason = ""
@@ -109,7 +110,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription
         # of what it said, in text mode its LLM text.
-        deadline = time.monotonic() + simulation.max_duration_s
+        started = time.monotonic()
+        deadline = started + simulation.max_duration_s
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s)"
@@ -135,6 +137,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()
+        self._duration_s = round(time.monotonic() - started, 3)
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
@@ -251,12 +254,19 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         return []
 
     async def _judge_conversation(self) -> None:
-        """Settle the judged metrics and the goal in one call.
+        """Score the measured metrics, then settle the judged ones and the goal in one call.
 
         The judge reads the whole transcript once, the bot's tool calls in place,
         and answers for every bot turn on every criterion and for the goal.
+        Measured metrics need no judge and take the file's order with the rest.
         """
+        measured = {
+            metric.name: self._measure(metric)
+            for metric in self._simulation.metrics
+            if metric.measure is not None
+        }
         if self._judge is None:
+            self._metrics.extend(measured.values())
             self._reason = "no judge configured"
             return
         evidence = self.tool_calls()
@@ -266,6 +276,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self.transcript(), self._criteria, self._simulation.success
         )
         for metric in self._simulation.metrics:
+            if metric.name in measured:
+                self._metrics.append(measured[metric.name])
+                continue
             verdicts = [
                 EvalSimulationTurnVerdict(
                     turn=index, passed=verdict.verdict == "yes", reason=verdict.reason
@@ -283,6 +296,82 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._trace.log(
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {self._reason}"
         )
+
+    def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
+        """A measured metric's outcome: its value against its range."""
+        value, described = self._measurement(metric.measure or "")
+        low, high = metric.min_value, metric.max_value
+        if low is not None and high is not None:
+            bound = f"between {low:g} and {high:g}"
+        elif high is not None:
+            bound = f"at most {high:g}"
+        else:
+            bound = f"at least {low:g}"
+        reason = f"{described}, {bound}"
+        if value is None:
+            score, passed = None, True
+        else:
+            inside = (low is None or value >= low) and (high is None or value <= high)
+            score, passed = (1.0 if inside else 0.0), inside
+        self._trace.log(
+            f"measure: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
+            f"{'' if passed else ' (out of range)'}: {reason}"
+        )
+        return EvalSimulationMetricScore(
+            name=metric.name, score=score, passed=passed, reason=reason, value=value
+        )
+
+    def _measurement(self, measure: str) -> tuple[float | None, str]:
+        """A measure's value for this run, and the phrase that reports it."""
+        events = self._stream.events_seen
+        if measure == "turns":
+            return float(self._turns), f"{self._turns} persona turn(s)"
+        if measure == "duration":
+            return self._duration_s, f"{self._duration_s:.1f} s"
+        if measure == "interruptions":
+            count = sum(1 for e in events if e["type"] == "bot_interrupted")
+            return float(count), f"{count} interruption(s)"
+        if measure == "words":
+            longest = max(
+                (
+                    len(line["content"].split())
+                    for line in self.timeline()
+                    if line["role"] == "assistant"
+                ),
+                default=None,
+            )
+            if longest is None:
+                return None, "no reply to measure"
+            return float(longest), f"longest reply {longest} words"
+        if measure == "latency":
+            slowest = max(self._reply_latencies(), default=None)
+            if slowest is None:
+                return None, "no reply to time"
+            return slowest, f"slowest reply {slowest:.2f} s"
+        raise ValueError(f"unknown measure {measure!r}")
+
+    def _reply_latencies(self) -> list[float]:
+        """Seconds from each persona turn to the bot's first word of the reply after it.
+
+        In text mode the persona's turn is its send and the bot's first word the
+        first token of the LLM response that follows; in audio mode they are the
+        bot's own report of the persona stopping and its first spoken sentence.
+        """
+        if self._simulation.bot_audio:
+            sent, replied = "user_stopped_speaking", "tts_response"
+        else:
+            sent, replied = PERSONA_TURN_EVENT, "llm_response"
+        latencies: list[float] = []
+        sent_at: float | None = None
+        for event in self._stream.events_seen:
+            if event["type"] == sent:
+                sent_at = event.get("at")
+            elif event["type"] == replied and sent_at is not None:
+                first_word = event.get("started_at", event.get("at"))
+                if first_word is not None:
+                    latencies.append(round(max(0.0, first_word - sent_at), 3))
+                sent_at = None
+        return latencies
 
     def _score(
         self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]

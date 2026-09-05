@@ -113,7 +113,21 @@ class TestFramesToEvents(unittest.TestCase):
 
     def _one(self, result):
         self.assertEqual(len(result), 1)
-        return result[0]
+        # The timing a reply carries for the measures is not what these tests map.
+        return {k: v for k, v in result[0].items() if k != "started_at"}
+
+    def test_a_reply_carries_the_time_of_its_first_token(self):
+        s = _stream(bot_audio=False)
+        s.frames_to_events(LLMFullResponseStartFrame())
+        s.frames_to_events(LLMTextFrame(text="Hello "))
+        s.frames_to_events(LLMTextFrame(text="world"))
+        (event,) = s.frames_to_events(LLMFullResponseEndFrame())
+        self.assertIn("started_at", event)
+        self.assertLessEqual(event["started_at"], s.elapsed())
+        # A response with no text carries no time.
+        s.frames_to_events(LLMFullResponseStartFrame())
+        (event,) = s.frames_to_events(LLMFullResponseEndFrame())
+        self.assertNotIn("started_at", event)
 
     def test_llm_lifecycle_aggregates_text(self):
         s = _stream(bot_audio=False)
@@ -691,6 +705,11 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(nxt.frames, [])
 
 
+def _untimed(events: list[dict]) -> list[dict]:
+    """The events without the arrival time the stream stamps on them."""
+    return [{k: v for k, v in e.items() if k != "at"} for e in events]
+
+
 class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
     """The persona's text-mode responses become one send-text each."""
 
@@ -714,7 +733,9 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         # The response's own frames go on, for the assistant aggregator.
         self.assertEqual([f for f in nxt.frames if f in frames], frames)
         self.assertTrue(any("'Hi there.' (persona, text)" in line for line in trace.lines))
-        self.assertEqual(relay._stream.events_seen, [{"type": "persona_turn", "text": "Hi there."}])
+        self.assertEqual(
+            _untimed(relay._stream.events_seen), [{"type": "persona_turn", "text": "Hi there."}]
+        )
 
     async def test_spoken_response_is_only_traced(self):
         relay, nxt, trace = self._relay()
@@ -728,7 +749,9 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         self.assertFalse(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in nxt.frames))
         self.assertTrue(any("'Hi' (persona, audio)" in line for line in trace.lines))
-        self.assertEqual(relay._stream.events_seen, [{"type": "persona_turn", "text": "Hi"}])
+        self.assertEqual(
+            _untimed(relay._stream.events_seen), [{"type": "persona_turn", "text": "Hi"}]
+        )
 
     async def test_a_response_without_words_is_not_a_turn(self):
         # An end_call-only response, or one cut off before any word went out.

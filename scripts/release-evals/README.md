@@ -276,8 +276,10 @@ order, quote a policy.
 Each simulation file names how many times it runs (`runs`), and every run must
 pass; a persona does not say the same thing twice, so a single run is an
 anecdote and the release set runs each three times. A run passes when the judge
-says the bot did its job (`success`) and no metric with a `min_quality` scored
-below it; a run that fails says which of those gave way. The suite prints a
+says the bot did its job (`success`), no judged metric with a `min_quality`
+scored below it, and no measured one (a `measure` such as `latency` or `turns`
+with a range) fell outside its range; a run that fails says which of those
+gave way. The suite prints a
 per-simulation pass rate, mean quality, and a ✓ or ✗ for whether every run
 passed, and exits non-zero when one did not. `--repeat` turns the whole thing
 into a measurement: rates are reported and the exit code stays 0. A run that

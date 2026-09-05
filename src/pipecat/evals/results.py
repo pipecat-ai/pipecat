@@ -195,7 +195,10 @@ class EvalSimulationMetricScore:
             or that every turn passed.
         min_quality: The score the metric needed, or ``None`` when it only
             reports.
-        verdicts: The judge's verdict on each bot turn, in order.
+        verdicts: The judge's verdict on each bot turn, in order; empty for a
+            measured metric.
+        value: What a measured metric measured, in its unit; ``None`` for a
+            judged one, or when there was nothing to measure.
     """
 
     name: str
@@ -204,6 +207,7 @@ class EvalSimulationMetricScore:
     reason: str = ""
     min_quality: float | None = None
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
+    value: float | None = None
 
 
 @dataclass
@@ -260,9 +264,12 @@ class EvalSimulationResult:
         if not self.succeeded:
             return f"goal not met: {self.reason}"
         for metric in self.metrics:
-            if not metric.passed:
-                score = "unscored" if metric.score is None else f"{metric.score:.2f}"
-                return f"{metric.name} {score} below {metric.min_quality:.2f}: {metric.reason}"
+            if metric.passed:
+                continue
+            if metric.min_quality is None:
+                return f"{metric.name} out of range: {metric.reason}"
+            score = "unscored" if metric.score is None else f"{metric.score:.2f}"
+            return f"{metric.name} {score} below {metric.min_quality:.2f}: {metric.reason}"
         return None
 
 

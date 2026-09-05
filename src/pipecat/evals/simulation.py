@@ -67,6 +67,18 @@ Fields:
     plain mean of the scores. Something the bot must do once, read the order
     back, belongs in ``success``, not here.
 
+    A metric can measure instead of judge: ``measure`` names one of
+    ``SIMULATION_MEASURES`` and ``min_value`` / ``max_value`` (at least one)
+    bound it; the ``name`` defaults to the measure. The harness computes the
+    value from the run, no judge involved, and the metric scores 1 inside the
+    range and 0 outside, which fails the run. ``turns`` is the persona's
+    turns, ``duration`` the conversation's seconds from its first line to the
+    hang-up, ``interruptions`` how often the bot reported being cut off,
+    ``words`` the longest bot reply in words, and ``latency`` the slowest
+    reply in seconds: from the persona's send to the reply's first token in
+    text mode, from the bot noticing the persona stop to its first spoken
+    sentence in audio mode. The per-reply measures bound every reply.
+
 ``max_turns``, ``max_duration_s``
     backstops on the persona's turns (default 20) and on the run's wall clock
     (default 300 s). A run they end has not succeeded.
@@ -97,21 +109,31 @@ from pipecat.evals.scenario_loader import _load_mapping
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
 
+# What a measured metric can measure, computed by the harness from the run.
+SIMULATION_MEASURES = ("turns", "duration", "interruptions", "words", "latency")
+
 
 @dataclass
 class EvalSimulationMetric:
-    """A judged quality criterion.
+    """A quality metric: a judged criterion, or a measure with a range.
 
     Parameters:
         name: The metric's name in the results.
-        criterion: What the judge decides.
-        min_quality: The score, in 0..1, below which the metric fails the run;
-            ``None`` reports the score without gating.
+        criterion: What the judge decides on each bot turn; ``None`` for a
+            measured metric.
+        min_quality: The score, in 0..1, below which a judged metric fails the
+            run; ``None`` reports the score without gating.
+        measure: One of ``SIMULATION_MEASURES``; ``None`` for a judged metric.
+        min_value: The measured value's lower bound, inclusive, or ``None``.
+        max_value: The measured value's upper bound, inclusive, or ``None``.
     """
 
     name: str
-    criterion: str
+    criterion: str | None = None
     min_quality: float | None = None
+    measure: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
 
 
 @dataclass
@@ -226,14 +248,22 @@ def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:
     for idx, item in enumerate(raw):
         if not isinstance(item, dict):
             raise ValueError(f"{path}: metric #{idx} must be a mapping")
-        name = item.get("name")
-        criterion = item.get("criterion")
+        criterion, measure = item.get("criterion"), item.get("measure")
+        if (criterion is None) == (measure is None):
+            raise ValueError(
+                f"{path}: metric #{idx} is judged ('criterion:') or measured ('measure:'), "
+                "one of the two"
+            )
+        name = item.get("name", measure)
         if not name or not isinstance(name, str):
             raise ValueError(f"{path}: metric #{idx} needs a 'name:'")
-        if not criterion or not isinstance(criterion, str):
-            raise ValueError(f"{path}: metric {name!r} needs a 'criterion:' for the judge")
         if name in {m.name for m in metrics}:
             raise ValueError(f"{path}: metric {name!r} is listed twice")
+        if measure is not None:
+            metrics.append(_parse_measure(item, name, measure, path))
+            continue
+        if not criterion or not isinstance(criterion, str):
+            raise ValueError(f"{path}: metric {name!r} needs a 'criterion:' for the judge")
         min_quality = item.get("min_quality")
         if min_quality is not None and (
             isinstance(min_quality, bool)
@@ -249,6 +279,27 @@ def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:
             )
         )
     return metrics
+
+
+def _parse_measure(item: dict, name: str, measure: Any, path: Path) -> EvalSimulationMetric:
+    """Parse a measured metric: a known measure and at least one bound."""
+    if measure not in SIMULATION_MEASURES:
+        raise ValueError(
+            f"{path}: metric {name!r} 'measure:' must be one of {', '.join(SIMULATION_MEASURES)}"
+        )
+    if "min_quality" in item:
+        raise ValueError(
+            f"{path}: metric {name!r} is measured; it takes a range, not 'min_quality:'"
+        )
+    bounds = {}
+    for key in ("min_value", "max_value"):
+        value = item.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            raise ValueError(f"{path}: metric {name!r} '{key}:' must be a number")
+        bounds[key] = None if value is None else float(value)
+    if bounds["min_value"] is None and bounds["max_value"] is None:
+        raise ValueError(f"{path}: metric {name!r} needs a 'min_value:' or a 'max_value:'")
+    return EvalSimulationMetric(name=name, measure=measure, **bounds)
 
 
 def _positive_int(data: dict, key: str, default: int, path: Path) -> int:

@@ -81,6 +81,10 @@ class EvalEventStream:
         # Accumulates the bot's LLM text for the current response, emitted as one
         # llm_response segment when the response ends.
         self._text_buffer: list[str] = []
+        # Events are stamped in seconds since here (``at``), and a reply with the
+        # arrival of its first token (``started_at``), for the timing measures.
+        self._t0 = time.monotonic()
+        self._llm_text_at: float | None = None
         # Set on an interruption (and by the driver after a send), cleared at the
         # bot's next llm-started. While set, llm_response segments are dropped:
         # the interrupted response can still flush a trailing token *after* the
@@ -94,6 +98,10 @@ class EvalEventStream:
         # harness's turn analyzer finalizes it.
         self._input_sent_at: float = 0.0
         self._bot_turn_started_at: float | None = None
+
+    def elapsed(self) -> float:
+        """Seconds since the stream began, the clock the events' ``at`` is on."""
+        return round(time.monotonic() - self._t0, 3)
 
     def input_sent(self) -> None:
         """Mark the user's input as sent: the bot's reply is what it says from now on.
@@ -135,11 +143,13 @@ class EvalEventStream:
         """Append an event for the matcher.
 
         Records it in :attr:`events_seen`, stamps its arrival time in
-        :attr:`latest_event_times`, and queues it.
+        :attr:`latest_event_times` and, as ``at`` (seconds since the stream
+        began), on the event itself unless it already carries one, and queues it.
 
         Args:
             event: The event dict, with at least a ``type``.
         """
+        event.setdefault("at", self.elapsed())
         self.events_seen.append(event)
         self.latest_event_times[event["type"]] = time.monotonic()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
@@ -174,17 +184,23 @@ class EvalEventStream:
         if isinstance(frame, LLMFullResponseStartFrame):
             self.awaiting_llm_restart = False
             self._text_buffer = []
+            self._llm_text_at = None
             return [{"type": "llm_started"}]
         if isinstance(frame, LLMTextFrame):
             if self.awaiting_llm_restart:
                 return []
+            if not self._text_buffer:
+                self._llm_text_at = self.elapsed()
             self._text_buffer.append(frame.text)
             return []
         if isinstance(frame, LLMFullResponseEndFrame):
             if self.awaiting_llm_restart:
                 self._text_buffer = []
                 return []
-            return [self._segment_event("llm_response", "".join(self._text_buffer))]
+            event = self._segment_event("llm_response", "".join(self._text_buffer))
+            if self._llm_text_at is not None:
+                event["started_at"] = self._llm_text_at
+            return [event]
         if isinstance(frame, TTSTextFrame):
             if self._bot_audio:
                 return [self._segment_event("tts_response", frame.text)]

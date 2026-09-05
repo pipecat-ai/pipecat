@@ -72,6 +72,40 @@ runs: 3
         self.assertEqual(s.max_duration_s, 42.0)
         self.assertEqual(s.runs, 3)
 
+    def test_a_measured_metric_takes_a_measure_and_a_range(self):
+        s = EvalSimulationScenario.load(
+            _write(
+                MINIMAL
+                + """
+metrics:
+  - measure: latency
+    max_value: 2
+  - name: quick
+    measure: turns
+    min_value: 1
+    max_value: 6
+"""
+            )
+        )
+        latency, quick = s.metrics
+        self.assertEqual(
+            (latency.name, latency.measure, latency.max_value), ("latency", "latency", 2.0)
+        )
+        self.assertIsNone(latency.criterion)
+        self.assertEqual((quick.measure, quick.min_value, quick.max_value), ("turns", 1.0, 6.0))
+        for bad, message in (
+            ("  - measure: mood\n    max_value: 1\n", "must be one of"),
+            ("  - measure: turns\n", "needs a 'min_value:' or a 'max_value:'"),
+            ("  - measure: turns\n    max_value: 3\n    min_quality: 1\n", "takes a range"),
+            (
+                "  - name: both\n    criterion: x\n    measure: turns\n    max_value: 3\n",
+                "one of the two",
+            ),
+        ):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                EvalSimulationScenario.load(_write(MINIMAL + "metrics:\n" + bad))
+            self.assertIn(message, str(cm.exception))
+
     def test_min_quality_is_a_share_and_names_are_unique(self):
         with self.assertRaises(ValueError) as cm:
             EvalSimulationScenario.load(
@@ -420,6 +454,61 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             [(r.status, r.text, r.turn) for r in records if r.status != "bot"],
             [("user", "The capital of Germany?", 1), ("ended", "end_call", 1)],
         )
+
+    async def test_measures_come_from_the_run_and_a_value_out_of_range_fails_it(self):
+        metrics = [
+            EvalSimulationMetric("latency", measure="latency", max_value=1.0),
+            EvalSimulationMetric("words", measure="words", max_value=3),
+            EvalSimulationMetric("turns", measure="turns", max_value=5),
+            EvalSimulationMetric("interruptions", measure="interruptions", max_value=0),
+            EvalSimulationMetric("duration", measure="duration", min_value=0),
+        ]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            # Times are seconds on the stream's clock; a reply's first token is started_at.
+            await stream.append(
+                {"type": "llm_response", "text": "Hi there", "at": 0.5, "started_at": 0.2}
+            )
+            await stream.append(
+                {"type": PERSONA_TURN_EVENT, "text": "Capital of Germany?", "at": 1.0}
+            )
+            await stream.append({"type": "bot_interrupted", "at": 1.1})
+            await stream.append(
+                {
+                    "type": "llm_response",
+                    "text": "It is Berlin, of course.",
+                    "at": 3.0,
+                    "started_at": 2.4,
+                }
+            )
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Thanks", "at": 3.5})
+            await stream.append(
+                {"type": "llm_response", "text": "Bye!", "at": 3.9, "started_at": 3.8}
+            )
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        by_name = {m.name: m for m in result.metrics}
+        # The slowest reply took 1.4 s, over the 1 s bound; the greeting had no send before it.
+        self.assertEqual((by_name["latency"].value, by_name["latency"].passed), (1.4, False))
+        self.assertEqual(by_name["latency"].reason, "slowest reply 1.40 s, at most 1")
+        self.assertEqual((by_name["words"].value, by_name["words"].passed), (5.0, False))
+        self.assertEqual((by_name["turns"].value, by_name["turns"].passed), (2.0, True))
+        self.assertEqual(
+            (by_name["interruptions"].value, by_name["interruptions"].passed), (1.0, False)
+        )
+        self.assertTrue(by_name["duration"].passed)
+        self.assertTrue(result.succeeded)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.failure, "latency out of range: slowest reply 1.40 s, at most 1")
 
     async def test_a_bot_turn_is_what_it_said_between_persona_turns_with_the_calls_by_then(self):
         judge = _FakeConversationJudge(["yes"])
