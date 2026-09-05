@@ -42,7 +42,7 @@ async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
     """Build and run the session for the scenario file in ``config``, whichever kind it is."""
     loaded = load_scenario_file(Path(config["scenario_path"]))
     if isinstance(loaded, EvalSimulationScenario):
-        session = EvalSimulationSession.from_simulation(
+        session = EvalSimulationSession.from_scenario(
             loaded,
             config["bot_url"],
             connect_timeout_s=config["connect_timeout_s"],

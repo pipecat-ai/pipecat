@@ -16,8 +16,8 @@ quality criteria, and the result is a
 
 Example::
 
-    simulation = EvalSimulationScenario.load("simulations/curious_caller.yaml")
-    run = await EvalSimulationSession.from_simulation(simulation, "ws://localhost:7860").run()
+    scenario = EvalSimulationScenario.load("scenarios/simulated/curious_caller.yaml")
+    run = await EvalSimulationSession.from_scenario(scenario, "ws://localhost:7860").run()
     print(f"{'succeeded' if run.succeeded else 'failed'}: {run.reason}")
 """
 
@@ -49,13 +49,13 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
     The persona LLM rides in the client's pipeline and answers the bot on its
     own; the session watches for the conversation's end and has the judge
     decide the goal and the quality criteria. Build one with
-    :meth:`from_simulation` (which constructs the persona LLM, judge, user TTS,
+    :meth:`from_scenario` (which constructs the persona LLM, judge, user TTS,
     and STT the simulation needs), then await :meth:`run`.
     """
 
     def __init__(
         self,
-        simulation: EvalSimulationScenario,
+        scenario: EvalSimulationScenario,
         bot_url: str,
         *,
         persona_llm: LLMService,
@@ -70,7 +70,7 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         """Initialize the simulation session.
 
         Args:
-            simulation: The parsed simulation to run.
+            scenario: The parsed simulation to run.
             bot_url: WebSocket URL of the bot's eval transport.
             persona_llm: The persona LLM service, run inside the eval pipeline.
             judge: The judge for the goal and the quality criteria, or ``None``
@@ -89,13 +89,13 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
             bot_stt: The STT that transcribes the bot's audio for the persona in
                 audio mode, or ``None`` for text mode.
         """
-        super().__init__(kind=EvalKind.SIMULATION, name=simulation.name, bot_url=bot_url)
-        self._simulation = simulation
-        persona = EvalPersona(simulation.persona, simulation.goal)
+        super().__init__(kind=EvalKind.SIMULATION, name=scenario.name, bot_url=bot_url)
+        self._scenario = scenario
+        persona = EvalPersona(scenario.persona, scenario.goal)
         persona_context = persona.context()
-        self._stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=self._trace)
+        self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
         self._client = EvalClient.for_simulation(
-            simulation,
+            scenario,
             bot_url=bot_url,
             stream=self._stream,
             trace=self._trace,
@@ -109,7 +109,7 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
             persona_context=persona_context,
         )
         self._driver: BaseEvalDriver[EvalSimulationResult] = EvalSimulationDriver(
-            simulation=simulation,
+            simulation=scenario,
             persona=persona,
             persona_llm=persona_llm,
             persona_context=persona_context,
@@ -121,9 +121,9 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         )
 
     @classmethod
-    def from_simulation(
+    def from_scenario(
         cls,
-        simulation: EvalSimulationScenario,
+        scenario: EvalSimulationScenario,
         bot_url: str,
         *,
         connect_timeout_s: float = 5.0,
@@ -137,13 +137,13 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ) -> "EvalSimulationSession":
-        """Build a ready-to-run session from a simulation, constructing what it needs.
+        """Build a ready-to-run session from a scenario, constructing what it needs.
 
         Builds the persona LLM, the judge, and in audio mode the user TTS and
         the STT from the simulation's config; pass any of them to use your own.
 
         Args:
-            simulation: The parsed simulation to run.
+            scenario: The parsed simulation to run.
             bot_url: WebSocket URL of the bot's eval transport.
             connect_timeout_s: How long to wait for the bot to accept the WS
                 connection before giving up.
@@ -166,20 +166,20 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         """
         if persona_llm is None:
             with logger.contextualize(eval_pipeline="persona"):
-                persona_llm = llm_service_from_config(simulation.simulator, where="simulator")
+                persona_llm = llm_service_from_config(scenario.simulator, where="simulator")
         if judge is None:
             with logger.contextualize(eval_pipeline="judge"):
-                judge = EvalJudge.from_config(simulation.judge)
-        if user_tts is None and simulation.user_speech is not None:
+                judge = EvalJudge.from_config(scenario.judge)
+        if user_tts is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
                 user_tts = tts_service_from_config(
-                    simulation.user_speech, cache_dir=cache_dir, use_cache=use_cache
+                    scenario.user_speech, cache_dir=cache_dir, use_cache=use_cache
                 )
-        if bot_stt is None and simulation.bot_audio:
+        if bot_stt is None and scenario.bot_audio:
             with logger.contextualize(eval_pipeline="transcription"):
-                bot_stt = stt_service_from_config(simulation.transcriber)
+                bot_stt = stt_service_from_config(scenario.transcriber)
         return cls(
-            simulation,
+            scenario,
             bot_url,
             persona_llm=persona_llm,
             judge=judge,
@@ -192,4 +192,4 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         )
 
     def _describe(self) -> str:
-        return describe_simulation(self._simulation)
+        return describe_simulation(self._scenario)

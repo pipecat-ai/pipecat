@@ -301,7 +301,7 @@ async def _execute_scenario(
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
             session: EvalScriptSession | EvalSimulationSession
             if isinstance(loaded, EvalSimulationScenario):
-                session = EvalSimulationSession.from_simulation(
+                session = EvalSimulationSession.from_scenario(
                     loaded,
                     url,
                     record_path=record_path,
