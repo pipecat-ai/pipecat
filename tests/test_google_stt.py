@@ -225,3 +225,42 @@ async def test_google_connect_leaves_adaptation_unset_when_not_configured():
     config = await connected_recognition_config(None)
 
     assert "adaptation" not in config
+
+
+@pytest.mark.asyncio
+async def test_settings_update_defers_the_reconnect_until_the_user_stops_speaking():
+    """A settings change mid-utterance must not tear the stream down under the speaker.
+
+    Reconnecting straight away cancels the RPC with no half-close, so Google is never given the
+    chance to flush a final for the audio already sent, and the replacement stream starts from a
+    fresh request queue, so that audio cannot be re-sent either. The utterance in flight is
+    unrecoverable. ``STTService`` keeps ``_can_reconnect`` and ``_need_reconnect`` for exactly
+    this case, so the reconnect waits until the turn is over.
+    """
+    stream = []
+
+    async def record(name):
+        stream.append(name)
+
+    service = object.__new__(GoogleSTTService)
+    service._name = "GoogleSTTService#0"
+    service._settings = GoogleSTTService.Settings(enable_automatic_punctuation=True)
+    service._streaming_task = object()  # a stream is live
+    service._can_reconnect = False  # the user is mid-utterance
+    service._need_reconnect = False
+    service._reconnecting = False
+    service._reconnect_audio_buffer = []
+    service._is_usable = True  # set_usable(True) in the base _update_settings short-circuits
+    service._disconnect = lambda: record("disconnect")
+    service._connect = lambda: record("connect")
+
+    await service._update_settings(GoogleSTTService.Settings(enable_automatic_punctuation=False))
+
+    assert service._need_reconnect is True, "the reconnect should have been deferred"
+    assert stream == [], "the live stream was torn down while the user was still speaking"
+
+    # The turn ends, and the deferred reconnect runs.
+    await service._maybe_reconnect_on_user_stopped_speaking()
+
+    assert stream == ["disconnect", "connect"]
+    assert service._settings.enable_automatic_punctuation is False
