@@ -17,7 +17,7 @@ from pipecat.evals.client_transport import (
     FRAME_S,
     EvalHarnessInputTransport,
     EvalHarnessOutputTransport,
-    HarnessRecorder,
+    EvalHarnessRecorder,
     _RecorderTrack,
 )
 from pipecat.frames.frames import (
@@ -81,7 +81,7 @@ class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(sent), int(0.25 / FRAME_S) + 5)
 
     async def test_interruption_drops_the_unsent_audio(self):
-        recorder = HarnessRecorder(self.SR)
+        recorder = EvalHarnessRecorder(self.SR)
         out = EvalHarnessOutputTransport(
             None, _fake_session(), WebsocketClientParams(audio_out_enabled=True), recorder=recorder
         )
@@ -165,7 +165,7 @@ class TestEvalHarnessInput(unittest.IsolatedAsyncioTestCase):
     SR = 16000
 
     async def test_bot_interrupted_drops_the_unplayed_audio(self):
-        recorder = HarnessRecorder(self.SR)
+        recorder = EvalHarnessRecorder(self.SR)
         inp = EvalHarnessInputTransport(
             None,
             _fake_session(),

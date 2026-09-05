@@ -26,7 +26,7 @@ continuous stream:
 The pacing and gap-filling exist for the bot and the VADs, where jitter is
 harmless. The *recording* must not depend on them: Python can't hold the ~40ms
 tick precisely, and a pacing underrun becomes silence wedged mid-word, so
-recording the paced/filled streams stutters. Instead :class:`HarnessRecorder` is
+recording the paced/filled streams stutters. Instead :class:`EvalHarnessRecorder` is
 fed the *raw* audio on each edge -- the user's TTS as produced, the bot's chunks
 as received, both gapless within a turn -- and reconstructs the recording from
 those (see its docstring), padding only the real between-turn pauses.
@@ -85,7 +85,7 @@ async def _sleep_to_next_tick(next_send: float) -> float:
     return time.monotonic() + FRAME_S if sleep_s == 0 else next_send + FRAME_S
 
 
-class HarnessRecorder:
+class EvalHarnessRecorder:
     """Builds the conversation recording from raw source audio, decoupled from pacing.
 
     The harness paces audio to the bot and fills gaps in the bot's audio for the
@@ -167,7 +167,7 @@ class _RecorderTrack:
     :meth:`rendered` lays the chunks out contiguously on a playout timeline: each
     starts where the previous one ends, and silence is inserted only for a real
     pause -- a chunk arriving later than the playout position by more than
-    ``HarnessRecorder.GAP_S``. Both sources run ahead of real time (the bot's
+    ``EvalHarnessRecorder.GAP_S``. Both sources run ahead of real time (the bot's
     transport sends up to twice real time, the user TTS synthesizes faster than
     it plays), so within a turn chunks arrive before the position and a hiccup
     on the receiving side is absorbed by that lead; a small late arrival is
@@ -218,7 +218,7 @@ class _RecorderTrack:
         position = self._chunks[0][0]  # playout position, as a wall-clock time
         for arrived, chunk in self._chunks:
             late = arrived - position
-            if late > HarnessRecorder.GAP_S:
+            if late > EvalHarnessRecorder.GAP_S:
                 out.extend(b"\x00" * (int(late * self._rate * 2) & ~1))
                 position = arrived
             elif late > 0:
@@ -243,7 +243,7 @@ class EvalHarnessOutputTransport(WebsocketClientOutputTransport):
     text-mode scenario sends nothing, so no silence is ever fed to the bot's STT.
     """
 
-    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
+    def __init__(self, *args, recorder: "EvalHarnessRecorder | None" = None, **kwargs):
         """Initialize the transport and its (lazily started) send stream."""
         super().__init__(*args, **kwargs)
         self._pending = bytearray()
@@ -351,7 +351,7 @@ class EvalHarnessInputTransport(WebsocketClientInputTransport):
     :class:`EvalHarnessOutputTransport`.
     """
 
-    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
+    def __init__(self, *args, recorder: "EvalHarnessRecorder | None" = None, **kwargs):
         """Initialize the transport and its (lazily started) fill stream."""
         super().__init__(*args, **kwargs)
         self._bot_pcm = bytearray()
@@ -443,11 +443,11 @@ class EvalHarnessTransport(RTVIClientTransport):
     recording is gapless regardless of the pacing jitter.
     """
 
-    def __init__(self, *args, recorder: "HarnessRecorder | None" = None, **kwargs):
+    def __init__(self, *args, recorder: "EvalHarnessRecorder | None" = None, **kwargs):
         """Initialize the transport, optionally wiring a recorder to both edges.
 
         Args:
-            recorder: Optional :class:`HarnessRecorder` fed the raw audio on both
+            recorder: Optional :class:`EvalHarnessRecorder` fed the raw audio on both
                 edges; ``None`` disables recording.
             *args: Forwarded to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
             **kwargs: Forwarded to the parent transport.

@@ -29,7 +29,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client_transport import EvalHarnessTransport, HarnessRecorder
+from pipecat.evals.client_transport import EvalHarnessRecorder, EvalHarnessTransport
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.script import EvalScriptScenario
@@ -396,7 +396,7 @@ class EvalClient:
         self._run_task: asyncio.Task | None = None
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
-        self._recorder: HarnessRecorder | None = None
+        self._recorder: EvalHarnessRecorder | None = None
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
@@ -510,7 +510,7 @@ class EvalClient:
         # precisely, and recording the paced streams stutters. The recorder
         # reconstructs gapless turns and pads only the real between-turn pauses.
         if self._record_path and self._bot_audio:
-            self._recorder = HarnessRecorder(user_audio_rate or HARNESS_STT_SAMPLE_RATE)
+            self._recorder = EvalHarnessRecorder(user_audio_rate or HARNESS_STT_SAMPLE_RATE)
         # EvalHarnessTransport reshapes both audio edges into the continuous
         # real-time stream VAD/STT expect: its output paces the user TTS to the bot
         # and its input fills gaps in the bot's audio (both audio-mode only). When a
