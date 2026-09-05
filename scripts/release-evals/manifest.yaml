@@ -426,12 +426,16 @@ suite:
   #
   # Simulations: an autonomous caller, an LLM playing a persona with a goal
   # (OpenAI by default, so OPENAI_API_KEY must be set), holds the conversation
-  # with the Flows bots, and the judge reads the whole exchange together with
-  # the tools the bot called. These check that the framework still carries a
-  # task-oriented conversation to its goal. Each file names how many times it
+  # with the bot, and the judge reads the whole exchange together with the
+  # tools the bot called. A plain voice bot takes a curious caller in text and
+  # in audio, which checks the simulation machinery itself in both modes; the
+  # Flows bots check that the framework still carries a task-oriented
+  # conversation to its goal. Each file names how many times it
   # runs and the success rate it needs: a persona does not say the same thing
   # twice, so one run is an anecdote.
   #
+  - bot: voice/voice-cartesia.py
+    scenarios: [capital_curious, capital_curious_audio]
   - bot: flows/restaurant_reservation.py
     scenarios: [book_table_available, book_table_flexible, book_table_impossible]
   - bot: flows/patient_intake.py

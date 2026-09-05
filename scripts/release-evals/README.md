@@ -261,9 +261,11 @@ and hangs up (an `end_call` tool) when the goal is reached or clearly out of
 reach. A judge then reads the whole conversation, together with the tools the
 bot called, and decides whether the caller got what they came for. A simulation
 is a `scenarios/<name>.yaml` like any other, told apart by its `persona:`; the
-release simulations sit at the end of the manifest and cover the Flows
-examples, because those are the bots with a job to finish: book a table, take a
-patient's intake, place an order, quote a policy.
+release simulations sit at the end of the manifest. A plain voice bot takes a
+curious caller in text and in audio, which checks the simulation machinery
+itself in both modes; the rest cover the Flows examples, because those are the
+bots with a job to finish: book a table, take a patient's intake, place an
+order, quote a policy.
 
 ```sh
 ./run.sh -p flows                  # the Flows bots: their scripted scenarios and simulations
@@ -281,6 +283,8 @@ never came up, the persona's LLM failed) is reported but kept out of the rate.
 
 | Simulation                | Bot                                              | The caller                                                       |
 | ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| `capital_curious`         | `voice/voice-cartesia.py`                        | Asks the capital of Germany and hangs up, in text.               |
+| `capital_curious_audio`   | `voice/voice-cartesia.py`                        | The same caller, speaking and listening.                         |
 | `book_table_available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
 | `book_table_flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
 | `book_table_impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
@@ -289,11 +293,16 @@ never came up, the persona's LLM failed) is reported but kept out of the rate.
 | `order_sushi`             | `flows/food_ordering_advanced_functionschema.py` | Orders three California rolls.                                   |
 | `get_insurance_quote`     | `flows/insurance_quote.py`                       | Gets a quote, then a second one with more coverage.              |
 
-The persona speaks in text (the `simulator:` block, an OpenAI model by default,
-so `OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
-the scenarios. `examples/simulations/` has audio-mode simulations and the file
-format; run one by hand with `pipecat eval run scenarios/<name>.yaml --bot-url
-ws://localhost:7860 -v`, the same command as a scripted scenario.
+The persona LLM is the `simulator:` block (an OpenAI model by default, so
+`OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
+the scripted scenarios. In audio mode the persona's turns are synthesized by
+Kokoro and the bot's speech transcribed by Moonshine, as for a scripted audio
+scenario, so `capital_curious_audio` exercises the bot's STT, TTS, and turn
+taking against an autonomous caller. The file format is documented in the
+[`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
+docstring; run one by hand with `pipecat eval run scenarios/<name>.yaml
+--bot-url ws://localhost:7860 -v`, the same command as a scripted scenario,
+which prints the conversation as it happens.
 
 ## Adding coverage
 
