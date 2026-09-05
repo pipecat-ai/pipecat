@@ -183,7 +183,7 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
         print()
         print(f"    {_bold('metrics:')}")
         for metric in result.metrics:
-            score = (_green if metric.score else _red)(f"{metric.score:g}")
+            score = (_green if metric.score else _red)(f"{metric.score:.2f}")
             print(f"      {_color(metric.name + ':', '36')} {score}  {_dim(metric.reason)}")
     if result.end_call is not None:
         print()
