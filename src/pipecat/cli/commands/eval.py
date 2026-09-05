@@ -136,6 +136,9 @@ def _bold(s: str) -> str:
 
 # The speakers in a simulation's conversation: the bot green, the persona cyan.
 _SPEAKER_COLOR = {"bot": "32", "user": "36"}
+# How a simulation ended: a party hanging up is green (the persona) or yellow
+# (the bot); a cap cutting it short is red.
+_ENDING_COLOR = {"end_call": "32", "bot": "33"}
 
 
 def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
@@ -146,7 +149,9 @@ def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
     """
     if isinstance(p, EvalSimulationProgress):
         if p.status == "ended":
-            print(f"      {_dim(f'ended by {p.text} after {p.turn} persona turn(s)')}")
+            ending = _color(p.text, _ENDING_COLOR.get(p.text, "31"))
+            print()
+            print(f"      {_dim('ended by')} {ending} {_dim(f'after {p.turn} persona turn(s)')}")
         else:
             print(f"      {_color(p.status + ':', _SPEAKER_COLOR[p.status])} {p.text}")
     elif p.status == "turn":

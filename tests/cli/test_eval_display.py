@@ -157,6 +157,7 @@ class TestSimulationProgress(unittest.TestCase):
             [
                 "      bot: Hi! How can I help?",
                 "      user: A table for two.",
+                "",
                 "      ended by end_call after 1 persona turn(s)",
             ],
         )
