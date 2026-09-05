@@ -28,7 +28,7 @@ from loguru import logger
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.results import EvalAssertionFailure, EvalScriptTurnProgress, EvalTrace
+from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
 from pipecat.utils.base_object import BaseObject
 
 R = TypeVar("R")
@@ -44,9 +44,11 @@ class BaseEvalSession(BaseObject, Generic[R]):
 
     Event handlers available:
 
-    - on_progress: Called with an :class:`~pipecat.evals.results.EvalScriptTurnProgress`
-      as each turn and each expectation resolves. Records are emitted in order,
-      and :meth:`run` waits for every handler before it returns.
+    - on_progress: Called with an :class:`~pipecat.evals.results.EvalProgress`
+      record as the conversation advances: a scripted scenario's turns and
+      expectations as they resolve, a simulation's lines as they are spoken.
+      Records are emitted in order, and :meth:`run` waits for every handler
+      before it returns.
     """
 
     def __init__(self, *, kind: str, name: str, bot_url: str):
@@ -169,6 +171,6 @@ class BaseEvalSession(BaseObject, Generic[R]):
             kind=kind,
         )
 
-    async def _progress(self, record: EvalScriptTurnProgress) -> None:
+    async def _progress(self, record: EvalProgress) -> None:
         """Emit a progress record to the ``on_progress`` handlers."""
         await self._call_event_handler("on_progress", record)

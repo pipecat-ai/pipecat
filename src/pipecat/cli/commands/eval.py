@@ -28,7 +28,14 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress, EvalSimulationResult
+from pipecat.evals.base_session import BaseEvalSession
+from pipecat.evals.results import (
+    EvalProgress,
+    EvalScriptResult,
+    EvalScriptTurnProgress,
+    EvalSimulationProgress,
+    EvalSimulationResult,
+)
 from pipecat.evals.scenario import (
     EvalSimulationScenario,
     describe_config,
@@ -123,9 +130,18 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_progress(session: EvalScriptSession, p: EvalScriptTurnProgress) -> None:
-    """Print a per-turn / per-expectation line (verbose mode)."""
-    if p.status == "turn":
+def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
+    """Print a progress record as it arrives (verbose mode).
+
+    A scripted scenario's per-turn and per-expectation lines, or a
+    simulation's conversation as it is spoken and how it ended.
+    """
+    if isinstance(p, EvalSimulationProgress):
+        if p.status == "ended":
+            print(f"      {_dim(f'ended by {p.text} after {p.turn} persona turn(s)')}")
+        else:
+            print(f"      {_dim(p.status + ':')} {p.text}")
+    elif p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
         print(f"      {_dim(f'turn {p.turn_index}')} → {label}")
     else:
@@ -141,8 +157,9 @@ def _print_progress(session: EvalScriptSession, p: EvalScriptTurnProgress) -> No
 def _print_simulation_detail(result: EvalSimulationResult) -> None:
     """Print what a simulation's one-line verdict leaves out (verbose mode).
 
-    The judge's reason, each metric's score and reason, the persona's own claim
-    from its ``end_call``, how many turns it took, and the conversation.
+    The judge's reason, each metric's score and reason, and the persona's own
+    claim from its ``end_call``. The conversation itself was printed as it
+    happened.
     """
     if result.error:
         return
@@ -152,12 +169,6 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
     if result.end_call is not None:
         claim = "succeeded" if result.end_call.get("success") else "gave up"
         print(f"    {_dim('persona:')} {claim}: {result.end_call.get('reason', '')}")
-    print(f"    {_dim('turns:')} {result.turns} persona turn(s), ended by {result.ended_by}")
-    if result.messages:
-        print("    Conversation:")
-        for message in result.messages:
-            who = "user" if message["role"] == "user" else "bot"
-            print(f"      {_dim(who + ':')} {message['content']}")
 
 
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
@@ -271,8 +282,8 @@ async def _execute_scenario(
                     stop_bot=stop_bot,
                     trigger_disconnect=trigger_disconnect,
                 )
-                if verbose:
-                    session.add_event_handler("on_progress", _print_progress)
+            if verbose:
+                session.add_event_handler("on_progress", _print_progress)
             run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
@@ -311,9 +322,9 @@ async def _run_scenarios_all(
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
 
-    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines, and
-    a simulation's verdict detail and conversation) or a piped stdout fall back to
-    streamed result lines instead.
+    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines, a
+    simulation's conversation as it happens, and its verdict detail) or a piped
+    stdout fall back to streamed result lines instead.
     """
 
     async def go(run: EvalRun, verbose: bool) -> None:
@@ -361,7 +372,7 @@ def run(
         "--verbose",
         "-v",
         help="Print a line for each turn and expectation as it resolves; for a "
-        "simulation, the judge's reasons and the conversation once it ends.",
+        "simulation, the conversation as it happens and the judge's reasons at the end.",
     ),
     audio: bool = typer.Option(
         False,

@@ -24,8 +24,9 @@ from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import (
     EvalAssertionFailure,
-    EvalScriptTurnProgress,
+    EvalProgress,
     EvalSimulationMetricScore,
+    EvalSimulationProgress,
     EvalSimulationResult,
     EvalTrace,
 )
@@ -42,11 +43,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     """Lets the persona LLM hold the conversation, then judges the whole of it.
 
     The persona runs inside the client's pipeline and answers the bot on its
-    own. This driver only watches the conversation for its end: the persona's
-    ``end_call``, after which it hangs up, the bot ending the call, the cap on
-    the persona's turns, or the wall-clock cap. Then it asks the judge, with
-    the bot's function calls as evidence, whether the goal was achieved and how
-    the conversation scored on each quality criterion.
+    own. This driver watches the conversation, reporting each line as progress,
+    for its end: the persona's ``end_call``, after which it hangs up, the bot
+    ending the call, the cap on the persona's turns, or the wall-clock cap.
+    Then it asks the judge, with the bot's function calls as evidence, whether
+    the goal was achieved and how the conversation scored on each quality
+    criterion.
     """
 
     def __init__(
@@ -60,7 +62,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -75,7 +77,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             stream: The bot's output as events.
             judge: The judge for the goal and the quality criteria.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns resolve.
+            progress: Awaited with an :class:`EvalSimulationProgress` for each
+                line of the conversation, and once when it ends.
         """
         super().__init__(client=client, stream=stream, judge=judge, trace=trace, progress=progress)
         self._simulation = simulation
@@ -94,6 +97,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._persona_llm.register_function(END_CALL_FUNCTION, self._on_end_call)
         await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
+        # The bot's finished response: in audio mode the harness's transcription
+        # of what it said, in text mode its LLM text.
+        bot_said = "response" if simulation.bot_audio else "llm_response"
         deadline = time.monotonic() + simulation.max_duration_s
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
@@ -111,14 +117,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 self._ended_by = "bot"
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
+                await self._report("user", event.get("text", ""))
                 if self._turns >= simulation.max_turns:
                     self._ended_by = "max_turns"
+            elif event["type"] == bot_said and event.get("text"):
+                await self._report("bot", event["text"])
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
+        await self._report("ended", self._ended_by)
         await self._judge_conversation()
         return []
+
+    async def _report(self, status: str, text: str) -> None:
+        """Emit one line of the conversation, or its end, as progress."""
+        await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
 
     async def _on_end_call(self, params: FunctionCallParams) -> None:
         """The persona's ``end_call``: note its claim and end the conversation."""

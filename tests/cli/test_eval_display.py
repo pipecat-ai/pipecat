@@ -17,9 +17,15 @@ from pipecat.cli.commands.eval import (
     _expand_scenario_paths,
     _finalize_evals,
     _group_below_threshold,
+    _print_progress,
     _turn_tally,
 )
-from pipecat.evals.results import EvalScriptResult, EvalScriptTurnResult, EvalSimulationResult
+from pipecat.evals.results import (
+    EvalScriptResult,
+    EvalScriptTurnResult,
+    EvalSimulationProgress,
+    EvalSimulationResult,
+)
 from pipecat.evals.suite import EvalRun
 
 
@@ -137,6 +143,23 @@ def _simulation_run(
         status="done",
         result=result,
     )
+
+
+class TestSimulationProgress(unittest.TestCase):
+    def test_lines_print_as_spoken_and_the_end_says_how(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_progress(None, EvalSimulationProgress("bot", "Hi! How can I help?", 0))  # type: ignore[arg-type]
+            _print_progress(None, EvalSimulationProgress("user", "A table for two.", 1))  # type: ignore[arg-type]
+            _print_progress(None, EvalSimulationProgress("ended", "end_call", 1))  # type: ignore[arg-type]
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            [
+                "      bot: Hi! How can I help?",
+                "      user: A table for two.",
+                "      ended by end_call after 1 persona turn(s)",
+            ],
+        )
 
 
 class TestSimulationVerdicts(unittest.TestCase):

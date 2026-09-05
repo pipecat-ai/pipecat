@@ -235,7 +235,8 @@ class _PersonaTurnRelay(FrameProcessor):
     into audio and this only traces the spoken text as it passes. Either way
     the frames go on to the assistant aggregator that records the persona's
     side of the conversation, and each response in which the persona said
-    something is one persona turn, reported as a ``persona_turn`` event. A
+    something is one persona turn, reported as a ``persona_turn`` event that
+    carries what it said. A
     response that only calls ``end_call``, or one the bot's speech cut off
     before a word went out, is not a turn.
     """
@@ -255,13 +256,15 @@ class _PersonaTurnRelay(FrameProcessor):
         self._trace = trace
         self._stream = stream
         self._text: list[str] = []
-        self._spoke = False
+        # What the persona said in the current response: the one text turn, or
+        # the sentences the user TTS spoke.
+        self._spoken: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
             self._text = []
-            self._spoke = False
+            self._spoken = []
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             self._text.append(frame.text)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -272,13 +275,15 @@ class _PersonaTurnRelay(FrameProcessor):
                 await self.push_frame(
                     OutputTransportMessageUrgentFrame(message=self._text_turn_message(text))
                 )
-                self._spoke = True
-            if self._spoke:
-                await self._stream.append({"type": PERSONA_TURN_EVENT})
-            self._spoke = False
+                self._spoken.append(text)
+            if self._spoken:
+                await self._stream.append(
+                    {"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)}
+                )
+            self._spoken = []
         elif isinstance(frame, TTSTextFrame):
             self._trace.log(f"send: {frame.text!r} (persona, audio)")
-            self._spoke = True
+            self._spoken.append(frame.text)
         await self.push_frame(frame, direction)
 
 

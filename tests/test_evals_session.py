@@ -714,7 +714,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         # The response's own frames go on, for the assistant aggregator.
         self.assertEqual([f for f in nxt.frames if f in frames], frames)
         self.assertTrue(any("'Hi there.' (persona, text)" in line for line in trace.lines))
-        self.assertEqual([e["type"] for e in relay._stream.events_seen], ["persona_turn"])
+        self.assertEqual(relay._stream.events_seen, [{"type": "persona_turn", "text": "Hi there."}])
 
     async def test_spoken_response_is_only_traced(self):
         relay, nxt, trace = self._relay()
@@ -728,7 +728,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         self.assertFalse(any(isinstance(f, OutputTransportMessageUrgentFrame) for f in nxt.frames))
         self.assertTrue(any("'Hi' (persona, audio)" in line for line in trace.lines))
-        self.assertEqual([e["type"] for e in relay._stream.events_seen], ["persona_turn"])
+        self.assertEqual(relay._stream.events_seen, [{"type": "persona_turn", "text": "Hi"}])
 
     async def test_a_response_without_words_is_not_a_turn(self):
         # An end_call-only response, or one cut off before any word went out.

@@ -246,14 +246,20 @@ def _simulation(**overrides) -> EvalSimulationScenario:
     return EvalSimulationScenario(**fields)
 
 
-def _driver(simulation: EvalSimulationScenario, judge, context: LLMContext | None = None):
+def _driver(
+    simulation: EvalSimulationScenario,
+    judge,
+    context: LLMContext | None = None,
+    progress_records: list | None = None,
+):
     trace = EvalTrace()
     stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=trace)
     llm = _FakePersonaLLM()
     client = _FakeClient()
 
-    async def progress(_record):
-        pass
+    async def progress(record):
+        if progress_records is not None:
+            progress_records.append(record)
 
     driver = EvalSimulationDriver(
         simulation=simulation,
@@ -346,6 +352,34 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(result.quality or -1, 1.0 / 4.0)
         self.assertEqual(result.messages, judge.messages)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
+
+    async def test_the_conversation_is_reported_as_it_happens(self):
+        records: list = []
+        driver, stream, llm, _ = _driver(
+            _simulation(), _FakeConversationJudge(["yes"]), None, records
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "What is the capital?"})
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+            # A response without text (a function call's own) is not a line.
+            await stream.append({"type": "llm_response", "text": ""})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+
+        self.assertEqual(
+            [(r.status, r.text, r.turn) for r in records],
+            [
+                ("bot", "Hi! How can I help?", 0),
+                ("user", "What is the capital?", 1),
+                ("bot", "Berlin.", 1),
+                ("ended", "end_call", 1),
+            ],
+        )
 
     async def test_bot_turn_cap_ends_the_run(self):
         driver, stream, _, _ = _driver(_simulation(max_turns=2), _FakeConversationJudge(["no"]))

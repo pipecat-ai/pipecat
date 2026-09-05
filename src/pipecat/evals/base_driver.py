@@ -21,7 +21,7 @@ from typing import Generic, TypeVar
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.results import EvalAssertionFailure, EvalScriptTurnProgress, EvalTrace
+from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
 
 R = TypeVar("R")
 
@@ -43,7 +43,7 @@ class BaseEvalDriver(ABC, Generic[R]):
         stream: EvalEventStream,
         judge: EvalJudge | None,
         trace: EvalTrace,
-        progress: Callable[[EvalScriptTurnProgress], Awaitable[None]],
+        progress: Callable[[EvalProgress], Awaitable[None]],
     ):
         """Initialize the driver.
 
@@ -54,8 +54,8 @@ class BaseEvalDriver(ABC, Generic[R]):
                 turns are added to its conversation so replies are judged in
                 context.
             trace: The run's trace.
-            progress: Awaited with an :class:`EvalScriptTurnProgress` as turns and
-                expectations resolve.
+            progress: Awaited with an :class:`~pipecat.evals.results.EvalProgress`
+                record as the conversation advances.
         """
         self._client = client
         self._stream = stream

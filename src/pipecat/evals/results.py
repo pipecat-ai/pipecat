@@ -245,6 +245,28 @@ class EvalScriptTurnProgress:
     detail: str = ""
 
 
+@dataclass
+class EvalSimulationProgress:
+    """A real-time progress record emitted while a simulation runs (for verbose output).
+
+    Parameters:
+        status: ``bot`` for a response the bot finished, ``user`` for a turn the
+            persona spoke, or ``ended`` once the conversation is over.
+        text: What was said; for ``ended``, how the conversation ended
+            (:data:`SIMULATION_ENDINGS`).
+        turn: The persona's turn count so far.
+    """
+
+    status: str
+    text: str
+    turn: int
+
+
+# What a session's ``on_progress`` handlers receive: a scripted scenario's
+# per-turn records, or a simulation's conversation as it happens.
+EvalProgress = EvalScriptTurnProgress | EvalSimulationProgress
+
+
 @deprecated(
     "`EvalTurnProgress` is deprecated since 1.9.0 and will be removed in 2.0.0. "
     "Use `EvalScriptTurnProgress` instead."
