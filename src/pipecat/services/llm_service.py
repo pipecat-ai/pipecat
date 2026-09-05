@@ -62,7 +62,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallTextPolicy
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
@@ -381,6 +381,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # typed for callers that opt into `LLMService[XAdapter]`.
         self._adapter = cast(TAdapter, self._resolve_adapter_class()())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
+        # Set by providers mid-stream once a tool call is detected, and reset
+        # per response (see ``push_frame``). Read by ``_push_llm_text`` to drop
+        # text after a tool call when ``tool_call_text_policy`` is SUPPRESS.
+        self._tool_call_detected: bool = False
         # Cleanup callables carried by registered tool handlers, awaited at
         # service teardown (see _record_tool_cleanup).
         self._tool_cleanups: list[Callable[[], Awaitable[None]]] = []
@@ -739,17 +743,29 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
+        # A new assistant response begins here, so any tool-call detection
+        # from the previous response no longer applies.
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._tool_call_detected = False
+
         await super().push_frame(frame, direction)
 
     async def _push_llm_text(self, text: str):
         """Push LLM text, using turn completion detection if enabled.
 
-        This helper method simplifies text pushing in LLM implementations by
-        handling the conditional logic for turn completion internally.
+        Text is suppressed once a tool call has been detected in the current
+        response when ``tool_call_text_policy`` is
+        :attr:`ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED`. Providers signal
+        detection via :meth:`_note_tool_call_detected`.
 
         Args:
             text: The text content from the LLM to push.
         """
+        if (
+            self._settings.tool_call_text_policy == ToolCallTextPolicy.SUPPRESS_AFTER_TOOL_CALL_DETECTED
+            and self._tool_call_detected
+        ):
+            return
         # Measured before turn-completion filtering, which can hold text back or
         # drop it entirely — neither says anything about how fast the model
         # answered.
@@ -760,6 +776,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._push_turn_text(text)
         else:
             await self.push_frame(LLMTextFrame(text))
+
+    def _note_tool_call_detected(self):
+        """Record that the current response contains a tool call.
+
+        Providers call this from their streaming loop as soon as a tool-call
+        delta/block is observed. It is idempotent within a response and resets
+        automatically at the start of the next response.
+        """
+        self._tool_call_detected = True
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():

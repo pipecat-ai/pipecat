@@ -536,6 +536,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             thinking={},
             enable_affective_dialog=False,
             proactivity={},
+            tool_call_text_policy=None,
             extra={},
         )
 
