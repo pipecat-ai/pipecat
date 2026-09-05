@@ -165,18 +165,37 @@ SIMULATION_ENDINGS = (
 
 
 @dataclass
+class EvalSimulationTurnVerdict:
+    """The judge's verdict on one bot turn, for a per-turn metric.
+
+    Parameters:
+        turn: The bot turn, 1-based, counting the turns in which the bot said
+            something; it indexes the ``assistant`` messages of the run's
+            conversation.
+        passed: Whether the turn satisfied the criterion.
+        reason: The judge's one-sentence justification.
+    """
+
+    turn: int
+    passed: bool
+    reason: str
+
+
+@dataclass
 class EvalSimulationMetricScore:
     """One quality metric's outcome for a simulation run.
 
     Parameters:
         name: The metric's name, from the simulation file.
-        score: 1.0 if the judge said the criterion held, else 0.0; ``None``
-            when nothing could be scored.
+        score: The share of the bot's turns that satisfied the criterion, in
+            0..1; ``None`` when there was no turn to judge.
         passed: Whether the metric let the run pass: its score reached its
             ``min_quality``, or it has none.
-        reason: The judge's justification.
+        reason: What the score rests on: the turns that fell short and why,
+            or that every turn passed.
         min_quality: The score the metric needed, or ``None`` when it only
             reports.
+        verdicts: The judge's verdict on each bot turn, in order.
     """
 
     name: str
@@ -184,6 +203,7 @@ class EvalSimulationMetricScore:
     passed: bool = True
     reason: str = ""
     min_quality: float | None = None
+    verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
 
 
 @dataclass
@@ -202,7 +222,8 @@ class EvalSimulationResult:
             ``passed``.
         metrics: The quality metrics' outcomes.
         messages: The conversation, with the persona's turns as ``user`` messages
-            and the bot's as ``assistant`` (the convention scenarios' judges use).
+            and the bot's as ``assistant`` (the convention scenarios' judges use);
+            the ``assistant`` messages are the bot turns the metrics scored.
         turns: How many turns the persona took.
         ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)

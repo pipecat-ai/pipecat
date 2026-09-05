@@ -82,6 +82,7 @@ from pipecat.evals.results import (
     EvalScriptTurnResult,
     EvalSimulationMetricScore,
     EvalSimulationResult,
+    EvalSimulationTurnVerdict,
 )
 from pipecat.evals.scenario import load_scenario_file
 from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS
@@ -263,6 +264,9 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "passed": m.passed,
                 "min_quality": m.min_quality,
                 "reason": m.reason,
+                "verdicts": [
+                    {"turn": v.turn, "passed": v.passed, "reason": v.reason} for v in m.verdicts
+                ],
             }
             for m in (result.metrics if result else [])
         ],
@@ -285,7 +289,13 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         reason=data.get("reason", ""),
         error=data.get("error"),
         quality=data.get("quality"),
-        metrics=[EvalSimulationMetricScore(**m) for m in data.get("metrics", [])],
+        metrics=[
+            EvalSimulationMetricScore(
+                **{k: v for k, v in m.items() if k != "verdicts"},
+                verdicts=[EvalSimulationTurnVerdict(**v) for v in m.get("verdicts", [])],
+            )
+            for m in data.get("metrics", [])
+        ],
         messages=data.get("messages", []),
         turns=data.get("turns", 0),
         ended_by=data.get("ended_by", "error"),

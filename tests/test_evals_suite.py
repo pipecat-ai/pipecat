@@ -207,7 +207,11 @@ if __name__ == "__main__":
 
 import json  # noqa: E402
 
-from pipecat.evals.results import EvalSimulationMetricScore, EvalSimulationResult  # noqa: E402
+from pipecat.evals.results import (  # noqa: E402
+    EvalSimulationMetricScore,
+    EvalSimulationResult,
+    EvalSimulationTurnVerdict,
+)
 from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
 
 SIMULATION = """
@@ -286,7 +290,19 @@ class TestSimulationRecords(unittest.TestCase):
             succeeded=True,
             reason="booked",
             quality=0.5,
-            metrics=[EvalSimulationMetricScore(name="politeness", score=1.0, reason="nice")],
+            metrics=[
+                EvalSimulationMetricScore(
+                    name="politeness",
+                    score=0.5,
+                    passed=False,
+                    reason="turn 2: curt",
+                    min_quality=1.0,
+                    verdicts=[
+                        EvalSimulationTurnVerdict(1, True, "warm"),
+                        EvalSimulationTurnVerdict(2, False, "curt"),
+                    ],
+                )
+            ],
             messages=[{"role": "user", "content": "hi"}],
             turns=2,
             ended_by="end_call",

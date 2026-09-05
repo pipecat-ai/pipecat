@@ -1664,7 +1664,7 @@ if __name__ == "__main__":
 # A simulation end to end: the persona LLM in the pipeline talks to the fake bot.
 # ---------------------------------------------------------------------------
 
-from pipecat.evals.judge import JudgeVerdict  # noqa: E402
+from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
@@ -1716,18 +1716,17 @@ class _ScriptedPersonaLLM(LLMService):
 
 class _YesJudge:
     def __init__(self):
-        self.messages: list[dict] = []
+        self.transcript: list[dict] = []
         self.criteria: list[str] = []
+        self.run_criteria: dict[str, str] = {}
 
-    def add_user_message(self, text):
-        self.messages.append({"role": "user", "content": text})
-
-    def add_assistant_message(self, text):
-        self.messages.append({"role": "assistant", "content": text})
-
-    async def evaluate_conversation(self, criterion, *, evidence=()):
-        self.criteria.append(criterion)
-        return JudgeVerdict(verdict="yes", reason="fine", raw_response="")
+    async def evaluate_run(self, transcript, criteria, success):
+        self.transcript = list(transcript)
+        self.criteria.append(success)
+        self.run_criteria = dict(criteria)
+        turns = sum(1 for e in transcript if e["role"] == "assistant")
+        yes = JudgeVerdict(verdict="yes", reason="", raw_response="")
+        return RunVerdicts(goal=yes, turns={name: [yes] * turns for name in criteria})
 
 
 class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
@@ -1794,7 +1793,10 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "The capital of Germany is Berlin."},
             ],
         )
-        self.assertEqual(judge.criteria, ["the bot named Berlin", "stayed polite"])
+        self.assertEqual(judge.criteria, ["the bot named Berlin"])
+        self.assertEqual(judge.run_criteria, {"politeness": "stayed polite"})
+        # Two bot turns, the greeting and the answer, reached the judge.
+        self.assertEqual(sum(1 for e in judge.transcript if e["role"] == "assistant"), 2)
 
     async def test_the_bot_hanging_up_ends_the_run(self):
         self.server.greeting = [

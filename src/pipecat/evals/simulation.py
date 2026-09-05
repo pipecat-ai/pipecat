@@ -58,10 +58,14 @@ Fields:
 
 ``metrics``
     judged quality criteria, each with ``name``, ``criterion``, and an optional
-    ``min_quality`` in 0..1. Each scores 1 (the judge says yes) or 0, and a
+    ``min_quality`` in 0..1. A criterion says what every reply of the bot should
+    be; the judge decides it for each bot turn, in the light of the conversation
+    before it and the tool calls the bot had made by then, and the metric's
+    score is the share of turns that passed: 0.80 is four replies in five. A
     metric with a ``min_quality`` fails the run when its score is below it; one
     without is reported and never fails anything. The run's ``quality`` is the
-    plain mean of the scores.
+    plain mean of the scores. Something the bot must do once, read the order
+    back, belongs in ``success``, not here.
 
 ``max_turns``, ``max_duration_s``
     backstops on the persona's turns (default 20) and on the run's wall clock

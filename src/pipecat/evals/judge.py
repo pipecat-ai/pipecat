@@ -111,6 +111,41 @@ CONVERSATION_JUDGE_ASK_TEMPLATE = (
     "Answer yes or no."
 )
 
+RUN_JUDGE_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair judge evaluating a complete conversation between a user "
+    "and a bot under test, given as a transcript. The bot's replies are numbered 'Bot "
+    "turn 1', 'Bot turn 2', and so on; the user's lines are marked 'User'; a line "
+    "marked '[tool call]' is a function the bot called at that point, and a completed "
+    "call is stronger evidence of an action (a booking, a lookup) than the bot saying "
+    "it did it. "
+    "You are given criteria, each with a name, that every bot reply is judged against "
+    "on its own, in the light of the conversation before it, and a goal that the "
+    "conversation as a whole is judged against. A criterion that forbids something "
+    "('never ...', 'does not ...') or that applies only in a situation ('when ...', "
+    "'if ...') is satisfied by a reply that does not do the forbidden thing or is not "
+    "in that situation; do not fault a reply for something the criterion does not ask "
+    "of it. "
+    "When the bot spoke its replies, its text is an automatic speech-to-text "
+    "transcription, so it may contain homophones, misspellings, split or merged words, "
+    "and missing punctuation. Always judge it by the intended spoken meaning, never by "
+    "its exact spelling. "
+    "Respond ONLY with a JSON object on a single line of the form "
+    '{"goal": {"verdict": "yes" | "no", "reason": "<one short sentence>"}, '
+    '"turns": {"<criterion name>": ["yes" | "no", ...]}, '
+    '"reasons": {"<criterion name>": {"<bot turn number>": "<one short sentence>"}}}. '
+    'Under "turns", give every criterion an array with exactly one entry per bot '
+    'turn, in order. Under "reasons", give a reason only for the turns you '
+    'answered "no". Do not include any other text, explanation, or markdown.'
+)
+
+RUN_JUDGE_ASK_TEMPLATE = (
+    "Transcript:\n{transcript}\n\n"
+    "Criteria for every bot reply:\n{criteria}\n\n"
+    "Goal for the conversation as a whole: {success}\n\n"
+    "Answer with the JSON described, one array entry per bot turn: there are "
+    "{turn_count} bot turns."
+)
+
 
 @dataclass
 class JudgeVerdict:
@@ -132,6 +167,19 @@ class JudgeVerdict:
     def passed(self) -> bool:
         """True only when the verdict is a definite ``"yes"``."""
         return self.verdict == "yes"
+
+
+@dataclass
+class RunVerdicts:
+    """A whole simulation run's verdicts, from one judge call.
+
+    Parameters:
+        goal: The verdict on the goal, over the whole conversation.
+        turns: Per criterion name, a verdict per bot turn, in order.
+    """
+
+    goal: JudgeVerdict
+    turns: dict[str, list[JudgeVerdict]]
 
 
 class EvalJudge:
@@ -157,6 +205,7 @@ class EvalJudge:
         # the scenario (one EvalJudge per scenario, so this starts empty).
         self._context = LLMContext()
         self._cache: dict[str, JudgeVerdict] = {}
+        self._run_cache: dict[str, RunVerdicts] = {}
 
     @classmethod
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
@@ -259,6 +308,55 @@ class EvalJudge:
             )
         return await self._evaluate(criterion, CONVERSATION_JUDGE_SYSTEM_INSTRUCTION, ask)
 
+    async def evaluate_run(
+        self, transcript: Sequence[dict], criteria: dict[str, str], success: str
+    ) -> "RunVerdicts":
+        """Judge a whole conversation in one call: every bot turn on every criterion, and the goal.
+
+        The transcript goes in the question itself, with the bot's turns
+        numbered and its tool calls inline where they happened, so one round
+        trip settles everything a simulation asks of the judge.
+
+        Args:
+            transcript: The conversation in order: dicts with a ``role`` of
+                ``assistant`` (a bot turn), ``user`` (the persona), or ``tool``
+                (a tool call the bot made, one line as :func:`str`), and the
+                ``content``.
+            criteria: The per-turn criteria to decide, by name.
+            success: The goal criterion, decided over the whole conversation.
+
+        Returns:
+            The goal's verdict and, per criterion, a verdict per bot turn in
+            order; a turn the judge left out is a ``no``.
+        """
+        lines = []
+        turn = 0
+        for entry in transcript:
+            if entry["role"] == "assistant":
+                turn += 1
+                lines.append(f"Bot turn {turn}: {entry['content']}")
+            elif entry["role"] == "tool":
+                lines.append(f"[tool call] {entry['content']}")
+            else:
+                lines.append(f"User: {entry['content']}")
+        listed = "\n".join(f"- {name}: {criterion}" for name, criterion in criteria.items())
+        ask = RUN_JUDGE_ASK_TEMPLATE.format(
+            transcript="\n".join(lines) or "(nothing was said)",
+            criteria=listed or "(none)",
+            success=success,
+            turn_count=turn,
+        )
+        key = _cache_key(ask, [])
+        if key not in self._run_cache:
+            # Room for a verdict per turn per criterion, a reason per "no", and
+            # the goal's verdict; a budget sized for one verdict cuts it short.
+            budget = max(300, 4 * turn * len(criteria) + 60 * len(criteria) + 80)
+            response = await self._call_judge_text(
+                success, [], RUN_JUDGE_SYSTEM_INSTRUCTION, ask, max_tokens=budget
+            )
+            self._run_cache[key] = _parse_run_verdicts(response, list(criteria), turn)
+        return self._run_cache[key]
+
     async def _evaluate(self, criterion: str, instruction: str, ask: str) -> JudgeVerdict:
         messages = self._context.get_messages()
         key = _cache_key(ask, messages)
@@ -272,6 +370,26 @@ class EvalJudge:
         self, criterion: str, messages: list, instruction: str, ask: str
     ) -> JudgeVerdict:
         """Single round-trip to the judge LLM over the conversation + a verdict ask."""
+        response = await self._call_judge_text(criterion, messages, instruction, ask)
+        if response.startswith("\0"):
+            return JudgeVerdict(verdict="no", reason=response[1:], raw_response="")
+        return _parse_verdict(response)
+
+    async def _call_judge_text(
+        self,
+        criterion: str,
+        messages: list,
+        instruction: str,
+        ask: str,
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        """The judge LLM's raw answer to ``ask`` over the conversation.
+
+        A failed or empty call comes back as a NUL-prefixed reason, which no
+        model answer starts with, so callers can report it as a ``no``.
+        ``max_tokens`` caps the answer, the judge's default when ``None``.
+        """
         # Copy the conversation and append the transient ask, so neither the ask
         # nor the judge's answer ever lands in the persistent context.
         context = LLMContext(messages=list(messages))
@@ -280,31 +398,99 @@ class EvalJudge:
         # Log the conversation the judge is about to evaluate, before its verdict,
         # so the debug log shows exactly what the judge saw (handy when a terse or
         # mis-transcribed reply gets an unexpected verdict).
+        # A run-level ask carries the transcript itself, so that is what to show.
         transcript = "\n".join(f"  [{m.get('role')}] {m.get('content')}" for m in messages)
         logger.debug(
-            "Judge evaluating {!r} over conversation:\n{}", criterion, transcript or "  (empty)"
+            "Judge evaluating {!r} over conversation:\n{}",
+            criterion,
+            transcript or "\n".join(f"  {line}" for line in ask.splitlines()),
         )
 
         try:
             response = await self._service.run_inference(
                 context=context,
-                max_tokens=self._max_tokens,
+                max_tokens=self._max_tokens if max_tokens is None else max_tokens,
                 system_instruction=instruction,
             )
         except Exception as e:
             logger.error(f"EvalJudge call failed: {e.__class__.__name__} ({e})")
-            return JudgeVerdict(
-                verdict="no",
-                reason=f"judge call failed: {e.__class__.__name__}",
-                raw_response="",
-            )
+            return f"\0judge call failed: {e.__class__.__name__}"
 
         if not response:
-            return JudgeVerdict(
-                verdict="no", reason="judge returned empty response", raw_response=""
-            )
+            return "\0judge returned empty response"
 
-        return _parse_verdict(response)
+        return response
+
+
+def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
+    """Parse a run-judge response: the goal's verdict and a verdict per turn per criterion.
+
+    Criterion names match case-insensitively. A turn the judge left out, an
+    array of the wrong length past the entries it has, or an answer that is
+    not the expected JSON, is a ``no`` with the reason saying so, and the raw
+    answer is logged, so a malformed answer never passes a turn silently.
+    """
+    nothing = "(judge gave no verdict)"
+    if response.startswith("\0"):
+        failed = JudgeVerdict(verdict="no", reason=response[1:], raw_response="")
+        return RunVerdicts(goal=failed, turns={n: [failed] * turn_count for n in names})
+    cleaned = response.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+    obj: dict = {}
+    start = cleaned.find("{")
+    if start != -1:
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+            if isinstance(parsed, dict):
+                obj = parsed
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    if not obj:
+        logger.warning(f"Judge answer was not the expected JSON: {response!r}")
+
+    goal = obj.get("goal")
+    if not isinstance(goal, dict):
+        goal = {}
+    goal_verdict = str(goal.get("verdict", "")).strip().lower()
+    goal_reason = str(goal.get("reason", "")).strip() or (nothing if goal_verdict != "yes" else "")
+    turns_by_name = {
+        str(k).lower(): v for k, v in (obj.get("turns") or {}).items() if isinstance(v, list)
+    }
+    reasons_by_name = {
+        str(k).lower(): v for k, v in (obj.get("reasons") or {}).items() if isinstance(v, dict)
+    }
+    turns: dict[str, list[JudgeVerdict]] = {}
+    for name in names:
+        answers = turns_by_name.get(name.lower(), [])
+        reasons = reasons_by_name.get(name.lower(), {})
+        if len(answers) != turn_count:
+            logger.warning(
+                f"Judge gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
+                f"turn(s); its answer was: {response!r}"
+            )
+        verdicts = []
+        for index in range(turn_count):
+            answer = answers[index] if index < len(answers) else None
+            if isinstance(answer, dict):
+                answer = answer.get("verdict")
+            if answer is None:
+                verdicts.append(JudgeVerdict(verdict="no", reason=nothing, raw_response=response))
+                continue
+            verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
+            reason = str(reasons.get(str(index + 1), "")).strip()
+            if verdict == "no" and not reason:
+                reason = "(no reason given)"
+            verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
+        turns[name] = verdicts
+    return RunVerdicts(
+        goal=JudgeVerdict(
+            verdict="yes" if goal_verdict == "yes" else "no",
+            reason=goal_reason,
+            raw_response=response,
+        ),
+        turns=turns,
+    )
 
 
 def _cache_key(criterion: str, messages: list) -> str:

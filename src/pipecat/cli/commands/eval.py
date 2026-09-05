@@ -187,10 +187,19 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
                 "unscored" if metric.score is None else f"{metric.score:.2f}"
             )
             bound = f" (min {metric.min_quality:.2f})" if metric.min_quality is not None else ""
+            failed = [v for v in metric.verdicts if not v.passed]
+            summary = f"{len(metric.verdicts) - len(failed)}/{len(metric.verdicts)} turns"
             print(
                 f"      {_color(metric.name + ':', '36')} {score}{_dim(bound)}"
-                f"{_dim(' | ' + metric.reason)}"
+                f"{_dim(' | ' + (summary if metric.verdicts else metric.reason))}"
             )
+            bot_turns = [m["content"] for m in result.messages if m["role"] == "assistant"]
+            for verdict in failed:
+                said = bot_turns[verdict.turn - 1] if verdict.turn <= len(bot_turns) else ""
+                print(
+                    f"        {_red('✗')} {_dim(f'turn {verdict.turn}:')} "
+                    f"{_fit_detail(said, 24)} {_dim('— ' + verdict.reason)}"
+                )
     if result.end_call is not None:
         print()
         claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")

@@ -194,7 +194,7 @@ from types import SimpleNamespace  # noqa: E402
 
 from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT  # noqa: E402
 from pipecat.evals.events import EvalEventStream  # noqa: E402
-from pipecat.evals.judge import JudgeVerdict  # noqa: E402
+from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
@@ -203,24 +203,40 @@ from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
 
 class _FakeConversationJudge:
-    """Answers evaluate_conversation from a script and records the conversation it saw."""
+    """Answers the judge's one run question from a script and records what it saw.
 
-    def __init__(self, verdicts: list[str]):
+    ``verdicts`` feed the goal in order; ``turn_verdicts`` are one dict per bot
+    turn, a metric left out of a dict passing that turn.
+    """
+
+    def __init__(self, verdicts: list[str], turn_verdicts: list[dict[str, str]] | None = None):
         self.verdicts = list(verdicts)
-        self.messages: list[dict] = []
+        self.turn_verdicts = list(turn_verdicts or [])
+        self.transcript: list[dict] = []
         self.criteria: list[str] = []
+        self.run_criteria: dict[str, str] = {}
 
-    def add_user_message(self, text):
-        self.messages.append({"role": "user", "content": text})
-
-    def add_assistant_message(self, text):
-        self.messages.append({"role": "assistant", "content": text})
-
-    async def evaluate_conversation(self, criterion: str, *, evidence=()) -> JudgeVerdict:
-        self.criteria.append(criterion)
-        self.evidence = list(evidence)
-        verdict = self.verdicts.pop(0)
-        return JudgeVerdict(verdict=verdict, reason=f"because {criterion}", raw_response="")
+    async def evaluate_run(self, transcript, criteria: dict[str, str], success: str):
+        self.transcript = list(transcript)
+        self.criteria.append(success)
+        self.run_criteria = dict(criteria)
+        turns = sum(1 for e in transcript if e["role"] == "assistant")
+        goal = JudgeVerdict(
+            verdict=self.verdicts.pop(0), reason=f"because {success}", raw_response=""
+        )
+        by_name = {}
+        for name, criterion in criteria.items():
+            by_name[name] = []
+            for index in range(turns):
+                scripted = self.turn_verdicts[index] if index < len(self.turn_verdicts) else {}
+                by_name[name].append(
+                    JudgeVerdict(
+                        verdict=scripted.get(name, "yes"),
+                        reason=f"because {criterion}",
+                        raw_response="",
+                    )
+                )
+        return RunVerdicts(goal=goal, turns=by_name)
 
 
 class _FakePersonaLLM:
@@ -317,7 +333,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"role": "user", "content": "Berlin."},
             ]
         )
-        judge = _FakeConversationJudge(["yes", "yes", "no"])
+        # The second bot turn is short but the judge finds it curt.
+        judge = _FakeConversationJudge(["yes"], [{}, {"brevity": "no"}])
         metrics = [
             EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0),
             EvalSimulationMetric("brevity", "kept it short"),
@@ -326,9 +343,11 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
-            await stream.append({"type": PERSONA_TURN_EVENT})
+            await stream.append(
+                {"type": PERSONA_TURN_EVENT, "text": "What is the capital of Germany?"}
+            )
             await stream.append({"type": "llm_response", "text": "Berlin."})
-            await stream.append({"type": PERSONA_TURN_EVENT})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Thanks!"})
             results = await _end_call(llm, success=True, reason="I got my answer")
             self.assertEqual(results[0][0], {"status": "call ended"})
             self.assertFalse(results[0][1].run_llm)
@@ -340,15 +359,20 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failures, [])
         self.assertIn("A traveler.", client.instruction or "")
         self.assertTrue(client.hung_up)
+        # One judge call saw the whole conversation, the criteria, and the goal.
         self.assertEqual(
-            judge.messages,
+            judge.transcript,
             [
                 {"role": "assistant", "content": "Hi! How can I help?"},
                 {"role": "user", "content": "What is the capital of Germany?"},
                 {"role": "assistant", "content": "Berlin."},
+                {"role": "user", "content": "Thanks!"},
             ],
         )
-        self.assertEqual(judge.criteria, ["the bot said Berlin", "stayed polite", "kept it short"])
+        self.assertEqual(
+            judge.run_criteria, {"politeness": "stayed polite", "brevity": "kept it short"}
+        )
+        self.assertEqual(judge.criteria, ["the bot said Berlin"])
 
         result = driver.result(
             failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
@@ -359,18 +383,22 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
-        self.assertEqual([m.score for m in result.metrics], [1.0, 0.0])
-        # brevity scored 0 but gates nothing, so the run still passes.
+        self.assertEqual([m.score for m in result.metrics], [1.0, 0.5])
+        # brevity scored 0.5 but gates nothing, so the run still passes.
         self.assertEqual([m.passed for m in result.metrics], [True, True])
-        self.assertAlmostEqual(result.quality or -1, 0.5)
+        self.assertEqual(result.metrics[0].reason, "all 2 turn(s)")
+        self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
+        self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
+        self.assertAlmostEqual(result.quality or -1, 0.75)
         self.assertIsNone(result.failure)
-        self.assertEqual(result.messages, judge.messages)
+        self.assertEqual(result.messages, judge.transcript)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
 
     async def test_a_metric_below_its_min_quality_fails_the_run(self):
-        judge = _FakeConversationJudge(["yes", "no"])
+        judge = _FakeConversationJudge(["yes"], [{"politeness": "no"}])
         metrics = [EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0)]
-        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge)
+        records: list = []
+        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge, None, records)
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "What do you want."})
@@ -385,7 +413,56 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
-        self.assertEqual(result.failure, "politeness 0.00 below 1.00: because stayed polite")
+        self.assertEqual(
+            result.failure, "politeness 0.00 below 1.00: turn 1: because stayed polite"
+        )
+        self.assertEqual(
+            [(r.status, r.text, r.turn) for r in records if r.status != "bot"],
+            [("user", "The capital of Germany?", 1), ("ended", "end_call", 1)],
+        )
+
+    async def test_a_bot_turn_is_what_it_said_between_persona_turns_with_the_calls_by_then(self):
+        judge = _FakeConversationJudge(["yes"])
+        metrics = [EvalSimulationMetric("honesty", "claims only what a call backs")]
+        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Hello!"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "A table at six, please."})
+            # A function call splits the reply in two; both halves are one turn,
+            # and the call is that turn's evidence, not the greeting's.
+            await stream.append({"type": "llm_response", "text": "Let me check."})
+            await stream.append(
+                {"type": "function_call", "name": "check_availability", "args": {"time": "6"}}
+            )
+            await stream.append({"type": "llm_response", "text": "Six is free, booked."})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": ""})
+            await _end_call(llm, success=True, reason="booked")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        # The call sits in the transcript where it happened, before the turn it split.
+        self.assertEqual(
+            judge.transcript,
+            [
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "A table at six, please."},
+                {"role": "tool", "content": 'check_availability({"time": "6"})'},
+                {"role": "assistant", "content": "Let me check. Six is free, booked."},
+            ],
+        )
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        self.assertEqual(
+            result.messages,
+            [
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "A table at six, please."},
+                {"role": "assistant", "content": "Let me check. Six is free, booked."},
+            ],
+        )
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []
@@ -476,7 +553,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         await driver.run()
         await task
         self.assertEqual(
-            judge.evidence,
+            [e["content"] for e in judge.transcript if e["role"] == "tool"],
             [
                 'check_availability({"time": "6:00 PM"})',
                 "end_conversation()",
