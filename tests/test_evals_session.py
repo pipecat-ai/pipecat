@@ -1802,7 +1802,6 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.end_call, {"success": True, "reason": "I learned it"})
         self.assertEqual(result.turns, 1)  # the question; end_call is not a turn
-        self.assertEqual(result.quality, 1.0)
         # The persona's question went to the bot as one text turn, not spoken.
         sent = [m for m in self.server.received if m.get("type") == "send-text"]
         self.assertEqual([m["data"]["content"] for m in sent], ["What is the capital of Germany?"])

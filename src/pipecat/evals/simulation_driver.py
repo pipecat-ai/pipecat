@@ -408,14 +408,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     ) -> EvalSimulationResult:
         """The run's result; a run-level failure makes it an error, not a goal failure."""
         error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
-        scores = [m.score for m in self._metrics if m.score is not None]
-        quality = sum(scores) / len(scores) if scores else None
         return EvalSimulationResult(
             simulation_name=self._simulation.name,
             succeeded=self._succeeded and error is None,
             reason=error or self._reason,
             error=error,
-            quality=quality,
             metrics=self._metrics,
             messages=self.conversation(),
             turns=self._turns,

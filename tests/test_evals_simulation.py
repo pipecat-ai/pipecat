@@ -423,7 +423,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metrics[0].reason, "all 2 turn(s)")
         self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
         self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
-        self.assertAlmostEqual(result.quality or -1, 0.75)
         self.assertIsNone(result.failure)
         self.assertEqual(result.messages, judge.transcript)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
@@ -592,7 +591,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "max_turns")
         self.assertEqual(result.turns, 2)
         self.assertFalse(result.succeeded)
-        self.assertIsNone(result.quality)  # no metrics
 
     async def test_the_bot_hanging_up_ends_the_run(self):
         judge = _FakeConversationJudge(["yes"])

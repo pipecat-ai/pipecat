@@ -118,7 +118,6 @@ def _simulation_run(
     attempt: int = 1,
     attempts: int = 3,
     sweep: bool = False,
-    quality: float | None = 1.0,
 ) -> EvalRun:
     """A finished simulation run; ``succeeded=None`` is one that errored out."""
     if succeeded is None:
@@ -130,7 +129,6 @@ def _simulation_run(
             simulation_name="book",
             succeeded=succeeded,
             reason="judged",
-            quality=quality,
             ended_by="end_call" if succeeded else "max_turns",
         )
     return EvalRun(
@@ -170,9 +168,9 @@ class TestSimulationVerdicts(unittest.TestCase):
         self.assertEqual(_eval_verdict(_simulation_run(False)), "failed")
         self.assertEqual(_eval_verdict(_simulation_run(None)), "error")
 
-    def test_detail_is_quality_and_how_it_ended(self):
-        self.assertEqual(_turn_tally(_simulation_run(True)), "quality 1.00 · end_call")
-        self.assertEqual(_turn_tally(_simulation_run(False, quality=None)), "max_turns")
+    def test_detail_is_how_it_ended(self):
+        self.assertEqual(_turn_tally(_simulation_run(True)), "end_call")
+        self.assertEqual(_turn_tally(_simulation_run(False)), "max_turns")
 
     def test_errored_runs_stay_out_of_the_rate(self):
         # The errors are reported on their own rather than counted as the bot failing.

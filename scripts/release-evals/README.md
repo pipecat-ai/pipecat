@@ -304,8 +304,8 @@ in `success`. A measured metric (`measure: turns`, `duration`, `words`, or
 per-reply ones bound every reply, so `latency` is the slowest reply and
 `words` the longest. `results.jsonl` carries each metric's score, value, and
 the verdict on every turn. The suite prints a
-per-simulation pass rate, mean quality, and a ✓ or ✗ for whether every run
-passed, and exits non-zero when one did not. `--repeat` turns the whole thing
+per-simulation pass rate and a ✓ or ✗ for whether every run passed, and exits
+non-zero when one did not. `--repeat` turns the whole thing
 into a measurement: rates are reported and the exit code stays 0. A run that
 errored (the bot never came up, the persona's LLM failed) is reported but kept
 out of the rate.

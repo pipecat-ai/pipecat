@@ -544,15 +544,11 @@ def _turn_tally(r: EvalRun) -> str:
     when they were never attempted — what it stopped on is in the failure listing
     instead. A run that passed is already said by the ✓.
 
-    A simulation: its quality and how it ended, e.g. ``quality 0.75 · end_call``.
+    A simulation: how it ended, e.g. ``end_call``.
     """
     result = r.result
     if isinstance(result, EvalSimulationResult):
-        parts = []
-        if result.quality is not None:
-            parts.append(f"quality {result.quality:.2f}")
-        parts.append(result.ended_by)
-        return " · ".join(parts)
+        return result.ended_by
     if result is None or not result.turns:
         return ""
     if any(t.status == "not_run" for t in result.turns):
@@ -708,21 +704,17 @@ class _EvalDashboard:
         return Group(*parts, Text(""), summary)
 
     def _render_grouped(self) -> Group:
-        """One row per (bot, scenario), showing that pair's pass rate and pace.
-
-        A simulation's row also carries its mean quality.
-        """
+        """One row per (bot, scenario), showing that pair's pass rate and pace."""
         table = Table.grid(padding=(0, 2))
         table.add_column()  # status
         table.add_column()  # bot
         table.add_column()  # scenario
         table.add_column(justify="right")  # pass rate
-        table.add_column(justify="right")  # mean quality (simulations)
         table.add_column(justify="right")  # remaining, then the mean run time
 
         for (bot, scenario), group in _grouped_runs(self.runs).items():
             done = [r for r in group if r.status == "done"]
-            passed, _, _, quality = _group_outcome(group)
+            passed, _, _ = _group_outcome(group)
             # Three states, and only the last is a verdict: spinning while a slot is
             # held, a still dot while waiting for one, and ✓/✗ once every attempt is
             # in. Motion is reserved for the runs actually in flight — most rows of a
@@ -745,7 +737,6 @@ class _EvalDashboard:
                 Text(bot),
                 Text(scenario, style="cyan"),
                 Text(_pass_rate(passed, len(done)), style=_rate_level(passed, len(done))),
-                Text(f"quality {quality:.2f}" if quality is not None else "", style="dim"),
                 Text(f"{remaining} left" if remaining else _mean_duration(done), style="dim"),
             )
 
@@ -888,8 +879,8 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
                 )
 
 
-def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int, float | None]:
-    """A (bot, scenario) group's ``(passed, completed, errored, mean quality)``.
+def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int]:
+    """A (bot, scenario) group's ``(passed, completed, errored)``.
 
     Errored runs are left out of the completed count: a run that crashed or never
     connected says nothing about whether the bot did its job, and folding it into
@@ -900,13 +891,7 @@ def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int, float | None]:
     passed = sum(1 for v in verdicts if v == "passed")
     errored = sum(1 for v in verdicts if v == "error")
     completed = sum(1 for v in verdicts if v in ("passed", "failed", "skipped"))
-    qualities = [
-        r.result.quality
-        for r in group
-        if isinstance(r.result, EvalSimulationResult) and r.result.quality is not None
-    ]
-    quality = sum(qualities) / len(qualities) if qualities else None
-    return passed, completed, errored, quality
+    return passed, completed, errored
 
 
 def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_rates: bool) -> None:
@@ -915,8 +900,8 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
     A repeated sweep is measuring a rate, not a verdict, so the useful output is
     how often each pair passed and which runs account for the rest. A simulation
     running its own ``runs`` is a requirement instead, marked ✓ or ✗ beside its
-    rate: every run had to pass. Either way the mean quality and how many runs
-    errored (those are outside the rate) follow.
+    rate: every run had to pass. Either way how many runs errored (those are
+    outside the rate) and the mean run time follow.
     ``show_rates`` is False when the live dashboard ran: its final frame is already
     a per-(bot, scenario) rate table, so repeating it here would just duplicate it.
     """
@@ -927,14 +912,12 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
         bot_w = max(len(bot) for bot, _ in groups)
         scenario_w = max(len(scenario) for _, scenario in groups)
         for (bot, scenario), group in groups.items():
-            passed, completed, errored, quality = _group_outcome(group)
+            passed, completed, errored = _group_outcome(group)
             rate_text = f"{_pass_rate(passed, completed):>14s}"
             rate = _color(rate_text, _RATE_ANSI[_rate_level(passed, completed)])
             extra = []
             if errored:
                 extra.append(f"{errored} errored")
-            if quality is not None:
-                extra.append(f"quality {quality:.2f}")
             extra.append(_mean_duration(group))
             mark = ""
             if not group[0].sweep:

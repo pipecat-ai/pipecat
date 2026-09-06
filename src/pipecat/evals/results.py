@@ -221,9 +221,6 @@ class EvalSimulationResult:
         error: When set, the run did not complete (a failed connect, a harness
             error); ``succeeded`` is then False and the run is neither a goal
             success nor a goal failure.
-        quality: Plain mean of the metrics' scores, or None without metrics. It
-            is reported and trended; what gates the run is each metric's own
-            ``passed``.
         metrics: The quality metrics' outcomes.
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use);
@@ -241,7 +238,6 @@ class EvalSimulationResult:
     succeeded: bool
     reason: str = ""
     error: str | None = None
-    quality: float | None = None
     metrics: list[EvalSimulationMetricScore] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
     turns: int = 0

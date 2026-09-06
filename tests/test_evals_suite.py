@@ -306,7 +306,6 @@ class TestSimulationRecords(unittest.TestCase):
             simulation_name="book",
             succeeded=True,
             reason="booked",
-            quality=0.5,
             metrics=[
                 EvalSimulationMetricScore(
                     name="politeness",
@@ -347,7 +346,6 @@ class TestSimulationRecords(unittest.TestCase):
                     simulation_name="book",
                     succeeded=False,
                     reason="no table",
-                    quality=0.0,
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],

@@ -244,9 +244,9 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     """The results.jsonl record of a simulation run.
 
-    Enough to compute a pass rate and a mean quality, and to see how each
-    run ended, what the judge said, and which metric fell short; the conversation and, for a run that
-    did not pass, the events the bot emitted are attached for diagnosis.
+    Enough to compute a pass rate and to see how each run ended, what the judge
+    said, and how each metric scored; the conversation and, for a run that did
+    not pass, the events the bot emitted are attached for diagnosis.
     """
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
@@ -259,7 +259,6 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "error": run.error or (result.error if result else None),
         "ended_by": result.ended_by if result else "error",
         "turns": result.turns if result else 0,
-        "quality": result.quality if result else None,
         "metrics": [
             {
                 "name": m.name,
@@ -292,7 +291,6 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         succeeded=data["succeeded"],
         reason=data.get("reason", ""),
         error=data.get("error"),
-        quality=data.get("quality"),
         metrics=[
             EvalSimulationMetricScore(
                 **{k: v for k, v in m.items() if k != "verdicts"},
