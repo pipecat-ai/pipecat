@@ -69,7 +69,12 @@ pipeline boundary as RGB ``InputImageRawFrame``/``OutputImageRawFrame``
 and converted to/from the call's packed I420 at the transport. The
 transport aligns the call's geometry with ``video_out_width/height/
 framerate`` at construction; a peer that declines video leaves a
-working audio call.
+working audio call. Video can also start and stop mid-call (SIP-only
+additions): ``set_video_direction()`` / ``add_video()`` /
+``remove_video()`` renegotiate a call whose video stream was
+negotiated at setup (``start_dialout`` ``video="inactive"`` dials
+audio-only with the stream ready to activate), and a peer's mid-call
+change fires ``on_participant_updated``.
 
 Trunk mode (registration-less): ``SIPConnection(reg_interval=0)`` never
 sends REGISTER — dial-out INVITEs go straight to the target (or the
@@ -103,16 +108,18 @@ from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
     EndFrame,
+    Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
     InputImageRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     StartFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -134,9 +141,10 @@ VIDEO_IN_POLL_SECS = 1 / 30
 # the buffer at exactly real time (padding silence when it runs dry).
 # The output transport must therefore pace itself. It keeps the buffer
 # filled at most AUDIO_OUT_BUFFER_SECS ahead of the transmit clock —
-# enough cushion to ride out event-loop jitter, and small enough that
-# an interruption leaves at most this much already-queued audio to play
-# out — and retries a rejected remainder every AUDIO_OUT_RETRY_SECS.
+# enough cushion to ride out event-loop jitter — and retries a rejected
+# remainder every AUDIO_OUT_RETRY_SECS. An interruption flushes the
+# buffer (flush_tx), so at most one in-flight frame (~20 ms) of stale
+# bot speech survives it.
 AUDIO_OUT_BUFFER_SECS = 0.08
 AUDIO_OUT_RETRY_SECS = 0.01
 
@@ -347,6 +355,17 @@ class SIPOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self.set_transport_ready(frame)
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame, flushing queued call audio on interruption.
+
+        The transmit buffer holds up to ``AUDIO_OUT_BUFFER_SECS`` of
+        already-written audio; without the flush that much stale bot
+        speech would still play after an interruption.
+        """
+        if isinstance(frame, InterruptionFrame):
+            self._connection.flush_tx()
+        await super().process_frame(frame, direction)
+
     async def stop(self, frame: EndFrame):
         """Flush the base transport and release the shared connection."""
         await super().stop(frame)
@@ -525,6 +544,7 @@ class SIPTransport(BaseTransport):
         connection.add_event_handler("call_failed", self._on_call_failed)
         connection.add_event_handler("dtmf", self._on_dtmf)
         connection.add_event_handler("remote_hold", self._on_remote_hold)
+        connection.add_event_handler("renegotiated", self._on_renegotiated)
         connection.add_event_handler("audio_warning", self._on_audio_warning)
 
     def input(self) -> FrameProcessor:
@@ -549,9 +569,12 @@ class SIPTransport(BaseTransport):
         Args:
             settings: ``sipUri`` for a direct SIP target, or
                 ``phoneNumber`` (with :attr:`SIPParams.trunk`) for a
-                PSTN-style target; optional ``video`` (bool) and
-                ``headers`` (dict of extra INVITE headers — a SIP-only
-                addition).
+                PSTN-style target; optional ``video`` — ``True`` offers
+                sendrecv, a direction string offers that direction
+                (``"inactive"`` negotiates video without activating it,
+                so :meth:`set_video_direction` can bring it up later) —
+                and ``headers`` (dict of extra INVITE headers — a
+                SIP-only addition).
 
         Returns:
             A ``(session_id, error)`` pair; ``error`` is None on success.
@@ -568,10 +591,11 @@ class SIPTransport(BaseTransport):
         if not uri:
             return "", "settings must include 'sipUri' or 'phoneNumber'"
         try:
+            video = settings.get("video", False)
             session_id = await self._connection.dial(
                 uri,
                 headers=settings.get("headers"),
-                video=bool(settings.get("video", False)),
+                video=video if isinstance(video, str) else bool(video),
             )
         except Exception as e:
             logger.error(f"{self} unable to start dialout: {e}")
@@ -685,6 +709,48 @@ class SIPTransport(BaseTransport):
         starting point sooner than the next natural keyframe.
         """
         await self._connection.request_keyframe()
+
+    async def set_video_direction(self, direction: str) -> str | None:
+        """Change the call's video direction mid-call (SIP-only addition).
+
+        Renegotiates with a re-INVITE: ``"sendrecv"`` brings video up,
+        ``"inactive"`` takes it down, leaving the audio call untouched.
+        The call must carry a video stream — dialed with a ``video``
+        setting, or answered to a video offer. Right after establishment
+        the error may say "retry shortly" (the ACK is still in flight);
+        the staged direction is kept, so calling again converges.
+
+        Args:
+            direction: ``"sendrecv"``, ``"sendonly"``, ``"recvonly"``
+                or ``"inactive"``.
+
+        Returns:
+            An error description, or None on success.
+        """
+        if not self._connection.has_active_call:
+            return "transport has no active call"
+        try:
+            await self._connection.set_video_direction(direction)
+        except Exception as e:
+            logger.error(f"{self} unable to set video direction: {e}")
+            return str(e)
+        return None
+
+    async def add_video(self) -> str | None:
+        """Bring video up mid-call; ``set_video_direction("sendrecv")``.
+
+        Returns:
+            An error description, or None on success.
+        """
+        return await self.set_video_direction("sendrecv")
+
+    async def remove_video(self) -> str | None:
+        """Take video down mid-call; ``set_video_direction("inactive")``.
+
+        Returns:
+            An error description, or None on success.
+        """
+        return await self.set_video_direction("inactive")
 
     async def _refer(self, settings) -> str | None:
         settings = settings or {}
@@ -814,6 +880,12 @@ class SIPTransport(BaseTransport):
         participant = self._participant(data)
         participant["media"] = {"onHold": data.get("on", False)}
         await self._call_event_handler("on_participant_updated", participant)
+
+    async def _on_renegotiated(self, connection, data: dict):
+        # Media state changed mid-call (video added or removed, a
+        # direction change) — the same signal Daily maps to a
+        # participant update.
+        await self._call_event_handler("on_participant_updated", self._participant(data))
 
     async def _on_audio_warning(self, connection, warning):
         data = {"sessionId": self._connection.session_id, "errorMsg": str(warning)}

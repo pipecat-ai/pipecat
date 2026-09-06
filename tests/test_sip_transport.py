@@ -19,8 +19,11 @@ pytest.importorskip("baresip")
 from pipecat.frames.frames import (  # noqa: E402
     ClientConnectedFrame,
     InputDTMFFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
+from pipecat.transports.base_output import BaseOutputTransport  # noqa: E402
 from pipecat.transports.sip.connection import SIPConnection  # noqa: E402
 from pipecat.transports.sip.transport import (  # noqa: E402
     SIPOutputTransport,
@@ -429,6 +432,56 @@ async def test_audio_warning_routed_by_direction():
     await connection._call_event_handler("audio_warning", "tx starved")
     await settle()
     assert recorded[1][0] == "on_dialout_warning"
+
+
+@pytest.mark.asyncio
+async def test_interruption_flushes_transmit_buffer():
+    connection = make_connection()
+    connection.flush_tx = Mock()
+    params = SIPParams(audio_out_enabled=True)
+    transport = SIPTransport(connection, params)
+    output = SIPOutputTransport(transport, connection, params)
+
+    with patch.object(BaseOutputTransport, "process_frame", new=AsyncMock()) as base:
+        await output.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+    connection.flush_tx.assert_called_once()
+    base.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_video_direction_never_raises():
+    transport, connection = make_transport()
+
+    assert await transport.set_video_direction("sendrecv") == "transport has no active call"
+
+    set_active_call(connection)
+    connection.set_video_direction = AsyncMock()
+    assert await transport.add_video() is None
+    connection.set_video_direction.assert_awaited_with("sendrecv")
+
+    connection.set_video_direction = AsyncMock(side_effect=RuntimeError("retry shortly"))
+    error = await transport.remove_video()
+    assert error is not None and "retry shortly" in error
+
+
+@pytest.mark.asyncio
+async def test_start_dialout_video_direction_passthrough():
+    transport, connection = make_transport()
+
+    await transport.start_dialout({"sipUri": "sip:x@example.com", "video": "inactive"})
+    connection.dial.assert_awaited_once_with("sip:x@example.com", headers=None, video="inactive")
+
+
+@pytest.mark.asyncio
+async def test_renegotiation_fires_participant_updated():
+    transport, connection = make_transport()
+    recorded = record_events(transport, ["on_participant_updated"])
+
+    await connection._call_event_handler("renegotiated", dict(IN_PAYLOAD, sdp="offer"))
+    await settle()
+
+    assert recorded and recorded[0][0] == "on_participant_updated"
 
 
 @pytest.mark.asyncio
