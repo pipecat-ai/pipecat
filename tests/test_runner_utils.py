@@ -299,6 +299,8 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             audio_codecs=("PCMU/8000/1",),
             auth_user="trunk-user",
             reg_interval=0,
+            rtp_timeout=30,
+            instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         )
         transport = await create_transport(
             args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
@@ -309,6 +311,11 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
         self.assertEqual(transport._connection._account.auth_user, "trunk-user")
         self.assertEqual(transport._connection._account.reg_interval, 0)
+        self.assertEqual(transport._connection._settings.rtp_timeout, 30)
+        self.assertEqual(
+            transport._connection._settings.instance_id,
+            "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        )
 
 
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")

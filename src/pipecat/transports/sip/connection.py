@@ -76,22 +76,29 @@ class _RuntimeSettings:
     net_interface: str | None = None
     expose_headers: tuple = ()
     max_concurrent_calls: int | None = 2
+    rtp_timeout: int = 0
+    instance_id: str | None = None
     video_size: tuple = (640, 480)
     video_fps: float = 30.0
     video_bitrate: int = 1_000_000
 
-    def render(self) -> str:
-        """Render these settings into baresip runtime configuration text."""
-        config = Config(
+    def to_config(self) -> Config:
+        """These settings as the binding's ``Config`` object.
+
+        The object form matters: ``expose_headers`` and ``instance_id``
+        are applied by ``Runtime.start()`` only when it receives a
+        ``Config`` — rendered text cannot carry them.
+        """
+        return Config(
+            net_interface=self.net_interface,
             expose_headers=self.expose_headers,
             max_concurrent_calls=self.max_concurrent_calls,
+            rtp_timeout=self.rtp_timeout,
+            instance_id=self.instance_id,
             video_size=self.video_size,
             video_fps=self.video_fps,
             video_bitrate=self.video_bitrate,
-        ).render()
-        if self.net_interface:
-            config = f"net_interface {self.net_interface}\n" + config
-        return config
+        )
 
 
 class _SharedRuntime:
@@ -129,7 +136,7 @@ class _SharedRuntime:
         async with self._lock:
             if self._runtime is None:
                 runtime = Runtime()
-                await runtime.start(settings.render())
+                await runtime.start(settings.to_config())
                 self._runtime = runtime
                 self._settings = settings
             elif settings != self._settings:
@@ -137,7 +144,8 @@ class _SharedRuntime:
                     "the SIP runtime is already up with different runtime-wide "
                     f"settings ({self._settings!r}); all SIPConnections in a process "
                     "must agree on net_interface, expose_headers, "
-                    "max_concurrent_calls, and the video parameters"
+                    "max_concurrent_calls, rtp_timeout, instance_id, "
+                    "and the video parameters"
                 )
             self._owners += 1
             return self._runtime
@@ -241,6 +249,9 @@ class SIPConnection(BaseObject):
     - dtmf: the far end pressed a key; receives the binding's DigitEvent.
     - remote_hold: the far end put the call on hold or resumed it;
       receives a payload dict with ``on`` (bool).
+    - renegotiated: an established call renegotiated (a mid-call
+      re-INVITE offer arrived, or the peer answered ours); receives a
+      payload dict with ``sdp`` (``"offer"`` or ``"answer"``).
     - audio_warning: the call's audio layer reported a warning.
     - media_restarted: a renegotiation replaced the media streams;
       receives ``"audio"`` or ``"video"``. Consumers should rebuild
@@ -270,6 +281,8 @@ class SIPConnection(BaseObject):
         net_interface: str | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
+        rtp_timeout: int = 0,
+        instance_id: str | None = None,
         video_size: tuple = (640, 480),
         video_fps: float = 30.0,
         video_bitrate: int = 1_000_000,
@@ -310,6 +323,19 @@ class SIPConnection(BaseObject):
             max_concurrent_calls: Stack-wide simultaneous-call cap;
                 further inbound INVITEs are refused with 486. None means
                 unlimited. Runtime-wide.
+            rtp_timeout: Seconds without received RTP after which a call
+                is declared dead and closed (close reason
+                ``"rtp stream error"``) — catches peers that vanish
+                without a BYE. Direction-aware: held and send-only
+                streams are not checked. 0 (the default) disables
+                detection. Runtime-wide.
+            instance_id: A canonical lowercase UUID identifying this
+                endpoint across restarts, carried on registration
+                Contacts as ``+sip.instance`` (RFC 5626): a supporting
+                registrar replaces a restarted bot's stale binding
+                instead of stacking a new one. Supply the same value
+                every run; None sends no instance parameter.
+                Runtime-wide.
             video_size: Video geometry for both directions. Runtime-wide.
             video_fps: Transmit frame pacing. Runtime-wide.
             video_bitrate: VP8 encoder target in bits/second. Runtime-wide.
@@ -331,6 +357,8 @@ class SIPConnection(BaseObject):
         self._account = Account(**account_args)
         self._settings = _RuntimeSettings(
             net_interface=net_interface,
+            rtp_timeout=rtp_timeout,
+            instance_id=instance_id,
             expose_headers=tuple(expose_headers),
             max_concurrent_calls=max_concurrent_calls,
             video_size=tuple(video_size),
@@ -355,6 +383,7 @@ class SIPConnection(BaseObject):
         self._register_event_handler("registered")
         self._register_event_handler("incoming")
         self._register_event_handler("remote_hold")
+        self._register_event_handler("renegotiated")
         self._register_event_handler("call_progress")
         self._register_event_handler("call_established")
         self._register_event_handler("call_closed")
@@ -472,7 +501,7 @@ class SIPConnection(BaseObject):
         self._ua = None
         await self._call_event_handler("disconnected")
 
-    async def dial(self, uri: str, headers: dict | None = None, video: bool = False) -> str:
+    async def dial(self, uri: str, headers: dict | None = None, video: bool | str = False) -> str:
         """Start an outbound call.
 
         Returns as soon as the INVITE is on its way; the outcome arrives
@@ -482,7 +511,12 @@ class SIPConnection(BaseObject):
         Args:
             uri: The SIP URI to call.
             headers: Extra headers for the INVITE.
-            video: Offer video (VP8).
+            video: Offer video (VP8). ``True`` offers sendrecv; a
+                direction string offers that direction —
+                ``"inactive"`` negotiates the video stream without
+                activating it, so :meth:`set_video_direction` can bring
+                video up mid-call. ``False`` dials with no video stream
+                at all (it can never be added later).
 
         Returns:
             The new call's session id.
@@ -614,6 +648,41 @@ class SIPConnection(BaseObject):
             return 0
         except AudioNotActive:
             return 0
+
+    def flush_tx(self):
+        """Discard audio that is written but not yet transmitted.
+
+        The binding drains the transmit buffer on its next pacing tick,
+        so at most one frame (~20 ms) can still reach the wire. Quiet
+        with no call or no audio — flushing nothing is not an error.
+        """
+        call = self._call
+        if call is None:
+            return
+        try:
+            call.audio.flush_tx()
+        except AudioRestarted:
+            self._emit_media_restarted("audio")
+        except AudioNotActive:
+            pass
+
+    async def set_video_direction(self, direction: str):
+        """Change the active call's video direction with a re-INVITE.
+
+        ``"sendrecv"`` brings video up mid-call, ``"inactive"`` takes it
+        down; the call must carry a video stream (dialed or answered
+        with video). Right after establishment the stack may refuse
+        with "retry shortly" while the ACK is still in flight.
+
+        Raises:
+            RuntimeError: No active call.
+            Exception: The binding's error, including the
+                retry-shortly case and calls without a video stream.
+        """
+        call = self._call
+        if call is None:
+            raise RuntimeError("SIPConnection has no active call")
+        await call.set_video_direction(direction)
 
     def audio_info(self):
         """The active call's audio stream info, or None.
@@ -760,6 +829,13 @@ class SIPConnection(BaseObject):
             self._emit("remote_hold", self._call_payload(on=True))
         elif event.event is Event.CALL_RESUME:
             self._emit("remote_hold", self._call_payload(on=False))
+        elif event.event is Event.CALL_REMOTE_SDP:
+            # Renegotiation traffic: an incoming re-INVITE offer or the
+            # peer's answer to ours (mid-call video, direction changes).
+            # Only meaningful once established — the initial offer and
+            # answer fire this too and are not "updates".
+            if self._call_established:
+                self._emit("renegotiated", self._call_payload(sdp=event.text or ""))
         elif event.event is Event.CALL_ESTABLISHED:
             self._call_established = True
             self._emit("call_established", self._call_payload())

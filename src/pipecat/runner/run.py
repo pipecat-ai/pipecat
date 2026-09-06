@@ -1547,9 +1547,11 @@ async def _run_sip(args: argparse.Namespace):
     signaling route. The account is read from the ``SIP_USER``, ``SIP_PASS``,
     ``SIP_DOMAIN``, and ``SIP_TRANSPORT`` environment variables — plus
     ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
-    ``SIP_AUTH_USER`` (credential-list digest username), and
-    ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode) — and the
-    bot function is invoked directly.
+    ``SIP_AUTH_USER`` (credential-list digest username),
+    ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
+    ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables), and
+    ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``) —
+    and the bot function is invoked directly.
     """
     logger.info("Running with SIP transport...")
 
@@ -1568,6 +1570,8 @@ async def _run_sip(args: argparse.Namespace):
         audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip()) if codecs else None,
         auth_user=os.getenv("SIP_AUTH_USER"),
         reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
+        rtp_timeout=int(os.getenv("SIP_RTP_TIMEOUT", "0")),
+        instance_id=os.getenv("SIP_INSTANCE_ID"),
         session_id=str(uuid.uuid4()),
     )
     runner_args.handle_sigint = True
