@@ -36,6 +36,7 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 - [`restaurant_reservation.py`](./restaurant_reservation.py) — reservation system with availability checking
 - [`restaurant_reservation_yaml.py`](./restaurant_reservation_yaml.py) — the reservation flow as [`restaurant_reservation.yaml`](./restaurant_reservation.yaml) plus [`restaurant_reservation_tools.py`](./restaurant_reservation_tools.py); the availability check routes through a branch table keyed on the tool's result
 - [`patient_intake.py`](./patient_intake.py) — medical intake system showing complex state management
+- [`patient_intake_yaml.py`](./patient_intake_yaml.py) — the intake flow as [`patient_intake.yaml`](./patient_intake.yaml) plus [`patient_intake_tools.py`](./patient_intake_tools.py), with the practice and patient names as template variables
 - [`insurance_quote.py`](./insurance_quote.py) — insurance quote system with data collection
 - [`podcast_interview.py`](./podcast_interview.py) — podcast interview flow
 
