@@ -754,6 +754,8 @@ async def create_transport(
             audio_codecs=runner_args.audio_codecs,
             auth_user=runner_args.auth_user,
             reg_interval=runner_args.reg_interval,
+            rtp_timeout=runner_args.rtp_timeout,
+            instance_id=runner_args.instance_id,
         )
         return SIPTransport(connection, params=params)
     elif isinstance(runner_args, VonageRunnerArguments):
