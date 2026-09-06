@@ -15,7 +15,7 @@ import pytest
 # isn't installed, matching CI environments that don't pull it.
 pytest.importorskip("baresip")
 
-from baresip import CallBusy, CallState  # noqa: E402
+from baresip import CallBusy, CallState, Config  # noqa: E402
 from baresip.events import Event, StackEvent  # noqa: E402
 
 import pipecat.transports.sip.connection as sip_connection  # noqa: E402
@@ -118,6 +118,28 @@ async def test_connect_registers_and_emits_registered(env):
     await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
     assert payloads == ["sip:1001@example.com"]
     assert connection.is_connected
+
+
+@pytest.mark.asyncio
+async def test_runtime_starts_with_config_object(env):
+    # The object form is load-bearing: expose_headers and instance_id are
+    # applied by Runtime.start() only when it receives a Config — rendered
+    # text silently drops them.
+    connection = make_connection(
+        net_interface="127.0.0.1",
+        expose_headers=("X-Case",),
+        rtp_timeout=30,
+        instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+    )
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert isinstance(config, Config)
+    assert config.net_interface == "127.0.0.1"
+    assert config.expose_headers == ("X-Case",)
+    assert config.rtp_timeout == 30
+    assert config.instance_id == "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 
 
 @pytest.mark.asyncio
@@ -259,6 +281,27 @@ async def test_call_events_relay_established_and_closed(env):
 
 
 @pytest.mark.asyncio
+async def test_renegotiated_fires_only_once_established(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    payloads, arrived = capture(connection, "renegotiated")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    # The initial answer's REMOTE_SDP is negotiation, not an update.
+    listener(StackEvent(event=Event.CALL_REMOTE_SDP, call=call.handle, text="answer"))
+    listener(StackEvent(event=Event.CALL_ESTABLISHED, call=call.handle))
+    listener(StackEvent(event=Event.CALL_REMOTE_SDP, call=call.handle, text="offer"))
+
+    await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
+    assert len(payloads) == 1
+    assert payloads[0]["sdp"] == "offer"
+
+
+@pytest.mark.asyncio
 async def test_disconnect_hangs_up_active_call(env):
     connection = make_connection()
     await connection.connect()
@@ -296,7 +339,11 @@ async def test_media_taps_without_call_are_quiet(env):
     assert connection.read_video_frame() is None
     assert connection.write_video_frame(b"\x00") is False
     assert connection.audio_info() is None
+    assert connection.flush_tx() is None
     await connection.request_keyframe()
+    # Direction changes are call-level: without a call they refuse.
+    with pytest.raises(RuntimeError):
+        await connection.set_video_direction("sendrecv")
 
 
 @pytest.mark.asyncio

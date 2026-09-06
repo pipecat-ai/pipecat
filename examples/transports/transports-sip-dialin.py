@@ -30,7 +30,10 @@ runner's ``/daily-dialin-webhook`` endpoint instead — the runner creates a
 SIP-enabled room per call and the transport forwards the caller into it.
 
 ``SIP_AUDIO_CODECS`` (comma-separated, e.g. ``opus/48000/2,PCMU/8000/1``)
-sets the codec preference order. For knobs beyond the ``SIP_*`` environment
+sets the codec preference order. ``SIP_RTP_TIMEOUT`` (seconds) closes the
+call when a peer vanishes without a BYE; ``SIP_INSTANCE_ID`` (a stable
+UUID) lets a registrar replace a restarted bot's binding instead of
+stacking a stale one. For knobs beyond the ``SIP_*`` environment
 variables, construct ``SIPConnection(...)`` yourself and pass it to
 ``SIPTransport`` instead of using ``create_transport``::
 

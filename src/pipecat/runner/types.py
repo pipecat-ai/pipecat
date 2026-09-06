@@ -274,7 +274,8 @@ class SIPRunnerArguments(RunnerArguments):
     baresip registers with the SIP server itself, so there is no HTTP signaling
     route; the development runner reads the account from the ``SIP_USER``,
     ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
-    ``SIP_AUTH_USER``, and ``SIP_REG_INTERVAL`` environment variables.
+    ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, and
+    ``SIP_INSTANCE_ID`` environment variables.
 
     Parameters:
         user: The user part of ``sip:user@domain``.
@@ -287,6 +288,11 @@ class SIPRunnerArguments(RunnerArguments):
             differently from ``user`` (credential-list trunks).
         reg_interval: Seconds between registration refreshes; 0 disables
             registration entirely (trunk mode).
+        rtp_timeout: Seconds without received RTP after which a call is
+            declared dead and closed; 0 disables detection.
+        instance_id: A canonical lowercase UUID identifying this endpoint
+            across restarts (RFC 5626 ``+sip.instance``); None sends no
+            instance parameter.
     """
 
     user: str
@@ -296,6 +302,8 @@ class SIPRunnerArguments(RunnerArguments):
     audio_codecs: tuple | None = None
     auth_user: str | None = None
     reg_interval: int = 600
+    rtp_timeout: int = 0
+    instance_id: str | None = None
 
 
 @dataclass
