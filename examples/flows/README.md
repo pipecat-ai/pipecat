@@ -39,6 +39,7 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 - [`patient_intake_yaml.py`](./patient_intake_yaml.py) — the intake flow as [`patient_intake.yaml`](./patient_intake.yaml) plus [`patient_intake_tools.py`](./patient_intake_tools.py), with the practice and patient names as template variables
 - [`insurance_quote.py`](./insurance_quote.py) — insurance quote system with data collection
 - [`podcast_interview.py`](./podcast_interview.py) — podcast interview flow
+- [`podcast_interview_yaml.py`](./podcast_interview_yaml.py) — the interview flow as [`podcast_interview.yaml`](./podcast_interview.yaml) plus [`podcast_interview_tools.py`](./podcast_interview_tools.py); its interview node transitions back to itself
 
 ### Advanced features
 
