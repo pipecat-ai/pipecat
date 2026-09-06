@@ -43,6 +43,19 @@ class GeminiLiveLLMAdapter(GeminiLLMAdapter):
         )
 
     @staticmethod
+    def to_tool_result_text(tool_name: str, result: Any) -> str:
+        """Render a tool result as the conversation text Gemini Live accepts.
+
+        Args:
+            tool_name: Name of the function that was called.
+            result: What the function returned.
+
+        Returns:
+            The result as a line of conversation.
+        """
+        return f"[Function {tool_name} returned {result}]"
+
+    @staticmethod
     def _convert_tool_calls_to_text(messages: list[LLMContextMessage]) -> list[LLMContextMessage]:
         """Convert tool calls and their results to text messages.
 
@@ -81,7 +94,10 @@ class GeminiLiveLLMAdapter(GeminiLLMAdapter):
                 # call isn't in the context.
                 name = tool_call_names.get(msg.get("tool_call_id", ""), "tool_call_result")
                 converted.append(
-                    {"role": "user", "content": f"[Function {name} returned {msg['content']}]"}
+                    {
+                        "role": "user",
+                        "content": GeminiLiveLLMAdapter.to_tool_result_text(name, msg["content"]),
+                    }
                 )
             else:
                 converted.append(message)
