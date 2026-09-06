@@ -4,7 +4,7 @@
 
 ## Hello, world
 
-[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below.
+[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below. [`hello_world_yaml.py`](./hello_world_yaml.py) is the same bot with its two nodes in [`hello_world.yaml`](./hello_world.yaml) and its one tool in [`hello_world_tools.py`](./hello_world_tools.py), the shape to copy when the flow should be configuration rather than code.
 
 ## Setup
 

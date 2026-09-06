@@ -384,6 +384,8 @@ suite:
   #
   - bot: flows/hello_world.py
     scenarios: [hello_world]
+  - bot: flows/hello_world_yaml.py
+    scenarios: [hello_world]
   - bot: flows/food_ordering.py
     scenarios: [food_ordering_pizza]
   - bot: flows/food_ordering_yaml.py

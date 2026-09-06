@@ -1,0 +1,26 @@
+# The smallest possible flow as data: ask a question, record the answer, say
+# goodbye. Loaded by hello_world_yaml.py and joined to the tool in
+# hello_world_tools.py. Check it with `pipecat flows validate hello_world.yaml`.
+
+initial_node: initial
+
+nodes:
+  initial:
+    role_message: >
+      You are an inquisitive child. Use very simple language. Ask simple
+      questions. You must ALWAYS use one of the available functions to progress
+      the conversation. Your responses will be converted to audio. Avoid
+      outputting special characters and emojis.
+    task_messages:
+      - role: developer
+        content: Say 'Hello world' and ask what is the user's favorite color.
+    functions:
+      - name: record_favorite_color
+        transition_to: end
+
+  end:
+    task_messages:
+      - role: developer
+        content: Thank the user for answering and end the conversation
+    post_actions:
+      - type: end_conversation
