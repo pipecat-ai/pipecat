@@ -1,0 +1,61 @@
+# Exercises a full round-trip multi-worker handoff: the reservation worker hands
+# off to the router (transfer_to_router) for an off-topic question, then the
+# router hands back to the reservation worker (transfer_to_reservation).
+#
+# Includes the regression check for
+# https://github.com/pipecat-ai/pipecat/issues/4979: only the newly activated
+# router may respond after the hand-off. Before the fix, FlowManager also queued
+# a completion on the just-deactivated reservation worker (its returned next node
+# has respond_immediately=True and directly queued frames bypass the bus
+# activation gate), so the bot answered twice, back to back. The `absent: true`
+# expectation fails if any second response arrives after the router's answer.
+#
+# Audio mode on purpose: text mode's send-text path currently double-runs
+# bridged workers in this multi-worker bot (a separate issue), which would
+# trip the absence check for the wrong reason.
+name: multi_worker_handoff_back_and_forth
+
+user: !include user_audio.yaml
+judge: !include judge_audio.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the user and offers to answer questions or book a table"
+
+  - user: "I'd like to book a table."
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_reservation
+      - event: response
+        eval: "the bot asks how many people are in their party"
+
+  - user: "There will be five of us."
+    expect:
+      - event: function_call
+        calls:
+          - name: collect_party_size
+            args: { size: 5 }
+      - event: response
+        eval: "the bot asks what time they would like to dine"
+
+  - user: "Before that, can you tell me the weather in Paris?"
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_router
+      - event: response
+        eval: "the bot deflects or declines the weather question"
+      # Regression check for issue #4979 (duplicate responses)
+      - event: response
+        absent: true
+        within_ms: 40000
+
+  - user: "Okay, let's get back to my booking."
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_reservation
+      - event: response
+        eval: "the bot continues the reservation, for example by asking or confirming the party size or the time"

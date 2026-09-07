@@ -30,7 +30,8 @@ from aic_sdk import (
     Model,
     ProcessorConfig,
     analyzer_pair,
-    set_sdk_id,
+    # Exported at runtime but absent from the SDK type stub.
+    set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger
 
@@ -46,7 +47,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 if TYPE_CHECKING:
     from aic_sdk import AnalysisResult, Analyzer, Collector
 
-DEFAULT_TYTO_MODEL_ID = "tyto-l-16khz"
+DEFAULT_TYTO_MODEL_ID = "tyto-1.1-l-16khz"
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Mirrors the value used by AICFilter / AICQuailVADAnalyzer.
@@ -108,7 +109,7 @@ class AICTytoAnalyzer(FrameProcessor):
         Args:
             license_key: ai-coustics SDK license key.
             model_id: Tyto analysis model identifier. Defaults to
-                ``"tyto-l-16khz"``. See https://artifacts.ai-coustics.io/ for the
+                ``"tyto-1.1-l-16khz"``. See https://artifacts.ai-coustics.io/ for the
                 catalogue. Ignored if ``model_path`` is provided.
             model_path: Optional path to a local ``.aicmodel`` file. Overrides
                 ``model_id`` when set.
@@ -141,6 +142,7 @@ class AICTytoAnalyzer(FrameProcessor):
         self._analyzer: Analyzer | None = None
         self._sample_rate = 0
         self._num_channels = 0
+        self._block_size = 0
         self._analysis_task: asyncio.Task | None = None
         # Latch: log analysis errors at ERROR once, then DEBUG until a success
         # re-arms it (so a recovery followed by a new failure surfaces again).
@@ -184,15 +186,14 @@ class AICTytoAnalyzer(FrameProcessor):
         assert self._model is not None
 
         collector, analyzer = analyzer_pair(self._model, self._license_key)
-        # allow_variable_frames so we can buffer whatever chunk size the
-        # transport delivers per InputAudioRawFrame without re-blocking.
+        # Short blocks are accepted; larger transport frames are split below.
         config = ProcessorConfig.optimal(
             self._model,
             sample_rate=sample_rate,
-            num_channels=num_channels,
-            allow_variable_frames=True,
+            variable_block_size=True,
         )
         collector.initialize(config)
+        self._block_size = config.block_size
 
         self._collector = collector
         self._analyzer = analyzer
@@ -236,14 +237,11 @@ class AICTytoAnalyzer(FrameProcessor):
 
         samples = np.frombuffer(frame.audio, dtype=_INT16_DTYPE).astype(np.float32)
         samples /= _INT16_SCALE
-        # Collector expects a 2D (channels, frames) array; de-interleave for
-        # multi-channel input (the model mixes to mono internally).
-        if channels > 1:
-            audio = samples.reshape(-1, channels).T
-        else:
-            audio = samples.reshape(1, -1)
+        # The SDK accepts mono audio only.
+        audio = samples.reshape(-1, channels).mean(axis=1) if channels > 1 else samples
         try:
-            self._collector.buffer(audio)
+            for offset in range(0, len(audio), self._block_size):
+                self._collector.buffer(audio[offset : offset + self._block_size])
         except Exception as e:  # noqa: BLE001 - keep the pipeline alive on SDK errors
             if not self._analysis_error_logged:
                 logger.error(f"Tyto buffering error: {e}")
@@ -292,7 +290,7 @@ class AICTytoAnalyzer(FrameProcessor):
             speaker_reverb=result.speaker_reverb,
             speaker_loudness=result.speaker_loudness,
             interfering_speech=result.interfering_speech,
-            media_speech=result.media_speech,
+            codec_degradation=result.codec_degradation,
             noise=result.noise,
             packet_loss=result.packet_loss,
         )

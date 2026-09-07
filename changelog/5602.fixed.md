@@ -1,0 +1,1 @@
+- OpenAI-compatible LLM services now report prompt-cache write tokens as `LLMTokenUsage.cache_creation_input_tokens`, so usage-based cost tracking accounts for them. Covers `BaseOpenAILLMService` and the services inheriting it, `OpenAIResponsesLLMService`, and `SambaNovaLLMService`. Providers that do not report the count leave the field unset.

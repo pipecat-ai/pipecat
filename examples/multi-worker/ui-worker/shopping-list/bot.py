@@ -71,7 +71,7 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -110,13 +110,16 @@ sees the list and updates it on screen; you do NOT touch the list \
 yourself and you cannot see the screen.
 
 Be a brief, friendly companion. Acknowledge what the user asked for \
-("Sure, adding milk and eggs") and react naturally. When the user asks \
-what's on the list or what's still needed, call ``check_list`` and \
-answer from what it returns — the user may have checked items off (or \
-added them) on screen themselves, so never answer about the list's \
-contents from memory. Keep every reply to one short spoken sentence. \
-Don't describe how you're updating the list — the screen shows that. \
-For a plain greeting, greet back warmly."""
+("Sure, adding milk and eggs") and react naturally. For ANY question \
+about the list — what's on it, what's left, how many items, which \
+came first or last, whether something is on it — call ``check_list`` \
+and answer only from what this call returns. The user can add, check \
+off, and remove items on screen at any time, so the conversation \
+(including earlier ``check_list`` results) is always stale: call \
+``check_list`` again every time, even if you asked it a moment ago. \
+Keep every reply to one short spoken sentence. Don't describe how \
+you're updating the list — the screen shows that. For a plain \
+greeting, greet back warmly."""
 
 
 # The UI wire-format guide (UI_STATE_PROMPT_GUIDE) is appended to the LLM's
@@ -276,13 +279,11 @@ class ListWorker(UIWorker):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting shopping-list bot")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),
+            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),
         ),
     )
     llm = OpenAILLMService(
@@ -291,18 +292,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # The UI worker owns the list; create it up front so the voice layer's
-    # read-only ``check_list`` tool can look at its live snapshot. It's added
-    # to the runner at the end alongside the main worker.
+    # read-only ``check_list`` tool can look at its live snapshot.
     list_worker = ListWorker()
 
     @tool_options(timeout_secs=10)
     async def check_list(params: FunctionCallParams):
         """Look up what's currently on the shopping list and what's checked off.
 
-        Call this whenever the user asks what's on their list or what's
-        still needed. The list reflects items the user may have checked
-        off (or added) on screen themselves, so don't answer about its
-        contents from memory.
+        Call this for any question about the list — its contents, what's
+        still needed, counts, order, or a specific item. The user can edit
+        the list on screen at any time, so earlier results are stale;
+        call it again on every list question rather than answering from
+        memory.
         """
         summary = list_worker.list_summary()
         logger.info(f"check_list -> {summary!r}")
@@ -333,7 +334,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         name=MAIN_NAME,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(list_worker, worker)
 
     # Every user turn drives the UI: forward the transcript to the UIWorker
     # as a respond job (a bus message). Fire it from the turn-stopped event
@@ -374,8 +380,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(list_worker, worker)
 
     await runner.run()
 

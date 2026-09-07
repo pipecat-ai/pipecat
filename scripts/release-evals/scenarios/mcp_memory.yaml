@@ -1,0 +1,23 @@
+name: mcp_memory
+
+# Text, end to end: the bot's tools come from an MCP server (the reference
+# memory server, spawned over stdio). Tests that MCPClient discovers and
+# registers the server's tools and that a call round-trips through the server:
+# the user asks the bot to remember a fact and the bot confirms once the call
+# completes.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  # The memory server chooses its own storage tools (create_entities,
+  # add_observations, ...), so match any call rather than a specific name.
+  - user: "Please remember that my favorite color is blue."
+    expect:
+      - event: function_call
+      - event: response
+        eval: "the bot indicates it has remembered or stored the user's favorite color"

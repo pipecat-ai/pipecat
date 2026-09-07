@@ -1,0 +1,32 @@
+name: capital_question_recording
+
+# Audio modality, from a recording: the user's turn is played from an audio file
+# (`audio:`) instead of being synthesized, so the bot hears a fixed clip rather
+# than the harness's TTS voice. The clip is 24 kHz where bots take 16 kHz input,
+# so the bot has to resample what the file was recorded at on the way in. And
+# since every spoken turn here comes from a file, `user:` names only the
+# modality: the scenario needs no user TTS at all.
+#
+# Same question as capital_question, for the same reason: a distinctive one-word
+# answer ("Berlin") that survives transcription on both sides.
+
+user:
+  modality: audio
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What is the capital of Germany?"
+    audio: ../assets/capital_question.wav
+    expect:
+      # The bot's STT heard the recording: its final transcription of the user's
+      # audio, accumulated across however many pieces it arrives in.
+      - event: user_transcription
+        text_contains: "capital of Germany"
+      - event: response
+        eval: "the response says the capital of Germany is Berlin"

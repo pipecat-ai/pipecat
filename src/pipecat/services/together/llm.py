@@ -50,7 +50,7 @@ class TogetherLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Together.ai's API.
             base_url: The base URL for Together.ai API. Defaults to "https://api.together.xyz/v1".
-            model: The model identifier to use. Defaults to "openai/gpt-oss-20b".
+            model: The model identifier to use. Defaults to "zai-org/GLM-5.2".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=TogetherLLMService.Settings(model=...)`` instead.
@@ -61,7 +61,7 @@ class TogetherLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="zai-org/GLM-5.1")
+        default_settings = self.Settings(model="zai-org/GLM-5.2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

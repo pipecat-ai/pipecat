@@ -121,6 +121,7 @@ Note: Use "Fixes #X" format (not "Closes" or "Resolves") for consistency. Each i
 
 Before updating the PR:
 
+- [ ] Description documents the change for users, not the development process — the standard `/prose-review` applies, in `AGENTS.md` under "Writing for Future Readers"
 - [ ] Verified existing description needs updating (not already complete)
 - [ ] Summary accurately reflects the changes
 - [ ] Breaking changes are clearly documented (if any)

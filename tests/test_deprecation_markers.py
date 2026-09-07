@@ -17,10 +17,11 @@ assertions over its validators, plus runtime checks that the converted shims
 still emit ``DeprecationWarning`` without warning at import time.
 """
 
-import asyncio
+import inspect
 import json
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
+    StartFrame,
     StopTaskFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
@@ -75,6 +77,31 @@ def test_directives_state_removal_version():
         "`Will be removed in X.Y.Z.` (a concrete semantic version):\n"
         + "\n".join(f"  {b}" for b in bad)
     )
+
+
+def test_no_replacement_directive_extracts_no_replacement():
+    """A directive leading with "No replacement." records none — even with backticks.
+
+    The first-reference rule treats the first backtick/role token as the
+    replacement, so a no-replacement body may freely backtick contextual symbols
+    (the deprecated thing itself, related types) without one being mistaken for a
+    replacement, as long as it leads with the explicit marker.
+    """
+    body = (
+        "No replacement. ``FlowResult`` is no longer referenced by any handler; "
+        "the upstream contract is ``Any``. Will be removed in 2.0.0."
+    )
+    assert dscan.first_reference(body) is None
+    assert dscan.relation_for(body, dscan.first_reference(body)) == "none"
+
+    # An incidental relation verb in later prose doesn't override the marker.
+    moved = "No replacement. The old behavior moved to a different layer entirely."
+    assert dscan.relation_for(moved, dscan.first_reference(moved)) == "none"
+
+    # A real replacement is still extracted as before.
+    use = "Use :class:`Foo` instead. Will be removed in 2.0.0."
+    assert dscan.first_reference(use) == "Foo"
+    assert dscan.relation_for(use, "Foo") == "use_existing"
 
 
 # --- @deprecated decorator message consistency -------------------------------
@@ -187,6 +214,64 @@ def test_no_deprecation_warnings_at_import_time():
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# --- Intercepted field reads (warn_deprecated_read) ---------------------------
+#
+# A field whose reads are intercepted by ``__getattribute__`` warns once per call
+# site. The helper finds that site by walking two frames up and reports it with a
+# matching ``stacklevel``, so the tests below pin both the count and the reported
+# location: a call layer added between the shim and the helper would otherwise
+# silently collapse every reader into one entry.
+
+
+def _read_enable_metrics(frame):
+    return frame.enable_metrics
+
+
+def test_intercepted_read_warns_once_per_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(10):
+            _read_enable_metrics(frame)
+    assert len(caught) == 1
+
+
+def test_intercepted_read_warns_for_every_call_site():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        _ = frame.enable_metrics  # Same field, second call site.
+    assert len(caught) == 2
+
+
+def test_intercepted_read_reports_the_reading_line():
+    frame = StartFrame()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _ = frame.enable_metrics
+        lineno = inspect.currentframe().f_lineno - 1
+    assert caught[0].filename == __file__
+    assert caught[0].lineno == lineno
+
+
+def test_intercepted_read_warns_through_an_ignore_filter():
+    """The warning reaches a reader who has filtered ``DeprecationWarning`` out.
+
+    Deprecations that only reach ``__main__`` would miss every caller inside a
+    library, so the warning is raised under its own ``always`` filter. Run in a
+    subprocess to get an interpreter whose filters ignore the category.
+    """
+    script = "from pipecat.frames.frames import StartFrame\n_ = StartFrame().enable_metrics\n"
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "`StartFrame.enable_metrics` is deprecated" in result.stderr
 
 
 # --- Removal history (removals.json) ------------------------------------------

@@ -25,22 +25,20 @@ from urllib.parse import urlencode
 
 import aiohttp
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 def language_to_xai_language(language: Language) -> str:
@@ -144,9 +142,9 @@ class XAITTSSettings(TTSSettings):
         text_normalization: Whether to normalize text before synthesis.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAIHttpTTSService(TTSService):
@@ -239,6 +237,11 @@ class XAIHttpTTSService(TTSService):
         await super().cancel(frame)
         await self._close_session()
 
+    async def cleanup(self):
+        """Release xAI TTS resources at teardown."""
+        await super().cleanup()
+        await self._close_session()
+
     async def _close_session(self):
         if self._session_owner and self._session and not self._session.closed:
             await self._session.close()
@@ -248,8 +251,6 @@ class XAIHttpTTSService(TTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using xAI's TTS API."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             self._session_owner = True
@@ -276,7 +277,6 @@ class XAIHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
-        measuring_ttfb = True
         try:
             async with self._session.post(
                 self._base_url, json=payload, headers=headers
@@ -290,18 +290,14 @@ class XAIHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                async for chunk in response.content.iter_chunked(self.chunk_size):
-                    if not chunk:
-                        continue
-                    if measuring_ttfb:
-                        await self.stop_ttfb_metrics()
-                        measuring_ttfb = False
-                    yield TTSAudioRawFrame(
-                        chunk,
-                        self.sample_rate,
-                        1,
-                        context_id=context_id,
-                    )
+                # xAI chops the stream at arbitrary byte boundaries, so let the
+                # iterator helper keep emitted frames sample-aligned.
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(self.chunk_size),
+                    context_id=context_id,
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
@@ -318,10 +314,10 @@ class XAIWebsocketTTSSettings(TTSSettings):
             service converts them into per-word ``TTSTextFrame`` objects.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    with_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    with_timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAITTSService(WebsocketTTSService):
@@ -422,20 +418,14 @@ class XAITTSService(WebsocketTTSService):
         """Convert a Language enum to xAI language format."""
         return language_to_xai_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the xAI WebSocket TTS service."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the xAI WebSocket TTS service."""
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the xAI WebSocket TTS service."""
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _connect(self):
         await super()._connect()
@@ -497,7 +487,7 @@ class XAITTSService(WebsocketTTSService):
 
             url = self._build_url()
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            self._websocket = await websocket_connect(url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(url, additional_headers=headers)
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -621,8 +611,6 @@ class XAITTSService(WebsocketTTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate TTS audio from text using xAI's streaming WebSocket API."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()

@@ -176,7 +176,10 @@ async def test_anthropic_run_inference_with_llm_context():
     assert result == "Hello! How can I help you today?"
     service.get_llm_adapter.assert_called_once()
     mock_adapter.get_llm_invocation_params.assert_called_once_with(
-        mock_context, enable_prompt_caching=False, system_instruction=None
+        mock_context,
+        enable_prompt_caching=False,
+        system_instruction=None,
+        ensure_last_message_is_user=False,
     )
     service._client.beta.messages.create.assert_called_once_with(
         model="claude-3-sonnet-20240229",
@@ -322,7 +325,7 @@ async def test_aws_bedrock_run_inference_with_llm_context():
         assert result == "Hello! How can I help you today?"
         service.get_llm_adapter.assert_called_once()
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction=None
+            mock_context, system_instruction=None, ensure_last_message_is_user=False
         )
 
         # Verify the call includes configured parameters
@@ -363,6 +366,79 @@ async def test_aws_bedrock_run_inference_client_exception():
     with patch.object(service._aws_session, "create_client", return_value=mock_context_manager):
         with pytest.raises(Exception, match="Bedrock API Error"):
             await service.run_inference(mock_context)
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_streaming_captures_all_tool_calls():
+    """Test AWS Bedrock streaming captures every parallel tool call, not just the last."""
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=[{"role": "user", "content": [{"text": "What's the weather?"}]}],
+        system=[],
+        tools=[{"toolSpec": {"name": "get_weather"}}],
+        tool_choice=None,
+    )
+    mock_adapter.get_messages_for_logging.return_value = []
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    # Two tool calls in one streamed response, each its own content block keyed
+    # by contentBlockIndex, finalized with contentBlockStop before messageStop.
+    stream_events = [
+        {
+            "contentBlockStart": {
+                "contentBlockIndex": 0,
+                "start": {"toolUse": {"toolUseId": "id-0", "name": "get_weather"}},
+            }
+        },
+        {
+            "contentBlockDelta": {
+                "contentBlockIndex": 0,
+                "delta": {"toolUse": {"input": '{"city": "SF"}'}},
+            }
+        },
+        {"contentBlockStop": {"contentBlockIndex": 0}},
+        {
+            "contentBlockStart": {
+                "contentBlockIndex": 1,
+                "start": {"toolUse": {"toolUseId": "id-1", "name": "get_weather"}},
+            }
+        },
+        {
+            "contentBlockDelta": {
+                "contentBlockIndex": 1,
+                "delta": {"toolUse": {"input": '{"city": "NY"}'}},
+            }
+        },
+        {"contentBlockStop": {"contentBlockIndex": 1}},
+        {"messageStop": {"stopReason": "tool_use"}},
+    ]
+
+    async def fake_stream():
+        for event in stream_events:
+            yield event
+
+    mock_client = AsyncMock()
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+    captured = []
+    service.run_function_calls = AsyncMock(side_effect=lambda calls: captured.extend(calls))
+
+    with (
+        patch.object(service._aws_session, "create_client", return_value=mock_context_manager),
+        patch.object(service, "_create_converse_stream", return_value={"stream": fake_stream()}),
+    ):
+        await service._process_context(mock_context)
+
+    assert len(captured) == 2
+    assert sorted(c.arguments["city"] for c in captured) == ["NY", "SF"]
+    assert sorted(c.tool_call_id for c in captured) == ["id-0", "id-1"]
 
 
 # --- system_instruction parameter tests ---
@@ -466,6 +542,7 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
         mock_context,
         enable_prompt_caching=False,
         system_instruction="New system instruction",
+        ensure_last_message_is_user=False,
     )
 
 
@@ -598,7 +675,9 @@ async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
         assert result == "Response"
         # Verify the adapter was called with the correct system_instruction
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction="New system instruction"
+            mock_context,
+            system_instruction="New system instruction",
+            ensure_last_message_is_user=False,
         )
 
 

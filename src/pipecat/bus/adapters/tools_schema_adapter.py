@@ -9,7 +9,7 @@
 from typing import Any
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.bus.adapters.base import DeserializeFunc, SerializeFunc, TypeAdapter
 
 
@@ -24,9 +24,17 @@ class ToolsSchemaAdapter(TypeAdapter):
             serialize_value: Callback to recursively serialize nested values.
 
         Returns:
-            A dict with a ``standard_tools`` list.
+            A dict with a ``standard_tools`` list and, if present, a
+            ``custom_tools`` mapping.
         """
-        return {"standard_tools": [tool.to_default_dict() for tool in obj.standard_tools]}
+        result: dict[str, Any] = {
+            "standard_tools": [tool.to_default_dict() for tool in obj.standard_tools]
+        }
+        if obj.custom_tools:
+            result["custom_tools"] = {
+                adapter_type.value: tools for adapter_type, tools in obj.custom_tools.items()
+            }
+        return result
 
     def deserialize(
         self,
@@ -42,7 +50,8 @@ class ToolsSchemaAdapter(TypeAdapter):
             target_type: Unused. ``ToolsSchema`` is always the target.
 
         Returns:
-            A new ``ToolsSchema`` instance.
+            A new ``ToolsSchema`` instance, including ``custom_tools`` if
+            present in ``data``.
         """
         tools = []
         for item in data["standard_tools"]:
@@ -55,4 +64,7 @@ class ToolsSchemaAdapter(TypeAdapter):
                     required=params.get("required", []),
                 )
             )
-        return ToolsSchema(standard_tools=tools)
+        custom_tools = None
+        if "custom_tools" in data:
+            custom_tools = {AdapterType(key): value for key, value in data["custom_tools"].items()}
+        return ToolsSchema(standard_tools=tools, custom_tools=custom_tools)

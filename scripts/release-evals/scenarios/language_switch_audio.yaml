@@ -1,0 +1,41 @@
+name: language_switch_audio
+
+# Audio modality: the user asks (in English) for Spanish replies, and the judge
+# evaluates the transcription of the bot's actual Spanish speech — the end-to-end
+# check that a non-English answer survives the bot's TTS and the harness's STT.
+# The text-modality `language_switch` covers the same instruction, but judges the
+# LLM's text and so never exercises either audio path.
+#
+# One transcriber serves the whole run, and this one is Spanish. The bot's
+# English greeting is therefore asserted on `tts_response` (the text the TTS
+# reports speaking) rather than `response` (the transcription), which would be
+# English decoded as Spanish. Only the post-switch turn asserts on `response`.
+
+user: !include user_audio.yaml
+
+judge:
+  modality: audio
+  eval:
+    service: ollama
+    model: gemma4:12b
+    extra:
+      reasoning_effort: none
+  transcription:
+    # Whisper rather than the default Moonshine: Moonshine's Spanish model
+    # returns nothing on the bot's synthesized Spanish. `tiny` because Whisper's
+    # own default model is English-only, and it is the smallest multilingual one
+    # (75MB) that transcribes this reply cleanly.
+    service: whisper
+    model: tiny
+    language: es
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: tts_response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "From now on, reply only in Spanish. Where is La Sagrada Familia?"
+    expect:
+      - event: response
+        eval: "the response is written in Spanish and says that La Sagrada Familia is in Barcelona"

@@ -23,7 +23,7 @@ Required env vars:
     Plus whatever credentials the chosen transport needs (DAILY_*, etc.)
 
 Run:
-    LOGURU_LEVEL=DEBUG uv run python examples/voice/voice-aicoustics-audio-quality.py daily
+    LOGURU_LEVEL=DEBUG uv run python examples/voice/voice-aicoustics-audio-quality.py -t daily
 """
 
 import os
@@ -57,7 +57,7 @@ async def on_audio_analysis(_processor, scores: AICAudioQualityMetricsData) -> N
         "audio quality: "
         f"risk={scores.risk_score:.2f} noise={scores.noise:.2f} "
         f"interfering_speech={scores.interfering_speech:.2f} "
-        f"media_speech={scores.media_speech:.2f} reverb={scores.speaker_reverb:.2f} "
+        f"codec_degradation={scores.codec_degradation:.2f} reverb={scores.speaker_reverb:.2f} "
         f"loudness={scores.speaker_loudness:.2f} packet_loss={scores.packet_loss:.2f}"
     )
 

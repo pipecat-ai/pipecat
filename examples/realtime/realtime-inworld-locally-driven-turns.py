@@ -36,7 +36,7 @@ from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -156,10 +156,9 @@ Always be helpful and proactive in offering assistance.""",
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Drive turn detection locally via SileroVAD wired into the user
-        # aggregator. realtime_service_mode keeps context-write semantics
-        # correct and (by default) drops the transcript wait on turn-end so
-        # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=True,
+        # aggregator. Realtime-service mode is auto-detected and (by default)
+        # drops the transcript wait on turn-end, so local VAD can drive turn
+        # boundaries on the latency critical path.
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
@@ -181,7 +180,12 @@ Always be helpful and proactive in offering assistance.""",
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[TranscriptionLogObserver()],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -191,7 +195,7 @@ Always be helpful and proactive in offering assistance.""",
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
     # In realtime mode the user transcript isn't finalized at turn-stop
     # time, so on_user_turn_stopped carries no content; subscribe to
@@ -216,9 +220,6 @@ Always be helpful and proactive in offering assistance.""",
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}assistant: {message.content}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

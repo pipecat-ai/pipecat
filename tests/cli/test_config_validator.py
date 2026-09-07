@@ -624,7 +624,7 @@ class TestConfigFile:
 
 
 def _parse_config_dict(file_data: dict) -> ProjectConfig:
-    """Simulate the merging logic from create_command: map config dict keys to
+    """Simulate the merging logic from resolve_scaffold_config: map config dict keys to
     validate_and_build_config kwargs, exactly as the CLI does after loading JSON."""
     return validate_and_build_config(
         name=file_data.get("name") or file_data.get("project_name"),

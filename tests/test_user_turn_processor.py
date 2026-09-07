@@ -8,6 +8,8 @@ import unittest
 
 from pipecat.frames.frames import (
     InterruptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -15,10 +17,15 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
+)
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_processor import UserTurnProcessor
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -158,6 +165,37 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertFalse(timeout)
+
+    async def test_proposal_is_resolved_once_with_an_aggregator_downstream(self):
+        """Two resolvers in one pipeline must not decide the same turn twice.
+
+        The processor resolves the proposal and consumes it, so the aggregator
+        downstream sees only the turn frames it emitted and adopts them.
+        """
+        user_turn_processor = UserTurnProcessor(user_turn_strategies=ExternalUserTurnStrategies())
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        )
+
+        frames_to_send = [
+            ProposedUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
+        ]
+        received_down, _ = await run_test(
+            Pipeline([user_turn_processor, user_aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+        )
+
+        names = [type(f).__name__ for f in received_down]
+        self.assertEqual(names.count("UserStartedSpeakingFrame"), 1)
+        self.assertEqual(names.count("UserStoppedSpeakingFrame"), 1)
+        self.assertEqual(names.count("InterruptionFrame"), 1)
+        self.assertEqual(names.count("ProposedUserStartedSpeakingFrame"), 0)
+        self.assertEqual(names.count("ProposedUserStoppedSpeakingFrame"), 0)
 
 
 if __name__ == "__main__":

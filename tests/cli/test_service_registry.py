@@ -319,40 +319,6 @@ class TestServiceLoader:
             )
 
 
-class TestExternalTurnDetection:
-    """Test uses_external_turn_detection and its effect on generated imports."""
-
-    def test_standard_stt_does_not_use_external_turn(self):
-        assert ServiceLoader.uses_external_turn_detection("deepgram_stt") is False
-
-    def test_external_turn_stt_services(self):
-        # Services that drive their own end-of-turn detection.
-        assert ServiceLoader.uses_external_turn_detection("deepgram_flux_stt") is True
-        assert ServiceLoader.uses_external_turn_detection("cartesia_turns_stt") is True
-
-    def test_none_and_unknown_stt(self):
-        assert ServiceLoader.uses_external_turn_detection(None) is False
-        assert ServiceLoader.uses_external_turn_detection("nonexistent_stt") is False
-
-    def test_external_turn_strategies_import_branch(self):
-        """ExternalUserTurnStrategies is imported only for external-turn STT services."""
-        base = {"llm": "openai_llm", "tts": "cartesia_tts"}
-
-        standard = "\n".join(
-            ServiceLoader.get_imports_for_services(
-                {"transports": ["daily"], "stt": "deepgram_stt", **base}, {}, "web"
-            )
-        )
-        assert "ExternalUserTurnStrategies" not in standard
-
-        external = "\n".join(
-            ServiceLoader.get_imports_for_services(
-                {"transports": ["daily"], "stt": "deepgram_flux_stt", **base}, {}, "web"
-            )
-        )
-        assert "ExternalUserTurnStrategies" in external
-
-
 class TestTransportImportBranching:
     """Test the dial-out / SIP branching in get_imports_for_services.
 

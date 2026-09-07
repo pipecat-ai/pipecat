@@ -9,6 +9,7 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ErrorFrame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallResultFrame,
@@ -50,6 +51,22 @@ class TestMuteUntilFirstBotCompleteUserMuteStrategy(unittest.IsolatedAsyncioTest
 
         self.assertTrue(await strategy.process_frame(InterruptionFrame()))
         self.assertTrue(await strategy.process_frame(BotStartedSpeakingFrame()))
+        self.assertTrue(await strategy.process_frame(InterruptionFrame()))
+        self.assertFalse(await strategy.process_frame(BotStoppedSpeakingFrame()))
+        self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+    async def test_error_before_first_speech(self):
+        strategy = MuteUntilFirstBotCompleteUserMuteStrategy()
+
+        self.assertTrue(await strategy.process_frame(InterruptionFrame()))
+        self.assertFalse(await strategy.process_frame(ErrorFrame(error="TTS failed")))
+        self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+    async def test_error_while_bot_speaking(self):
+        strategy = MuteUntilFirstBotCompleteUserMuteStrategy()
+
+        self.assertTrue(await strategy.process_frame(BotStartedSpeakingFrame()))
+        self.assertTrue(await strategy.process_frame(ErrorFrame(error="TTS failed")))
         self.assertTrue(await strategy.process_frame(InterruptionFrame()))
         self.assertFalse(await strategy.process_frame(BotStoppedSpeakingFrame()))
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
@@ -137,6 +154,78 @@ class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+    async def test_repeated_result_frame_stays_unmuted(self):
+        """A tool call id can be reported as finished more than once, e.g. an
+        async tool emitting an intermediate update and then its final result.
+        """
+        strategy = FunctionCallUserMuteStrategy()
+
+        self.assertTrue(
+            await strategy.process_frame(
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="fn", tool_call_id="1", arguments={}, context=None
+                        )
+                    ]
+                )
+            )
+        )
+        result = FunctionCallResultFrame(
+            function_name="fn", tool_call_id="1", arguments={}, result={}
+        )
+        self.assertFalse(await strategy.process_frame(result))
+        self.assertFalse(await strategy.process_frame(result))
+
+    async def test_unknown_tool_call_id_stays_unmuted(self):
+        """Result and cancel frames can arrive for a tool call id that never
+        appeared in a started frame, e.g. the built-in cancel tool.
+        """
+        strategy = FunctionCallUserMuteStrategy()
+
+        self.assertFalse(
+            await strategy.process_frame(
+                FunctionCallCancelFrame(function_name="fn", tool_call_id="unknown")
+            )
+        )
+        self.assertFalse(
+            await strategy.process_frame(
+                FunctionCallResultFrame(
+                    function_name="fn", tool_call_id="unknown", arguments={}, result={}
+                )
+            )
+        )
+
+    async def test_unknown_tool_call_id_leaves_other_calls_muted(self):
+        """An unknown id must not disturb the calls that are still running."""
+        strategy = FunctionCallUserMuteStrategy()
+
+        self.assertTrue(
+            await strategy.process_frame(
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="fn", tool_call_id="1", arguments={}, context=None
+                        )
+                    ]
+                )
+            )
+        )
+        self.assertTrue(
+            await strategy.process_frame(
+                FunctionCallResultFrame(
+                    function_name="other", tool_call_id="unknown", arguments={}, result={}
+                )
+            )
+        )
+        self.assertFalse(
+            await strategy.process_frame(
+                FunctionCallResultFrame(
+                    function_name="fn", tool_call_id="1", arguments={}, result={}
+                )
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -30,13 +30,15 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import grpc
@@ -120,15 +122,15 @@ class _NvidiaBaseSTTSettings(STTSettings):
         diarization_max_speakers: Maximum number of speakers for diarization.
     """
 
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_alternatives: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_time_offsets: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_diarization: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarization_max_speakers: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_alternatives: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarization_max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -139,7 +141,7 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
         interim_results: Whether to return interim (partial) results.
     """
 
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -219,7 +221,9 @@ class AudioChunkIterator:
             self._closed = True
             raise StopIteration
 
-        return audio
+        # Only put() (bytes) and close() (the sentinel, excluded above) write
+        # to the queue.
+        return cast(bytes, audio)
 
 
 class NvidiaSTTService(STTService):
@@ -256,6 +260,9 @@ class NvidiaSTTService(STTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/nemotron-asr-streaming/api
             "function_id": "bb0837de-8c7b-481f-9ec8-ef5663e9c1fa",
             "model_name": "nemotron-asr-streaming",
         },
@@ -337,6 +344,8 @@ class NvidiaSTTService(STTService):
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=30.0,
+            keepalive_interval=5.0,
             settings=default_settings,
             **kwargs,
         )
@@ -463,6 +472,19 @@ class NvidiaSTTService(STTService):
             model: Model name to set.
         """
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._initialize_client()
+        self._config = self._create_recognition_config()
+        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
+        self._create_keepalive_task()
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
+
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Nemotron Speech STT service and initialize streaming configuration.
 
@@ -470,14 +492,9 @@ class NvidiaSTTService(STTService):
             frame: StartFrame indicating pipeline start.
         """
         await super().start(frame)
-        self._initialize_client()
-        self._config = self._create_recognition_config()
-        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
-
-        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Nemotron Speech STT service and clean up resources.
@@ -497,6 +514,11 @@ class NvidiaSTTService(STTService):
         await super().cancel(frame)
         await self._stop_tasks()
 
+    async def cleanup(self):
+        """Release the streaming ASR resources at teardown."""
+        await super().cleanup()
+        await self._stop_tasks()
+
     async def _stop_tasks(self, close_iterator: bool = True):
         """Stop the active stream thread and optionally close the shared iterator.
 
@@ -504,6 +526,9 @@ class NvidiaSTTService(STTService):
         current gRPC stream but keep buffering audio on the same iterator until
         the replacement stream starts consuming it.
         """
+        if close_iterator:
+            await self._cancel_keepalive_task()
+
         iterator = self._audio_iterator
         if close_iterator:
             self._audio_iterator = None
@@ -534,7 +559,9 @@ class NvidiaSTTService(STTService):
     def _response_handler(self, iterator: AudioChunkIterator):
         drop_reason = None
         try:
-            responses = self._asr_service.streaming_response_generator(
+            asr_service = self._asr_service
+            assert asr_service is not None, "ASR service not initialized"
+            responses = asr_service.streaming_response_generator(
                 audio_chunks=iterator,
                 streaming_config=self._config,
             )
@@ -569,6 +596,17 @@ class NvidiaSTTService(STTService):
         except asyncio.CancelledError:
             raise
 
+    def _is_keepalive_ready(self) -> bool:
+        """Check if there is an active NVIDIA audio stream for keepalive."""
+        iterator = self._audio_iterator
+        return iterator is not None and not iterator.closed
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio through the active NVIDIA stream iterator."""
+        iterator = self._audio_iterator
+        if iterator is not None and not iterator.closed:
+            await iterator.put(silence)
+
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Language | None = None
@@ -583,10 +621,14 @@ class NvidiaSTTService(STTService):
 
             transcript = result.alternatives[0].transcript
             if transcript and len(transcript) > 0:
-                language = assert_given(self._settings.language)
+                # Technically `_settings.language` could be a raw string, but
+                # Language is a StrEnum so downstream handles either.
+                language = cast("Language | None", assert_given(self._settings.language))
                 if result.is_final:
-                    await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
+                    # Report usage before the transcription frame so tracing
+                    # can attach it to the STT span the frame closes.
+                    await self.emit_stt_usage_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
@@ -623,7 +665,6 @@ class NvidiaSTTService(STTService):
         Yields:
             None - transcription results are pushed to the pipeline via frames.
         """
-        await self.start_processing_metrics()
         iterator = self._audio_iterator
         if iterator is not None and not iterator.closed:
             await iterator.put(audio)
@@ -674,7 +715,10 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
-            "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
+            # The function id identifies NVIDIA's hosted deployment of the model
+            # and changes when NVIDIA redeploys it. The current id is on
+            # https://build.nvidia.com/nvidia/canary-1b-asr/api
+            "function_id": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
             "model_name": "canary-1b-asr",
         },
         sample_rate: int | None = None,
@@ -898,7 +942,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                     text = alternatives[0].transcript.strip()
                     if text:
                         logger.debug(f"Transcription: [{text}]")
-                        language = assert_given(self._settings.language)
+                        # Technically `_settings.language` could be a raw string, but
+                        # Language is a StrEnum so downstream handles either.
+                        language = cast("Language | None", assert_given(self._settings.language))
                         yield TranscriptionFrame(
                             text,
                             self._user_id,

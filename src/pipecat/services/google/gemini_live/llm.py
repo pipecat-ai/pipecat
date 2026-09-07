@@ -12,13 +12,12 @@ voice transcription, streaming responses, and tool usage.
 """
 
 import asyncio
-import base64
 import io
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from PIL import Image
@@ -28,7 +27,7 @@ from typing_extensions import override
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.frames.frames import (
     AggregationType,
     BotStartedSpeakingFrame,
@@ -44,13 +43,13 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     SpeechControlParamsFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -62,16 +61,17 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 from .file_api import GeminiFileAPI
 
@@ -85,6 +85,7 @@ try:
         AutomaticActivityDetection,
         Blob,
         Content,
+        ContentDict,
         ContextWindowCompressionConfig,
         EndSensitivity,
         FunctionResponse,
@@ -94,9 +95,12 @@ try:
         HttpOptions,
         LiveConnectConfig,
         LiveServerMessage,
+        MediaModality,
         MediaResolution,
         Modality,
+        ModalityTokenCount,
         Part,
+        PrebuiltVoiceConfig,
         ProactivityConfig,
         RealtimeInputConfig,
         SessionResumptionConfig,
@@ -104,6 +108,7 @@ try:
         SpeechConfig,
         StartSensitivity,
         ThinkingConfig,
+        TurnCoverage,
         VoiceConfig,
     )
 except ModuleNotFoundError as e:
@@ -115,6 +120,28 @@ except ModuleNotFoundError as e:
 # Connection management constants
 MAX_CONSECUTIVE_FAILURES = 3
 CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
+
+
+def _audio_token_count(details: list[ModalityTokenCount] | None) -> int | None:
+    """Get the AUDIO token count from a modality breakdown, if reported.
+
+    Gemini omits modalities with no tokens (and omits the list entirely when
+    there is no breakdown), so absence means "not reported" rather than zero.
+
+    Args:
+        details: A modality breakdown from usage metadata, e.g.
+            ``prompt_tokens_details``.
+
+    Returns:
+        The AUDIO token count, or ``None`` if not reported.
+    """
+    if not details:
+        return None
+    for entry in details:
+        if entry.modality == MediaModality.AUDIO:
+            return entry.token_count
+    return None
+
 
 # Pre-roll cushion added on top of the auto-sized duration (start_secs), to
 # absorb small timing slop between start_secs and the audio actually clipped,
@@ -354,26 +381,29 @@ class GeminiLiveLLMSettings(LLMSettings):
         language: Language for generation.
         media_resolution: Media resolution setting.
         vad: Voice activity detection parameters.
+        turn_coverage: Which realtime input a user turn covers. Unset uses the
+            model's own default.
         context_window_compression: Context window compression configuration.
         thinking: Thinking configuration.
         enable_affective_dialog: Whether to enable affective dialog.
         proactivity: Proactivity configuration.
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad: GeminiVADParams | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    context_window_compression: ContextWindowCompressionParams | dict | _NotGiven = field(
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    modalities: GeminiModalities | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_resolution: GeminiMediaResolution | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad: GeminiVADParams | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_coverage: TurnCoverage | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context_window_compression: ContextWindowCompressionParams | dict | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    thinking: ThinkingConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_affective_dialog: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: ThinkingConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_affective_dialog: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    proactivity: ProactivityConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
+class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     """Provides access to Google's Gemini Live API.
 
     This service enables real-time conversations with Gemini, supporting both
@@ -385,9 +415,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     pipeline processors that depend on those frames — RTVI client speech
     events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
     recording, ``UserIdleController``, user mute strategies, voicemail
-    detector — won't activate with the default server-VAD-only setup. Pair
-    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
-    so context writes are correct anyway. To produce the turn frames
+    detector — won't activate with the default server-VAD-only setup.
+    ``LLMContextAggregatorPair`` auto-detects this realtime service so context
+    writes are correct anyway. To produce the turn frames
     locally, see ``examples/realtime/realtime-gemini-live-locally-driven-turns.py``;
     note that locally-generated turn boundaries are a heuristic and may
     not match Gemini Live's server-side turn decisions.
@@ -396,13 +426,14 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     Settings = GeminiLiveLLMSettings
     _settings: Settings
 
-    # Overriding the default adapter to use the Gemini one.
-    adapter_class = GeminiLLMAdapter
+    # Overriding the default adapter to use the Gemini Live one.
+    adapter_class = GeminiLiveLLMAdapter
 
-    # Realtime (speech-to-speech) service. Does NOT emit
-    # UserStarted/StoppedSpeakingFrame from server-side turn signals —
-    # the API exposes an `interrupted` event but no turn-start/-end.
-    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
+        # The API exposes an `interrupted` event but no turn-start/-end.
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
+        return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
     @property
     def _is_gemini_3(self) -> bool:
@@ -500,6 +531,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             language="en-US",
             media_resolution=GeminiMediaResolution.UNSPECIFIED,
             vad=None,
+            turn_coverage=None,
             context_window_compression={},
             thinking={},
             enable_affective_dialog=False,
@@ -525,11 +557,13 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 default_settings.temperature = params.temperature
                 default_settings.top_k = params.top_k
                 default_settings.top_p = params.top_p
-                default_settings.modalities = params.modalities
+                default_settings.modalities = params.modalities or GeminiModalities.AUDIO
                 default_settings.language = (
                     language_to_gemini_language(params.language) if params.language else "en-US"
                 )
-                default_settings.media_resolution = params.media_resolution
+                default_settings.media_resolution = (
+                    params.media_resolution or GeminiMediaResolution.UNSPECIFIED
+                )
                 default_settings.vad = params.vad
                 default_settings.context_window_compression = (
                     params.context_window_compression.model_dump()
@@ -575,10 +609,10 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._ready_for_realtime_input = False
-        self._context = None
+        self._context: LLMContext | None = None
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
-        self._session: AsyncSession = None
+        self._session: AsyncSession | None = None
         self._connection_task = None
 
         self._disconnecting = False
@@ -607,7 +641,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         self._language = assert_given(self._settings.language)
         self._language_code = (
-            language_to_gemini_language(self._language) if self._language else "en-US"
+            language_to_gemini_language(cast(Language, self._language))
+            if self._language
+            else "en-US"
         )
         vad_settings = assert_given(self._settings.vad)
         self._vad_disabled = bool(vad_settings and vad_settings.disabled)
@@ -727,13 +763,13 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     # standard AIService frame handling
     #
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -752,6 +788,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
         await self._disconnect()
 
     #
@@ -782,7 +823,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         self._user_is_speaking = False
         self._user_audio_preroll_buffer = bytearray()
         await self.start_ttfb_metrics()
-        if self._vad_disabled and self._session and self._ready_for_realtime_input:
+
+        if not self._session:
+            return
+
+        if self._vad_disabled and self._ready_for_realtime_input:
             try:
                 await self._session.send_realtime_input(activity_end=ActivityEnd())
             except Exception as e:
@@ -910,7 +955,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     )
                     self._context.add_message(
                         {
-                            "role": "system",
+                            "role": "developer",
                             "content": assert_given(self._system_instruction_from_init),
                         }
                     )
@@ -936,6 +981,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             await self._process_completed_function_calls(send_new_results=True)
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        assert self._context is not None
+
         # If the user registered a function with cancel_on_interruption=False,
         # the aggregator emits async-tool-style messages into the context. On
         # models that don't support NON_BLOCKING tool calls, the conversation
@@ -998,7 +1045,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     tool_name = self._tool_call_id_to_name.get(
                         async_payload.tool_call_id, "tool_call_result"
                     )
-                    response_dict = GeminiLLMAdapter.to_function_response_dict(async_payload.result)
+                    response_dict = GeminiLiveLLMAdapter.to_function_response_dict(
+                        async_payload.result
+                    )
                     if send_new_results:
                         await self._tool_result(
                             async_payload.tool_call_id, tool_name, response_dict
@@ -1016,7 +1065,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
                     tool_name = self._tool_call_id_to_name.get(tool_call_id, "tool_call_result")
-                    response_dict = GeminiLLMAdapter.to_function_response_dict(
+                    response_dict = GeminiLiveLLMAdapter.to_function_response_dict(
                         message.get("content")
                     )
                     if send_new_results:
@@ -1103,13 +1152,16 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     frequency_penalty=assert_given(self._settings.frequency_penalty),
                     max_output_tokens=assert_given(self._settings.max_tokens),
                     presence_penalty=assert_given(self._settings.presence_penalty),
+                    seed=assert_given(self._settings.seed),
                     temperature=assert_given(self._settings.temperature),
                     top_k=assert_given(self._settings.top_k),
                     top_p=assert_given(self._settings.top_p),
                     response_modalities=[Modality(modalities.value)],
                     speech_config=SpeechConfig(
                         voice_config=VoiceConfig(
-                            prebuilt_voice_config={"voice_name": assert_given(self._settings.voice)}
+                            prebuilt_voice_config=PrebuiltVoiceConfig(
+                                voice_name=assert_given(self._settings.voice)
+                            )
                         ),
                         language_code=language,
                     ),
@@ -1145,16 +1197,22 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 config.context_window_compression = compression_config
 
             # Add thinking configuration to configuration, if provided
-            if self._settings.thinking:
-                config.thinking_config = self._settings.thinking
+            thinking = assert_given(self._settings.thinking)
+            if isinstance(thinking, dict):
+                thinking = ThinkingConfig(**thinking) if thinking else None
+            if thinking:
+                config.thinking_config = thinking
 
             # Add affective dialog setting, if provided
             if self._settings.enable_affective_dialog:
                 config.enable_affective_dialog = self._settings.enable_affective_dialog
 
             # Add proactivity configuration to configuration, if provided
-            if self._settings.proactivity:
-                config.proactivity = self._settings.proactivity
+            proactivity = assert_given(self._settings.proactivity)
+            if isinstance(proactivity, dict):
+                proactivity = ProactivityConfig(**proactivity) if proactivity else None
+            if proactivity:
+                config.proactivity = proactivity
 
             # Add VAD configuration to configuration, if provided
             vad_params = assert_given(self._settings.vad)
@@ -1188,6 +1246,14 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     config.realtime_input_config = RealtimeInputConfig(
                         automatic_activity_detection=vad_config
                     )
+
+            # Add turn coverage to configuration, if provided
+            turn_coverage = assert_given(self._settings.turn_coverage)
+            if turn_coverage:
+                if config.realtime_input_config:
+                    config.realtime_input_config.turn_coverage = turn_coverage
+                else:
+                    config.realtime_input_config = RealtimeInputConfig(turn_coverage=turn_coverage)
 
             # Add system instruction and tools to configuration, if provided.
             # These settings from the context take precedence over the ones
@@ -1255,7 +1321,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
             while True:
                 try:
-                    turn = self._session.receive()
+                    turn = session.receive()
                     async for message in turn:
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
@@ -1463,6 +1529,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         audio = bytes(self._user_audio_preroll_buffer)
         sample_rate = self._user_audio_preroll_buffer_sample_rate
         self._user_audio_preroll_buffer = bytearray()
+        assert self._session is not None
         await self._session.send_realtime_input(
             audio=Blob(data=audio, mime_type=f"audio/pcm;rate={sample_rate}")
         )
@@ -1508,10 +1575,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         buffer = io.BytesIO()
         Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
-        data = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         try:
-            await self._session.send_realtime_input(video=Blob(data=data, mime_type="image/jpeg"))
+            await self._session.send_realtime_input(
+                video=Blob(data=buffer.getvalue(), mime_type="image/jpeg")
+            )
         except Exception as e:
             await self._handle_send_error(e)
 
@@ -1576,8 +1644,13 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             self._run_llm_when_session_ready = True
             return
 
+        assert self._context is not None
+
         adapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
+        messages = cast(
+            "list[Content | ContentDict]",
+            adapter.get_llm_invocation_params(self._context).get("messages", []),
+        )
         if not messages:
             # No messages to seed convo with, so we're ready for realtime input right away
             self._ready_for_realtime_input = True
@@ -1636,7 +1709,10 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         # in the right format
         context = LLMContext(messages=messages_list)
         adapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(context).get("messages", [])
+        messages = cast(
+            "list[Content | ContentDict]",
+            adapter.get_llm_invocation_params(context).get("messages", []),
+        )
 
         if not messages:
             return
@@ -1715,9 +1791,12 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _handle_msg_model_turn(self, msg: LiveServerMessage):
         """Handle the model turn message."""
-        part = msg.server_content.model_turn.parts[0]
-        if not part:
+        assert msg.server_content is not None and msg.server_content.model_turn is not None
+
+        parts = msg.server_content.model_turn.parts
+        if not parts:
             return
+        part = parts[0]
 
         await self.stop_ttfb_metrics()
 
@@ -1793,6 +1872,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     @traced_gemini_live(operation="llm_tool_call")
     async def _handle_msg_tool_call(self, message: LiveServerMessage):
         """Handle tool call messages."""
+        assert message.tool_call is not None
+
         function_calls = message.tool_call.function_calls
         if not function_calls:
             return
@@ -1807,8 +1888,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     # tool call IDs here
                     f.id or str(uuid.uuid4())
                 ),
-                function_name=f.name,
-                arguments=f.args,
+                function_name=f.name or "",
+                arguments=f.args or {},
             )
             for f in function_calls
         ]
@@ -1910,6 +1991,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         aggregates into sentences, splitting on the end of sentence markers. If no
         punctuation arrives within a timeout period, the buffer is flushed automatically.
         """
+        assert message.server_content is not None
+
         if not message.server_content.input_transcription:
             return
 
@@ -1954,6 +2037,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _handle_msg_output_transcription(self, message: LiveServerMessage):
         """Handle the output transcription message."""
+        assert message.server_content is not None
+
         if not message.server_content.output_transcription:
             return
 
@@ -2080,12 +2165,17 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             total_tokens=total_tokens,
             cache_read_input_tokens=usage.cached_content_token_count,
             reasoning_tokens=usage.thoughts_token_count,
+            input_audio_tokens=_audio_token_count(usage.prompt_tokens_details),
+            output_audio_tokens=_audio_token_count(usage.response_tokens_details),
+            cache_read_input_audio_tokens=_audio_token_count(usage.cache_tokens_details),
         )
 
         await self.start_llm_usage_metrics(tokens)
 
     def _handle_msg_resumption_update(self, message: LiveServerMessage):
         update = message.session_resumption_update
+        assert update is not None
+
         if update.resumable and update.new_handle:
             self._session_resumption_handle = update.new_handle
 

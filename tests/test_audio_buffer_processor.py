@@ -7,22 +7,28 @@
 import asyncio
 import struct
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    AudioBufferStartRecordingFrame,
+    AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughResampler:
@@ -32,20 +38,28 @@ class _PassthroughResampler:
         return audio
 
 
-async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
-    """Create and start a processor ready to record.
+async def _make_processor(
+    *, buffer_size: int = 0, start: bool = True, auto_start: bool = False
+) -> AudioBufferProcessor:
+    """Create a processor ready to record.
 
     Calls setup() and sends a StartFrame through the public process_frame path so that
     the processor is fully initialised (task manager set, sample rate configured,
     __started flag set) without needing a full pipeline.
+
+    When ``start`` is True the processor starts recording before returning; pass
+    ``start=False`` to leave recording off (e.g. to test frame-driven start).
     """
-    processor = AudioBufferProcessor(sample_rate=16000, num_channels=2, buffer_size=buffer_size)
+    processor = AudioBufferProcessor(
+        sample_rate=16000,
+        num_channels=2,
+        buffer_size=buffer_size,
+        auto_start_recording=auto_start,
+    )
     processor._input_resampler = _PassthroughResampler()
     processor._output_resampler = _PassthroughResampler()
 
-    loop = asyncio.get_event_loop()
     task_manager = TaskManager()
-    task_manager.setup(TaskManagerParams(loop=loop))
     await processor.setup(
         FrameProcessorSetup(
             clock=SystemClock(),
@@ -57,7 +71,8 @@ async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
     await processor.process_frame(
         StartFrame(audio_out_sample_rate=16000), FrameDirection.DOWNSTREAM
     )
-    await processor.start_recording()
+    if start:
+        await processor.start_recording()
     return processor
 
 
@@ -770,6 +785,448 @@ class TestBotSilenceGapInsertion(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(p._last_bot_buffer_update_time)
         self.assertEqual(p._last_bot_buffer_update_time, 5.0)
         await p.cleanup()
+
+
+class TestRecordingControlFrames(unittest.IsolatedAsyncioTestCase):
+    """Tests for frame-driven recording control.
+
+    AudioBufferStartRecordingFrame / AudioBufferStopRecordingFrame let any
+    upstream processor start and stop recording from within the frame flow,
+    triggering the same start_recording() / stop_recording() methods as the
+    direct API.
+    """
+
+    async def test_start_recording_frame_enables_recording(self):
+        """A start frame turns recording on so subsequent audio is buffered."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_audio_ignored_before_start_recording_frame(self):
+        """Audio arriving before a start frame is not buffered."""
+        p = await _make_processor(start=False)
+
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stop_recording_frame_flushes_and_disables(self):
+        """A stop frame flushes buffered audio and turns recording off."""
+        p = await _make_processor()
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        captured = {}
+        event = asyncio.Event()
+
+        async def on_track_audio_data(_, user, bot, sample_rate, num_channels):
+            captured["user"] = user
+            event.set()
+
+        p.add_event_handler("on_track_audio_data", on_track_audio_data)
+        await p.process_frame(AudioBufferStopRecordingFrame(), FrameDirection.DOWNSTREAM)
+
+        await asyncio.wait_for(event.wait(), timeout=1)
+        self.assertEqual(captured["user"], audio)
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_recording_control_frames_passed_downstream(self):
+        """Control frames are re-pushed so other processors also react."""
+        processor = AudioBufferProcessor(sample_rate=16000, num_channels=2)
+
+        await run_test(
+            processor,
+            frames_to_send=[
+                AudioBufferStartRecordingFrame(),
+                AudioBufferStopRecordingFrame(),
+            ],
+            expected_down_frames=[
+                AudioBufferStartRecordingFrame,
+                AudioBufferStopRecordingFrame,
+            ],
+        )
+
+
+class TestAutoStartRecording(unittest.IsolatedAsyncioTestCase):
+    """Tests for the auto_start_recording constructor option.
+
+    With auto_start_recording=True the processor starts recording as soon as
+    it handles the StartFrame, without an explicit start_recording() call or
+    an AudioBufferStartRecordingFrame.
+    """
+
+    async def test_auto_start_begins_recording_on_start_frame(self):
+        """Recording is active right after pipeline start; audio is buffered."""
+        p = await _make_processor(start=False, auto_start=True)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_auto_start_disabled_by_default(self):
+        """Without the option, the StartFrame does not begin recording."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+        await p.cleanup()
+
+    async def test_auto_start_fires_started_event(self):
+        """on_recording_started fires when auto-start kicks in."""
+        p = AudioBufferProcessor(sample_rate=16000, auto_start_recording=True)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await run_test(p, frames_to_send=[], expected_down_frames=[])
+        await asyncio.wait_for(fired.wait(), timeout=1)
+
+
+class TestRecordingLifecycleEvents(unittest.IsolatedAsyncioTestCase):
+    """Tests for the on_recording_started / on_recording_stopped events.
+
+    These fire only on actual recording state transitions, decoupling the
+    code that triggers recording (a direct call or a control frame) from
+    code that wants to react to it (UI indicators, logging, etc.).
+    """
+
+    async def test_started_event_fires_on_start(self):
+        """on_recording_started fires when recording transitions to active."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.start_recording()
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_fires_via_frame(self):
+        """on_recording_started fires when started by a control frame."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_not_refired_when_already_recording(self):
+        """A redundant start (already recording) does not re-fire the event."""
+        p = await _make_processor()  # already recording
+
+        started = []
+        p.add_event_handler("on_recording_started", lambda _: started.append(True))
+
+        await p.start_recording()
+        await asyncio.sleep(0.05)  # give any erroneously-scheduled handler a chance
+        self.assertEqual(len(started), 0)
+        await p.cleanup()
+
+    async def test_redundant_start_preserves_buffered_audio(self):
+        """A redundant start (already recording) does not reset the buffers."""
+        p = await _make_processor()  # already recording
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        self.assertTrue(p.has_audio())
+
+        await p.start_recording()
+        self.assertTrue(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_fires_with_final_audio_already_emitted(self):
+        """on_recording_stopped fires; the final audio handler runs as part of stop."""
+        p = await _make_processor()
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        audio_fired = asyncio.Event()
+        stopped_fired = asyncio.Event()
+        p.add_event_handler("on_audio_data", lambda *_: audio_fired.set())
+        p.add_event_handler("on_recording_stopped", lambda _: stopped_fired.set())
+
+        await p.stop_recording()
+
+        await asyncio.wait_for(audio_fired.wait(), timeout=1)
+        await asyncio.wait_for(stopped_fired.wait(), timeout=1)
+        # By the time stop signals, recording is off and buffers are cleared.
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_not_fired_when_not_recording(self):
+        """Stopping when not recording (e.g. EndFrame before start) does not fire."""
+        p = await _make_processor(start=False)
+
+        stopped = []
+        p.add_event_handler("on_recording_stopped", lambda _: stopped.append(True))
+
+        await p.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(stopped), 0)
+        await p.cleanup()
+
+
+TURN_SAMPLE_RATE = 16000
+
+# 0.1s of mono audio. Every run of speech below is one chunk, so a turn's audio
+# is one chunk per run its speaker contributed.
+TURN_CHUNK = b"\x11\x00" * 1600
+
+
+def _user_run():
+    """One run of user speech, paced as a real mic would deliver it."""
+    return [
+        UserStartedSpeakingFrame(),
+        SleepFrame(sleep=0.05),
+        InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.05),
+        UserStoppedSpeakingFrame(),
+        SleepFrame(sleep=0.2),
+    ]
+
+
+def _bot_run():
+    """One run of bot speech.
+
+    Bot audio is a DataFrame and queues, while the speaking frames are
+    SystemFrames that skip the queue, so it needs time to drain before
+    BotStoppedSpeakingFrame closes the run.
+    """
+    return [
+        BotStartedSpeakingFrame(),
+        SleepFrame(sleep=0.05),
+        OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.1),
+        BotStoppedSpeakingFrame(),
+        SleepFrame(sleep=0.2),
+    ]
+
+
+class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
+    """The turn audio events report each speaker once per turn."""
+
+    async def _turn_events(self, frames):
+        """Run frames through a recording processor, returning its turn audio events."""
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE,
+            num_channels=1,
+            enable_turn_audio=True,
+            auto_start_recording=True,
+        )
+        events = []
+
+        @processor.event_handler("on_user_turn_audio")
+        async def on_user(buffer, turn):
+            events.append(("user", turn.turn_number, bytes(turn.audio)))
+
+        @processor.event_handler("on_bot_turn_audio")
+        async def on_bot(buffer, turn):
+            events.append(("bot", turn.turn_number, bytes(turn.audio)))
+
+        await run_test(
+            processor,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=TURN_SAMPLE_RATE, audio_out_sample_rate=TURN_SAMPLE_RATE
+            ),
+        )
+        return events
+
+    async def test_reports_each_speaker_once_for_a_turn(self):
+        events = await self._turn_events([*_user_run(), *_bot_run()])
+
+        # Turn 1 opens with the pipeline, so the first exchange lands there.
+        self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
+
+    async def test_joins_several_runs_of_speech_in_a_turn(self):
+        # The user pauses mid-thought and the bot resumes after a function call,
+        # so each speaks twice within one turn.
+        events = await self._turn_events([*_user_run(), *_user_run(), *_bot_run(), *_bot_run()])
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK * 2), ("bot", 1, TURN_CHUNK * 2)])
+
+    async def test_numbers_successive_turns(self):
+        events = await self._turn_events([*_user_run(), *_bot_run(), *_user_run(), *_bot_run()])
+
+        self.assertEqual(
+            events,
+            [
+                ("user", 1, TURN_CHUNK),
+                ("bot", 1, TURN_CHUNK),
+                ("user", 2, TURN_CHUNK),
+                ("bot", 2, TURN_CHUNK),
+            ],
+        )
+
+    async def test_reports_barged_in_audio_under_the_interrupted_turn(self):
+        # The user barges in while the bot is speaking, which ends turn 1 and
+        # starts turn 2 before the bot's cut-off audio is closed out.
+        events = await self._turn_events(
+            [
+                *_user_run(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.1),
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+                *_bot_run(),
+            ]
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("user", 1, TURN_CHUNK),
+                ("bot", 1, TURN_CHUNK),
+                ("user", 2, TURN_CHUNK),
+                ("bot", 2, TURN_CHUNK),
+            ],
+        )
+
+    async def test_silent_speaker_is_not_reported(self):
+        # The bot greets and the user never replies, so turn 1 has no user audio.
+        events = await self._turn_events(_bot_run())
+
+        self.assertEqual(events, [("bot", 1, TURN_CHUNK)])
+
+    async def test_turn_audio_needs_turn_tracking(self):
+        # Turn boundaries come from the tracker, so without one there is nothing
+        # to report. Say so rather than going quiet.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE, num_channels=1, enable_turn_audio=True
+        )
+        await processor.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=TaskManager(),
+                pipeline_worker=SimpleNamespace(  # type: ignore[arg-type]
+                    app_resources=None, turn_tracking_observer=None
+                ),
+            )
+        )
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.logger") as mock_logger:
+            await processor.process_frame(
+                StartFrame(audio_out_sample_rate=TURN_SAMPLE_RATE), FrameDirection.DOWNSTREAM
+            )
+
+        mock_logger.warning.assert_called_once()
+        self.assertIn("enable_turn_tracking", mock_logger.warning.call_args[0][0])
+        await processor.cleanup()
+
+    async def test_deprecated_events_still_report_each_run_of_speech(self):
+        # The superseded events keep their old shape: one call per run of
+        # speech, four arguments, no turn number.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE,
+            num_channels=1,
+            enable_turn_audio=True,
+            auto_start_recording=True,
+        )
+        runs = []
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @processor.event_handler("on_user_turn_audio_data")
+            async def on_user(buffer, audio, sample_rate, num_channels):
+                runs.append(("user", bytes(audio)))
+
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        self.assertIn("on_user_turn_audio", str(caught[0].message))
+
+        # Two runs of user speech in one turn produce two calls.
+        await run_test(
+            processor,
+            frames_to_send=[*_user_run(), *_user_run(), *_bot_run()],
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=TURN_SAMPLE_RATE, audio_out_sample_rate=TURN_SAMPLE_RATE
+            ),
+        )
+
+        self.assertEqual(runs, [("user", TURN_CHUNK), ("user", TURN_CHUNK)])
+
+    async def test_open_mic_audio_stays_out_of_the_interrupted_turn(self):
+        # The mic keeps delivering while the bot speaks, so at a barge-in the
+        # user's buffer holds the pre-roll leading into their interruption. That
+        # audio belongs to the turn starting, not the one being interrupted.
+        events = await self._turn_events(
+            [
+                *_user_run(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.1),
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+            ]
+        )
+
+        turn_1_user = next(audio for who, turn, audio in events if who == "user" and turn == 1)
+        self.assertEqual(turn_1_user, TURN_CHUNK)
+
+    async def test_reports_the_turn_in_progress_when_recording_stops(self):
+        # Stopping the recording leaves the turn open, and ending the pipeline
+        # closes it. A conversation's last turn arrives this way.
+        events = await self._turn_events(
+            [*_user_run(), *_bot_run(), AudioBufferStopRecordingFrame(), SleepFrame(sleep=0.2)]
+        )
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
 
 
 if __name__ == "__main__":

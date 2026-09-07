@@ -49,7 +49,7 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         cls.AICAudioQualityMetricsData = AICAudioQualityMetricsData
 
     def setUp(self):
-        self.mock_model = MockModel(model_id="tyto-l-16khz")
+        self.mock_model = MockModel(model_id="tyto-1.1-l-16khz")
         self.mock_collector = MockCollector()
         self.mock_analyzer = MockAnalyzer()
 
@@ -70,7 +70,9 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
 
         self.mocks["Model"].from_file.return_value = self.mock_model
         self.mocks["Model"].download.return_value = "/tmp/test.aicmodel"
-        self.mocks["ProcessorConfig"].optimal.return_value = MagicMock(name="config")
+        self.mocks["ProcessorConfig"].optimal.return_value = MagicMock(
+            name="config", block_size=160
+        )
 
     def _make(self, **kwargs):
         analyzer_kwargs = {"license_key": "test-key"}
@@ -94,7 +96,7 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
     def test_default_model_id(self):
         """Default model_id is the published Tyto model."""
         analyzer = self._make()
-        self.assertEqual(analyzer._model_id, "tyto-l-16khz")
+        self.assertEqual(analyzer._model_id, "tyto-1.1-l-16khz")
         self.assertEqual(analyzer._model_id, self.DEFAULT_TYTO_MODEL_ID)
 
     def test_default_download_dir(self):
@@ -108,7 +110,7 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         self._make()
         self.mocks["set_sdk_id"].assert_called_once_with(6)
         self.mocks["Model"].download.assert_called_once_with(
-            "tyto-l-16khz",
+            "tyto-1.1-l-16khz",
             str(Path.home() / ".cache" / "pipecat" / "aic-models"),
         )
         self.mocks["Model"].from_file.assert_called_once_with("/tmp/test.aicmodel")
@@ -133,18 +135,18 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
     # --- Audio buffering -----------------------------------------------------
 
     def test_buffer_initializes_collector_with_variable_frames(self):
-        """First audio frame lazily builds the collector with allow_variable_frames."""
+        """First audio frame lazily builds the collector with variable_block_size."""
         analyzer = self._make()
         analyzer._buffer_audio(self._audio_frame(num_samples=160))
 
         self.mocks["analyzer_pair"].assert_called_once()
         self.mocks["ProcessorConfig"].optimal.assert_called_once()
         _, kwargs = self.mocks["ProcessorConfig"].optimal.call_args
-        self.assertTrue(kwargs["allow_variable_frames"])
+        self.assertTrue(kwargs["variable_block_size"])
         self.assertEqual(kwargs["sample_rate"], 16000)
-        self.assertEqual(kwargs["num_channels"], 1)
+        self.assertNotIn("num_channels", kwargs)
         self.assertEqual(len(self.mock_collector.buffer_calls), 1)
-        self.assertEqual(self.mock_collector.buffer_calls[0].shape, (1, 160))
+        self.assertEqual(self.mock_collector.buffer_calls[0].shape, (160,))
         self.assertEqual(self.mock_collector.buffer_calls[0].dtype, np.float32)
 
     def test_buffer_normalizes_int16(self):
@@ -153,14 +155,26 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer._buffer_audio(self._audio_frame(num_samples=4))
         buffered = self.mock_collector.buffer_calls[0]
         # Samples were 0,1,2,3 → divided by 32768.
-        np.testing.assert_allclose(buffered[0], np.array([0, 1, 2, 3], dtype=np.float32) / 32768.0)
+        np.testing.assert_allclose(buffered, np.array([0, 1, 2, 3], dtype=np.float32) / 32768.0)
 
-    def test_buffer_deinterleaves_multichannel(self):
-        """Stereo audio is reshaped to (channels, frames)."""
+    def test_buffer_downmixes_multichannel(self):
+        """Stereo audio is averaged to mono."""
         analyzer = self._make()
         # 8 interleaved samples → 2 channels × 4 frames.
         analyzer._buffer_audio(self._audio_frame(num_samples=8, num_channels=2))
-        self.assertEqual(self.mock_collector.buffer_calls[0].shape, (2, 4))
+        np.testing.assert_allclose(
+            self.mock_collector.buffer_calls[0],
+            np.array([0.5, 2.5, 4.5, 6.5], dtype=np.float32) / 32768.0,
+        )
+
+    def test_buffer_splits_large_frames_without_losing_samples(self):
+        analyzer = self._make()
+        analyzer._buffer_audio(self._audio_frame(num_samples=401))
+        self.assertEqual([len(x) for x in self.mock_collector.buffer_calls], [160, 160, 81])
+        np.testing.assert_allclose(
+            np.concatenate(self.mock_collector.buffer_calls),
+            np.arange(401, dtype=np.float32) / 32768.0,
+        )
 
     def test_buffer_reinitializes_on_sample_rate_change(self):
         """A changed input sample rate rebuilds the collector."""
@@ -194,19 +208,19 @@ class TestAICTytoAnalyzer(unittest.IsolatedAsyncioTestCase):
             speaker_reverb=0.1,
             speaker_loudness=0.5,
             interfering_speech=0.2,
-            media_speech=0.3,
+            codec_degradation=0.3,
             noise=0.4,
             packet_loss=0.05,
         )
         data = analyzer._build_metrics(result)
         self.assertIsInstance(data, self.AICAudioQualityMetricsData)
         self.assertEqual(data.processor, analyzer.name)
-        self.assertEqual(data.model, "tyto-l-16khz")
+        self.assertEqual(data.model, "tyto-1.1-l-16khz")
         self.assertAlmostEqual(data.risk_score, 0.9)
         self.assertAlmostEqual(data.speaker_reverb, 0.1)
         self.assertAlmostEqual(data.speaker_loudness, 0.5)
         self.assertAlmostEqual(data.interfering_speech, 0.2)
-        self.assertAlmostEqual(data.media_speech, 0.3)
+        self.assertAlmostEqual(data.codec_degradation, 0.3)
         self.assertAlmostEqual(data.noise, 0.4)
         self.assertAlmostEqual(data.packet_loss, 0.05)
 

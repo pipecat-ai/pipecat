@@ -1,0 +1,47 @@
+name: insurance_quote
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the customer and begins helping with an insurance quote"
+
+  - user: "I'm thirty years old."
+    expect:
+      - event: function_call
+        calls:
+          - name: collect_age
+            args: { age: 30 }
+      - event: response
+        eval: "the bot asks about the customer's marital status"
+
+  # The quote-calculation node immediately calls calculate_quote and reads the
+  # quote back, so both calls land on this turn (no separate "what's my quote?").
+  - user: "I'm married."
+    expect:
+      - event: function_call
+        calls:
+          - name: collect_marital_status
+            args: { marital_status: married }
+      - event: function_call
+        calls:
+          - name: calculate_quote
+      - event: response
+        eval: "the bot explains the insurance quote, including a monthly premium"
+
+  - user: "Can you raise the coverage to five hundred thousand with a two thousand dollar deductible?"
+    expect:
+      - event: function_call
+        calls:
+          - name: update_coverage
+      - event: response
+        eval: "the bot explains the updated quote after the coverage change"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "Great, I'm all set."
+    expect:
+      - event: function_call
+        calls:
+          - name: end_quote

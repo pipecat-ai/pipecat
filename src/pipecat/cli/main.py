@@ -17,6 +17,7 @@ and the console script) is resolved on first access via ``__getattr__``.
 """
 
 import sys
+from collections.abc import Sequence
 
 _INSTALL_HINT = (
     "The Pipecat CLI needs its optional dependencies (the `cli` extra), which aren't "
@@ -28,23 +29,35 @@ _INSTALL_HINT = (
     '        uv pip install "pipecat-ai[cli]"      # or: pip install "pipecat-ai[cli]"\n'
 )
 
-# Official optional sub-CLIs. Each ships as a separate plugin package that registers
-# a Typer app under the ``pipecat_cli.extensions`` group. We list them in ``--help``
-# even when they're not installed (as stubs) so they're discoverable, and the stub
-# prints how to enable the plugin. Only first-party plugins belong here.
+# Official sub-CLIs the user must install themselves. Each ships as a separate plugin
+# package that registers a Typer app under the ``pipecat_cli.extensions`` group. We list
+# them in ``--help`` even when they're not installed (as stubs) so they're discoverable,
+# and the stub prints how to enable the plugin.
+#
+# `context-hub` is deliberately absent: it ships with the `cli` extra, so it mounts from
+# its entry point like any installed plugin and a stub advertising an install step would
+# be describing one that doesn't exist.
 _KNOWN_EXTENSIONS: dict[str, tuple[str, str]] = {
     "cloud": ("pipecatcloud", "Deploy and manage bots on Pipecat Cloud"),
 }
 
 
-def _enable_hint(name: str, package: str) -> str:
-    """Message shown when an official-but-uninstalled sub-CLI is invoked."""
+def _enable_hint(name: str, package: str, installed_plugins: Sequence[str] = ()) -> str:
+    """Message shown when an official-but-uninstalled sub-CLI is invoked.
+
+    ``installed_plugins`` are the plugin packages already present in the tool
+    environment. They must be repeated in the ``uv tool install`` line because
+    ``--with`` *replaces* that environment rather than adding to it — a hint
+    naming only the missing plugin would silently uninstall every other one.
+    """
+    packages = [*dict.fromkeys([*installed_plugins, package])]
+    with_flags = " ".join(f"--with {pkg}" for pkg in packages)
     return (
         f"The `pipecat {name}` command requires the optional `{package}` plugin, "
         "which isn't installed.\n\n"
         "Enable it where the `pipecat` command lives:\n\n"
         "  • As a global tool (on your PATH), reinstall with the plugin:\n"
-        f'        uv tool install "pipecat-ai[cli]" --with {package}\n\n'
+        f'        uv tool install "pipecat-ai[cli]" {with_flags}\n\n'
         "  • In your current project or virtualenv:\n"
         f"        uv pip install {package}     # or: pip install {package}\n"
     )
@@ -60,7 +73,6 @@ def _build_app():
     import typer
     from rich.console import Console
 
-    from pipecat.cli.commands.create import create_command
     from pipecat.cli.commands.eval import eval_app
     from pipecat.cli.commands.init import init_command
 
@@ -71,32 +83,78 @@ def _build_app():
     )
     console = Console()
 
-    # `create` is a plain command (not a sub-Typer group) so it can take an optional
-    # positional target path followed by options (e.g. `pc create . --bot-type web`).
-    app.command("create", help="Create a new Pipecat project")(create_command)
+    # `init` is the single entry point for building a Pipecat app: it writes the
+    # coding-agent guide and can scaffold a runnable bot (interactively or from flags/a
+    # config file, e.g. `pipecat init . --bot-type web -t daily ...`). No `help=` here so
+    # the command's docstring (summary + examples) drives `pipecat init --help`.
+    app.command("init")(init_command)
 
-    # `init` makes a project agent-ready (writes AGENTS.md + CLAUDE.md). ignore_unknown_options
-    # lets it catch legacy scaffolder flags (now `pipecat create`) and redirect with a clear
-    # message instead of an opaque "no such option" error.
+    # `pipecat create` was removed (folded into `init`). Keep a hidden stub so an old
+    # command or muscle-memory invocation gets a clear pointer instead of Click's bare
+    # "No such command". ignore_unknown_options swallows the old scaffolder flags.
+    def _removed_create(ctx: typer.Context):
+        print(
+            "`pipecat create` was removed. Use `pipecat init` instead. It scaffolds "
+            "a project from flags or a config file, e.g.\n\n"
+            "    pipecat init . --bot-type web -t daily --stt deepgram_stt "
+            "--llm openai_llm --tts cartesia_tts\n\n"
+            "Run `pipecat init --help` or `pipecat init --list-options` for details.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
     app.command(
-        "init",
-        help="Make a project agent-ready (writes AGENTS.md + CLAUDE.md)",
+        "create",
+        help=(
+            "The create command was removed. Use the init command to scaffold your "
+            "Pipecat project. Run `pipecat init --help` for details."
+        ),
+        hidden=True,
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-    )(init_command)
+    )(_removed_create)
 
     # `eval` is a first-party sub-Typer group, built in (not a plugin extension).
     app.add_typer(eval_app, name="eval")
 
-    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point
-    # group is intentionally still named
-    # "pipecat_cli.extensions" for backward compatibility — renaming it would force
-    # every plugin to re-release. (A future rename to "pipecat.cli.extensions" is a
-    # separate, coordinated change.)
-    extensions = [
-        (ep.name, ep.load())
-        for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions")
-    ]
+    # Discover CLI extensions (e.g. `cloud` from pipecatcloud). The entry-point group
+    # is intentionally still named "pipecat_cli.extensions" for backward compatibility
+    # — renaming it would force every plugin to re-release. (A future rename to
+    # "pipecat.cli.extensions" is a separate, coordinated change.)
+    #
+    # Each plugin loads in isolation. A plugin is third-party code imported on every
+    # invocation, so an unguarded load lets one bad install (missing transitive
+    # dependency, version conflict, stale wheel) take down the entire CLI — including
+    # commands that have nothing to do with it, like `pipecat init`. Skip the broken
+    # one, say so, and carry on.
+    extensions: list[tuple[str, typer.Typer]] = []
+    installed_plugins: list[str] = []
+    for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions"):
+        # Recorded even when the load fails: the package is installed either way,
+        # and `_enable_hint` must not tell the user to drop it (see `--with` note).
+        dist_name = getattr(getattr(ep, "dist", None), "name", None)
+        if dist_name:
+            installed_plugins.append(dist_name)
+        try:
+            extension = ep.load()
+        except Exception as exc:
+            print(
+                f"Warning: skipping the `{ep.name}` plugin, which failed to load: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if not isinstance(extension, typer.Typer):
+            # add_typer accepts this silently and fails much later, while building
+            # the command tree, with an opaque AttributeError.
+            print(
+                f"Warning: skipping the `{ep.name}` plugin: expected a typer.Typer, "
+                f"got {type(extension).__name__}.",
+                file=sys.stderr,
+            )
+            continue
+        extensions.append((ep.name, extension))
+
     extensions.sort(key=lambda item: item[0].lower())
+    installed_plugins.sort()
     for name, extension in extensions:
         app.add_typer(extension, name=name)
 
@@ -105,7 +163,7 @@ def _build_app():
     # it instead of a bare "No such command". Installed plugins (above) take precedence.
     def _make_extension_stub(cmd_name: str, package: str):
         def _stub(ctx: typer.Context):
-            print(_enable_hint(cmd_name, package), file=sys.stderr)
+            print(_enable_hint(cmd_name, package, installed_plugins), file=sys.stderr)
             raise typer.Exit(1)
 
         return _stub
@@ -117,7 +175,15 @@ def _build_app():
         app.command(
             cmd_name,
             help=f"{help_text} (requires {package})",
-            context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+            # An empty help_option_names lets `--help` reach the stub too. Otherwise
+            # `pipecat <plugin> --help` — the natural thing to type after spotting the
+            # command in `pipecat --help` — renders an empty options panel and says
+            # nothing about installing it, while every other invocation explains.
+            context_settings={
+                "ignore_unknown_options": True,
+                "allow_extra_args": True,
+                "help_option_names": [],
+            },
         )(_make_extension_stub(cmd_name, package))
 
     def version_callback(value: bool):
@@ -157,6 +223,24 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _warn_about_stale_hub_index():
+    """Print a one-line notice when the local Context Hub index needs a refresh.
+
+    A stale index is invisible until a coding agent cites an API that has since
+    changed, so it is worth surfacing on the way past. Silent unless an index
+    exists, written to stderr so it never lands in parsed stdout, and swallowed
+    on any failure — a hint must not break the command the user asked for.
+    """
+    try:
+        from pipecat.cli.hub_status import freshness_warning
+
+        warning = freshness_warning()
+    except Exception:
+        return
+    if warning:
+        print(f"⚠ {warning}", file=sys.stderr)
+
+
 def run():
     """Console-script entry point; degrades gracefully when the ``cli`` extra is absent."""
     try:
@@ -164,6 +248,10 @@ def run():
     except ImportError:
         print(_INSTALL_HINT, file=sys.stderr)
         raise SystemExit(1)
+    # Here rather than in the group callback: click answers a bare `--help`
+    # eagerly, without ever invoking the callback, so a check placed there would
+    # miss it. This runs for every invocation of the console script.
+    _warn_about_stale_hub_index()
     app()
 
 

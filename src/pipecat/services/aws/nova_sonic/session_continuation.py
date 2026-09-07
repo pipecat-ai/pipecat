@@ -134,6 +134,7 @@ class SessionContinuationHelper:
     back to the LLM service via callbacks.
 
     The LLM service hooks into this helper at key points:
+
     - ``on_audio_input(audio)``: called for each user audio frame
     - ``on_assistant_audio_started()``: called on AUDIO contentStart from assistant
     - ``on_assistant_text_output(role, text, stage)``: called on textOutput events

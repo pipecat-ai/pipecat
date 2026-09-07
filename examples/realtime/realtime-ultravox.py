@@ -13,7 +13,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -82,7 +82,7 @@ async def get_secret_menu(params: FunctionCallParams):
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     system_prompt = f"""
 You are a drive-thru order taker for a donut shop called "Dr. Donut". Local time is currently: {datetime.datetime.now().isoformat()}
@@ -180,12 +180,11 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # Ultravox drives the conversation server-side.
     #
     # It does not, however, emit turn frames (UserStartedSpeakingFrame,
-    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
-    # aggregation will work without those frames, but you can add supplemental
-    # local turn frames for consumption by other pipeline processors that
-    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
-    # you should consider supplemental local turn frames approximate, as they
-    # may not always align with server turns.
+    # UserStoppedSpeakingFrame). Context aggregation works without those
+    # frames, but you can add supplemental local turn frames for consumption
+    # by other pipeline processors that expect them (like RTVI), or to trigger
+    # on_user_turn_* events. WARNING: you should consider supplemental local
+    # turn frames approximate, as they may not always align with server turns.
     #
     # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
     # and related imports below and the `user_params=` argument further down.
@@ -200,7 +199,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
@@ -223,18 +221,23 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     # See comment above the user_aggregator for details on why this is
     # commented out and instructions for enabling it.
@@ -258,9 +261,6 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

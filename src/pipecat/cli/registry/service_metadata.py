@@ -40,13 +40,11 @@ BotType = Literal["web", "telephony"]
 class ServiceDefinition:
     """Service metadata definition.
 
-    Required fields:
-        value: Service identifier (e.g., "openai_llm")
-        label: Human-readable name (e.g., "OpenAI")
-        package: Python package requirement (e.g., "pipecat-ai[openai]")
-
-    Optional fields:
-        class_name: List of class names to import for this service
+    Parameters:
+        value: Service identifier (e.g., "openai_llm").
+        label: Human-readable name (e.g., "OpenAI").
+        package: Python package requirement (e.g., "pipecat-ai[openai]").
+        class_name: List of class names to import for this service.
         env_prefix: Prefix for environment variables (e.g., "OPENAI" -> "OPENAI_API_KEY")
         include_params: Constructor params that have defaults but should still appear in the
             generated config (e.g., "api_key" has a default but we want users to set it via
@@ -62,9 +60,6 @@ class ServiceDefinition:
             produces os.getenv("ENV_VAR", "default") instead of os.getenv("ENV_VAR").
             Use this for params where the quickstart should work without the user
             setting the env var (e.g., model or voice defaults).
-        external_turn_detection: If True, this STT service performs its own end-of-turn
-            detection, so the generated bot uses ExternalUserTurnStrategies() in the user
-            aggregator instead of VAD-driven turn taking (e.g. Deepgram Flux, Cartesia Turns).
     """
 
     value: str
@@ -78,7 +73,6 @@ class ServiceDefinition:
     recommended: bool = False
     additional_imports: list[str] | None = None
     param_defaults: dict[str, str] | None = None
-    external_turn_detection: bool = False
 
     def __post_init__(self):
         """Validate service definition after initialization."""
@@ -93,7 +87,13 @@ class ServiceDefinition:
 # Feature definitions with metadata for auto-generation
 # Maps feature names to the list of classes/functions that need to be imported
 FEATURE_DEFINITIONS: dict[str, list[str]] = {
-    "recording": ["AudioBufferProcessor", "datetime", "io", "wave", "aiofiles"],
+    "recording": [
+        "AudioBufferProcessor",
+        "datetime",
+        "io",
+        "wave",
+        "aiofiles",
+    ],
     "transcription": ["AssistantTurnStoppedMessage", "UserTurnStoppedMessage"],
     "vad": ["SileroVADAnalyzer"],
     "pipeline": ["Pipeline", "WorkerRunner", "PipelineParams", "PipelineWorker"],
@@ -107,7 +107,6 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # callee to answer/speak first, so they don't import or use it.
     "llm_run_frame": ["LLMRunFrame"],
     "observability": ["WhiskerObserver"],
-    "external_turn_strategies": ["ExternalUserTurnStrategies"],
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
@@ -277,7 +276,6 @@ class ServiceRegistry:
             class_name=["CartesiaTurnsSTTService"],
             env_prefix="CARTESIA",
             include_params=["api_key"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_stt",
@@ -294,7 +292,6 @@ class ServiceRegistry:
             class_name=["DeepgramFluxSTTService"],
             env_prefix="DEEPGRAM",
             include_params=["api_key"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_flux_sagemaker_stt",
@@ -303,7 +300,6 @@ class ServiceRegistry:
             class_name=["DeepgramFluxSageMakerSTTService"],
             env_prefix="DEEPGRAM_FLUX_SAGEMAKER_STT",
             include_params=["endpoint_name", "region"],
-            external_turn_detection=True,
         ),
         ServiceDefinition(
             value="deepgram_sagemaker_stt",
@@ -335,6 +331,14 @@ class ServiceRegistry:
             package="pipecat-ai[fal]",
             class_name=["FalSTTService"],
             env_prefix="FAL",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="gemini_stt",
+            label="Gemini Transcribe Live",
+            package="pipecat-ai[google]",
+            class_name=["GeminiSTTService"],
+            env_prefix="GOOGLE",
             include_params=["api_key"],
         ),
         ServiceDefinition(
@@ -490,11 +494,29 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="baseten_llm",
+            label="Baseten",
+            package="pipecat-ai[baseten]",
+            class_name=["BasetenLLMService"],
+            env_prefix="BASETEN",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="cerebras_llm",
             label="Cerebras",
             package="pipecat-ai[cerebras]",
             class_name=["CerebrasLLMService"],
             env_prefix="CEREBRAS",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="crusoe_llm",
+            label="Crusoe",
+            package="pipecat-ai[crusoe]",
+            class_name=["CrusoeLLMService"],
+            env_prefix="CRUSOE",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
         ),
@@ -711,6 +733,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="bland_tts",
+            label="Bland",
+            package="pipecat-ai[bland]",
+            class_name=["BlandTTSService"],
+            env_prefix="BLAND",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "2f29fdbb-c55e-4add-9c7c-93437ebf379d"},
+        ),
+        ServiceDefinition(
             value="cartesia_tts",
             label="Cartesia",
             package="pipecat-ai[cartesia]",
@@ -718,7 +750,7 @@ class ServiceRegistry:
             env_prefix="CARTESIA",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "71a7ad14-091c-4e8e-a314-022ece01c121"},
+            param_defaults={"voice": "86e30c1d-714b-4074-a1f2-1cb6b552fb49"},
         ),
         ServiceDefinition(
             value="deepgram_tts",
@@ -727,6 +759,24 @@ class ServiceRegistry:
             class_name=["DeepgramTTSService"],
             env_prefix="DEEPGRAM",
             include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="deepgram_flux_tts",
+            label="Deepgram Flux",
+            package="pipecat-ai[deepgram]",
+            class_name=["DeepgramFluxTTSService"],
+            env_prefix="DEEPGRAM",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="deepgram_flux_sagemaker_tts",
+            label="Deepgram Flux SageMaker",
+            package="pipecat-ai[deepgram,sagemaker]",
+            class_name=["DeepgramFluxSageMakerTTSService"],
+            env_prefix="DEEPGRAM_FLUX_SAGEMAKER_TTS",
+            include_params=["endpoint_name", "region"],
             settings_params=["voice"],
         ),
         ServiceDefinition(
@@ -743,6 +793,15 @@ class ServiceRegistry:
             label="ElevenLabs",
             package="pipecat-ai[elevenlabs]",
             class_name=["ElevenLabsTTSService"],
+            env_prefix="ELEVENLABS",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="elevenlabs_dialogue_tts",
+            label="ElevenLabs Dialogue (v3)",
+            package="pipecat-ai[elevenlabs]",
+            class_name=["ElevenLabsDialogueTTSService"],
             env_prefix="ELEVENLABS",
             include_params=["api_key"],
             settings_params=["voice"],
@@ -890,6 +949,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="pockettts_tts",
+            label="Pocket TTS",
+            package="pipecat-ai[pocket-tts]",
+            class_name=["PocketTTSService"],
+            env_prefix="POCKET_TTS",
+            settings_params=["voice"],
+            param_defaults={"voice": "alba"},
+        ),
+        ServiceDefinition(
             value="resemble_tts",
             label="Resemble",
             package="pipecat-ai[resembleai]",
@@ -931,6 +999,15 @@ class ServiceRegistry:
             package="pipecat-ai[soniox]",
             class_name=["SonioxTTSService"],
             env_prefix="SONIOX",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="speechify_tts",
+            label="Speechify",
+            package="pipecat-ai",
+            class_name=["SpeechifyHttpTTSService"],
+            env_prefix="SPEECHIFY",
             include_params=["api_key"],
             settings_params=["voice"],
         ),

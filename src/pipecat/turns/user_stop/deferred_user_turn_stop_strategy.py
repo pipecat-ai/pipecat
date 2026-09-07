@@ -7,9 +7,9 @@
 """Wrapper that defers a stop strategy's finalization to another strategy."""
 
 from pipecat.frames.frames import Frame
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -46,6 +46,16 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Return the wrapped strategy."""
         return self._inner
 
+    @property
+    def resolves_proposed_turn_stop_frames(self) -> bool:
+        """Report what the inner strategy does with proposals.
+
+        Frame processing is forwarded, so a proposal reaches the inner strategy
+        and is resolved there. Deferring finalization changes when the turn ends,
+        not who decides it.
+        """
+        return self._inner.resolves_proposed_turn_stop_frames
+
     def add_event_handler(self, event_name: str, handler):
         """Forward event subscriptions to the inner strategy.
 
@@ -58,20 +68,23 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
             return
         self._inner.add_event_handler(event_name, handler)
 
-    async def setup(self, task_manager: BaseTaskManager):
+    async def setup(self, setup: FrameProcessorSetup):
         """Set up the inner strategy."""
-        await super().setup(task_manager)
-        await self._inner.setup(task_manager)
+        await super().setup(setup)
+        await self._inner.setup(setup)
 
     async def cleanup(self):
         """Clean up the inner strategy."""
         await super().cleanup()
         await self._inner.cleanup()
 
-    async def reset(self):
-        """Reset the inner strategy for a new user turn."""
-        await super().reset()
-        await self._inner.reset()
+    async def handle_user_turn_started(self):
+        """Forward the turn-started callback to the inner strategy."""
+        await self._inner.handle_user_turn_started()
+
+    async def handle_user_turn_stopped(self):
+        """Forward the turn-stopped callback to the inner strategy."""
+        await self._inner.handle_user_turn_stopped()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Forward frame processing to the inner strategy."""

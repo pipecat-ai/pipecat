@@ -34,28 +34,25 @@ from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregationType,
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_inworld_language(language: Language) -> str:
@@ -102,9 +99,9 @@ class InworldTTSSettings(TTSSettings):
             Only supported by ``inworld-tts-2``.
     """
 
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | _NotGiven = field(
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -280,13 +277,13 @@ class InworldHttpTTSService(TTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -346,8 +343,6 @@ class InworldHttpTTSService(TTSService):
         Returns:
             An asynchronous generator of frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
-
         self._current_run_had_timestamps = False
 
         audio_config = {
@@ -776,33 +771,15 @@ class InworldTTSService(WebsocketTTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Inworld WebSocket TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Inworld WebSocket TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio without closing the context.
@@ -995,7 +972,7 @@ class InworldTTSService(WebsocketTTSService):
                 ("X-User-Agent", USER_AGENT),
                 ("X-Request-Id", request_id),
             ]
-            self._websocket = await websocket_connect(self._url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(self._url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -1056,10 +1033,19 @@ class InworldTTSService(WebsocketTTSService):
                 error_msg = status.get("message", "Unknown error")
                 error_code = status.get("code")
 
-                # Handle "Context not found" error (code 5)
-                # This can happen when a keepalive message is sent but no context is available.
+                # Handle benign context errors:
+                # - "Context not found" (code 5): keepalive sent after context expired
+                # - "context_id is required" / "no open context": keepalive sent
+                #   without an active context
                 if error_code == 5 and "not found" in error_msg.lower():
                     logger.debug(f"{self}: Context {ctx_id} not found.")
+                    continue
+                lower_error_msg = error_msg.lower()
+                if (
+                    "context_id is required" in lower_error_msg
+                    or "no open context" in lower_error_msg
+                ):
+                    logger.debug(f"{self}: Contextless message rejected (benign): {error_msg}")
                     continue
 
                 # For other errors, push error frame

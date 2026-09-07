@@ -170,9 +170,8 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._audio_buffer.clear()
         self._decision_made = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn."""
         self._reset_state()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
@@ -254,7 +253,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            ip_prob = self._ip_session.process(ip_frame.tolist(), self._speech_active)
+            ip_prob = self._ip_session.process(ip_frame, self._speech_active)
 
             if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(

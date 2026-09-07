@@ -193,6 +193,185 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         # Buffer should be empty
         self.assertEqual(self.aggregator.text.text, "")
 
+    async def test_flush_unclosed_pattern_returns_preceding_text(self):
+        """Unclosed REMOVE pattern: flush returns text before it, drops the rest.
+
+        A closed <test>...</test> pair is stripped from the output entirely
+        (see test_pattern_match_and_removal); an unclosed one degrades to the
+        same result instead of leaking the raw start tag and its content.
+        """
+        text = "Well <test>pattern content"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "Well")
+        self.assertNotIn("<test>", result.text)
+        self.assertNotIn("pattern content", result.text)
+
+        # The pair never closed, so its handler is not invoked.
+        self.test_handler.assert_not_called()
+
+        # Buffer is cleared after flush.
+        self.assertEqual(self.aggregator.text.text, "")
+
+    async def test_flush_unclosed_pattern_with_no_preceding_text(self):
+        """Unclosed pattern with nothing before it: flush drops it entirely."""
+        text = "<test>pattern content"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await self.aggregator.flush()
+        self.assertIsNone(result)
+        self.test_handler.assert_not_called()
+
+    async def test_flush_state_resets_for_reuse(self):
+        """After flush drops an incomplete pattern, the aggregator works cleanly again."""
+        text = "Well <test>pattern content"
+        async for _ in self.aggregator.aggregate(text):
+            pass
+        await self.aggregator.flush()
+        self.assertEqual(self.aggregator.text.text, "")
+
+        # A fresh, fully-closed pattern still works after the reset.
+        text = "New <test>value</test> sentence."
+        results = [result async for result in self.aggregator.aggregate(text)]
+        result = await self.aggregator.flush()
+        combined = "".join(r.text for r in results) + (result.text if result else "")
+        self.assertNotIn("value", combined)
+        self.assertIn("New", combined)
+
+    async def test_flush_remove_pattern_closed_then_unclosed_same_type(self):
+        """A prior closed REMOVE pair doesn't confuse handling of a later,
+        genuinely unclosed occurrence of the same pattern type: flush must
+        find the actual unmatched occurrence, not just the first occurrence
+        of the start delimiter in the buffer.
+        """
+        text = "Start <test>closed</test> middle <test>unclosed"
+        results = [result async for result in self.aggregator.aggregate(text)]
+
+        result = await self.aggregator.flush()
+        combined = "".join(r.text for r in results) + (result.text if result else "")
+        self.assertIn("Start", combined)
+        self.assertIn("middle", combined)
+        self.assertNotIn("closed", combined)
+        self.assertNotIn("unclosed", combined)
+
+        self.test_handler.assert_called_once()
+
+    async def test_flush_earliest_unmatched_wins_regardless_of_registration_order(self):
+        """Two different unclosed REMOVE patterns: flush cuts at whichever
+        starts first in the text, not whichever pattern was registered first.
+        """
+        aggregator = PatternPairAggregator()
+        voice_handler = AsyncMock()
+        test_handler = AsyncMock()
+        # Registered in reverse of where they appear in the text below.
+        aggregator.add_pattern(
+            type="voice", start_pattern="<voice>", end_pattern="</voice>", action=MatchAction.REMOVE
+        )
+        aggregator.add_pattern(
+            type="test2", start_pattern="<test>", end_pattern="</test>", action=MatchAction.REMOVE
+        )
+        aggregator.on_pattern_match("voice", voice_handler)
+        aggregator.on_pattern_match("test2", test_handler)
+
+        text = "Hi <test>foo <voice>bar"
+        results = [result async for result in aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "Hi")
+        self.assertNotIn("foo", result.text)
+        self.assertNotIn("bar", result.text)
+        voice_handler.assert_not_called()
+        test_handler.assert_not_called()
+
+    async def test_flush_unclosed_keep_pattern_kept_verbatim(self):
+        """Unclosed KEEP pattern: flush keeps the content, delimiter
+        included, just as a closed KEEP pair is kept verbatim (see
+        test_multiple_patterns).
+        """
+        self.aggregator.add_pattern(
+            type="emphasis",
+            start_pattern="<em>",
+            end_pattern="</em>",
+            action=MatchAction.KEEP,
+        )
+
+        text = "Well <em>unclosed content"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, text)
+
+    async def test_flush_keep_pattern_uses_correct_unmatched_occurrence(self):
+        """A closed KEEP pair earlier in the buffer must not be mistaken for
+        the unmatched one; the actually-unmatched occurrence can come later.
+        """
+        self.aggregator.add_pattern(
+            type="emphasis",
+            start_pattern="<em>",
+            end_pattern="</em>",
+            action=MatchAction.KEEP,
+        )
+
+        text = "Hello <em>bold</em> world <em>unclosed"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        # Unclosed KEEP content is kept, so nothing gets dropped, and the
+        # closed <em>bold</em> pair is not mistaken for the unmatched one.
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, text)
+
+    async def test_flush_unclosed_aggregate_pattern_dropped_without_handler(self):
+        """Unclosed AGGREGATE pattern: content is dropped like REMOVE, and its
+        handler is not invoked, since AGGREGATE content is a side channel
+        that's never spoken.
+        """
+        text = "Before <code>unclosed content"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Before")
+
+        result = await self.aggregator.flush()
+        self.assertIsNone(result)
+        self.code_handler.assert_not_called()
+
+    async def test_flush_skips_completed_pair_still_in_buffer(self):
+        """A completed pair still sitting in the buffer at flush time is not
+        mistaken for an unmatched one: its start delimiter (and any start
+        nested inside its span) is skipped, and the cut happens at the
+        genuinely unmatched occurrence that follows it.
+        """
+        # Seed the buffer directly: aggregate() strips closed REMOVE pairs
+        # eagerly, so flush() seeing one only happens in edge cases (e.g. a
+        # pair completing while _last_processed_position is stale).
+        self.aggregator._text = "Start <test>closed</test> middle <test>unclosed"
+
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "Start <test>closed</test> middle")
+        self.assertNotIn("unclosed", result.text)
+
+    async def test_flush_trims_trailing_partial_start_delimiter(self):
+        """Buffer ending mid-delimiter (stream cut off inside '<test>') has
+        the partial delimiter trimmed rather than spoken as plain text.
+        """
+        text = "Hello <te"
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        result = await self.aggregator.flush()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "Hello")
+
 
 class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -253,6 +432,136 @@ class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0].text, "Hi ")
         self.assertEqual(results[0].type, "token")
         self.handler.assert_not_called()
+
+    async def test_token_flush_drops_unclosed_pattern(self):
+        """TOKEN mode: an unclosed REMOVE pattern is dropped on flush, not leaked."""
+        results = []
+        for token in ["Hi ", "<think>", "secret"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hi ")
+
+        result = await self.aggregator.flush()
+        self.assertIsNone(result)
+        self.handler.assert_not_called()
+
+        # State resets after flush.
+        self.assertEqual(self.aggregator.text.text, "")
+
+    async def test_token_start_delimiter_split_across_chunks(self):
+        """A start delimiter split across chunks is not leaked as plain text.
+
+        Regression test for https://github.com/pipecat-ai/pipecat/issues/5267:
+        on unmodified main, "<thin" is yielded as a token before the delimiter
+        reassembles, so the REMOVE pattern is never recognized and "secret" is
+        spoken.
+        """
+        results = []
+        for token in ["Hi ", "<thin", "k>secret</think>", " bye"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        # The delimiter reassembles and the pattern is recognized: content is
+        # stripped and the handler fires exactly once with the right content.
+        self.handler.assert_called_once()
+        call_args = self.handler.call_args[0][0]
+        self.assertEqual(call_args.text, "secret")
+
+        texts = [r.text for r in results]
+        self.assertEqual(texts, ["Hi ", " bye"])
+
+    async def test_token_start_delimiter_split_across_three_chunks(self):
+        """A start delimiter split across three chunks reassembles correctly."""
+        results = []
+        for token in ["<th", "in", "k>secret</think>"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        self.handler.assert_called_once()
+        call_args = self.handler.call_args[0][0]
+        self.assertEqual(call_args.text, "secret")
+
+        # Nothing should have leaked while the delimiter was reassembling.
+        self.assertEqual(results, [])
+
+    async def test_token_partial_delimiter_chunk_yields_nothing(self):
+        """A chunk that is entirely a partial delimiter yields nothing."""
+        results = [r async for r in self.aggregator.aggregate("<thin")]
+        self.assertEqual(results, [])
+        self.assertEqual(self.aggregator.text.text, "<thin")
+
+    async def test_token_trailing_prefix_char_held_then_emitted(self):
+        """A plain trailing '<' is held back and emitted with the next chunk once it no longer matches a delimiter."""
+        results = []
+        async for r in self.aggregator.aggregate("Hello <"):
+            results.append(r)
+        # "<" could be the start of "<think>", so it's held back.
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hello ")
+
+        async for r in self.aggregator.aggregate(" world"):
+            results.append(r)
+        # Once the held-back "<" is followed by something other than "t", it
+        # no longer matches a delimiter prefix and is emitted with the rest.
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[1].text, "< world")
+
+    async def test_token_split_aggregate_delimiter_recognized(self):
+        """A split AGGREGATE delimiter still reassembles: content is yielded as
+        its own aggregation instead of the fragments leaking as plain tokens.
+        """
+        code_handler = AsyncMock()
+        self.aggregator.add_pattern(
+            type="code_pattern",
+            start_pattern="<code>",
+            end_pattern="</code>",
+            action=MatchAction.AGGREGATE,
+        )
+        self.aggregator.on_pattern_match("code_pattern", code_handler)
+
+        results = []
+        for token in ["Here is code ", "<cod", "e>pattern content</code>", " more"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        code_handler.assert_called_once()
+        call_args = code_handler.call_args[0][0]
+        self.assertEqual(call_args.text, "pattern content")
+
+        self.assertEqual(
+            [(r.type, r.text) for r in results],
+            [
+                ("token", "Here is code "),
+                ("code_pattern", "pattern content"),
+                ("token", " more"),
+            ],
+        )
+
+    async def test_token_split_keep_delimiter_recognized(self):
+        """A split KEEP delimiter still reassembles and triggers its handler."""
+        keep_handler = AsyncMock()
+        self.aggregator.add_pattern(
+            type="em",
+            start_pattern="<em>",
+            end_pattern="</em>",
+            action=MatchAction.KEEP,
+        )
+        self.aggregator.on_pattern_match("em", keep_handler)
+
+        results = []
+        for token in ["very <e", "m>excited</em> today"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        keep_handler.assert_called_once()
+        call_args = keep_handler.call_args[0][0]
+        self.assertEqual(call_args.text, "excited")
+
+        # KEEP delimiters stay in the text; the split start delimiter
+        # reassembles intact instead of leaking as a fragment ("<e").
+        texts = [r.text for r in results]
+        self.assertEqual(texts, ["very ", "<em>excited</em> today"])
 
 
 if __name__ == "__main__":

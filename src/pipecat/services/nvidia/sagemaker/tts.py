@@ -22,13 +22,13 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.utils.errors import ErrorCategory, extract_http_status_code
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -113,13 +113,13 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the TTS service and create the SageMaker client.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         session = aiobotocore.session.get_session()
         self._client_ctx = session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
             "sagemaker-runtime",
@@ -129,6 +129,11 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         )
         self._client = await self._client_ctx.__aenter__()
         logger.debug(f"{self}: connected to SageMaker endpoint '{self._endpoint_name}'")
+
+    async def cleanup(self):
+        """Release the SageMaker client at teardown."""
+        await super().cleanup()
+        await self._close_client()
 
     async def _close_client(self):
         if self._client_ctx is not None:
@@ -170,8 +175,6 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         Yields:
             :class:`TTSAudioRawFrame` chunks of signed 16-bit mono PCM.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         text = text.strip()
         if not text or not any(c.isalnum() for c in text):
             return
@@ -239,6 +242,17 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     Settings = NvidiaSageMakerTTSSettings
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Treat rejected credentials as recoverable.
+
+        AWS credentials are resolved when the client is built, so a rejection
+        can be an expired credential rather than a misconfigured service, and
+        reconnecting is what clears it.
+        """
+        if extract_http_status_code(exception) in (401, 403):
+            return ErrorCategory.CONNECTIVITY
+        return None
+
     def __init__(
         self,
         *,
@@ -294,32 +308,18 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the TTS service and connect to the SageMaker endpoint.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the TTS service and disconnect from the SageMaker endpoint.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
+    # Teardown is handled by the base WebsocketTTSService, whose stop/cancel/
+    # cleanup all route through self._disconnect() (which cancels the receive
+    # task and closes the bidi-stream session).
 
     # ── Connection management (WebsocketService abstract interface) ────────────
 
@@ -386,7 +386,7 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._reset_audio_buffer()
-        if self._bot_speaking and self._client:
+        if (self._bot_speaking or self._tts_started) and self._client:
             logger.debug(
                 f"{self}: interruption detected, sending input_text.done and waiting for speech.completed"
             )
@@ -494,8 +494,6 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Send text to NIM; audio arrives asynchronously via _receive_messages."""
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         text = text.strip()
         if not text or not any(c.isalnum() for c in text):
             return

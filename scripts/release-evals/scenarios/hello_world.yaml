@@ -1,0 +1,17 @@
+name: hello_world
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot says hello and asks what the user's favorite color is"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "My favorite color is blue."
+    expect:
+      - event: function_call
+        calls:
+          - name: record_favorite_color
+            args: { color: blue }

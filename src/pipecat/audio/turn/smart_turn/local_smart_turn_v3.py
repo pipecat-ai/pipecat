@@ -10,7 +10,7 @@ This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -59,7 +59,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
                 try:
                     with impresources.path(package_path, model_name) as f:
-                        smart_turn_model_path = f
+                        smart_turn_model_path = str(f)
                 except BaseException:
                     smart_turn_model_path = str(
                         impresources.files(package_path).joinpath(model_name)
@@ -168,7 +168,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         outputs = self._session.run(None, {"input_features": input_features})
 
         # Extract probability (ONNX model returns sigmoid probabilities)
-        probability = outputs[0][0].item()
+        probability = cast(np.ndarray, outputs[0])[0].item()
 
         # Make prediction (1 for Complete, 0 for Incomplete)
         prediction = 1 if probability > 0.5 else 0

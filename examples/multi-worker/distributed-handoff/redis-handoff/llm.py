@@ -68,11 +68,11 @@ WORKER_CONFIG = {
 }
 
 
-class AcmeLLMTask(LLMWorker):
+class AcmeLLMWorker(LLMWorker):
     """LLM worker for Acme Corp with transfer and end tools."""
 
     def __init__(self, name: str, *, system_instruction: str, watch: list[str]):
-        """Initialize the AcmeLLMTask.
+        """Initialize the AcmeLLMWorker.
 
         Args:
             name: Unique worker name (``"greeter"`` or ``"support"``).
@@ -102,12 +102,12 @@ class AcmeLLMTask(LLMWorker):
             agent (str): The agent to transfer to (e.g. 'greeter', 'support').
             reason (str): Why the user is being transferred.
         """
-        logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(None)
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(messages=[{"role": "developer", "content": reason}]),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -117,12 +117,9 @@ class AcmeLLMTask(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 async def main_async() -> None:
@@ -136,7 +133,7 @@ async def main_async() -> None:
     bus = RedisBus(redis=redis, channel=args.channel)
 
     config = WORKER_CONFIG[args.worker]
-    worker = AcmeLLMTask(
+    worker = AcmeLLMWorker(
         args.worker,
         system_instruction=config["system_instruction"],
         watch=config["watch"],

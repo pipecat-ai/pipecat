@@ -19,17 +19,17 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummaryConfig,
 )
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
         self.context = LLMContext(
             messages=[
@@ -45,7 +45,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -81,7 +81,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -111,7 +111,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -140,7 +140,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_count = 0
 
@@ -171,7 +171,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Add messages and trigger summarization
         for i in range(10):
@@ -218,7 +218,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         config = LLMAutoContextSummarizationConfig(max_context_tokens=50)
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Add messages and trigger summarization
         for i in range(10):
@@ -251,7 +251,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Add messages and trigger summarization
         for i in range(10):
@@ -316,7 +316,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
             config=config,
             auto_trigger=False,  # Disable auto; only manual requests should work
         )
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -355,7 +355,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -386,7 +386,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         config = LLMAutoContextSummarizationConfig(max_context_tokens=100000)
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_count = 0
 
@@ -416,7 +416,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Add messages and trigger summarization
         for i in range(10):
@@ -458,7 +458,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         for i in range(10):
             self.context.add_message({"role": "user", "content": "Test message."})
@@ -506,7 +506,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         for i in range(10):
             self.context.add_message({"role": "user", "content": "Test message."})
@@ -548,7 +548,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         # Add messages (1 system + 10 user = 11 total)
         for i in range(10):
@@ -605,7 +605,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         for i in range(10):
             self.context.add_message({"role": "user", "content": "Test message."})
@@ -649,7 +649,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -676,7 +676,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -711,7 +711,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -739,7 +739,7 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         )
 
         summarizer = LLMContextSummarizer(context=self.context, config=config)
-        await summarizer.setup(self.task_manager)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
 
         request_frame = None
 
@@ -757,6 +757,136 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         # Should NOT trigger because token limit is not exceeded
         self.assertIsNone(request_frame)
+
+        await summarizer.cleanup()
+
+    async def _check_trigger(self, summarizer) -> bool:
+        """Run one threshold check and report whether a summary was requested."""
+        requested = False
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal requested
+            requested = True
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        return requested
+
+    async def test_message_count_excludes_system_message_only_when_present(self):
+        """The message threshold counts conversation messages, not the system message."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,
+            max_unsummarized_messages=5,
+        )
+
+        # With a leading system message, 5 conversation messages trigger.
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+        for i in range(4):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+        self.assertFalse(await self._check_trigger(summarizer))
+        self.context.add_message({"role": "user", "content": "Message 4"})
+        self.assertTrue(await self._check_trigger(summarizer))
+        await summarizer.cleanup()
+
+        # Without one, 5 conversation messages still trigger.
+        context = LLMContext()
+        summarizer = LLMContextSummarizer(context=context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+        for i in range(4):
+            context.add_message({"role": "user", "content": f"Message {i}"})
+        self.assertFalse(await self._check_trigger(summarizer))
+        context.add_message({"role": "user", "content": "Message 4"})
+        self.assertTrue(await self._check_trigger(summarizer))
+        await summarizer.cleanup()
+
+    async def test_message_count_resets_after_summary(self):
+        """After a summary, only messages added since it count toward the threshold."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,
+            max_unsummarized_messages=5,
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        for i in range(5):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertIsNotNone(request_frame)
+
+        # Summarize messages 1..3, keeping the last two. The context becomes
+        # [system, summary, Message 3, Message 4].
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Summary.",
+                last_summarized_index=3,
+            )
+        )
+        self.assertEqual(len(self.context.messages), 4)
+
+        # Two kept messages plus two new ones is below the threshold of five.
+        for i in range(2):
+            self.context.add_message({"role": "user", "content": f"New message {i}"})
+        self.assertFalse(await self._check_trigger(summarizer))
+
+        # The fifth conversation message since the summary triggers again.
+        self.context.add_message({"role": "user", "content": "New message 2"})
+        self.assertTrue(await self._check_trigger(summarizer))
+
+        await summarizer.cleanup()
+
+    async def test_message_count_resets_when_context_replaced(self):
+        """Replacing the context after a summary drops the summary from the count."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,
+            max_unsummarized_messages=5,
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        for i in range(5):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Summary.",
+                last_summarized_index=3,
+            )
+        )
+
+        # A fresh conversation with no summary message: every message counts.
+        self.context.set_messages(
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Message 0"},
+                {"role": "user", "content": "Message 1"},
+                {"role": "user", "content": "Message 2"},
+                {"role": "user", "content": "Message 3"},
+            ]
+        )
+        self.assertFalse(await self._check_trigger(summarizer))
+        self.context.add_message({"role": "user", "content": "Message 4"})
+        self.assertTrue(await self._check_trigger(summarizer))
 
         await summarizer.cleanup()
 

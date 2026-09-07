@@ -304,9 +304,6 @@ class ProjectGenerator:
             "transports": self.config.transports,
             "mode": self.config.mode,
             "stt_service": self.config.stt_service,
-            "external_turn_detection": ServiceLoader.uses_external_turn_detection(
-                self.config.stt_service
-            ),
             "llm_service": self.config.llm_service,
             "tts_service": self.config.tts_service,
             "realtime_service": self.config.realtime_service,
@@ -346,6 +343,9 @@ class ProjectGenerator:
                     services[key] = value
         elif self.config.realtime_service:
             services["realtime"] = self.config.realtime_service
+
+        if self.config.video_service:
+            services["video"] = self.config.video_service
 
         # Extract all required extras
         extras = ServiceLoader.extract_extras_for_services(services)

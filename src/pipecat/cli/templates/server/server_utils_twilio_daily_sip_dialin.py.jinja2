@@ -16,7 +16,7 @@ from pydantic import BaseModel
 class TwilioCallData(BaseModel):
     """Data received from Twilio call webhook.
 
-    Attributes:
+    Parameters:
         call_sid: Unique identifier for the call
         from_phone: The caller's phone number
         to_phone: The dialed phone number
@@ -30,7 +30,7 @@ class TwilioCallData(BaseModel):
 class AgentRequest(BaseModel):
     """Request data sent to bot start endpoint.
 
-    Attributes:
+    Parameters:
         room_url: Daily room URL for the bot to join
         token: Authentication token for the Daily room
         call_sid: Unique identifier for the call

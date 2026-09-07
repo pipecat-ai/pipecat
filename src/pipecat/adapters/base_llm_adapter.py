@@ -30,6 +30,26 @@ from pipecat.processors.aggregators.llm_context import (
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
 
 
+class LLMContextConversionError(Exception):
+    """Raised when converting a universal ``LLMContext`` to a provider's message format fails.
+
+    Adapters that transform context messages into a provider-specific format
+    raise this from their conversion routine, wrapping the underlying error
+    (preserved as ``__cause__``). Its message identifies the failure as a
+    context-mapping problem and carries the underlying cause. The corresponding
+    LLM service catches this and surfaces it in the ``ErrorFrame`` it pushes
+    upstream.
+    """
+
+    def __init__(self, cause: Exception):
+        """Initialize the error.
+
+        Args:
+            cause: The underlying exception raised during message conversion.
+        """
+        super().__init__(f"Error mapping context messages to provider format: {cause}")
+
+
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """Abstract base class for LLM provider adapters.
 
@@ -51,6 +71,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def __init__(self):
         """Initialize the adapter."""
         self._warned_system_instruction = False
+        self._warned_context_system_message = False
         self._builtin_tools: dict[str, FunctionSchema] = {}
 
     @property
@@ -143,7 +164,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
         )
 
-    def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven:
+    def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven | None:
         """Convert tools from standard format to provider format.
 
         Built-in tools are automatically merged into the schema before conversion so that every
@@ -154,7 +175,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
 
         Returns:
             List of tools converted to provider format, or original tools
-            if not in standard format.
+            (possibly ``None``) if not in standard format.
         """
         if self._builtin_tools:
             if isinstance(tools, ToolsSchema):
@@ -185,6 +206,33 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
+    def _warn_context_system_message(self):
+        """Warn once that the initial ``"system"`` context message is deprecated.
+
+        The system prompt belongs on the LLM service, where it composes with
+        the instructions the framework contributes — appended instructions,
+        turn-completion guidance, async-tool guidance. A prompt carried in the
+        context bypasses that composition, and providers that take the system
+        instruction as a separate parameter drop it entirely when the service
+        also has one.
+        """
+        if self._warned_context_system_message:
+            return
+        self._warned_context_system_message = True
+        # Raised under an `always` filter so it survives the default
+        # `ignore::DeprecationWarning` that hides call sites outside
+        # `__main__` — every caller here is inside an LLM service. The flag
+        # above supplies the deduplication that filter would provide.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                'Passing the system prompt as an initial "system" message in `LLMContext` is'
+                " deprecated since 1.9.0 and will be removed in 2.0.0. Set `system_instruction`"
+                " on the LLM service instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
     def _extract_initial_system(
         self,
         messages: list,
@@ -207,7 +255,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         non-system message.
 
         Args:
-            messages: Message list in standard format (mutated in-place).
+            messages: Message list in standard format. The list is mutated
+                in-place; the message dicts it holds are never mutated, since
+                they are shared with the source LLMContext.
             system_instruction: The system instruction from service settings
                 or ``run_inference``. Only used to decide whether to warn
                 about a conflict in the single-message case.
@@ -222,6 +272,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if messages[0].get("role") != "system":
             return None
 
+        self._warn_context_system_message()
+
         # Would extracting empty the list? Convert to "user" instead.
         if len(messages) == 1:
             if system_instruction:
@@ -233,7 +285,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                         " system message is being converted to a user message to"
                         " avoid sending an empty conversation history."
                     )
-            messages[0]["role"] = "user"
+            # Replace rather than mutate: the message dicts are shared with the
+            # source LLMContext, so an in-place write would rewrite its history.
+            messages[0] = {**messages[0], "role": "user"}
             return None
 
         # Extract
@@ -272,9 +326,13 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             if not self._warned_system_instruction:
                 self._warned_system_instruction = True
                 if discard_context_system:
+                    # This provider takes the system instruction as a separate
+                    # parameter, so only one of the two can be sent.
                     logger.warning(
-                        "Both system_instruction and an initial system message"
-                        " in context are set. Using system_instruction."
+                        "Both system_instruction and an initial system message in"
+                        " context are set. Using system_instruction; the context"
+                        " system message is not sent to the model. Move the prompt"
+                        " to system_instruction on the LLM service."
                     )
                 else:
                     logger.warning(

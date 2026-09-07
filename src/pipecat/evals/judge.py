@@ -27,7 +27,7 @@ Example::
 
     from pipecat.services.ollama.llm import OLLamaLLMService
 
-    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="gemma2:9b"))
+    service = OLLamaLLMService(settings=OLLamaLLMService.Settings(model="gemma4:12b"))
     judge = EvalJudge(service)
     judge.add_user_message("What can you help me with?")
     judge.add_assistant_message("I can answer questions, set reminders, and look things up.")
@@ -65,11 +65,16 @@ JUDGE_SYSTEM_INSTRUCTION = (
     "when the intended spoken meaning satisfies the criterion. "
     "Respond ONLY with a JSON object on a single line containing two fields: "
     '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
-    'Use "yes" if the reply satisfies the criterion. Use "no" if the reply gives a '
-    'substantive answer that fails it. Use "continue" if the reply so far is only an '
-    'interim or filler utterance (e.g. "Let me check on that.", a greeting, or an '
-    "obviously incomplete fragment) that does not yet contain enough to decide — more "
-    "text is expected. Do not include any other text, explanation, or markdown."
+    'Use "yes" if the reply satisfies the criterion. '
+    'Use "continue" if the bot has not given its answer yet: it says it is checking, '
+    "looking something up, fetching, working on something, or that it will report back. "
+    "The answer is still coming, so there is nothing to judge yet. This holds however "
+    'long and however fluent the reply is: "The system is checking the current '
+    'conditions for you right now." is waiting, not answering. A greeting or an '
+    'obviously incomplete fragment is also "continue". '
+    'Use "no" only when the bot has given its answer and that answer fails the '
+    'criterion. If the bot has not answered yet, always use "continue", never "no". '
+    "Do not include any other text, explanation, or markdown."
 )
 
 # Transient final user message appended for the judge call. The conversation it
@@ -140,8 +145,10 @@ class EvalJudge:
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
-                ``model`` (default ``"gemma2:9b"``), and optional ``endpoint``
-                (service-specific default if omitted). ``None`` uses all defaults.
+                ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
+                (service-specific default if omitted), and an optional ``extra``
+                mapping forwarded to the model as top-level request parameters.
+                ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
