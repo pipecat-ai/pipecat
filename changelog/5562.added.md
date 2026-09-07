@@ -1,0 +1,1 @@
+- Added a `replace` field to `XAIHttpTTSService.Settings`, which passes xAI's pronunciation substitution map (up to 200 phrase-to-respelling entries) to `POST /v1/tts`.
