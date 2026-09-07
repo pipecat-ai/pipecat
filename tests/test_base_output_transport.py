@@ -34,7 +34,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.tests.mock_transport import MockOutputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
 class CapturingOutputTransport(MockOutputTransport):
