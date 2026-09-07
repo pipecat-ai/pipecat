@@ -19,7 +19,8 @@ from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import (
     WakePhraseUserTurnStartStrategy,
     _WakeState,
 )
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
@@ -30,9 +31,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def _setup_strategy(self, strategy: WakePhraseUserTurnStartStrategy):
         task_manager = TaskManager()
-        loop = asyncio.get_running_loop()
-        task_manager.setup(TaskManagerParams(loop=loop))
-        await strategy.setup(task_manager)
+        await strategy.setup(frame_processor_setup(task_manager))
         # The tests are quick, so make sure the schedule starts all tasks.
         await asyncio.sleep(0)
         return task_manager
@@ -167,7 +166,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_reset_preserves_inactive_state(self):
+    async def test_turn_start_preserves_inactive_state(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
@@ -176,7 +175,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
-        await strategy.reset()
+        await strategy.handle_user_turn_started()
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
@@ -266,8 +265,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_single_activation_stays_inactive_after_reset(self):
-        """In single activation mode, reset() keeps INACTIVE so the current turn can finish."""
+    async def test_single_activation_stays_inactive_after_turn_start(self):
+        """In single activation mode, the turn-start callback keeps INACTIVE so the current turn can finish."""
         strategy = self._create_strategy(single_activation=True, timeout=0.5)
         await self._setup_strategy(strategy)
 
@@ -278,8 +277,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
-        # Simulate turn start (controller calls reset on all start strategies).
-        await strategy.reset()
+        # Simulate turn start (the controller notifies all start strategies).
+        await strategy.handle_user_turn_started()
         # State remains INACTIVE so frames continue to flow.
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 

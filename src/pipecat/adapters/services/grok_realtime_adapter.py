@@ -128,6 +128,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
 
         # Extract system message as session instructions
         if messages and messages[0].get("role") == "system":
+            self._warn_context_system_message()
             system = messages.pop(0)
             content = system.get("content")
             if isinstance(content, str):

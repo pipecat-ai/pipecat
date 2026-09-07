@@ -11,11 +11,15 @@ information to bot functions.
 """
 
 import argparse
+import asyncio
+import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from fastapi import WebSocket
 
 
 class DialinSettings(BaseModel):
@@ -140,7 +144,7 @@ class RunnerArguments:
         handle_sigint: Whether the bot should install a SIGINT handler.
         handle_sigterm: Whether the bot should install a SIGTERM handler.
         pipeline_idle_timeout_secs: Seconds the pipeline may stay idle before
-            shutting down.
+            shutting down; ``None`` disables the idle timeout.
         body: Optional request body data passed from the runner entry point.
         call_data: Parsed telephony handshake as a :class:`CallData` model — typed
             attribute access (``call_data.to_number``) that's also dict-compatible
@@ -156,7 +160,7 @@ class RunnerArguments:
     # Use kw_only so subclasses don't need to worry about ordering.
     handle_sigint: bool = field(init=False, kw_only=True)
     handle_sigterm: bool = field(init=False, kw_only=True)
-    pipeline_idle_timeout_secs: int = field(init=False, kw_only=True)
+    pipeline_idle_timeout_secs: float | None = field(init=False, kw_only=True)
     body: Any | None = field(default_factory=dict, kw_only=True)
     call_data: CallData | None = field(default=None, kw_only=True)
     session_id: str | None = field(default=None, kw_only=True)
@@ -213,7 +217,7 @@ class WebSocketRunnerArguments(RunnerArguments):
         body: Additional request data
     """
 
-    websocket: WebSocket
+    websocket: "WebSocket"
     transport_type: str | None = None
 
 
@@ -234,6 +238,7 @@ class LiveKitRunnerArguments(RunnerArguments):
 
     Parameters:
         room_name: LiveKit room name to join
+        url: LiveKit server URL to connect to
         token: Authentication token for the room
         body: Additional request data
     """
@@ -259,3 +264,74 @@ class EvalRunnerArguments(RunnerArguments):
 
     host: str = "localhost"
     port: int = 7860
+
+
+@dataclass
+class MOQRunnerArguments(RunnerArguments):
+    """MOQ (Media over QUIC) transport session arguments for the runner.
+
+    The ``ready_event`` and ``cert_fingerprints`` fields are populated
+    automatically by :func:`pipecat.runner.utils.create_transport`; bots
+    don't need to thread them by hand.
+
+    Parameters:
+        host: MOQ relay/server hostname the browser uses to connect.
+        port: MOQ relay/server port.
+        path: MOQ endpoint path on the relay (client mode).
+        namespace: MOQ namespace (like a room identifier).
+        participant_id: This bot's participant id; it broadcasts under
+            ``<namespace>/<participant_id>``.
+        peer_id: The peer's participant id; the bot subscribes to
+            ``<namespace>/<peer_id>``.
+        verify_ssl: Whether to verify SSL certificates (client mode).
+        serve: When True, the bot binds its own MOQ server instead of
+            dialing a relay — useful for local dev with no separate
+            ``moq-relay`` process.
+        bind: Local UDP bind address — the listen address in serve mode
+            (e.g. ``"[::]:4080"``), the dial source address in client mode
+            (ephemeral if unset).
+        serve_bind: Serve-mode listen address.
+
+            .. deprecated:: 1.8.0
+                Use ``bind`` instead, which also covers client mode. Will be
+                removed in 2.0.0.
+        serve_tls_host: Hostname used for the generated self-signed cert
+            when no on-disk cert/key is provided.
+        serve_tls_cert: Path to a PEM-encoded TLS cert chain.
+        serve_tls_key: Path to the matching PEM-encoded private key.
+        ready_event: Event the bot fires once it has finished MOQ
+            bring-up. The HTTP ``/start`` endpoint waits on this before
+            telling the browser to open its WebTransport.
+        cert_fingerprints: SHA-256 fingerprints (hex) of the bot's TLS
+            cert chain — populated by the transport in serve mode so
+            ``/api/config`` can hand them to the browser for pinning.
+    """
+
+    host: str
+    port: int
+    path: str = "/moq"
+    namespace: str = "pipecat"
+    participant_id: str = "response"
+    peer_id: str = "request"
+    verify_ssl: bool = True
+    serve: bool = False
+    bind: str | None = None
+    serve_bind: str | None = field(default=None, kw_only=True)
+    serve_tls_host: str = "localhost"
+    serve_tls_cert: str | None = None
+    serve_tls_key: str | None = None
+    ready_event: asyncio.Event | None = field(default=None, kw_only=True)
+    cert_fingerprints: list[str] = field(default_factory=list, kw_only=True)
+
+    def __post_init__(self):
+        """Carry the pre-1.8.0 ``serve_bind`` spelling over to ``bind``."""
+        super().__post_init__()
+        if self.serve_bind is not None:
+            warnings.warn(
+                "`MOQRunnerArguments.serve_bind` is deprecated since 1.8.0 and will be "
+                "removed in 2.0.0. Use `MOQRunnerArguments.bind` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if self.bind is None:
+                self.bind = self.serve_bind

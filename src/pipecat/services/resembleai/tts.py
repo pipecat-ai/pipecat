@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,6 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -20,11 +19,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -161,13 +160,13 @@ class ResembleAITTSService(WebsocketTTSService):
         self._request_id_counter += 1
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Resemble AI TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._resemble_sample_rate = self.sample_rate
         await self._connect()
 
@@ -211,7 +210,11 @@ class ResembleAITTSService(WebsocketTTSService):
                 return
             logger.debug("Connecting to Resemble AI TTS")
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            self._websocket = await websocket_connect(self._url, additional_headers=headers)
+            # Resemble AI doesn't acknowledge the closing handshake, so don't
+            # wait for one.
+            self._websocket = await self._websocket_connect(
+                self._url, additional_headers=headers, close_timeout=0
+            )
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -225,8 +228,6 @@ class ResembleAITTSService(WebsocketTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Resemble AI")
-                # ResembleAI doesn't send disconnect acknowledgement, set close_timeout to 0
-                self._websocket.close_timeout = 0
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -438,8 +439,6 @@ class ResembleAITTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()

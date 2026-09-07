@@ -89,7 +89,8 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 "turns: [{user: hi, expect: [{event: llm_started}]}]\n"
             )
         )
-        self.assertEqual(s.user_audio, {"service": "cartesia", "voice": "v1"})
+        self.assertTrue(s.user_audio)
+        self.assertEqual(s.user_speech, {"service": "cartesia", "voice": "v1"})
 
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
@@ -144,6 +145,59 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.text_contains, "bar")
         self.assertEqual(exp.eval, "is friendly")
         self.assertIsNone(exp.calls)
+        self.assertFalse(exp.absent)
+
+    def test_absent_expectation_parsed(self):
+        s = EvalScenario.load(
+            _write(
+                """
+                name: absent
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        eval: "answers"
+                      - event: llm_response
+                        absent: true
+                        within_ms: 5000
+                """
+            )
+        )
+        exp = s.turns[0].expect[1]
+        self.assertTrue(exp.absent)
+        self.assertEqual(exp.within_ms, 5000)
+
+    def test_absent_rejects_content_checks(self):
+        for extra in ('eval: "repeats itself"', 'text_contains: "again"'):
+            with self.assertRaises(ValueError):
+                EvalScenario.load(
+                    _write(
+                        f"""
+                        name: bad_absent
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                absent: true
+                                {extra}
+                        """
+                    )
+                )
+
+    def test_absent_must_be_boolean(self):
+        with self.assertRaises(ValueError):
+            EvalScenario.load(
+                _write(
+                    """
+                    name: bad_absent_type
+                    turns:
+                      - user: "x"
+                        expect:
+                          - event: llm_response
+                            absent: "yes please"
+                    """
+                )
+            )
 
     def test_function_call_name_args_shorthand(self):
         """A single function_call uses the ``name:``/``args:`` shorthand."""
@@ -252,6 +306,22 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = EvalScenario.load(_write("name: dtmf\nturns: [{dtmf: 123}]\n"))
         self.assertEqual(s.turns[0].dtmf, "123")
 
+    def test_dtmf_unquoted_leading_zero_preserved(self):
+        """A leading zero must stay literal digits, not be read as YAML octal.
+
+        YAML 1.1 would otherwise parse `012` as octal 10, silently sending the
+        wrong keys; the scenario loader resolves only plain decimal as int.
+        """
+        for seq in ("012", "010", "007", "0420", "000"):
+            s = EvalScenario.load(_write(f"name: dtmf\nturns: [{{dtmf: {seq}}}]\n"))
+            self.assertEqual(s.turns[0].dtmf, seq)
+
+    def test_dtmf_unquoted_hex_rejected(self):
+        """A hex-looking token isn't read as a number; `x` fails validation."""
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: bad\nturns: [{dtmf: 0x10}]\n"))
+        self.assertIn("invalid keypad entry", str(cm.exception))
+
     def test_dtmf_invalid_entry_rejected(self):
         with self.assertRaises(ValueError) as cm:
             EvalScenario.load(_write('name: bad\nturns: [{dtmf: "1A"}]\n'))
@@ -301,7 +371,10 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = EvalScenario.load(
             _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
-        self.assertEqual(s.judge, {"service": "ollama", "model": "gemma2:9b"})
+        self.assertEqual(
+            s.judge,
+            {"service": "ollama", "model": "gemma4:12b", "extra": {"reasoning_effort": "none"}},
+        )
 
     def test_judge_block_non_mapping_rejected(self):
         with self.assertRaises(ValueError) as cm:
@@ -499,8 +572,99 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertTrue(s.bot_audio)
         self.assertEqual(s.transcriber, {"service": "whisper", "model": "base"})
         self.assertEqual(s.judge, {"service": "ollama", "model": "llama3:latest"})
-        self.assertEqual(s.user_audio, {"service": "kokoro", "voice": "af_heart"})
+        self.assertTrue(s.user_audio)
+        self.assertEqual(s.user_speech, {"service": "kokoro", "voice": "af_heart"})
+
+    def test_stop_on_failure_defaults_true(self):
+        s = EvalScenario.load(
+            _write("name: a\nturns: [{user: hi, expect: [{event: llm_response}]}]\n")
+        )
+        self.assertTrue(s.stop_on_failure)
+
+    def test_stop_on_failure_false(self):
+        s = EvalScenario.load(
+            _write(
+                "name: a\n"
+                "stop_on_failure: false\n"
+                "turns: [{user: hi, expect: [{event: llm_response}]}]\n"
+            )
+        )
+        self.assertFalse(s.stop_on_failure)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTurnAudioFile(unittest.TestCase):
+    """A turn can name an audio file to play instead of synthesizing its text."""
+
+    AUDIO_USER = "user:\n  modality: audio\n  speech: {service: kokoro, voice: af_heart}\n"
+
+    def test_audio_path_resolves_against_the_scenario(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "clips").mkdir()
+        (d / "clips" / "hi.wav").write_bytes(b"")
+        scenario = d / "s.yaml"
+        scenario.write_text(
+            "name: a\n" + self.AUDIO_USER + "turns: [{user: hi, audio: clips/hi.wav}]\n",
+            encoding="utf-8",
+        )
+
+        s = EvalScenario.load(scenario)
+        self.assertEqual(s.turns[0].audio, str((d / "clips" / "hi.wav").resolve()))
+        # The text stays the turn's input for the judge and text_contains.
+        self.assertEqual(s.turns[0].user, "hi")
+
+    def test_audio_without_user_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: a\n" + self.AUDIO_USER + "turns: [{audio: hi.wav}]\n"))
+        self.assertIn("no 'user:'", str(cm.exception))
+
+    def test_audio_with_dtmf_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write(
+                    "name: a\n"
+                    + self.AUDIO_USER
+                    + 'turns: [{user: hi, audio: hi.wav, dtmf: "1"}]\n'
+                )
+            )
+        self.assertIn("one or the other", str(cm.exception))
+
+    def test_audio_needs_audio_modality(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(_write("name: a\nturns: [{user: hi, audio: hi.wav}]\n"))
+        self.assertIn("text modality", str(cm.exception))
+
+    def test_audio_must_be_a_path(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write("name: a\n" + self.AUDIO_USER + "turns: [{user: hi, audio: 3}]\n")
+            )
+        self.assertIn("must be a path string", str(cm.exception))
+
+    def test_file_only_scenario_needs_no_speech_config(self):
+        # Nothing is synthesized, so the scenario should not have to name a TTS
+        # (building one loads a model for no reason).
+        d = Path(tempfile.mkdtemp())
+        (d / "hi.wav").write_bytes(b"")
+        scenario = d / "s.yaml"
+        scenario.write_text(
+            "name: a\nuser: {modality: audio}\nturns: [{user: hi, audio: hi.wav}]\n",
+            encoding="utf-8",
+        )
+
+        s = EvalScenario.load(scenario)
+        self.assertTrue(s.user_audio)
+        self.assertIsNone(s.user_speech)
+
+    def test_a_synthesized_turn_still_needs_speech(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenario.load(
+                _write(
+                    "name: a\nuser: {modality: audio}\n"
+                    "turns: [{user: recorded, audio: hi.wav}, {user: synthesized}]\n"
+                )
+            )
+        self.assertIn("turn(s) [1]", str(cm.exception))

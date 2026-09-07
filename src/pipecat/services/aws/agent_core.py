@@ -189,6 +189,13 @@ class AWSAgentCoreProcessor(FrameProcessor):
         # Schedule closing the output response after timeout
         self._close_task = self.create_task(self._close_output_response_after_timeout())
 
+    async def cleanup(self):
+        """Release resources held by this processor."""
+        await super().cleanup()
+        if self._close_task:
+            await self.cancel_task(self._close_task)
+            self._close_task = None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle LLM message frames.
 

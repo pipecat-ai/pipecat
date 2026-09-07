@@ -1,0 +1,33 @@
+name: food_ordering_sushi
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot greets the user and offers to take a food order"
+
+  - user: "I'll have sushi."
+    expect:
+      - event: function_call
+        calls:
+          - name: choose_sushi
+      - event: response
+        eval: "the bot asks for sushi details such as roll type and count"
+
+  - user: "Three California rolls, please."
+    expect:
+      - event: function_call
+        calls:
+          - name: select_sushi_order
+            args: { count: 3, type: california }
+      - event: response
+        eval: "the bot reads back or confirms an order of three California rolls"
+
+  # Terminal turn — assert the function call only: end_conversation tears the
+  # pipeline down before the farewell llm_response reaches the harness.
+  - user: "Yes, that's correct, go ahead."
+    expect:
+      - event: function_call
+        calls:
+          - name: complete_order

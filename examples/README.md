@@ -4,7 +4,7 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Setup
 
-1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
+1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-developing-pipecat) steps to get your local environment configured.
 
    > **Run from root directory**: Make sure you are running the steps from the root directory.
 
@@ -61,6 +61,10 @@ uv run getting-started/06-voice-agent.py -t twilio -x NGROK_HOST_NAME
 
 Progressive introduction to Pipecat, from minimal TTS to a full voice agent with function calling.
 
+### [`flows/`](./flows/)
+
+Structured conversations with [Pipecat Flows](../src/pipecat/flows): predefined and dynamic conversation paths with state management, across multiple LLM providers.
+
 ### [`voice/`](./voice/)
 
 Full STT + LLM + TTS voice agent pipelines showcasing different speech service providers (Deepgram, ElevenLabs, Cartesia, etc.)
@@ -101,9 +105,13 @@ Changing service settings at runtime, organized by service type:
 
 Turn detection, interruption handling, and user input management.
 
-### [`thinking-and-mcp/`](./thinking-and-mcp/)
+### [`thinking/`](./thinking/)
 
-LLM thinking/reasoning modes and MCP (Model Context Protocol) tool server integration.
+LLM thinking/reasoning modes.
+
+### [`mcp/`](./mcp/)
+
+MCP (Model Context Protocol) tool server integration.
 
 ### [`transports/`](./transports/)
 

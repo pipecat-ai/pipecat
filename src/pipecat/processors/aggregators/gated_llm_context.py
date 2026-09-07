@@ -57,6 +57,11 @@ class GatedLLMContextAggregator(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    async def cleanup(self):
+        """Release resources held by the aggregator."""
+        await super().cleanup()
+        await self._stop()
+
     async def _start(self):
         """Start the gate task handler."""
         if not self._gate_task:

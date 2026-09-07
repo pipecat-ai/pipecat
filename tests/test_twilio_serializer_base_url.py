@@ -8,7 +8,7 @@
 
 import unittest
 
-from pipecat.serializers.twilio import _build_call_resource_url
+from pipecat.serializers.twilio import TwilioFrameSerializer, _build_call_resource_url
 
 
 class TestBuildCallResourceURL(unittest.TestCase):
@@ -39,6 +39,23 @@ class TestBuildCallResourceURL(unittest.TestCase):
             _build_call_resource_url("ACxxxx", "CAyyyy", base_url="https://api.example.test/"),
             "https://api.example.test/2010-04-01/Accounts/ACxxxx/Calls/CAyyyy.json",
         )
+
+
+class TestConstructorRegionEdgeValidation(unittest.TestCase):
+    CREDS = dict(call_sid="CAyyyy", account_sid="ACxxxx", auth_token="token")
+
+    def test_partial_region_edge_rejected_without_base_url(self):
+        # FQDN host is derived from region/edge, so a lone region is rejected.
+        with self.assertRaises(ValueError):
+            TwilioFrameSerializer("MZstream", region="au1", **self.CREDS)
+
+    def test_partial_region_edge_allowed_with_base_url(self):
+        # base_url is used verbatim and ignores region/edge, so the pairing
+        # requirement does not apply.
+        serializer = TwilioFrameSerializer(
+            "MZstream", base_url="https://api.example.test", region="au1", **self.CREDS
+        )
+        self.assertEqual(serializer._base_url, "https://api.example.test")
 
 
 if __name__ == "__main__":

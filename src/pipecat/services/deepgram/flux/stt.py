@@ -12,14 +12,13 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxEventType,
@@ -142,7 +141,11 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                     Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
-            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
+            should_interrupt: Whether to interrupt the bot when Flux detects that
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -197,6 +200,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             eot_timeout_ms=None,
             keyterm=[],
             min_confidence=None,
+            numerals=None,
+            profanity_filter=None,
+            redact=None,
             language_hints=None,
         )
 
@@ -313,14 +319,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             # `_connect` sets `_websocket_url` before calling us; the assert
             # narrows for pyright.
             assert self._websocket_url is not None
-            websocket = await websocket_connect(
+            websocket = await self._websocket_connect(
                 self._websocket_url,
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
             self._websocket = websocket
 
             # `response` is populated after the handshake completes (which it
-            # has, since `websocket_connect` already returned).
+            # has, since the connect call already returned).
             response_headers = websocket.response.headers if websocket.response else {}
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
@@ -337,7 +343,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             # Now wait for the connection established event
             logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._connection_established_event.wait()
+            await self._await_connection_established()
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -362,11 +368,15 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 self._last_stt_time = None
 
             self._connection_established_event.clear()
+            # Discard any in-flight/pending Configure — the connection is going
+            # away (including ahead of a reconnect), so it can no longer be
+            # acked or sent; a reconnect re-applies settings via the URL.
+            self._reset_configure_state()
             await self.stop_all_metrics()
 
             if self._websocket:
                 await self._send_close_stream()
-                logger.debug("Disconnecting from Deepgram Flux Websocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -449,6 +459,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             else:
                 logger.warning(f"Received non-string message: {type(message)}")
 
-    async def _report_error(self, error):
+    async def _report_error(self, error, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

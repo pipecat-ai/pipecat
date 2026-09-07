@@ -10,10 +10,13 @@ This module provides helper classes for interacting with the LemonSlice API,
 including session creation and termination.
 """
 
+import io
+import json
 from typing import Any
 
 import aiohttp
 from loguru import logger
+from PIL import Image
 
 
 class LemonSliceApi:
@@ -40,6 +43,7 @@ class LemonSliceApi:
         *,
         agent_image_url: str | None = None,
         agent_id: str | None = None,
+        agent_image: Image.Image | None = None,
         agent_prompt: str | None = None,
         idle_timeout: int | None = None,
         daily_room_url: str | None = None,
@@ -48,12 +52,14 @@ class LemonSliceApi:
         extra_properties: dict[str, Any] | None = None,
         api_url: str | None = None,
     ) -> dict:
-        """Create a new session with the specified agent_id or agent_image_url.
+        """Create a new session with the specified agent_id, agent_image_url, or agent_image.
 
         Args:
-            agent_image_url: The URL to an agent image. Provide either agent_id or agent_image_url.
-            agent_id: ID of a LemonSlice agent. Provide either agent_id or agent_image_url.
-            agent_prompt: A high-level system prompt that subtly influences the avatar’s movements, expressions, and emotional demeanor.
+            agent_image_url: URL to an agent image.
+            agent_id: ID of a LemonSlice agent.
+            agent_image: PIL image of the agent.
+            agent_prompt: A high-level system prompt that subtly influences the avatar's
+                movements, expressions, and emotional demeanor.
             idle_timeout: Idle timeout in seconds.
             daily_room_url: Daily room URL to use for the session.
             daily_token: Daily token for authenticating with the room.
@@ -65,15 +71,20 @@ class LemonSliceApi:
             Dictionary containing session_id, room_url, and control_url.
 
         Raises:
-            ValueError: If neither agent_id nor agent_image_url is provided.
+            ValueError: If zero or more than one of agent_id, agent_image_url, or agent_image
+                is provided.
         """
-        if not agent_id and not agent_image_url:
-            raise ValueError("Provide an agent_id or agent_image_url")
-        if agent_id and agent_image_url:
-            raise ValueError("Provide exactly one of agent_id or agent_image_url, not both")
+        given_sources = [
+            source for source in (agent_id, agent_image_url, agent_image) if source is not None
+        ]
+        if len(given_sources) == 0:
+            raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
+        if len(given_sources) > 1:
+            raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
 
         logger.debug(
-            f"Creating LemonSlice session: agent_id={agent_id}, agent_image_url={agent_image_url}"
+            f"Creating LemonSlice session: agent_id={agent_id}, "
+            f"agent_image_url={agent_image_url}, agent_image={'set' if agent_image else None}"
         )
         payload: dict[str, Any] = {"transport_type": "daily"}
         if agent_id is not None:
@@ -95,12 +106,51 @@ class LemonSliceApi:
             payload["properties"] = properties_dict
         if extra_properties:
             payload.update(extra_properties)
+
+        image_bytes: bytes | None = None
+        if agent_image is not None:
+            image_bytes = _encode_image(agent_image)
+
         url = api_url if api_url is not None else self.LEMONSLICE_URL
-        async with self._session.post(url, headers=self._headers, json=payload) as r:
+        response = await self._post(url, payload, image_bytes=image_bytes)
+        logger.debug(f"Created LemonSlice session: {response}")
+        return response
+
+    async def _post(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        image_bytes: bytes | None = None,
+    ) -> dict:
+        """POST to the LemonSlice API as JSON or multipart form data.
+
+        Args:
+            url: Request URL.
+            payload: JSON payload for the session request.
+            image_bytes: Optional PNG-encoded image.
+
+        Returns:
+            Parsed JSON response body.
+        """
+        headers = {"x-api-key": self._api_key}
+        if image_bytes is not None:
+            form = aiohttp.FormData()
+            form.add_field("payload", json.dumps(payload), content_type="application/json")
+            form.add_field(
+                "image",
+                image_bytes,
+                filename="image.png",
+                content_type="image/png",
+            )
+            async with self._session.post(url, headers=headers, data=form) as r:
+                r.raise_for_status()
+                return await r.json()
+
+        headers["Content-Type"] = "application/json"
+        async with self._session.post(url, headers=headers, json=payload) as r:
             r.raise_for_status()
-            response = await r.json()
-            logger.debug(f"Created LemonSlice session: {response}")
-            return response
+            return await r.json()
 
     async def end_session(self, session_id: str, control_url: str):
         """End an existing session.
@@ -113,3 +163,10 @@ class LemonSliceApi:
         async with self._session.post(control_url, headers=self._headers, json=payload) as r:
             r.raise_for_status()
             logger.debug(f"Ended LemonSlice session {session_id}")
+
+
+def _encode_image(image: Image.Image) -> bytes:
+    """Encode a PIL image as PNG bytes for a multipart upload."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()

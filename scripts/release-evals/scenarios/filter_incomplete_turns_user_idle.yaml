@@ -1,0 +1,34 @@
+name: filter_incomplete_turns_user_idle
+
+# Audio modality. Covers filter_incomplete_user_turns combined with user idle
+# detection. The user completes a thought, so the bot voices a ✓ response; then
+# the user goes silent. Once the bot's idle timeout expires, its idle handler
+# appends a developer message with run_llm=True, and that response has to be
+# spoken like any other ✓ response.
+#
+# The final turn sends nothing: it only waits for speech the bot produces on its
+# own, with a budget covering the bot's 8s idle timeout plus inference and TTS.
+
+user: !include user_audio.yaml
+
+judge: !include judge_audio.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, or a question inviting the user to respond)"
+
+  # A complete thought: the bot marks the turn ✓ and answers. That is the one
+  # spoken completion for this user turn.
+  - user: "I'm planning a trip to Japan next spring."
+    expect:
+      - event: response
+        eval: "the response engages with the user's trip to Japan"
+
+  # The user stays silent. The bot's idle handler fires and asks the LLM for a
+  # check-in, which the bot must speak.
+  - expect:
+      - event: response
+        eval: "the bot checks in on the user, asking whether they are still there or still with the bot"
+        within_ms: 45000

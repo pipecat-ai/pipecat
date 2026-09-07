@@ -6,23 +6,42 @@
 
 import asyncio
 import unittest
+import warnings
+from unittest.mock import AsyncMock, MagicMock
 
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnInferenceCompletedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_start import VADUserTurnStartStrategy
+from pipecat.turns.user_start import (
+    BaseUserTurnStartStrategy,
+    ExternalUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
+)
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
+    ExternalUserTurnCompletionStopStrategy,
+    ExternalUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
+    deferred,
+)
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -31,7 +50,44 @@ TRANSCRIPTION_TIMEOUT = 0.1
 class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
-        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def test_completion_dropped_while_user_speaking(self):
+        """A completion arriving while the user speaks must not stop the turn.
+
+        External completions (e.g. an LLM ●) resolve with latency, so the user
+        may have resumed speaking. The controller drops the finalization while
+        the user is speaking and finalizes once they fall silent.
+        """
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        stopped = False
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        # Start a turn; the user is now speaking.
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+
+        # A completion resolving while the user still speaks is stale: dropped.
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertFalse(stopped)
+
+        # Once the user stops, a fresh completion finalizes the turn.
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertTrue(stopped)
+
+        await controller.cleanup()
 
     async def test_default_user_turn_strategies(self):
         controller = UserTurnController(
@@ -40,7 +96,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         should_start = None
         should_stop = None
@@ -71,6 +128,29 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertTrue(should_stop)
 
+    async def test_update_strategies_does_not_accumulate_event_handlers(self):
+        # Regression: re-applying strategies (e.g. realtime mode re-installing the
+        # same instances, or repeated metadata broadcasts) must not accumulate
+        # duplicate controller event handlers on the strategy instances —
+        # _cleanup_strategies removes what _setup_strategies added.
+        start = VADUserTurnStartStrategy()
+        stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=[start], stop=[stop])
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        # Re-apply the same strategy instances several times.
+        for _ in range(3):
+            await controller.update_strategies(UserTurnStrategies(start=[start], stop=[stop]))
+
+        for strategy in (start, stop):
+            for name, handler in strategy._event_handlers.items():
+                self.assertLessEqual(
+                    len(handler.handlers), 1, f"{name} double-registered on {strategy}"
+                )
+
     async def test_inference_triggered_fires_alongside_stopped(self):
         """Default strategies fire both inference-triggered and stopped, in order."""
         controller = UserTurnController(
@@ -79,7 +159,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         events: list[str] = []
 
@@ -107,7 +188,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         )
         controller = UserTurnController(user_turn_strategies=UserTurnStrategies(stop=[wrapped]))
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         events: list[str] = []
 
@@ -139,7 +221,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         should_start = 0
 
@@ -175,7 +258,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         should_start = None
         should_stop = None
@@ -217,7 +301,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         should_start = None
         should_stop = None
@@ -260,6 +345,155 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
 
+    async def test_proposed_frames_drive_the_turn_and_emit(self):
+        """A proposal leaves the decision to the strategy, which emits."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        started_params = None
+        stopped_params = None
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started_params
+            started_params = params
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped_params
+            stopped_params = params
+
+        await controller.process_frame(ProposedUserStartedSpeakingFrame())
+        self.assertTrue(started_params.enable_user_speaking_frames)
+        self.assertTrue(started_params.enable_interruptions)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertTrue(stopped_params.enable_user_speaking_frames)
+
+        await controller.cleanup()
+
+    async def test_real_turn_frames_drive_the_turn_but_suppress_emission(self):
+        """The emitter already announced the turn, so the strategy emits nothing."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        started_params = None
+        stopped_params = None
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started_params
+            started_params = params
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped_params
+            stopped_params = params
+
+        await controller.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(started_params.enable_user_speaking_frames)
+        self.assertFalse(started_params.enable_interruptions)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(stopped_params.enable_user_speaking_frames)
+
+        await controller.cleanup()
+
+    async def test_proposal_arriving_mid_speech_does_not_stop_the_turn(self):
+        """The finalization guard still applies when proposals drive the turn."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        stopped = False
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        # The controller tracks _user_speaking from the proposals, so a
+        # completion resolving mid-speech is still dropped as stale.
+        await controller.process_frame(ProposedUserStartedSpeakingFrame())
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertFalse(stopped)
+
+        await controller.cleanup()
+
+    async def test_proposals_are_resolved_only_by_resolving_strategies(self):
+        """A controller whose strategies can't resolve a proposal reports so."""
+        external = UserTurnController(user_turn_strategies=ExternalUserTurnStrategies())
+        self.assertTrue(external.resolves_proposed_turn_start_frames)
+        self.assertTrue(external.resolves_proposed_turn_stop_frames)
+
+        default = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+        self.assertFalse(default.resolves_proposed_turn_start_frames)
+        self.assertFalse(default.resolves_proposed_turn_stop_frames)
+
+    async def test_each_side_reports_its_own_proposal_resolution(self):
+        """Resolving turn starts says nothing about turn stops, and vice versa."""
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[ExternalUserTurnStartStrategy()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+        self.assertTrue(controller.resolves_proposed_turn_start_frames)
+        self.assertFalse(controller.resolves_proposed_turn_stop_frames)
+
+    async def test_custom_strategies_can_resolve_proposals(self):
+        """Resolution follows what a strategy declares, not what class it is."""
+
+        class CustomStartStrategy(BaseUserTurnStartStrategy):
+            @property
+            def resolves_proposed_turn_start_frames(self) -> bool:
+                return True
+
+        class CustomStopStrategy(BaseUserTurnStopStrategy):
+            @property
+            def resolves_proposed_turn_stop_frames(self) -> bool:
+                return True
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[CustomStartStrategy()],
+                stop=[CustomStopStrategy()],
+            )
+        )
+        self.assertTrue(controller.resolves_proposed_turn_start_frames)
+        self.assertTrue(controller.resolves_proposed_turn_stop_frames)
+
+    async def test_deferring_a_strategy_keeps_its_proposal_resolution(self):
+        """Deferred finalization changes when the turn ends, not who decides it."""
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[deferred(ExternalUserTurnStopStrategy())],
+            )
+        )
+        self.assertTrue(controller.resolves_proposed_turn_stop_frames)
+
     async def test_late_transcription_between_turns_no_premature_stop(self):
         """Test that a late transcription arriving between turns does not cause a premature stop.
 
@@ -279,7 +513,8 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
 
         start_count = 0
         stop_count = 0
@@ -326,6 +561,325 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         # Wait for user_speech_timeout to elapse — should get turn 2 stop
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
+
+    async def test_turn_start_notifies_start_and_stop_strategies(self):
+        """Turn start calls handle_user_turn_started on both start and stop strategies."""
+        started = []
+
+        class SpyStart(VADUserTurnStartStrategy):
+            async def handle_user_turn_started(self):
+                started.append("start")
+
+        class SpyStop(SpeechTimeoutUserTurnStopStrategy):
+            async def handle_user_turn_started(self):
+                await super().handle_user_turn_started()
+                started.append("stop")
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[SpyStart()],
+                stop=[SpyStop(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        self.assertEqual(started, [])
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(started, ["start", "stop"])
+
+        await controller.cleanup()
+
+    async def test_handle_user_turn_stopped_called_on_strategy_stop(self):
+        """handle_user_turn_stopped() runs on a stop strategy when it ends the turn, never at start."""
+        finalized = 0
+
+        class SpyStopStrategy(SpeechTimeoutUserTurnStopStrategy):
+            async def handle_user_turn_stopped(self):
+                nonlocal finalized
+                await super().handle_user_turn_stopped()
+                finalized += 1
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpyStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(finalized, 0)
+
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
+        self.assertEqual(finalized, 1)
+
+        await controller.cleanup()
+
+    async def test_handle_user_turn_stopped_called_on_watchdog_stop(self):
+        """handle_user_turn_stopped() also runs when the stop watchdog ends the turn."""
+        finalized = 0
+
+        class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
+            async def handle_user_turn_stopped(self):
+                nonlocal finalized
+                await super().handle_user_turn_stopped()
+                finalized += 1
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[SpyNeverStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertEqual(finalized, 0)
+
+        # No completion ever arrives; the watchdog finalizes the turn.
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(finalized, 1)
+
+        await controller.cleanup()
+
+    async def test_start_strategy_not_reset_on_turn_stop(self):
+        """A start strategy's handle_user_turn_stopped is a no-op (the deliberate asymmetry).
+
+        Start strategies are armed on turn start but never reset on turn stop:
+        their reset is turn-start semantic (e.g. WakePhrase refreshes its
+        keepalive timeout), so a stop-side reset would be wrong.
+        """
+        resets = 0
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+
+            class LegacyStart(VADUserTurnStartStrategy):
+                async def reset(self):  # the deprecated hook
+                    nonlocal resets
+                    resets += 1
+
+        strategy = LegacyStart()
+
+        # Arming on turn start bridges to reset()...
+        await strategy.handle_user_turn_started()
+        self.assertEqual(resets, 1)
+
+        # ...but turn stop does not touch it.
+        await strategy.handle_user_turn_stopped()
+        self.assertEqual(resets, 1)
+
+    async def test_stop_strategy_reset_bridged_on_both_callbacks(self):
+        """A stop strategy's reset() is bridged on both turn boundaries (armed, then cleaned)."""
+        resets = 0
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+
+            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+                async def reset(self):  # the deprecated hook
+                    nonlocal resets
+                    resets += 1
+
+        strategy = LegacyStop()
+        await strategy.handle_user_turn_started()
+        await strategy.handle_user_turn_stopped()
+        self.assertEqual(resets, 2)
+
+    async def test_overriding_reset_warns_at_class_definition(self):
+        """Overriding the deprecated reset() warns when the class is defined."""
+        with self.assertWarns(DeprecationWarning):
+
+            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+                async def reset(self):
+                    pass
+
+    async def test_subclass_of_concrete_strategy_overriding_reset_warns_but_is_not_bridged(self):
+        """Subclassing a concrete strategy and overriding reset() warns, but reset() won't run.
+
+        A concrete strategy's callback overrides don't route through the
+        backward-compat bridge, so a legacy reset() on such a subclass is never
+        invoked. __init_subclass__ still flags it loudly so the author migrates
+        to the callbacks — no silent no-op.
+        """
+        reset_calls = 0
+
+        with self.assertWarns(DeprecationWarning):
+
+            class MyMinWords(MinWordsUserTurnStartStrategy):
+                async def reset(self):
+                    nonlocal reset_calls
+                    reset_calls += 1
+
+        strategy = MyMinWords(min_words=3)
+        await strategy.handle_user_turn_started()
+        self.assertEqual(reset_calls, 0)
+
+    async def test_overriding_callbacks_does_not_warn_at_class_definition(self):
+        """Defining a strategy that overrides the callbacks (not reset) doesn't warn."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+
+            class Migrated(ExternalUserTurnCompletionStopStrategy):
+                async def handle_user_turn_stopped(self):
+                    pass
+
+    async def test_migrated_strategy_does_not_warn_at_runtime(self):
+        """A strategy overriding the callbacks never warns on the per-turn callbacks."""
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await strategy.handle_user_turn_started()
+            await strategy.handle_user_turn_stopped()
+        await strategy.cleanup()
+
+    async def test_turn_analyzer_cleared_on_stop_but_not_start(self):
+        """The analyzer is cleared when the turn ends, but not when it starts.
+
+        Clearing on start would drop the continuously-fed pre-speech buffer;
+        that's the whole reason the clear can't live in the shared reset.
+        """
+        analyzer = MagicMock()
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer)
+
+        await strategy.handle_user_turn_started()
+        analyzer.clear.assert_not_called()
+
+        await strategy.handle_user_turn_stopped()
+        analyzer.clear.assert_called_once()
+
+    async def test_deferred_forwards_both_callbacks(self):
+        """The deferred() wrapper forwards both callbacks to its inner strategy."""
+        analyzer = MagicMock()
+        strategy = deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer))
+
+        await strategy.handle_user_turn_started()
+        analyzer.clear.assert_not_called()
+
+        await strategy.handle_user_turn_stopped()
+        analyzer.clear.assert_called_once()
+
+    def _make_turn_analyzer_strategy(self, *, inference_secs: float, **kwargs):
+        """Build a TurnAnalyzerUserTurnStopStrategy whose analyzer takes real time.
+
+        Returns (strategy, released) where ``released`` is an asyncio.Event set
+        when the strategy fires on_user_turn_stopped.
+        """
+        analyzer = MagicMock()
+
+        async def slow_analyze():
+            await asyncio.sleep(inference_secs)
+            return (EndOfTurnState.COMPLETE, None)
+
+        analyzer.analyze_end_of_turn = slow_analyze
+        analyzer.cleanup = AsyncMock()
+
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=analyzer, **kwargs)
+
+        released = asyncio.Event()
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            released.set()
+
+        return strategy, released
+
+    async def test_stt_timeout_anchored_to_speech_end(self):
+        """The STT safety-net timeout doesn't grow with analyzer inference time.
+
+        The p99 budget is anchored at the end of the user's speech
+        (VAD stop timestamp minus stop_secs). Time the analyzer spends in
+        analyze_end_of_turn() must come out of that budget, not extend it.
+        """
+        inference_secs = 0.3
+        stop_secs = 0.2
+        stt_p99 = 0.6  # deadline: 0.4s after the VAD stop frame is created
+
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=stop_secs))
+
+        start = asyncio.get_running_loop().time()
+        vad_stop = VADUserStoppedSpeakingFrame(stop_secs=stop_secs)
+        vad_task = asyncio.create_task(strategy.process_frame(vad_stop))
+        # A non-finalized transcript arrives well within the budget.
+        await strategy.process_frame(
+            TranscriptionFrame(user_id="", text="hello", timestamp="now", finalized=False)
+        )
+        await vad_task
+
+        await asyncio.wait_for(released.wait(), timeout=2.0)
+        elapsed = asyncio.get_running_loop().time() - start
+
+        # Unanchored, release would come at inference + (p99 - stop_secs) = 0.7s.
+        # Anchored, it comes at p99 - stop_secs = 0.4s after the VAD stop frame.
+        self.assertLess(elapsed, 0.55)
+        self.assertGreaterEqual(elapsed, inference_secs)
+
+        await strategy.cleanup()
+
+    async def test_finalized_transcript_during_inference_releases_immediately(self):
+        """A transcript that finalizes mid-inference releases the turn right after.
+
+        Transcripts are data frames and VAD stop is a system frame, so they are
+        processed on different tasks and can interleave with the
+        analyze_end_of_turn() await. Once the analyzer's verdict lands, the
+        already-finalized transcript must release the turn immediately instead
+        of waiting out the safety-net timer.
+        """
+        inference_secs = 0.3
+        stt_p99 = 5.0  # timer far out, so an immediate release is unambiguous
+
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=inference_secs)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+
+        vad_task = asyncio.create_task(
+            strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+        )
+        await asyncio.sleep(inference_secs / 3)  # land mid-inference
+        await strategy.process_frame(
+            TranscriptionFrame(user_id="", text="hello", timestamp="now", finalized=True)
+        )
+        await vad_task
+
+        await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
+
+    async def test_no_wait_for_transcript_releases_on_verdict(self):
+        """With wait_for_transcript=False the verdict alone releases the turn.
+
+        No transcript is ever sent; release must follow analyze_end_of_turn()
+        directly rather than the STT safety-net timer.
+        """
+        stt_p99 = 5.0
+
+        strategy, released = self._make_turn_analyzer_strategy(
+            inference_secs=0.1, wait_for_transcript=False
+        )
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+
+        await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
 
 
 if __name__ == "__main__":

@@ -22,13 +22,16 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
     :class:`~pipecat.turns.user_stop.ExternalUserTurnCompletionStopStrategy`
     with the LLM-specific setup needed for the marker-based completion
     protocol: on ``StartFrame``, pushes an ``LLMUpdateSettingsFrame``
-    upstream that enables ``filter_incomplete_user_turns`` on the LLM
+    downstream that enables ``filter_incomplete_user_turns`` on the LLM
     and seeds the
     :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`.
+    The update is marked ``reach_inactive_services`` so that every LLM behind
+    an :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher` is configured, not
+    only the one active at startup.
 
     Finalization itself is inherited: when the LLM service's
     :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionLLMServiceMixin`
-    detects a ``✓`` marker, it broadcasts a
+    detects a ``●`` marker, it broadcasts a
     :class:`~pipecat.frames.frames.UserTurnInferenceCompletedFrame` and the
     base class fires ``on_user_turn_stopped``. On
     ``incomplete_short`` / ``incomplete_long`` markers the mixin
@@ -77,6 +80,7 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
                 delta=LLMSettings(
                     filter_incomplete_user_turns=True,
                     user_turn_completion_config=self._config,
-                )
+                ),
+                reach_inactive_services=True,
             )
         )

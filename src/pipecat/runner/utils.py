@@ -35,7 +35,6 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi import WebSocket
 from loguru import logger
 
 from pipecat.runner.types import (
@@ -44,6 +43,7 @@ from pipecat.runner.types import (
     EvalRunnerArguments,
     ExotelCallData,
     LiveKitRunnerArguments,
+    MOQRunnerArguments,
     SmallWebRTCRunnerArguments,
     TelnyxCallData,
     VonageRunnerArguments,
@@ -55,6 +55,8 @@ if TYPE_CHECKING:
     # Imported for type-checking only so the typed guard functions (e.g.
     # _is_daily) can narrow to the concrete transport types
     from typing import TypeGuard
+
+    from fastapi import WebSocket
 
     from pipecat.transports.daily.transport import DailyTransport
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -108,7 +110,7 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     return "unknown"
 
 
-async def parse_telephony_websocket(websocket: WebSocket):
+async def parse_telephony_websocket(websocket: "WebSocket"):
     """Parse telephony WebSocket messages and return transport type and call data.
 
     Args:
@@ -286,7 +288,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
         # Only successful parses are cached; the raising paths stay retryable.
         # setattr (not attribute assignment) since WebSocket has no such declared
         # field; mirrors the getattr-based read above.
-        setattr(websocket, "_pipecat_parsed_telephony", result)
+        # setattr: the attribute is ours to stash, not part of WebSocket's type.
+        setattr(websocket, "_pipecat_parsed_telephony", result)  # noqa: B010
         return result
 
     except Exception as e:
@@ -481,7 +484,7 @@ def _get_transport_params(transport_key: str, transport_params: dict[str, Callab
 
 
 async def _create_telephony_transport(
-    websocket: WebSocket,
+    websocket: "WebSocket",
     params: Any,
     transport_type: str,
     call_data: CallData,
@@ -762,5 +765,44 @@ async def create_transport(
             runner_args.token,
             params=params,
         )
+    elif isinstance(runner_args, MOQRunnerArguments):
+        params = _get_transport_params("moq", transport_params)
+
+        from pipecat.transports.moq.transport import MOQParams, MOQTransport
+
+        # Convert TransportParams to MOQParams if needed, applying runner args
+        if not isinstance(params, MOQParams):
+            params = MOQParams(**params.model_dump())
+        params.verify_ssl = runner_args.verify_ssl
+        params.namespace = runner_args.namespace
+        params.participant_id = runner_args.participant_id
+        params.peer_id = runner_args.peer_id
+        params.serve = runner_args.serve
+        params.bind = runner_args.bind
+        params.serve_tls_host = runner_args.serve_tls_host
+        params.serve_tls_cert = runner_args.serve_tls_cert
+        params.serve_tls_key = runner_args.serve_tls_key
+
+        transport = MOQTransport(
+            params=params,
+            host=runner_args.host,
+            port=runner_args.port,
+            path=runner_args.path,
+        )
+
+        # Auto-wire the runner back-channel: when the transport finishes
+        # MOQ bring-up, copy out the cert fingerprints (serve mode) and
+        # signal the runner's ready_event so /start can return. This used
+        # to require boilerplate in every bot example.
+        if runner_args.ready_event is not None:
+
+            @transport.event_handler("on_connected")
+            async def _moq_runner_on_connected(t):
+                runner_args.cert_fingerprints = list(t.cert_fingerprints)
+                if runner_args.ready_event is not None:
+                    runner_args.ready_event.set()
+
+        return transport
+
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

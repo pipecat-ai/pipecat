@@ -1,0 +1,30 @@
+name: function_call_timeout
+
+# Text, end to end: a function call that hangs past the `timeout_secs` it was
+# registered with. The deadline cancels the call and runs inference, so the bot
+# reports on its own that the lookup didn't complete — rather than a price it
+# was never given, or silence the user has to break. Needs a bot with a tool
+# that sleeps well past its own timeout (see the function-calling-*-async
+# examples).
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the current share price of NVDA?"
+    expect:
+      - event: function_call
+        calls:
+          - name: get_stock_price
+
+  # No user turn: the lookup's deadline passes with nothing to report, and
+  # cancelling runs inference, so the bot volunteers the failure without being
+  # asked. A "let me look that up" filler ahead of it is fine — the judge holds
+  # out for the rest of the reply.
+  - expect:
+      - event: response
+        eval: "says the price lookup did not succeed — it failed, timed out, was cancelled, or produced nothing — and does not quote a share price"

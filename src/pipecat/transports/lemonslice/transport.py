@@ -17,7 +17,8 @@ from typing import Any
 import aiohttp
 from daily.daily import AudioData
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from PIL import Image
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -42,14 +43,19 @@ from pipecat.transports.daily.transport import (
     DailyTransportClient,
 )
 from pipecat.transports.lemonslice.api import LemonSliceApi
+from pipecat.utils.shared import acquires, releases
 
 
 class LemonSliceNewSessionRequest(BaseModel):
     """Request model for creating a new LemonSlice session.
 
     Parameters:
-        agent_image_url: URL to an agent image. Provide either agent_id or agent_image_url.
-        agent_id: ID of a LemonSlice agent. Provide either agent_id or agent_image_url.
+        agent_image_url: URL to an agent image. Provide exactly one of ``agent_image_url``,
+            ``agent_id``, or ``agent_image``.
+        agent_id: ID of a LemonSlice agent. Provide exactly one of ``agent_image_url``,
+            ``agent_id``, or ``agent_image``.
+        agent_image: PIL image uploaded as the agent image. Provide exactly one of
+            ``agent_image_url``, ``agent_id``, or ``agent_image``.
         agent_prompt: A high-level system prompt that subtly influences the avatar's movements,
             expressions, and emotional demeanor.
         idle_timeout: Idle timeout in seconds.
@@ -59,16 +65,33 @@ class LemonSliceNewSessionRequest(BaseModel):
         api_url: Override the LemonSlice API URL.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     agent_image_url: str | None = None
     agent_id: str | None = None
+    agent_image: Image.Image | None = None
     agent_prompt: str | None = None
     idle_timeout: int | None = None
     daily_room_url: str | None = None
     daily_token: str | None = None
     lemonslice_properties: dict | None = None
     api_url: str | None = None
+
+    @model_validator(mode="after")
+    def validate_agent_source(self) -> "LemonSliceNewSessionRequest":
+        """Ensure exactly one agent source is provided."""
+        given = [
+            source
+            for source in (self.agent_id, self.agent_image_url, self.agent_image)
+            if source is not None
+        ]
+        if len(given) == 0:
+            raise ValueError("Provide exactly one of agent_id, agent_image_url, or agent_image")
+        if len(given) > 1:
+            raise ValueError(
+                "Provide exactly one of agent_id, agent_image_url, or agent_image, not multiple"
+            )
+        return self
 
 
 class LemonSliceCallbacks(BaseModel):
@@ -112,7 +135,7 @@ class LemonSliceTransportClient:
         self,
         *,
         bot_name: str,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         callbacks: LemonSliceCallbacks,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
@@ -125,13 +148,18 @@ class LemonSliceTransportClient:
             params: Optional parameters for LemonSlice operation.
             callbacks: Callback handlers for LemonSlice-related events.
             api_key: API key for authenticating with LemonSlice API.
-            session_request: Optional session creation parameters. If not provided, a default
-                agent will be used.
+            session_request: Session creation parameters.
             session: The aiohttp session for making async HTTP requests.
         """
+        params = params or LemonSliceParams()
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
-        self._session_request = session_request or LemonSliceNewSessionRequest()
+        if session_request is None:
+            raise ValueError(
+                "session_request is required; provide exactly one of agent_id, "
+                "agent_image_url, or agent_image"
+            )
+        self._session_request = session_request
         self._session_id: str | None = None
         self._control_url: str | None = None
         self._daily_transport_client: DailyTransportClient | None = None
@@ -145,6 +173,7 @@ class LemonSliceTransportClient:
         response = await self._api.create_session(
             agent_image_url=self._session_request.agent_image_url,
             agent_id=self._session_request.agent_id,
+            agent_image=self._session_request.agent_image,
             agent_prompt=self._session_request.agent_prompt,
             idle_timeout=self._session_request.idle_timeout,
             daily_room_url=self._session_request.daily_room_url,
@@ -157,15 +186,13 @@ class LemonSliceTransportClient:
         self._control_url = response["control_url"]
         return response["room_url"]
 
+    @acquires("client")
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._session_id is not None:
-            logger.debug(f"Session ID already defined: {self._session_id}")
-            return
         try:
             room_url = await self._initialize()
             daily_callbacks = DailyCallbacks(
@@ -211,12 +238,10 @@ class LemonSliceTransportClient:
             await self._daily_transport_client.setup(setup)
         except Exception as e:
             logger.error(f"Failed to setup LemonSliceTransportClient: {e}")
-            if self._session_id and self._control_url:
-                await self._api.end_session(self._session_id, self._control_url)
-            self._session_id = None
-            self._control_url = None
+            await self._end_session()
             raise
 
+    @releases("client")
     async def cleanup(self):
         """Cleanup client resources."""
         try:
@@ -224,6 +249,17 @@ class LemonSliceTransportClient:
                 await self._daily_transport_client.cleanup()
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
+        await self._end_session()
+
+    async def _end_session(self):
+        """End the LemonSlice session.
+
+        Idempotent: safe to call from stop(), cleanup(), and the setup error path.
+        """
+        if self._session_id and self._control_url:
+            await self._api.end_session(self._session_id, self._control_url)
+        self._session_id = None
+        self._control_url = None
 
     async def _on_joined(self, data):
         """Handle joined event."""
@@ -251,16 +287,18 @@ class LemonSliceTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
-        await self._daily_transport_client.start(frame)
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.leave()
-        if self._session_id and self._control_url:
-            await self._api.end_session(self._session_id, self._control_url)
-        self._session_id = None
-        self._control_url = None
+        await self._end_session()
 
     async def capture_participant_video(
         self,
@@ -279,6 +317,9 @@ class LemonSliceTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -300,6 +341,9 @@ class LemonSliceTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        if not self._daily_transport_client:
+            return
+
         await self._daily_transport_client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -324,6 +368,10 @@ class LemonSliceTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.out_sample_rate
 
     @property
@@ -333,6 +381,10 @@ class LemonSliceTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        if not self._daily_transport_client:
+            # No client until setup() runs; 0 is what Daily reports before starting.
+            return 0
+
         return self._daily_transport_client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:
@@ -431,8 +483,6 @@ class LemonSliceInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -455,11 +505,6 @@ class LemonSliceInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
         await self.set_transport_ready(frame)
@@ -541,8 +586,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
 
@@ -567,11 +610,6 @@ class LemonSliceOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self._client.start(frame)
 
@@ -697,7 +735,7 @@ class LemonSliceTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         session_request: LemonSliceNewSessionRequest | None = None,
-        params: LemonSliceParams = LemonSliceParams(),
+        params: LemonSliceParams | None = None,
         input_name: str | None = None,
         output_name: str | None = None,
     ):
@@ -707,12 +745,13 @@ class LemonSliceTransport(BaseTransport):
             bot_name: The name of the Pipecat bot.
             session: aiohttp session used for async HTTP requests.
             api_key: LemonSlice API key for authentication.
-            session_request: Optional session creation parameters. If not provided, a default
-                agent will be used.
+            session_request: Session creation parameters. Exactly one of agent_id,
+                agent_image_url, or agent_image must be provided.
             params: Optional LemonSlice-specific configuration parameters.
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
+        params = params or LemonSliceParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 

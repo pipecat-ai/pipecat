@@ -195,6 +195,7 @@ This applies to everything that documents the code — comments, docstrings, com
 
 - **Leave the current moment out of it.** Detail that feels important while making a change — alternatives considered and not taken, what the code used to do, shorthand that only made sense while the work was in progress — usually isn't worth a future reader's time, and may not even make sense to them. Include it only when they genuinely need it to understand the code as it stands.
 - **Match the weight of the prose to the code.** Keep it general, high-level, and concise. Reserve long comments for architecturally salient pieces, genuinely tricky sections, or decisions non-obvious enough that a reader would otherwise be puzzled. Routine code needs a short note or none at all.
+- **Litmus test for commits, changelogs, and comments:** every sentence must answer "what does the code do now?" — not "what happened while we worked on it." Write comments as if the code had always existed in its current form: a comment earns its place only by stating a constraint or non-obvious decision the code can't show. If a sentence describes a superseded implementation, a rejected alternative, verification performed, or argues the change is correct, delete it. Rationale is allowed only as a trailing note when its absence would puzzle a future reader.
 
 ## Service Implementation
 
@@ -219,4 +220,4 @@ A scenario is a YAML file of `turns` with `expect:` assertions; scenarios are re
 1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
 2. Run a scenario against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
 
-For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma2:9b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.scenario` module docstring for the complete scenario file format.
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.scenario` module docstring for the complete scenario file format.

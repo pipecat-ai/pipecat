@@ -43,9 +43,12 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._use_interim = use_interim
         self._bot_speaking = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn.
+
+        Clears the bot-speaking flag so the next turn's word counting starts
+        from the single-word interruption threshold.
+        """
         self._bot_speaking = False
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:

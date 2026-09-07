@@ -32,18 +32,18 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import assert_given
 
 
 @dataclass
@@ -127,13 +127,13 @@ class NvidiaSageMakerSTTService(STTService):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and connect to the SageMaker endpoint.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -152,6 +152,11 @@ class NvidiaSageMakerSTTService(STTService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release resources at teardown."""
+        await super().cleanup()
         await self._disconnect()
 
     # ── Audio input ───────────────────────────────────────────────────────────
@@ -178,7 +183,7 @@ class NvidiaSageMakerSTTService(STTService):
     # ── VAD integration ───────────────────────────────────────────────────────
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with VAD-specific handling for metrics lifecycle.
+        """Log the VAD speech boundaries this service sees.
 
         Args:
             frame: The frame to process.
@@ -188,7 +193,6 @@ class NvidiaSageMakerSTTService(STTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"{self}: VAD user started speaking")
-            await self.start_processing_metrics()
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             logger.debug(f"{self}: VAD user stopped speaking")
 
@@ -320,6 +324,10 @@ class NvidiaSageMakerSTTService(STTService):
                     transcript = msg.get("transcript", "")
                     if transcript.strip():
                         logger.debug(f"{self}: received final transcription: {transcript}")
+                        # Report usage before the transcription frame so
+                        # tracing can attach it to the STT span the frame
+                        # closes.
+                        await self.emit_stt_usage_metrics()
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,
@@ -331,7 +339,6 @@ class NvidiaSageMakerSTTService(STTService):
                             )
                         )
                         await self._handle_transcription(transcript, True)
-                        await self.stop_processing_metrics()
 
                 elif event_type in (
                     "conversation.item.input_audio_transcription.failed",

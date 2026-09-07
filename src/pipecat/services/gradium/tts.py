@@ -13,7 +13,6 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 from websockets import ConnectionClosedOK
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -21,10 +20,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.deprecation import deprecated
@@ -193,13 +192,13 @@ class GradiumTTSService(WebsocketTTSService):
         msg = {"text": text, "type": "text", "client_req_id": context_id}
         return msg
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish websocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -256,7 +255,7 @@ class GradiumTTSService(WebsocketTTSService):
                 return
 
             headers = {"x-api-key": self._api_key, "x-api-source": "pipecat"}
-            self._websocket = await websocket_connect(self._url, additional_headers=headers)
+            self._websocket = await self._websocket_connect(self._url, additional_headers=headers)
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -369,7 +368,6 @@ class GradiumTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 self._websocket = None

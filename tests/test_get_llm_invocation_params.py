@@ -27,6 +27,11 @@ For Gemini adapter:
 6. Multiple system instructions: first extracted, later ones converted to user messages
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
+
+For Gemini Live adapter (everything the Gemini adapter does, plus):
+1. LLMSpecificMessage objects with llm='gemini-live' are included and others are filtered out
+2. Tool calls and their results are summarized as text messages
 
 For Anthropic adapter:
 1. LLMStandardMessage objects are converted to Anthropic MessageParam format
@@ -37,6 +42,7 @@ For Anthropic adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For AWS Bedrock adapter:
 1. LLMStandardMessage objects are converted to AWS Bedrock format
@@ -47,6 +53,7 @@ For AWS Bedrock adapter:
 6. Empty text content is converted to "(empty)"
 7. system_instruction overrides context system message, with conflict warnings
 8. Developer messages are converted to user
+9. Malformed messages raise LLMContextConversionError (preserving the underlying cause)
 
 For OpenAI Responses adapter:
 1. LLMContext messages are converted to Responses API input items
@@ -63,17 +70,23 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import subprocess
+import sys
 import unittest
+import warnings
 from unittest.mock import patch
 
-from google.genai.types import Content, Part
+from google.genai.types import Content, FunctionCall, FunctionResponse, Part
+from openai._types import NotGiven as OpenAINotGiven
 
+from pipecat.adapters.base_llm_adapter import LLMContextConversionError
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
@@ -81,6 +94,7 @@ from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesL
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
+    LLMSpecificMessage,
     LLMStandardMessage,
 )
 
@@ -118,6 +132,13 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
         self.assertEqual(params["messages"][1]["content"], "Hello, how are you?")
         self.assertEqual(params["messages"][2]["content"], "I'm doing well, thank you for asking!")
+
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
 
     def test_llm_specific_message_filtering(self):
         """Test that OpenAI-specific messages are included and others are filtered out."""
@@ -343,6 +364,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
+        self.assertEqual(context.get_messages()[0]["role"], "developer")
 
     def test_developer_conversion_does_not_affect_other_roles(self):
         """convert_developer_to_user only affects developer messages, not system/user/assistant."""
@@ -367,6 +389,26 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = GeminiLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_gemini_format(self):
         """Test that LLMStandardMessage objects are converted to Gemini Content format."""
@@ -723,11 +765,297 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # Second message (developer) should be converted to user in Google format
         self.assertEqual(params["messages"][1].role, "user")
 
+    # --- _merge_parallel_tool_calls_for_thinking ---
+    #
+    # With thinking enabled, a batch of parallel tool calls arrives split across
+    # separate messages (each call, then its response). The adapter regroups
+    # both sides so the model turn's call count matches the following user
+    # turn's response count.
+
+    def _tool_call_message(self, call_id, *, signature=None):
+        """Build a model Content with a single function_call Part."""
+        part = Part(
+            function_call=FunctionCall(id=call_id, name=f"tool_{call_id}", args={"q": call_id})
+        )
+        if signature:
+            part.thought_signature = signature
+        return Content(role="model", parts=[part])
+
+    def _tool_response_message(self, call_id):
+        """Build a user Content with a single function_response Part."""
+        return Content(
+            role="user",
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        id=call_id, name=f"tool_{call_id}", response={"ok": True}
+                    )
+                )
+            ],
+        )
+
+    def _thought_signature_dict(self, call_id):
+        """Build a thought_signature dict bookmarked to a function call."""
+        return {"signature": f"sig-{call_id}", "bookmark": {"function_call": call_id}}
+
+    def test_merge_parallel_interleaved_calls_and_responses(self):
+        """Parallel calls interleaved with responses merge into one model and one user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_batch_ordered_calls_and_responses(self):
+        """Calls grouped first, then responses, still merge into matching turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c1"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+
+    def test_merge_three_parallel_calls(self):
+        """Three parallel calls merge into a single model turn and user turn."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 3)
+        self.assertEqual(len(result[1].parts), 3)
+
+    def test_merge_single_call_unchanged(self):
+        """A lone signed call and its response pass through as-is."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user"])
+        self.assertEqual(len(result[0].parts), 1)
+        self.assertEqual(len(result[1].parts), 1)
+
+    def test_merge_sequential_calls_with_signatures_not_merged(self):
+        """Sequential calls (each with its own signature) stay in separate turns."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2", signature="sig-c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c2")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertTrue(all(len(m.parts) == 1 for m in result))
+
+    def test_merge_mixed_parallel_and_sequential_groups(self):
+        """A parallel group followed by a sequential call are grouped independently."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+            self._tool_call_message("c3", signature="sig-c3"),
+            self._tool_response_message("c3"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1"), self._thought_signature_dict("c3")], messages
+        )
+
+        self.assertEqual([m.role for m in result], ["model", "user", "model", "user"])
+        self.assertEqual([len(m.parts) for m in result], [2, 2, 1, 1])
+
+    def test_merge_collects_interleaved_non_tool_message(self):
+        """A non-tool message inside a group is collected and re-emitted after it."""
+        text_message = Content(role="model", parts=[Part(text="thinking out loud")])
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            text_message,
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+
+        # Both calls still merge (and both responses), and the interleaved text
+        # is preserved after the merged group rather than stopping the merge.
+        self.assertEqual([m.role for m in result], ["model", "user", "model"])
+        self.assertEqual([p.function_call.id for p in result[0].parts], ["c1", "c2"])
+        self.assertEqual([p.function_response.id for p in result[1].parts], ["c1", "c2"])
+        self.assertEqual(result[2].parts[0].text, "thinking out loud")
+
+    def test_merge_no_thought_signatures_unchanged(self):
+        """Without any function-call thought signatures, messages pass through unchanged."""
+        messages = [
+            self._tool_call_message("c1"),
+            self._tool_response_message("c1"),
+        ]
+        result = self.adapter._merge_parallel_tool_calls_for_thinking([], messages)
+
+        self.assertEqual(len(result), 2)
+
+    def test_merge_empty_messages(self):
+        """An empty message list returns empty."""
+        self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
+
+
+class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = GeminiLiveLLMAdapter()
+
+    def test_standard_messages_converted_to_gemini_format(self):
+        """Test that messages with no tool calls are converted just like Gemini's."""
+        standard_messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing well, thank you for asking!"},
+        ]
+        context = LLMContext(messages=standard_messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params, GeminiLLMAdapter().get_llm_invocation_params(context))
+
+    def test_llm_specific_message_filtering(self):
+        """Test that Gemini Live-specific messages are included and others are filtered out."""
+        messages = [
+            GeminiLLMAdapter().create_llm_specific_message(
+                Content(role="model", parts=[Part(text="Gemini specific response")]),
+            ),
+            self.adapter.create_llm_specific_message(
+                Content(role="model", parts=[Part(text="Gemini Live specific response")]),
+            ),
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0].parts[0].text, "Gemini Live specific response")
+
+    def test_tool_call_and_result_summarized_as_text(self):
+        """Test that a tool call and its result are summarized as text messages."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "What's the weather?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"location": "Paris"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": '{"conditions": "nice"}'},
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 3)
+        # The call is a model turn, its result a user turn.
+        call_message = params["messages"][1]
+        self.assertEqual(call_message.role, "model")
+        self.assertIsNone(call_message.parts[0].function_call)
+        self.assertIn("get_weather", call_message.parts[0].text)
+        self.assertIn("Paris", call_message.parts[0].text)
+
+        result_message = params["messages"][2]
+        self.assertEqual(result_message.role, "user")
+        self.assertIsNone(result_message.parts[0].function_response)
+        self.assertIn("get_weather", result_message.parts[0].text)
+        self.assertIn("nice", result_message.parts[0].text)
+
+    def test_parallel_tool_calls_summarized_together(self):
+        """Test that a message calling several functions is summarized as one message."""
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {"name": "get_restaurant", "arguments": "{}"},
+                    },
+                ],
+            },
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        parts = params["messages"][0].parts
+        self.assertEqual(len(parts), 1)
+        self.assertIn("get_weather", parts[0].text)
+        self.assertIn("get_restaurant", parts[0].text)
+
 
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AnthropicLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
@@ -982,6 +1310,16 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
 
+    def test_single_system_message_conversion_does_not_mutate_source_context(self):
+        """Converting a lone system message to user leaves the source context unchanged."""
+        context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
+
+        self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, system_instruction="Be concise."
+        )
+
+        self.assertEqual(context.get_messages()[0]["role"], "system")
+
     def test_system_instruction_only(self):
         """system_instruction alone becomes the system parameter."""
         messages: list[LLMStandardMessage] = [
@@ -1089,11 +1427,166 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], "How are you?")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(
+            context, enable_prompt_caching=False, ensure_last_message_is_user=True
+        )
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
+
+    def test_thought_converted_to_thinking_block(self):
+        """A signed thought becomes a thinking block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # The thought and the response merge into a single assistant message,
+        # with the thinking block first.
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0], {"type": "thinking", "thinking": "Let me check.", "signature": "sig"}
+        )
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_with_empty_text_preserved(self):
+        """A signed thought with no text still round-trips as a thinking block.
+
+        Models that default to ``display: "omitted"`` return thinking blocks whose
+        text is empty and whose signature carries the reasoning; Anthropic requires
+        those blocks to be passed back.
+        """
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "", "signature": "sig"},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        content = params["messages"][1]["content"]
+        self.assertEqual(content[0], {"type": "thinking", "thinking": "", "signature": "sig"})
+        self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
+
+    def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be round-tripped, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="anthropic",
+                    message={"type": "thought", "text": "Let me check.", "signature": ""},
+                ),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["content"], "What's the weather?")
+        self.assertEqual(params["messages"][1]["content"], "It's sunny.")
+
 
 class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AWSBedrockLLMAdapter()
+
+    def test_malformed_message_raises_conversion_error(self):
+        """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
+        # A data URL with no comma has no base64 payload, so the adapter's
+        # url.split(",")[1] raises IndexError during conversion.
+        malformed_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}},
+            ],
+        }
+        context = LLMContext(messages=[malformed_message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            self.adapter.get_llm_invocation_params(context)
+
+        # The underlying cause is preserved for debugging.
+        self.assertIsInstance(ctx.exception.__cause__, IndexError)
+        self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
@@ -1417,6 +1910,128 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][2]["role"], "user")
+
+    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+        """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"text": "."}])
+
+    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+        """Without the flag (default), a trailing assistant message is preserved."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+        """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+
+    def test_ensure_last_message_is_user_handles_empty_list(self):
+        """ensure_last_message_is_user=True handles an empty context."""
+        params = self.adapter.get_llm_invocation_params(
+            LLMContext(), ensure_last_message_is_user=True
+        )
+        self.assertEqual(len(params["messages"]), 0)
+
+    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+        """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
+            ]
+        )
+        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertIn("toolResult", params["messages"][-1]["content"][0])
+
+    def test_image_before_text_does_not_raise_unbound_local_error(self):
+        """Regression test for issue #4724: image placed before text must not raise UnboundLocalError.
+
+        When a user message's content list places the image *before* the text (e.g. a
+        UserImageRawFrame followed by a prompt), _from_standard_message previously
+        raised ``UnboundLocalError: cannot access local variable 'image_item'``
+        because the ``new_content.insert(...)`` call was outside the
+        ``if img_idx > first_txt_idx:`` guard that assigns ``image_item``.
+        """
+        # Image appears FIRST (before text) — this is the failing shape from the issue.
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "What do you see?"},
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        # Must not raise — previously threw UnboundLocalError.
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Image was already first, so the adapter should leave it in place.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
+
+    def test_image_after_text_reordered_to_first(self):
+        """Image placed after text is reordered to come before text (existing behaviour)."""
+        message: LLMStandardMessage = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        user_msg = params["messages"][0]
+        content = user_msg["content"]
+        self.assertEqual(len(content), 2)
+        # Adapter should have moved the image before the text.
+        self.assertIn("image", content[0])
+        self.assertEqual(content[1]["text"], "What do you see?")
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
@@ -1979,6 +2594,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(tool["description"], "Get the current weather")
         self.assertIn("properties", tool["parameters"])
 
+    def test_tools_absent_yields_openai_sentinel(self):
+        """A context without tools yields the sentinel the SDK omits from the request."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsInstance(params["tools"], OpenAINotGiven)
+
     def test_empty_messages(self):
         """Empty messages list produces empty input list."""
         context = LLMContext(messages=[])
@@ -2000,6 +2622,52 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0]["role"], "user")
         self.assertEqual(params["input"][1]["type"], "function_call")
+
+    def test_reasoning_message_becomes_reasoning_item(self):
+        """A persisted reasoning message converts to a Responses reasoning item."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            }
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["input"][0],
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "Let me think."}],
+                "encrypted_content": "ENCRYPTED",
+            },
+        )
+
+    def test_reasoning_precedes_assistant_message(self):
+        """Reasoning round-trips positioned before the assistant reply it produced."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENCRYPTED"}
+        )
+        context = LLMContext(messages=[reasoning_msg, {"role": "assistant", "content": "Hello!"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][1]["role"], "assistant")
+
+    def test_reasoning_without_encrypted_content_omits_field(self):
+        """encrypted_content is optional; omit it rather than send null."""
+        reasoning_msg = self.adapter.create_llm_specific_message(
+            {"type": "reasoning", "id": "rs_2", "summary": []}
+        )
+        context = LLMContext(messages=[reasoning_msg])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["input"][0]["type"], "reasoning")
+        self.assertEqual(params["input"][0]["id"], "rs_2")
+        self.assertNotIn("encrypted_content", params["input"][0])
 
     def test_id_for_llm_specific_messages(self):
         """Adapter identifier is 'openai_responses'."""
@@ -2397,6 +3065,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
                 "from context", "from settings", discard_context_system=True
             )
             mock_logger.warning.assert_called_once()
+            self.assertIn("is not sent to the model", mock_logger.warning.call_args[0][0])
 
         self.assertEqual(result, "from settings")
 
@@ -2435,6 +3104,201 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+
+class TestTrailingUserMessageInjection(unittest.TestCase):
+    """Model gating for the no-prefill trailing-user-message injection.
+
+    Claude 4.6+ models reject requests whose message list ends with an
+    assistant message. Injection must default to ON for any model not known
+    to support prefill (so future models are covered) and stay OFF for the
+    frozen legacy set that still supports prefill.
+    """
+
+    def _anthropic(self, **settings):
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        return AnthropicLLMService(
+            api_key="test-key", settings=AnthropicLLMService.Settings(**settings)
+        )
+
+    def _bedrock(self, **settings):
+        from pipecat.services.aws.llm import AWSBedrockLLMService
+
+        return AWSBedrockLLMService(
+            aws_region="us-east-1", settings=AWSBedrockLLMService.Settings(**settings)
+        )
+
+    def test_anthropic_no_prefill_models_inject(self):
+        """Models without prefill support — including unknown future ones — inject."""
+        for model in (
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-opus-4-8",
+            "claude-sonnet-5",  # hypothetical future model: must default to inject
+        ):
+            service = self._anthropic(model=model)
+            self.assertTrue(service._should_inject_trailing_user_message(), model)
+
+    def test_anthropic_legacy_prefill_models_do_not_inject(self):
+        """Models known to support prefill are left untouched."""
+        for model in (
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5",
+            "claude-opus-4-1",
+            "claude-3-7-sonnet-latest",
+        ):
+            service = self._anthropic(model=model)
+            self.assertFalse(service._should_inject_trailing_user_message(), model)
+
+    def test_prefill_patterns_overridable_by_subclass(self):
+        """Deployments with exotic model naming can override the pattern set."""
+        from pipecat.services.anthropic.llm import AnthropicLLMService
+
+        class CustomService(AnthropicLLMService):
+            _PREFILL_SUPPORTED_PATTERNS = ("my-claude-proxy",)
+
+        service = CustomService(
+            api_key="test-key", settings=CustomService.Settings(model="my-claude-proxy-v2")
+        )
+        self.assertFalse(service._should_inject_trailing_user_message())
+
+    def test_anthropic_invocation_params_append_trailing_user(self):
+        """A trailing assistant message gets a user message appended, request-only."""
+        service = self._anthropic(model="claude-sonnet-4-6")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "user")
+        self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
+        # The stored context is never mutated — the fix applies to the request only.
+        self.assertEqual(context.messages[-1]["role"], "assistant")
+
+    def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
+        """Legacy prefill-supporting models keep the trailing assistant message."""
+        service = self._anthropic(model="claude-haiku-4-5")
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hold on a second."},
+                {"role": "assistant", "content": "◐"},
+            ]
+        )
+        params = service._get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][-1]["role"], "assistant")
+
+    def test_bedrock_gate_by_model(self):
+        """Bedrock IDs match by substring; non-Claude models never inject."""
+        cases = {
+            "us.anthropic.claude-sonnet-4-6-v1:0": True,
+            "anthropic.claude-opus-4-8-v1:0": True,
+            "us.anthropic.claude-haiku-4-5-v1:0": False,
+            "anthropic.claude-3-7-sonnet-20250219-v1:0": False,
+            "amazon.nova-pro-v1:0": False,
+        }
+        for model, expected in cases.items():
+            service = self._bedrock(model=model)
+            self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
+
+
+class TestContextSystemMessageDeprecation(unittest.TestCase):
+    """Every adapter warns when the system prompt is carried in the context."""
+
+    def _context(self):
+        return LLMContext(
+            messages=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
+
+    def _invoke(self, adapter, system_instruction):
+        if isinstance(adapter, OpenAILLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                convert_developer_to_user=False,
+            )
+        if isinstance(adapter, AnthropicLLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                enable_prompt_caching=False,
+            )
+        return adapter.get_llm_invocation_params(
+            self._context(), system_instruction=system_instruction
+        )
+
+    def test_every_adapter_warns_with_or_without_system_instruction(self):
+        adapters = [
+            OpenAILLMAdapter,
+            OpenAIResponsesLLMAdapter,
+            AnthropicLLMAdapter,
+            GeminiLLMAdapter,
+            GeminiLiveLLMAdapter,
+            AWSBedrockLLMAdapter,
+            AWSNovaSonicLLMAdapter,
+            OpenAIRealtimeLLMAdapter,
+            GrokRealtimeLLMAdapter,
+        ]
+        for cls in adapters:
+            for system_instruction in (None, "Be concise."):
+                with self.subTest(adapter=cls.__name__, system_instruction=system_instruction):
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        self._invoke(cls(), system_instruction)
+                    messages = [
+                        str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)
+                    ]
+                    self.assertTrue(messages, "expected a DeprecationWarning")
+                    self.assertIn("system_instruction", messages[0])
+
+    def test_warns_once_per_adapter(self):
+        adapter = OpenAILLMAdapter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._invoke(adapter, None)
+            self._invoke(adapter, None)
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(deprecations), 1)
+
+    def test_warns_through_an_ignore_filter(self):
+        """The warning reaches a bot whose interpreter ignores the category.
+
+        Every caller is inside an LLM service, so the default
+        ``ignore::DeprecationWarning`` would hide it. Run in a subprocess to get
+        an interpreter whose filters ignore the category.
+        """
+        script = (
+            "from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter\n"
+            "from pipecat.processors.aggregators.llm_context import LLMContext\n"
+            "ctx = LLMContext(messages=["
+            "{'role': 'system', 'content': 'Be helpful.'},"
+            "{'role': 'user', 'content': 'hi'}])\n"
+            "OpenAILLMAdapter().get_llm_invocation_params("
+            "ctx, system_instruction=None, convert_developer_to_user=False)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is deprecated since 1.9.0", result.stderr)
+
+    def test_no_warning_without_a_context_system_message(self):
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            OpenAILLMAdapter().get_llm_invocation_params(
+                context, system_instruction="Be concise.", convert_developer_to_user=False
+            )
+        self.assertFalse([w for w in caught if issubclass(w.category, DeprecationWarning)])
 
 
 if __name__ == "__main__":

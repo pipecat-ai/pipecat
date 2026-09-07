@@ -8,6 +8,7 @@ import asyncio
 import io
 import time
 import unittest
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 
@@ -18,9 +19,15 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     StartFrame,
     StopFrame,
     TextFrame,
+    TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -28,7 +35,12 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
+from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import HeartbeatsObserver, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -73,6 +85,89 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
             pipeline_params=PipelineParams(start_metadata={"foo": "bar"}),
         )
         assert "foo" in received_down[-1].metadata
+
+    async def test_start_frame_still_carries_the_deprecated_configuration(self):
+        """The deprecated StartFrame fields carry the pipeline's configuration.
+
+        Processors read it from FrameProcessorSetup, but one that still reads a
+        StartFrame field gets the configured value, warned about rather than
+        quietly replaced by the field's default, until the fields are removed.
+        """
+        pipeline = Pipeline([IdentityFilter()])
+
+        (received_down, _) = await run_test(
+            pipeline,
+            frames_to_send=[],
+            expected_down_frames=[StartFrame],
+            ignore_start=False,
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=8000,
+                audio_out_sample_rate=48000,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                report_only_initial_ttfb=True,
+                send_initial_empty_metrics=False,
+            ),
+        )
+
+        start_frame = received_down[-1]
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(start_frame.audio_in_sample_rate, 8000)
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(start_frame.audio_out_sample_rate, 48000)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.enable_metrics)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.enable_usage_metrics)
+        with self.assertWarns(DeprecationWarning):
+            self.assertTrue(start_frame.report_only_initial_ttfb)
+
+    async def test_pipeline_setup_failures_are_reported(self):
+        """A processor that fails to set up reports it as an error frame.
+
+        Services connect during setup, so a failure there is as worth reporting
+        as one while handling a frame. Each failing processor reports its own,
+        so one failure never hides another.
+        """
+
+        class FailingSetup(FrameProcessor):
+            def __init__(self, reason: str):
+                super().__init__()
+                self._reason = reason
+
+            async def setup(self, setup):
+                await super().setup(setup)
+                raise RuntimeError(self._reason)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+
+        errors = []
+
+        class ErrorWatcher(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, ErrorFrame):
+                    errors.append(frame.error)
+                await self.push_frame(frame, direction)
+
+        first = FailingSetup("first failed")
+        second = FailingSetup("second failed")
+        pipeline = Pipeline([ErrorWatcher(), first, second])
+        worker = PipelineWorker(pipeline)
+
+        await worker.queue_frame(EndFrame())
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+
+        self.assertEqual(len(errors), 2, f"expected both setup failures, got {errors}")
+        self.assertTrue(any("first failed" in e for e in errors))
+        self.assertTrue(any("second failed" in e for e in errors))
+
+        # Setting up is not attempted again, so a processor that failed it can
+        # no longer do its job and a switcher can move off it.
+        self.assertFalse(first.is_usable)
+        self.assertFalse(second.is_usable)
 
 
 class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
@@ -128,7 +223,7 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
+class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         worker = PipelineWorker(pipeline)
@@ -435,13 +530,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 cancel_on_idle_timeout=False,
             )
 
-            try:
-                await asyncio.wait_for(
-                    worker.run(WorkerParams(task_manager=TaskManager())),
-                    timeout=0.6,
-                )
-            except TimeoutError:
-                pass
+            @worker.event_handler("on_heartbeat_timeout")
+            async def on_heartbeat_timeout(worker: PipelineWorker):
+                await worker.cancel()
+
+            await worker.run(WorkerParams(task_manager=TaskManager()))
 
             log_text = log_output.getvalue()
             assert f"more than {custom_monitor_secs} seconds" in log_text
@@ -539,7 +632,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         except TimeoutError:
             assert True
         else:
-            assert False
+            raise AssertionError("worker.run() returned instead of running until cancelled")
 
     async def test_idle_task_heartbeats(self):
         identity = IdentityFilter()
@@ -651,6 +744,62 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         # Wait for the pending tasks to complete.
         await asyncio.gather(*pending)
 
+    async def test_idle_task_external_user_activity(self):
+        idle_timeout_secs = 0.4
+        activity_period_secs = 0.1
+
+        # A pipeline whose turns are detected by a provider instead of local VAD
+        # pushes no UserSpeakingFrame, so the default idle timeout frames have to
+        # pick up the turn and transcription frames it does push.
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=idle_timeout_secs,
+            cancel_on_idle_timeout=False,
+        )
+
+        started = asyncio.Event()
+        idle_timeouts = 0
+        idle_timeouts_during_turn = 0
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(worker: PipelineWorker, frame: StartFrame):
+            started.set()
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle_timeout(worker: PipelineWorker):
+            nonlocal idle_timeouts
+            idle_timeouts += 1
+
+        async def external_user_turn():
+            """Sending a single user turn that outlasts the idle timeout."""
+            nonlocal idle_timeouts_during_turn
+
+            # The idle monitor only watches frames the running pipeline pushes,
+            # so nothing sent before this point counts as activity.
+            await asyncio.wait_for(started.wait(), timeout=5)
+
+            await worker.queue_frame(UserStartedSpeakingFrame())
+            for _ in range(6):
+                await asyncio.sleep(activity_period_secs)
+                await worker.queue_frame(
+                    InterimTranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp="")
+                )
+            await worker.queue_frame(UserStoppedSpeakingFrame())
+            idle_timeouts_during_turn = idle_timeouts
+
+            # The timeout still fires once the user goes quiet.
+            await asyncio.sleep(idle_timeout_secs * 2)
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.gather(
+            worker.run(WorkerParams(task_manager=TaskManager())), external_user_turn()
+        )
+
+        assert idle_timeouts_during_turn == 0
+        assert idle_timeouts > 0
+
     async def test_idle_task_swallowed_frames(self):
         idle_timeout_secs = 0.2
         sleep_time_secs = idle_timeout_secs / 2
@@ -746,10 +895,173 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([StartBlocker(start_received=start_received)])
         worker = PipelineWorker(pipeline, cancel_timeout_secs=0.1)
 
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
         run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
         await start_received.wait()
         await worker.cancel()
         await asyncio.wait_for(run_task, timeout=1.0)
+
+        assert worker.has_finished()
+
+        # The blocked processor never lets the CancelFrame drain, so the worker
+        # gives up waiting for it and reports the timeout.
+        assert len(timed_out) == 1
+        assert isinstance(timed_out[0], CancelFrame)
+
+    async def test_task_start_frame_never_reaches_sink(self):
+        class StartBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, StartFrame):
+                    await self._block.wait()
+
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([StartBlocker()])
+        worker = PipelineWorker(pipeline, start_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        timed_out = []
+
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(_worker, frame):
+            timed_out.append(frame)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+
+        # Nothing else tells the application its pipeline never came up.
+        assert len(timed_out) == 1
+        assert isinstance(timed_out[0], StartFrame)
+
+    async def test_task_setup_never_finishes(self):
+        """Processors connect while they are set up, so one that never connects
+        would otherwise leave run() waiting on it with nothing to time it out."""
+
+        class SetupBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        pipeline = Pipeline([SetupBlocker()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        timed_out = []
+
+        @worker.event_handler("on_setup_timeout")
+        async def on_setup_timeout(_worker):
+            timed_out.append(True)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        assert worker.has_finished()
+
+        # Nothing else tells the application its pipeline never came up.
+        assert len(timed_out) == 1
+
+    async def test_task_setup_timeout_still_cleans_the_rest_up(self):
+        """Setting up is abandoned part-way, so processors are cleaned up from
+        states they never finished reaching."""
+
+        class SetupBlocker(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._block = asyncio.Event()
+
+            async def setup(self, setup: FrameProcessorSetup):
+                await super().setup(setup)
+                await self._block.wait()
+
+        class CleanupFailer(FrameProcessor):
+            async def cleanup(self):
+                await super().cleanup()
+                raise RuntimeError("cannot clean up")
+
+        cleaned = []
+
+        class CleanupRecorder(FrameProcessor):
+            async def cleanup(self):
+                await super().cleanup()
+                cleaned.append(self.name)
+
+        pipeline = Pipeline([CleanupFailer(), SetupBlocker(), CleanupRecorder()])
+        worker = PipelineWorker(pipeline, setup_timeout_secs=0.1, cancel_timeout_secs=0.1)
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        # The failing cleanup must not cost the others theirs.
+        assert len(cleaned) == 1
+
+    async def test_task_end_frame_blocked_by_paused_tts_service(self):
+        """TTSService pauses its process queue while audio is in flight
+        (pause_frame_processing=True) and is normally unpaused by a
+        BotStoppedSpeakingFrame — a SystemFrame, so it bypasses the pause via
+        the input task instead of queuing behind it — sent by the output
+        transport once it confirms audio actually played.
+
+        Here, a TTS context completes (isFinal) having produced zero
+        TTSAudioRawFrames, so the transport's BotStoppedSpeakingFrame gate
+        (`_tts_audio_received`) never opens and no resume signal arrives. This
+        test has no transport, so no BotStoppedSpeakingFrame or
+        BotStartedSpeakingFrame is ever sent, modeling that gap directly.
+
+        The terminal EndFrame is a ControlFrame, so a pause left latched would
+        queue it behind the pause and it would never reach the sink —
+        _wait_for_pipeline_end's EndFrame branch has no timeout (unlike the
+        CancelFrame branch), so PipelineWorker.run() would never return.
+        """
+
+        class TTSZeroAudioNoResume(TTSService):
+            def __init__(self, **kwargs):
+                super().__init__(
+                    push_start_frame=True,
+                    push_text_frames=False,
+                    pause_frame_processing=True,
+                    sample_rate=16000,
+                    **kwargs,
+                )
+
+            def can_generate_metrics(self) -> bool:
+                return False
+
+            async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+                # Provider reports the context finished (isFinal) with no
+                # audio — same as ElevenLabsTTSService against a
+                # quota-exhausted key.
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+                if False:
+                    yield
+
+        pipeline = Pipeline([TTSZeroAudioNoResume()])
+        worker = PipelineWorker(pipeline, cancel_timeout_secs=0.2)
+
+        await worker.queue_frames(
+            [
+                LLMFullResponseStartFrame(),
+                TextFrame(text="hi"),
+                LLMFullResponseEndFrame(),
+                EndFrame(),
+            ]
+        )
+
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=1.0)
 
         assert worker.has_finished()
 
@@ -783,6 +1095,53 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.run(WorkerParams(task_manager=TaskManager()))
         except asyncio.CancelledError:
             assert error_received
+
+    async def test_heartbeat_timeout_event_handler(self):
+        """on_heartbeat_timeout fires when heartbeat frames cannot reach the sink."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        heartbeat_timeout = False
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal heartbeat_timeout
+            heartbeat_timeout = True
+            await worker.cancel()
+
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+        assert heartbeat_timeout
+
+    async def test_heartbeat_timeout_fires_repeatedly(self):
+        """on_heartbeat_timeout keeps firing every heartbeats_monitor_secs while stalled."""
+        pipeline = Pipeline([FrameFilter(types=())])
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.05,
+                heartbeats_monitor_secs=0.1,
+            ),
+        )
+
+        timeout_count = 0
+
+        @worker.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(worker: PipelineWorker):
+            nonlocal timeout_count
+            timeout_count += 1
+            if timeout_count >= 2:
+                await worker.cancel()
+
+        await worker.run(WorkerParams(task_manager=TaskManager()))
+        assert timeout_count >= 2
 
 
 if __name__ == "__main__":

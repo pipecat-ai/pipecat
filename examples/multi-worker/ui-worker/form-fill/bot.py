@@ -60,7 +60,7 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -161,8 +161,12 @@ missing item in the current step.
 - **A step is now complete:** acknowledge the step and move to the \
 next one's first field ("Great, that's your contact details — now, \
 how many years of relevant experience do you have?").
-- **Everything is filled:** give a one-line recap and ask if they're \
-ready to submit. When they say yes, ``click=[submit_ref]``.
+- **Everything is filled:** say the form is complete and ask if \
+they're ready to submit. Do NOT read the values back — each one was \
+already confirmed when captured.
+- **User says to submit:** ``click=[submit_ref]`` with a short \
+send-off only ("Submitting your application now — good luck!"). No \
+recap, no "let me confirm", nothing after; the conversation is over.
 - **User corrects a value:** re-fill that field and confirm the change.
 
 Ask for one thing at a time (a full name counts as one thing).
@@ -235,13 +239,11 @@ async def answer_about_screen(params: FunctionCallParams, query: str):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting form-fill bot")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice=os.getenv("CARTESIA_VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),
+            voice=os.getenv("CARTESIA_VOICE_ID", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),
         ),
     )
     llm = OpenAILLMService(
@@ -272,7 +274,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         name=MAIN_NAME,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(FormWorker(), worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -293,8 +300,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(FormWorker(), worker)
 
     await runner.run()
 

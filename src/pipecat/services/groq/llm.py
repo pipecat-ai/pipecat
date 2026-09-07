@@ -45,7 +45,7 @@ class GroqLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Groq's API.
             base_url: The base URL for Groq API. Defaults to "https://api.groq.com/openai/v1".
-            model: The model identifier to use. Defaults to "llama-3.3-70b-versatile".
+            model: The model identifier to use. Defaults to "openai/gpt-oss-120b".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GroqLLMService.Settings(model=...)`` instead.
@@ -56,7 +56,7 @@ class GroqLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="llama-3.3-70b-versatile")
+        default_settings = self.Settings(model="openai/gpt-oss-120b")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

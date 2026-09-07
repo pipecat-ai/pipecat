@@ -47,7 +47,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
@@ -76,13 +76,13 @@ class BaseOutputTransport(FrameProcessor):
 
         self._params = params
 
-        # Output sample rate. It will be initialized on StartFrame.
+        # Output sample rate. It will be initialized during setup.
         self._sample_rate = 0
 
         # We write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This helps with interruption handling. It will be
-        # initialized on StartFrame.
+        # initialized during setup.
         self._audio_chunk_size = 0
 
         # We will have one media sender per output frame destination. This allow
@@ -120,19 +120,37 @@ class BaseOutputTransport(FrameProcessor):
         """
         return self._audio_chunk_size
 
-    async def start(self, frame: StartFrame):
-        """Start the output transport and initialize components.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+        await super().setup(setup)
+        self._sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
 
         # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
         audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+
+    async def cleanup(self):
+        """Release output transport resources at teardown."""
+        await super().cleanup()
+        for _, sender in self._media_senders.items():
+            await sender.cleanup()
+
+    async def start(self, frame: StartFrame):
+        """Start the output transport.
+
+        Base hook for subclasses, which reach it through ``super()``. The
+        transport's own audio configuration is resolved in :meth:`setup`.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        pass
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and cleanup resources.
@@ -375,7 +393,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
-            await sender.handle_sync_frame(frame)
+            await sender.handle_tts_stopped(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -419,8 +437,11 @@ class BaseOutputTransport(FrameProcessor):
             # This is to resize images. We only need to resize one image at a time.
             self._executor = ThreadPoolExecutor(max_workers=1)
 
-            # Buffer to keep track of incoming audio.
+            # Buffer to keep track of incoming audio, along with the type of
+            # the frames it was built from (so a flushed partial chunk can be
+            # reconstructed as the same frame type).
             self._audio_buffer = bytearray()
+            self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
 
             # This will be used to resample incoming audio to the output sample rate.
             self._resampler = create_stream_resampler()
@@ -526,14 +547,21 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The cancel frame signaling immediate cancellation.
             """
-            # Since we are cancelling everything it doesn't matter what task we cancel first.
-            await self._cancel_audio_task()
-            await self._cancel_clock_task()
-            await self._cancel_video_task()
+            await self.cleanup()
 
-            # Stop audio mixer so it doesn't keep generating frames after cancellation.
-            if self._mixer:
-                await self._mixer.stop()
+        async def cleanup(self):
+            """Release media sender resources at teardown."""
+            try:
+                # Since we are cancelling everything it doesn't matter what task we cancel first.
+                await self._cancel_audio_task()
+                await self._cancel_clock_task()
+                await self._cancel_video_task()
+
+                # Stop audio mixer so it doesn't keep generating frames after cancellation.
+                if self._mixer:
+                    await self._mixer.stop()
+            finally:
+                self._executor.shutdown(wait=False)
 
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
@@ -580,6 +608,7 @@ class BaseOutputTransport(FrameProcessor):
             )
 
             cls = type(frame)
+            self._audio_buffer_cls = cls
             self._audio_buffer.extend(resampled)
             while len(self._audio_buffer) >= self._audio_chunk_size:
                 chunk = cls(
@@ -625,6 +654,21 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The frame to handle synchronously.
             """
+            await self._audio_queue.put(frame)
+
+        async def handle_tts_stopped(self, frame: TTSStoppedFrame):
+            """Queue a TTSStoppedFrame, flushing any trailing buffered audio first.
+
+            `handle_audio_frame` only queues complete `audio_chunk_size` chunks,
+            so up to one chunk's worth of trailing audio can still be sitting in
+            `_audio_buffer`. Queue it now (padded to a full chunk with silence)
+            so it plays before the stop frame is handled, instead of being
+            discarded when the buffer is cleared in `_bot_stopped_speaking`.
+
+            Args:
+                frame: The TTS stopped frame to queue.
+            """
+            await self._enqueue_flushed_audio_buffer()
             await self._audio_queue.put(frame)
 
         async def handle_mixer_control_frame(self, frame: MixerControlFrame):
@@ -675,6 +719,30 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
+        async def _enqueue_flushed_audio_buffer(self):
+            """Pad any unsent trailing audio with silence and queue it for playback.
+
+            Turns whatever is left in `_audio_buffer` into a frame of the same
+            type (e.g. `TTSAudioRawFrame`) as the audio it was buffered from,
+            and puts it on `_audio_queue`, so it goes through the normal
+            playback path (write, error handling, bot speaking tracking) like
+            any other chunk, in order relative to whatever is queued after it
+            (e.g. a TTSStoppedFrame).
+            """
+            if not self._audio_buffer:
+                return
+
+            padding = bytes(self._audio_chunk_size - len(self._audio_buffer))
+            frame = self._audio_buffer_cls(
+                bytes(self._audio_buffer) + padding,
+                sample_rate=self._sample_rate,
+                num_channels=self._params.audio_out_channels,
+            )
+            frame.transport_destination = self._destination
+            self._audio_buffer = bytearray()
+
+            await self._audio_queue.put(frame)
+
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
@@ -683,8 +751,8 @@ class BaseOutputTransport(FrameProcessor):
             self._bot_speaking = False
             self._tts_audio_received = False
 
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
+            # Any remaining leftover here (e.g. from an interruption) is
+            # discarded rather than flushed, since it's no longer wanted.
             self._audio_buffer = bytearray()
 
             logger.debug(
@@ -823,13 +891,7 @@ class BaseOutputTransport(FrameProcessor):
             silence_frame = OutputAudioRawFrame(
                 audio=silence, sample_rate=self.sample_rate, num_channels=1
             )
-            try:
-                await asyncio.wait_for(
-                    self._transport.write_audio_frame(silence_frame),
-                    timeout=secs + 1,
-                )
-            except TimeoutError:
-                logger.warning(f"{self} timed out writing end-frame silence")
+            await self._internal_write_audio_frame(silence_frame)
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
@@ -850,7 +912,7 @@ class BaseOutputTransport(FrameProcessor):
                 # Try to send audio to the transport.
                 try:
                     if isinstance(frame, OutputAudioRawFrame):
-                        push_downstream = await self._transport.write_audio_frame(frame)
+                        push_downstream = await self._internal_write_audio_frame(frame)
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False
@@ -859,6 +921,36 @@ class BaseOutputTransport(FrameProcessor):
                 # downstream in case anyone else needs it.
                 if push_downstream:
                     await self._transport.push_frame(frame)
+
+        async def _internal_write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
+            """Write a frame to the transport, giving up if the write never returns.
+
+            A client that stops reading is the common way to get there: the
+            connection stays up and nothing fails, so the transport has neither
+            an error to report nor state to check. That leaves how long the
+            write takes as the only signal available.
+
+            Returns:
+                Whether the transport took the frame.
+            """
+            # Reporting the timeout below costs the transport its usability, so
+            # a peer is only written off once however much audio is still queued.
+            if not self._transport.is_usable:
+                return False
+
+            timeout = self._params.audio_out_write_timeout_secs
+            try:
+                return await asyncio.wait_for(
+                    self._transport.write_audio_frame(frame), timeout=timeout
+                )
+            except TimeoutError as e:
+                await self._transport.push_error(
+                    f"{self._transport} timed out after {timeout}s writing audio to the "
+                    "transport; the peer has stopped reading",
+                    exception=e,
+                    force_treat_as_permanent=True,
+                )
+                return False
 
         #
         # Video handling

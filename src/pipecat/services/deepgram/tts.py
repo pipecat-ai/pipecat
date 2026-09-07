@@ -12,33 +12,37 @@ for generating speech from text using various voice models.
 
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Settings for DeepgramTTSService and DeepgramHttpTTSService."""
+    """Settings for DeepgramTTSService and DeepgramHttpTTSService.
 
-    pass
+    Parameters:
+        speed: Speech-rate multiplier, from 0.7 to 1.5. ``None`` leaves Aura at
+            its default rate. Supported by the Aura-2 English and Spanish
+            voices; Deepgram recommends staying at or above 0.9 for Spanish.
+    """
+
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -98,6 +102,7 @@ class DeepgramTTSService(WebsocketTTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            speed=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -137,32 +142,14 @@ class DeepgramTTSService(WebsocketTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Deepgram WebSocket TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Deepgram WebSocket TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
 
     async def _connect(self):
         """Connect to Deepgram WebSocket and start receive task."""
@@ -218,6 +205,8 @@ class DeepgramTTSService(WebsocketTTSService):
             params.append(f"model={self._settings.voice}")
             params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
+            if self._settings.speed is not None:
+                params.append(f"speed={self._settings.speed}")
             if self._mip_opt_out is not None:
                 params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
@@ -225,11 +214,11 @@ class DeepgramTTSService(WebsocketTTSService):
 
             headers = {"Authorization": f"Token {self._api_key}"}
 
-            websocket = await websocket_connect(url, additional_headers=headers)
+            websocket = await self._websocket_connect(url, additional_headers=headers)
             self._websocket = websocket
 
             # `response` is populated after the handshake completes (which it
-            # has, since `websocket_connect` already returned).
+            # has, since the connect call already returned).
             response_headers = websocket.response.headers if websocket.response else {}
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
@@ -237,7 +226,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}", exception=e))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -247,7 +236,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Deepgram WebSocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram WebSocket")
                 # Send Close message to gracefully close the connection
                 await self._websocket.send(json.dumps({"type": "Close"}))
                 await self._websocket.close()
@@ -341,8 +330,6 @@ class DeepgramTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             # Reconnect if the websocket is closed
             if not self._websocket or self._websocket.state is State.CLOSED:
@@ -410,6 +397,7 @@ class DeepgramHttpTTSService(TTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            speed=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -457,8 +445,6 @@ class DeepgramHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         # Build URL with parameters
         url = f"{self._base_url}/v1/speak"
 
@@ -470,6 +456,9 @@ class DeepgramHttpTTSService(TTSService):
             "sample_rate": self.sample_rate,
             "container": "none",
         }
+
+        if self._settings.speed is not None:
+            params["speed"] = self._settings.speed
 
         if self._mip_opt_out is not None:
             params["mip_opt_out"] = str(self._mip_opt_out).lower()

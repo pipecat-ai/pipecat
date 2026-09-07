@@ -20,6 +20,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-assemblyai.py
     scenarios: [capital_question]
+  - bot: voice/voice-assemblyai-sync.py
+    scenarios: [capital_question]
   - bot: voice/voice-assemblyai-turn-detection.py
     scenarios: [capital_question]
   - bot: voice/voice-asyncai.py
@@ -34,15 +36,21 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-azure-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-bland.py
+    scenarios: [capital_question]
+  - bot: voice/voice-bland-http.py
+    scenarios: [capital_question]
   - bot: voice/voice-camb.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia.py
     scenarios:
       - capital_question
+      - capital_question_recording
       - multi_turn
       - interruption_audio
       - interruption_text
       - language_switch
+      - language_switch_audio
   - bot: voice/voice-cartesia-http.py
     scenarios: [capital_question]
   - bot: voice/voice-cartesia-turns.py
@@ -57,9 +65,13 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-elevenlabs-http.py
     scenarios: [capital_question]
+  - bot: voice/voice-elevenlabs-dialogue.py
+    scenarios: [capital_question]
   - bot: voice/voice-fal.py
     scenarios: [capital_question]
   - bot: voice/voice-fish.py
+    scenarios: [capital_question]
+  - bot: voice/voice-funasr.py
     scenarios: [capital_question]
   - bot: voice/voice-gladia.py
     scenarios: [capital_question]
@@ -69,7 +81,7 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-google-audio-in.py
     scenarios: [capital_question]
-  - bot: voice/voice-google-gemini-tts.py
+  - bot: voice/voice-google-gemini.py
     scenarios: [capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [capital_question]
@@ -101,6 +113,8 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-nvidia.py
     scenarios: [capital_question]
+  - bot: voice/voice-nvidia-segmented.py
+    scenarios: [capital_question]
   - bot: voice/voice-openai.py
     scenarios: [capital_question]
   - bot: voice/voice-openai-http.py
@@ -119,11 +133,19 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-sarvam.py
     scenarios: [capital_question]
-  - bot: voice/voice-sarvam-http.py
+  - bot: voice/voice-sarvam-vad-http.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam-realtime.py
+    scenarios: [capital_question]
+  - bot: voice/voice-sarvam-realtime-turn-detection.py
     scenarios: [capital_question]
   - bot: voice/voice-smallest.py
     scenarios: [capital_question]
   - bot: voice/voice-soniox.py
+    scenarios: [capital_question]
+  - bot: voice/voice-soniox-turn-detection.py
+    scenarios: [capital_question]
+  - bot: voice/voice-speechify-http.py
     scenarios: [capital_question]
   - bot: voice/voice-speechmatics.py
     scenarios: [capital_question]
@@ -133,6 +155,28 @@ suite:
     scenarios: [capital_question]
   - bot: voice/voice-xai-http.py
     scenarios: [capital_question]
+
+  #
+  # Realtime (speech-to-speech): one bot per provider, each exercising a
+  # function call end to end inside the provider's own realtime session. These
+  # are audio scenarios, audio being the modality these services consume.
+  # Ultravox runs its async-tool example because that's the one with the
+  # weather function the scenario expects.
+  #
+  - bot: realtime/realtime-aws-nova-sonic.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-azure.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-gemini-live.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-grok.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-inworld.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-openai.py
+    scenarios: [weather_function_call_audio]
+  - bot: realtime/realtime-ultravox-async-tool.py
+    scenarios: [weather_function_call_audio]
 
   #
   # Function calling: exercise one or more function calls.
@@ -151,7 +195,11 @@ suite:
       - weather_and_restaurant
   - bot: function-calling/function-calling-azure.py
     scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-baseten.py
+    scenarios: [weather_function_call]
   - bot: function-calling/function-calling-cerebras.py
+    scenarios: [weather_function_call]
+  - bot: function-calling/function-calling-crusoe.py
     scenarios: [weather_function_call]
   - bot: function-calling/function-calling-deepseek.py
     scenarios: [weather_function_call]
@@ -201,6 +249,45 @@ suite:
     scenarios: [weather_function_call]
 
   #
+  # Async function calling: the tool keeps running after the LLM's turn ends
+  # (cancel_on_interruption=False), so its result lands once the conversation has
+  # moved on and the bot has to deliver it as an aside. The cancellation
+  # scenarios go further and abandon work mid-flight, and these bots also carry a
+  # share-price tool that hangs past its own timeout. Text except where the bot
+  # has to be interrupted mid-sentence, which needs real speech to talk over.
+  #
+  - bot: function-calling/function-calling-anthropic-async.py
+    scenarios:
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
+      - function_call_timeout
+  - bot: function-calling/function-calling-google-async.py
+    scenarios:
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
+      - function_call_timeout
+  - bot: function-calling/function-calling-openai-async.py
+    scenarios:
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - function_call_timeout
+      # gpt-4.1 answers that it is working on the report without calling
+      # write_report, so neither cancellation scenario reaches what it tests.
+      # - async_tool_cancellation
+      # - async_tool_cancellation_concurrent
+  - bot: function-calling/function-calling-openai-responses-async.py
+    scenarios:
+      - async_tool_delivery
+      - async_tool_deferred_delivery_audio
+      - async_tool_cancellation
+      - async_tool_cancellation_concurrent
+      - function_call_timeout
+
+  #
   # Function calling with video: the bot calls a vision function that requests a
   # user image; the eval transport serves the scenario's `image:` for that turn.
   #
@@ -218,6 +305,14 @@ suite:
     scenarios: [describe_image]
   - bot: function-calling/function-calling-moondream-video.py
     scenarios: [describe_image]
+
+  #
+  # MCP: the bot's tools come from an MCP server instead of local functions.
+  # The stdio bot spawns the reference memory server with npx (requires
+  # Node.js — see the README prerequisites).
+  #
+  - bot: mcp/mcp-stdio.py
+    scenarios: [mcp_memory]
 
   #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
@@ -259,6 +354,14 @@ suite:
     scenarios: [filter_incomplete_turns]
 
   #
+  # Turn management: the user goes silent instead of trailing off. The bot's
+  # idle handler asks the LLM for a check-in, and that response has to be spoken
+  # even though no user speech preceded it.
+  #
+  - bot: turn-management/turn-management-filter-incomplete-turns-user-idle.py
+    scenarios: [filter_incomplete_turns_user_idle]
+
+  #
   # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of
   # speech. The bot's DTMFAggregator turns each keypress into a transcription the
   # LLM responds to, so the harness can assert on the resulting transcription and
@@ -266,3 +369,54 @@ suite:
   #
   - bot: features/features-dtmf-menu.py
     scenarios: [dtmf_menu]
+
+  #
+  # Video avatar services
+  #
+  - bot: video-avatar/video-avatar-tavus-video-service.py
+    scenarios: [capital_question]
+
+  #
+  # Flows: structured-conversation examples (examples/flows/). Text-only
+  # scenarios asserting on node transitions, function calls, and context
+  # strategies. The bots pick their LLM from $LLM_PROVIDER (default
+  # openai_responses; hello_world always uses Google).
+  #
+  - bot: flows/hello_world.py
+    scenarios: [hello_world]
+  - bot: flows/food_ordering.py
+    scenarios: [food_ordering_pizza]
+  - bot: flows/food_ordering_advanced_functionschema.py
+    scenarios: [food_ordering_sushi]
+  - bot: flows/multi_worker_handoff.py
+    scenarios: [multi_worker_handoff, multi_worker_handoff_back_and_forth]
+  - bot: flows/patient_intake.py
+    scenarios: [patient_intake]
+  - bot: flows/restaurant_reservation.py
+    scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]
+  - bot: flows/insurance_quote.py
+    scenarios: [insurance_quote]
+  # Constructs and switches between OpenAI, Google, and Anthropic, so all
+  # three API keys must be set.
+  - bot: flows/llm_switching.py
+    scenarios: [llm_switching]
+
+  # Web search: the bot answers a current-events question by calling Keenable's
+  # search tool, and reads a specific URL with its page-fetch tool.
+  #
+  - bot: features/features-keenable-web-search.py
+    scenarios:
+      - keenable_web_search
+      - keenable_fetch_page
+
+  #
+  # Multi-worker: LLM workers on a bus handing the conversation between each
+  # other. The distributed variants of these run the same handoff over pgmq or
+  # redis, and need that broker plus a second process, so they stay manual.
+  #
+  - bot: multi-worker/local-handoff/local-handoff-two-agents.py
+    scenarios: [acme_handoff]
+  # Audio only: each child worker's LLM text goes to that worker's own TTS, so
+  # only the audio reaches the main worker.
+  - bot: multi-worker/local-handoff/local-handoff-two-agents-tts.py
+    scenarios: [acme_handoff_voices]

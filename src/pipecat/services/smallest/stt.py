@@ -21,7 +21,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -31,18 +30,17 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SMALLEST_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_smallest_stt_language(language: Language) -> str:
@@ -110,15 +108,22 @@ class SmallestSTTSettings(STTSettings):
         redact_pci: Redact payment card information.
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization.
+        endpointing: Finalize promptly on trailing silence.
+        keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
+            recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
+        format: Apply punctuation and capitalization to transcripts.
     """
 
-    word_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    full_transcript: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sentence_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact_pii: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact_pci: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    full_transcript: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sentence_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pii: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pci: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestSTTService(WebsocketSTTService):
@@ -129,7 +134,10 @@ class SmallestSTTService(WebsocketSTTService):
     for real-time voice applications where immediate feedback is needed.
 
     Uses Pipecat's VAD to detect when the user stops speaking and sends
-    a finalize message to flush the final transcript.
+    a ``finalize`` message to flush the final transcript while keeping the
+    session alive for the next utterance.
+
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``.
 
     Example::
 
@@ -177,6 +185,9 @@ class SmallestSTTService(WebsocketSTTService):
             redact_pci=False,
             numerals="auto",
             diarize=False,
+            endpointing=True,
+            keywords="",
+            format=True,
         )
 
         if settings is not None:
@@ -213,9 +224,13 @@ class SmallestSTTService(WebsocketSTTService):
         """
         return language_to_smallest_stt_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the service and connect to the WebSocket."""
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -232,9 +247,7 @@ class SmallestSTTService(WebsocketSTTService):
         """Process frames, handling VAD events for finalization."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
                 try:
                     await self._websocket.send(json.dumps({"type": "finalize"}))
@@ -305,6 +318,7 @@ class SmallestSTTService(WebsocketSTTService):
             logger.debug("Connecting to Smallest STT")
 
             query_params = {
+                "model": self._settings.model,
                 "language": self._settings.language,
                 "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
@@ -315,11 +329,18 @@ class SmallestSTTService(WebsocketSTTService):
                 "redact_pci": str(self._settings.redact_pci).lower(),
                 "numerals": self._settings.numerals,
                 "diarize": str(self._settings.diarize).lower(),
+                "endpointing": str(self._settings.endpointing).lower(),
+                "format": str(self._settings.format).lower(),
             }
 
-            ws_url = f"{self._base_url}/waves/v1/pulse/get_text?{urlencode(query_params)}"
+            # An empty `keywords` value would register a single empty keyword,
+            # so omit the parameter entirely when no keywords are configured.
+            if self._settings.keywords:
+                query_params["keywords"] = self._settings.keywords
 
-            self._websocket = await websocket_connect(
+            ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
+
+            self._websocket = await self._websocket_connect(
                 ws_url,
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",
@@ -367,17 +388,31 @@ class SmallestSTTService(WebsocketSTTService):
 
         Args:
             data: Parsed JSON response containing transcript data.
+
+        The response contains:
+            - ``transcript``: The recognized text.
+            - ``is_final``: Whether this is a final (vs. interim) result.
+            - ``is_last``: Whether this is the last message of the session.
+              Only ``True`` after ``close_stream`` is sent at call end.
+            - ``language``: The detected or specified language.
+            - ``session_id``: Unique identifier for the WebSocket session.
         """
         is_final = data.get("is_final", False)
+        is_last = data.get("is_last", False)
         text = data.get("transcript", "").strip()
+
+        if is_last:
+            logger.debug(f"{self} received is_last; server will close session")
 
         if not text:
             return
 
         if is_final:
-            await self.stop_processing_metrics()
             logger.debug(f"Smallest final transcript: [{text}]")
             await self._handle_transcription(text, True, data.get("language"))
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
                     text,

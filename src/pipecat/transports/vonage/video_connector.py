@@ -62,23 +62,19 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             params: Transport parameters for input configuration.
         """
         super().__init__(params)
-        self._initialized: bool = False
         self._client: VonageClient = client
         self._listener_id: int = -1
         self._connected: bool = False
 
-    async def start(self, frame: StartFrame) -> None:
-        """Start the Vonage input transport.
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        """Set up the processor with required components.
 
         Args:
-            frame: The StartFrame to initiate the transport.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
+        await self._client.setup(setup)
 
         if (
             self._params.audio_in_enabled
@@ -94,29 +90,48 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
                     on_error=self._on_error_cb,
                 )
             )
+
             try:
-                await self._client.connect(frame)
+                await self._client.connect()
                 self._connected = True
             except Exception as exc:
                 logger.error(f"Error connecting to Vonage session: {exc}")
-                await self.push_error("Vonage video connector connection error", fatal=True)
-                return
-
-        await self.set_transport_ready(frame)
-
-    async def setup(self, setup: FrameProcessorSetup) -> None:
-        """Set up the processor with required components.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        await super().setup(setup)
-        await self._client.setup(setup)
+                await self.push_error(
+                    "Vonage video connector connection error", force_treat_as_permanent=True
+                )
 
     async def cleanup(self) -> None:
         """Cleanup input transport."""
         await super().cleanup()  # type: ignore
         await self._client.cleanup()
+
+    async def start(self, frame: StartFrame) -> None:
+        """Start the Vonage input transport.
+
+        Args:
+            frame: The StartFrame to initiate the transport.
+        """
+        await super().start(frame)
+
+        await self.set_transport_ready(frame)
+
+    async def stop(self, frame: EndFrame) -> None:
+        """Stop the Vonage input transport.
+
+        Args:
+            frame: The EndFrame to stop the transport.
+        """
+        await super().stop(frame)
+        await self._stop_client()
+
+    async def cancel(self, frame: CancelFrame) -> None:
+        """Cancel the Vonage input transport.
+
+        Args:
+            frame: The CancelFrame to cancel the transport.
+        """
+        await super().cancel(frame)
+        await self._stop_client()
 
     async def push_caption_frame(
         self, frame: TranscriptionFrame | InterimTranscriptionFrame
@@ -154,25 +169,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             f"Vonage input transport error session={session.id} code={code} description={description}"
         )
         if self._connected:
-            await self.push_error("Vonage video connector error", fatal=True)
-
-    async def stop(self, frame: EndFrame) -> None:
-        """Stop the Vonage input transport.
-
-        Args:
-            frame: The EndFrame to stop the transport.
-        """
-        await super().stop(frame)
-        await self._stop_client()
-
-    async def cancel(self, frame: CancelFrame) -> None:
-        """Cancel the Vonage input transport.
-
-        Args:
-            frame: The CancelFrame to cancel the transport.
-        """
-        await super().cancel(frame)
-        await self._stop_client()
+            await self.push_error("Vonage video connector error", force_treat_as_permanent=True)
 
     async def _stop_client(self) -> None:
         if self._connected:
@@ -209,10 +206,38 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             params: Transport parameters for output configuration.
         """
         super().__init__(params)
-        self._initialized: bool = False
         self._client = client
         self._connected: bool = False
         self._listener_id: int = -1
+
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        """Set up the processor with required components.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(setup)
+
+        if self._params.audio_out_enabled or self._params.video_out_enabled:
+            self._listener_id = self._client.add_listener(
+                VonageClientListener(on_error=self._on_error_cb)
+            )
+
+            try:
+                await self._client.connect()
+                self._connected = True
+            except Exception as exc:
+                logger.error(f"Error connecting to Vonage session: {exc}")
+                await self.push_error(
+                    "Vonage video connector connection error", force_treat_as_permanent=True
+                )
+
+    async def cleanup(self) -> None:
+        """Cleanup output transport."""
+        await super().cleanup()  # type: ignore
+        await self._client.cleanup()
 
     async def start(self, frame: StartFrame) -> None:
         """Start the Vonage output transport.
@@ -222,38 +247,25 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        if self._params.audio_out_enabled or self._params.video_out_enabled:
-            self._listener_id = self._client.add_listener(
-                VonageClientListener(on_error=self._on_error_cb)
-            )
-            try:
-                await self._client.connect(frame)
-                self._connected = True
-            except Exception as exc:
-                logger.error(f"Error connecting to Vonage session: {exc}")
-                await self.push_error("Vonage video connector connection error", fatal=True)
-                return
-
         await self.set_transport_ready(frame)
 
-    async def setup(self, setup: FrameProcessorSetup) -> None:
-        """Set up the processor with required components.
+    async def stop(self, frame: EndFrame) -> None:
+        """Stop the Vonage output transport.
 
         Args:
-            setup: Configuration object containing setup parameters.
+            frame: The EndFrame to stop the transport.
         """
-        await super().setup(setup)
-        await self._client.setup(setup)
+        await super().stop(frame)
+        await self._stop_client()
 
-    async def cleanup(self) -> None:
-        """Cleanup output transport."""
-        await super().cleanup()  # type: ignore
-        await self._client.cleanup()
+    async def cancel(self, frame: CancelFrame) -> None:
+        """Cancel the Vonage output transport.
+
+        Args:
+            frame: The CancelFrame to cancel the transport.
+        """
+        await super().cancel(frame)
+        await self._stop_client()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Process a frame for the Vonage output transport.
@@ -297,24 +309,6 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
 
         return result
 
-    async def stop(self, frame: EndFrame) -> None:
-        """Stop the Vonage output transport.
-
-        Args:
-            frame: The EndFrame to stop the transport.
-        """
-        await super().stop(frame)
-        await self._stop_client()
-
-    async def cancel(self, frame: CancelFrame) -> None:
-        """Cancel the Vonage output transport.
-
-        Args:
-            frame: The CancelFrame to cancel the transport.
-        """
-        await super().cancel(frame)
-        await self._stop_client()
-
     async def _stop_client(self) -> None:
         if self._connected:
             self._client.remove_listener(self._listener_id)
@@ -329,7 +323,7 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
             f"Vonage output transport error session={session.id} code={code} description={description}"
         )
         if self._connected:
-            await self.push_error("Vonage video connector error", fatal=True)
+            await self.push_error("Vonage video connector error", force_treat_as_permanent=True)
 
 
 class VonageVideoConnectorTransport(BaseTransport):

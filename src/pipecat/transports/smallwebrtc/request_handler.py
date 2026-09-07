@@ -248,9 +248,15 @@ class SmallWebRTCRequestHandler:
             raise HTTPException(status_code=404, detail="Peer connection not found")
 
         for c in request.candidates:
-            candidate = candidate_from_sdp(c.candidate)
-            candidate.sdpMid = c.sdp_mid
-            candidate.sdpMLineIndex = c.sdp_mline_index
+            if c.candidate:
+                candidate = candidate_from_sdp(c.candidate)
+                candidate.sdpMid = c.sdp_mid
+                candidate.sdpMLineIndex = c.sdp_mline_index
+            else:
+                # An empty candidate string is an RFC 8840 end-of-candidates marker
+                # (e.g. sent by Firefox per media line). aiortc signals this by
+                # passing `None` rather than a candidate with an empty SDP.
+                candidate = None
             await peer_connection.add_ice_candidate(candidate)
 
     async def close(self):

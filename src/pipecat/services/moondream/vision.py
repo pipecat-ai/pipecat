@@ -25,8 +25,9 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
-from pipecat.services.settings import VisionSettings, assert_given
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
+from pipecat.utils.types import assert_given
 
 try:
     import torch
@@ -86,7 +87,7 @@ class MoondreamService(VisionService):
         self,
         *,
         model: str | None = None,
-        revision="2025-01-09",
+        revision="2025-06-21",
         use_cpu=False,
         settings: Settings | None = None,
         **kwargs,

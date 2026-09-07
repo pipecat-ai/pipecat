@@ -78,8 +78,8 @@ class DTMFAggregator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            self._create_aggregation_task()
             await self.push_frame(frame, direction)
+            self._create_aggregation_task()
         elif isinstance(frame, (EndFrame, CancelFrame)):
             if self._aggregation:
                 await self._flush_aggregation()
@@ -141,8 +141,9 @@ class DTMFAggregator(FrameProcessor):
         sequence = self._aggregation
         transcription_text = f"{self._prefix}{sequence}"
 
+        # A DTMF flush is always a complete entry, so mark it finalized.
         transcription_frame = TranscriptionFrame(
-            text=transcription_text, user_id="", timestamp=time_now_iso8601()
+            text=transcription_text, user_id="", timestamp=time_now_iso8601(), finalized=True
         )
         await self.push_frame(transcription_frame)
 

@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class _WakeState(enum.Enum):
@@ -127,13 +127,13 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Returns the current wake state."""
         return self._state
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
+        await super().setup(setup)
         if not self._timeout_task:
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_task_handler(),
@@ -147,15 +147,14 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def reset(self):
-        """Reset the strategy.
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn.
 
-        In timeout mode, preserves state and refreshes timeout since reset
-        means a turn started (activity). In single activation mode, does
-        nothing — the keepalive timeout (started when the wake phrase was
-        detected) handles the transition back to IDLE.
+        In timeout mode, preserves state and refreshes the timeout — a turn
+        starting is the activity that keeps the strategy awake. In single
+        activation mode, does nothing: the keepalive timeout (started when the
+        wake phrase was detected) handles the transition back to IDLE.
         """
-        await super().reset()
         if self._state == _WakeState.AWAKE:
             if not self._single_activation:
                 self._refresh_timeout()

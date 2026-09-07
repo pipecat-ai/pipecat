@@ -20,12 +20,22 @@ from typing import Any
 
 from loguru import logger
 
+from pipecat.processors.frame_processor import FrameProcessorSetup
+
+try:
+    from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Deepgram on SageMaker, you need to `uv add "pipecat-ai[sagemaker]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
 )
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
@@ -135,14 +145,30 @@ class DeepgramSageMakerTTSService(TTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram SageMaker TTS service.
+    @property
+    def supports_processing_metrics(self) -> bool:
+        """Whether this service has a meaningful processing-time metric.
+
+        False: the SageMaker endpoint is driven over a bidirectional HTTP/2
+        stream, so ``run_tts`` sends the text and returns while audio arrives
+        on the receive task — the same handoff the websocket services make,
+        over a different transport.
+        """
+        return False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Clean up the Deepgram SageMaker TTS service."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the Deepgram SageMaker TTS service.
@@ -201,7 +227,7 @@ class DeepgramSageMakerTTSService(TTSService):
         and closes the BiDi session. Safe to call multiple times.
         """
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram TTS on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram TTS on SageMaker...")
 
             try:
                 await self._client.send_json({"type": "Close"})
@@ -256,7 +282,7 @@ class DeepgramSageMakerTTSService(TTSService):
                 if result is None:
                     break
 
-                if hasattr(result, "value") and hasattr(result.value, "bytes_"):
+                if isinstance(result, ResponseStreamEventPayloadPart):
                     if result.value.bytes_:
                         payload = result.value.bytes_
 
@@ -337,7 +363,6 @@ class DeepgramSageMakerTTSService(TTSService):
             Frame: TTSStartedFrame, then None (audio comes asynchronously via
             the response processor).
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
         if self._client is None:
             logger.warning(f"{self}: client unavailable, skipping TTS")
             yield ErrorFrame(error="client unavailable")

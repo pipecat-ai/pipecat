@@ -20,7 +20,7 @@ from typing import (
     Literal,
 )
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.utils.deprecation import deprecated
 
 # -- Constants --
-PROTOCOL_VERSION = "2.0.0"
+PROTOCOL_VERSION = "2.1.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -242,14 +242,16 @@ class SendTextData(BaseModel):
 
 
 class DTMFInputData(BaseModel):
-    """Data format for a DTMF keypress sent from the client.
+    """Data format for DTMF keypresses sent from the client.
 
-    Carries a single keypad entry. Clients send one ``dtmf`` message per key, the
-    way a telephony transport delivers them; the bot's DTMF handling (e.g. a
-    ``DTMFAggregator``) sequences them.
+    Carries one or more keypad entries (``0``-``9``, ``*``, ``#``), delivered
+    in order, so the bot's DTMF handling (e.g. a ``DTMFAggregator``) sees them
+    exactly as a telephony transport would deliver rapid keypresses.
+
+    Protocol 2.1.0 replaced the single ``button`` field with ``buttons``.
     """
 
-    button: KeypadEntry
+    buttons: list[KeypadEntry] = Field(min_length=1)
 
 
 class LLMFunctionCallStartMessageData(BaseModel):

@@ -12,15 +12,15 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict, cast
 
 from loguru import logger
-from openai import NotGiven
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
     LLMStandardMessage,
+    NotGiven,
 )
 
 try:
@@ -47,6 +47,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     - Converting Pipecat's standardized tools schema to Gemini's function-calling format.
     - Extracting and sanitizing messages from the LLM context for logging with Gemini.
     """
+
+    def __init__(self):
+        """Initialize the adapter."""
+        super().__init__()
+        # (adaptation, tool name) pairs already reported, so a tool set needing
+        # them warns once rather than on every inference.
+        self._warned_schema_adaptations: set[tuple[str, str]] = set()
 
     @property
     def id_for_llm_specific_messages(self) -> str:
@@ -78,7 +85,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "system_instruction": effective_system,
             "messages": converted.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": self.from_standard_tools(context.tools),
+            "tools": cast("list[Any] | NotGiven", self.from_standard_tools(context.tools)),
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
@@ -92,30 +99,53 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
 
-        def _strip_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
-            """Recursively remove "additionalProperties" fields from JSON schema, as they're not supported by Gemini.
+        def _adapt_schema(schema: Any, notes: set[str]) -> Any:
+            """Recursively adapt a JSON schema to the subset Gemini accepts.
+
+            Tool schemas are JSON Schema, but Gemini takes only a limited subset
+            of it — its schema object follows OpenAPI 3.0's, which predates JSON
+            Schema alignment — and it rejects anything outside that subset. Three
+            constructs need adapting:
+
+            - Keys it has no field for, namely ``additionalProperties`` and vendor
+              extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's
+              MCP server attaches to its tool properties), are dropped.
+            - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
+            - ``enum`` members must be strings, so an ``enum`` holding other values
+              is dropped and its constraint lost.
 
             Args:
-                schema: The JSON schema dict to process.
+                schema: The JSON schema to process.
+                notes: Collects one description per kind of adaptation applied.
 
             Returns:
-                JSON schema dict with "additionalProperties" stripped out.
+                The schema, in the form Gemini accepts.
             """
             if not isinstance(schema, dict):
                 return schema
 
-            result = {}
+            result: dict[str, Any] = {}
 
             for key, value in schema.items():
-                if key == "additionalProperties":
-                    continue
+                if key == "additionalProperties" or key.startswith("x-"):
+                    notes.add(f"dropped unsupported key '{key}'")
+                elif key == "properties" and isinstance(value, dict):
+                    # Keys here name the tool's parameters rather than schema
+                    # keywords, so adapt the values but keep every key.
+                    result[key] = {name: _adapt_schema(prop, notes) for name, prop in value.items()}
+                elif key == "type" and isinstance(value, list):
+                    notes.add("converted a union 'type' to 'anyOf'")
+                    result["anyOf"] = [{"type": member} for member in value]
+                elif (
+                    key == "enum"
+                    and isinstance(value, list)
+                    and not all(isinstance(member, str) for member in value)
+                ):
+                    notes.add("dropped a non-string 'enum', losing its constraint")
                 elif isinstance(value, dict):
-                    result[key] = _strip_additional_properties(value)
+                    result[key] = _adapt_schema(value, notes)
                 elif isinstance(value, list):
-                    result[key] = [
-                        _strip_additional_properties(item) if isinstance(item, dict) else item
-                        for item in value
-                    ]
+                    result[key] = [_adapt_schema(item, notes) for item in value]
                 else:
                     result[key] = value
 
@@ -124,12 +154,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         functions_schema = tools_schema.standard_tools
         if functions_schema:
             formatted_functions = []
+            adapted: dict[str, list[str]] = {}
             for func in functions_schema:
                 func_dict = func.to_default_dict()
-                func_dict["parameters"]["properties"] = _strip_additional_properties(
-                    func_dict["parameters"]["properties"]
-                )
+                notes: set[str] = set()
+                func_dict["parameters"] = _adapt_schema(func_dict["parameters"], notes)
+                for note in notes:
+                    adapted.setdefault(note, []).append(func_dict["name"])
                 formatted_functions.append(func_dict)
+            self._warn_schema_adaptations(adapted)
             formatted_standard_tools = [{"function_declarations": formatted_functions}]
         else:
             formatted_standard_tools = []
@@ -138,6 +171,30 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
         return formatted_standard_tools + custom_gemini_tools
+
+    def _warn_schema_adaptations(self, adapted: dict[str, list[str]]) -> None:
+        """Report tool schemas that had to be adapted before Gemini would accept them.
+
+        Each (adaptation, tool) pair is reported once, so a stable tool set warns
+        on the first inference rather than on all of them, while a tool added
+        later still gets reported.
+
+        Args:
+            adapted: Adaptation description mapped to the tools it applied to.
+        """
+        lines = []
+        for note, tools in sorted(adapted.items()):
+            fresh = [t for t in tools if (note, t) not in self._warned_schema_adaptations]
+            if not fresh:
+                continue
+            self._warned_schema_adaptations.update((note, t) for t in fresh)
+            listed = ", ".join(fresh[:3])
+            if len(fresh) > 3:
+                listed += f" and {len(fresh) - 3} more"
+            lines.append(f"  {note}: {listed}")
+
+        if lines:
+            logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
 
     @staticmethod
     def to_function_response_dict(content: Any) -> dict[str, Any]:
@@ -263,40 +320,45 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         tool_call_id_to_name_mapping = {}
         thought_signature_dicts = []
 
-        # Process each message, converting to Google format as needed
-        for message in remaining_messages:
-            # We have a Google-specific message; this may either be a
-            # thought-signature-containing message that we need to handle in a
-            # special way, or a message already in Google format that we can
-            # use directly
-            if isinstance(message, LLMSpecificMessage):
-                if (
-                    isinstance(message.message, dict)
-                    and message.message.get("type") == "thought_signature"
-                ):
-                    thought_signature_dicts.append(message.message)
+        # Process each message, converting to Google format as needed. A
+        # conversion failure (e.g. a malformed message) is wrapped so it
+        # surfaces with its underlying cause.
+        try:
+            for message in remaining_messages:
+                # We have a Google-specific message; this may either be a
+                # thought-signature-containing message that we need to handle in a
+                # special way, or a message already in Google format that we can
+                # use directly
+                if isinstance(message, LLMSpecificMessage):
+                    if (
+                        isinstance(message.message, dict)
+                        and message.message.get("type") == "thought_signature"
+                    ):
+                        thought_signature_dicts.append(message.message)
+                        continue
+
+                    # Fall back to assuming that the message is already in Google
+                    # format
+                    messages.append(message.message)
                     continue
 
-                # Fall back to assuming that the message is already in Google
-                # format
-                messages.append(message.message)
-                continue
+                # We have a standard universal context message; convert it to
+                # Google format
+                result = self._from_standard_message(
+                    message,
+                    params=self.MessageConversionParams(
+                        tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
+                    ),
+                )
 
-            # We have a standard universal context message; convert it to
-            # Google format
-            result = self._from_standard_message(
-                message,
-                params=self.MessageConversionParams(
-                    tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
-                ),
-            )
+                if result.content:
+                    messages.append(result.content)
 
-            if result.content:
-                messages.append(result.content)
-
-            # Merge tool call ID to name mapping
-            if result.tool_call_id_to_name_mapping:
-                tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+                # Merge tool call ID to name mapping
+                if result.tool_call_id_to_name_mapping:
+                    tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+        except Exception as e:
+            raise LLMContextConversionError(e) from e
 
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
@@ -449,7 +511,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     )
                 elif c["type"] == "image_url":
                     url = c["image_url"]["url"]
-                    logger.warning(f"Unsupported 'image_url': {url}")
+                    parts.append(Part.from_uri(file_uri=url))
                 elif c["type"] == "input_audio":
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
@@ -473,13 +535,20 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     def _merge_parallel_tool_calls_for_thinking(
         self, thought_signature_dicts: list[dict], messages: list[Content]
     ) -> list[Content]:
-        """Merge parallel tool calls into single Content objects when thinking is enabled.
+        """Merge parallel tool calls and their responses into single Content objects.
 
-        Gemini expects parallel tool calls (multiple function calls made
-        simultaneously) to be in a single Content with multiple function_call
-        Parts. This method takes a list of Content messages, where parallel
-        tool calls may be split across multiple messages, and merges them into
-        single messages.
+        Gemini expects the two sides of a batch of parallel tool calls to each
+        live in a single Content: all the ``function_call`` Parts in one model
+        turn, and all the matching ``function_response`` Parts in the following
+        user turn. It rejects the request when the number of response Parts in
+        the response turn doesn't match the number of call Parts in the call
+        turn. In practice the Vertex AI endpoint enforces this strictly (with a
+        400); the Gemini Developer API is currently more lenient and accepts the
+        split form, but the grouped form is the shape the API documents, so we
+        always produce it. Pipecat's context stores each call (and its response)
+        as its own message, so a batch of parallel calls arrives split across
+        several messages; this method regroups both sides back into a single
+        model turn and a single user turn.
 
         This only has an effect when thought_signatures are present (i.e., when
         thinking is enabled). When thinking is disabled, merging doesn't matter.
@@ -491,9 +560,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         - Sequential tool calls: each have their own thought_signature
 
         Algorithm: A tool call message with a thought_signature starts a new
-        parallel group. Any tool call messages after it without a
-        thought_signature get merged into that group, regardless of what
-        messages appear in between.
+        parallel group. Scanning forward, subsequent unsigned tool call messages
+        and their function response messages are merged into the group's single
+        model turn and single user turn respectively, and a fresh
+        thought_signature ends the group. Any other messages that happen to be
+        interleaved are collected and re-emitted after the group, so the
+        regrouping makes as few assumptions as possible about the surrounding
+        message structure.
 
         Args:
             thought_signature_dicts: A list of thought signature dicts, used
@@ -525,6 +598,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 and all(getattr(part, "function_call", None) for part in msg.parts)
             )
 
+        def is_tool_response_message(msg: Content) -> bool:
+            """Check if message contains only function_response parts."""
+            return bool(
+                msg.role == "user"
+                and msg.parts
+                and all(getattr(part, "function_response", None) for part in msg.parts)
+            )
+
         def message_has_thought_signature(msg: Content) -> bool:
             """Check if any part in the message has a thought_signature."""
             if msg.parts is None:
@@ -539,28 +620,39 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
             # If this is a tool call message with a thought signature, start merging
             if is_tool_call_message(current) and message_has_thought_signature(current):
-                merged_parts = list(current.parts)
+                merged_parts = list(current.parts or [])
+                merged_response_parts = []
                 other_messages = []
                 j = i + 1
 
-                # Scan forward, merging tool calls without signatures, collecting others
+                # Scan forward: merge unsigned tool calls and their responses
+                # into the group, collecting any other interleaved messages to
+                # re-emit afterward. A fresh thought signature ends the group.
                 while j < len(messages):
                     next_msg = messages[j]
                     if is_tool_call_message(next_msg):
                         if message_has_thought_signature(next_msg):
                             # New parallel group starts, stop here
                             break
-                        else:
-                            # Merge this call into the current group
-                            merged_parts.extend(next_msg.parts)
-                            j += 1
+                        # Merge this call into the current group
+                        merged_parts.extend(next_msg.parts or [])
+                        j += 1
+                    elif is_tool_response_message(next_msg):
+                        # Merge the corresponding response into the group
+                        merged_response_parts.extend(next_msg.parts or [])
+                        j += 1
                     else:
-                        # Collect non-tool-call message, keep scanning
+                        # Some other message is interleaved within the group;
+                        # collect it and keep scanning for this group's calls
+                        # and responses.
                         other_messages.append(next_msg)
                         j += 1
 
-                # Output merged calls, then collected other messages
+                # Output the merged calls, then the merged responses, then any
+                # other messages that were interleaved within the group.
                 merged_messages.append(Content(role="model", parts=merged_parts))
+                if merged_response_parts:
+                    merged_messages.append(Content(role="user", parts=merged_response_parts))
                 merged_messages.extend(other_messages)
                 i = j
             else:
@@ -603,7 +695,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 log_display_text = f"{text[:50]}..." if len(text) > 50 else text
                 logger.trace(f" - To text: {log_display_text}")
             elif bookmark.get("inline_data"):
-                logger.trace(f" - To inline data")
+                logger.trace(" - To inline data")
 
         # Get all assistant messages
         assistant_messages = [
@@ -704,7 +796,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # strict message order. Comparing actual data is expensive.
             and len(part.inline_data.data) == len(bookmark_inline_data.data)
         ):
-            logger.trace(f"Thought signature inline data match")
+            logger.trace("Thought signature inline data match")
             return True
 
         return False

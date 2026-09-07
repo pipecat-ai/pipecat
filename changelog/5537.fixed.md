@@ -1,0 +1,1 @@
+- Fixed `GeminiTTSService` ignoring its `language` setting on the Gemini API (GenAI) backend. The configured language is now sent as the speech config's `language_code`, as it already is on the Cloud Text-to-Speech backend.

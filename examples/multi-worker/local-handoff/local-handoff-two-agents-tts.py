@@ -9,7 +9,7 @@
 Same shape as ``local-handoff-two-agents.py``, but each child worker
 runs its own TTS with a distinct voice. The main worker has no TTS —
 audio comes from the child workers via the bus and is played by the
-main worker's transport. Tasks announce the transfer ("let me connect
+main worker's transport. Workers announce the transfer ("let me connect
 you with...") before handing off.
 
 Architecture::
@@ -37,7 +37,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -75,7 +75,7 @@ transport_params = {
 }
 
 
-class AcmeTTSTask(LLMWorker):
+class AcmeTTSWorker(LLMWorker):
     """Child worker with its own LLM + TTS, bridged to the main worker.
 
     Each child wraps the standard ``Pipeline([llm])`` with an extra
@@ -110,20 +110,14 @@ class AcmeTTSTask(LLMWorker):
             agent (str): The agent to transfer to (e.g. 'greeter', 'support').
             reason (str): Why the user is being transferred.
         """
-        logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
+        logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
+        await params.result_callback(f"Transferring to {agent} agent.")
         await self.activate_worker(
             agent,
-            messages=[
-                {
-                    "role": "developer",
-                    "content": f"Tell the user about the transfer ({reason}).",
-                }
-            ],
             args=LLMWorkerActivationArgs(
                 messages=[{"role": "developer", "content": reason}],
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -133,15 +127,12 @@ class AcmeTTSTask(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
-def build_greeter() -> AcmeTTSTask:
+def build_greeter() -> AcmeTTSWorker:
     """Greeter: routes the user to support when they pick a product."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -158,14 +149,14 @@ def build_greeter() -> AcmeTTSTask:
             ),
         ),
     )
-    return AcmeTTSTask(
+    return AcmeTTSWorker(
         "greeter",
         llm=llm,
         voice_id="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline
     )
 
 
-def build_support() -> AcmeTTSTask:
+def build_support() -> AcmeTTSWorker:
     """Support: answers product questions, can hand back to the greeter."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -183,7 +174,7 @@ def build_support() -> AcmeTTSTask:
             ),
         ),
     )
-    return AcmeTTSTask(
+    return AcmeTTSWorker(
         "support",
         llm=llm,
         voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Blake
@@ -231,7 +222,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    await runner.add_workers(build_greeter(), build_support(), worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -255,8 +249,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(build_greeter(), build_support(), worker)
 
     await runner.run()
 
