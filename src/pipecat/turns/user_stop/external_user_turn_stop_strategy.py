@@ -164,10 +164,12 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_user_started_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user is speaking."""
         self._user_speaking = True
-        self._text = ""
-        self._seen_interim_results = False
+        # Disarm the finalized-transcript fast path: this is a new utterance, so
+        # the previous one's stop signal must not let a late transcript finalize
+        # the turn. The rest of the per-turn state belongs to _reset(), which
+        # runs at real turn boundaries — clearing it here would drop transcript
+        # text a turn is still accumulating across utterances.
         self._external_stop_received = False
-        self._event.clear()
         self._turn_announced_elsewhere = announced_elsewhere
 
     async def _handle_user_stopped_speaking(self, *, announced_elsewhere: bool):

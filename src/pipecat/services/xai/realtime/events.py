@@ -106,13 +106,16 @@ class InputAudioTranscription(BaseModel):
     """Input audio transcription settings for the voice agent.
 
     Parameters:
-        model: Transcription model. Use ``grok-transcribe`` for streaming
-            ``conversation.item.input_audio_transcription.updated`` events.
+        model: Transcription model. Defaults to ``grok-transcribe``: xAI only
+            emits input-audio transcription events
+            (``conversation.item.input_audio_transcription.updated``) when it is
+            explicitly enabled on the realtime session, and Dograh needs the user
+            transcripts. Pass ``None`` to leave transcription off.
         language_hint: BCP-47 language code to bias ASR.
         keyterms: Domain terms to bias transcription (max 100, ≤50 chars each).
     """
 
-    model: str | None = None
+    model: str | None = "grok-transcribe"
     language_hint: str | None = None
     keyterms: list[str] | None = None
 

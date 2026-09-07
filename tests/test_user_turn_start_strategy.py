@@ -30,6 +30,7 @@ from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
 )
+from tests.frame_processor_helpers import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
@@ -201,7 +202,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_vad_while_bot_speaking_pauses_without_starting_turn(self):
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=0.05)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
         should_start = False
@@ -226,7 +227,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_transcript_during_provisional_pause_starts_turn(self):
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=1.0)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
         should_start = False
@@ -259,7 +260,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_transcript_resumes_and_locks_out_until_bot_stops(self):
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=0.01)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
         should_start = False
@@ -303,7 +304,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # A long pause window keeps the provisional pause armed so the only way
         # the transport gets resumed is the handle_user_turn_started() guard.
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=10.0)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
 
@@ -325,7 +326,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # Turns can end by any path (e.g. a forced semantic stop) while a
         # provisional pause is armed; the stop callback must resume audio.
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=10.0)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
 
@@ -347,7 +348,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_during_provisional_pause_resumes_output_audio(self):
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=10.0)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
 
@@ -367,7 +368,7 @@ class TestProvisionalVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # With interruptions disabled, trigger_user_turn_started() emits no
         # InterruptionFrame, so the strategy must resume the transport itself.
         strategy = ProvisionalVADUserTurnStartStrategy(pause_secs=10.0, enable_interruptions=False)
-        await strategy.setup(self.task_manager)
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         pushed_frames = []
         should_start = False

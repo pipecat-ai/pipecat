@@ -35,7 +35,7 @@ def _tool(name, properties=None, required=None, description="A tool."):
 
 
 class _FakeTransport:
-    """Fake streamablehttp_client context manager; records enter/exit tasks."""
+    """Fake streamable_http_client context manager; records enter/exit tasks."""
 
     def __init__(self, record, exit_error=None, connect_delay=0):
         self._record = record
@@ -110,7 +110,10 @@ class MCPClientTestBase(unittest.IsolatedAsyncioTestCase):
         session = _FakeSession(tools, record, fail_initializes, cancel_initialize)
         ctx = patch.multiple(
             "pipecat.services.mcp_service",
-            streamablehttp_client=lambda **kwargs: _FakeTransport(
+            # The fork calls the mcp SDK's newer `streamable_http_client`
+            # (url positional, plus an http_client it builds for timeouts)
+            # rather than upstream's `streamablehttp_client(**model_dump())`.
+            streamable_http_client=lambda *args, **kwargs: _FakeTransport(
                 record, transport_exit_error, connect_delay
             ),
             ClientSession=lambda read, write: session,

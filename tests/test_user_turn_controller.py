@@ -191,7 +191,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         events: list[str] = []
 
@@ -256,7 +256,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await controller.setup(self.task_manager)
+        await controller.setup(frame_processor_setup(self.task_manager))
 
         stop_events: list[object | None] = []
 
