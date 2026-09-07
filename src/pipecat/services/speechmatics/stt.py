@@ -32,7 +32,8 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import STTSettings
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -150,19 +151,19 @@ class SpeechmaticsSTTSettings(STTSettings):
         prefer_current_speaker: Prefer current speaker ID.
     """
 
-    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    turn_detection_mode: TurnDetectionMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_active_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    known_speakers: list[SpeakerIdentifier] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
+    domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_detection_mode: TurnDetectionMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_active_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    known_speakers: list[SpeakerIdentifier] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_vocab: list[AdditionalVocabEntry] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    operating_point: Model | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_partials: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_speakers: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prefer_current_speaker: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prefer_current_speaker: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that are purely local (formatting templates) — no reconnect
     #: and no API call needed.
