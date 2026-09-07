@@ -80,6 +80,7 @@ IMPORTS = {
     ],
     "openai_stt": ["from pipecat.services.openai.stt import OpenAISTTService"],
     "openai_realtime_stt": ["from pipecat.services.openai.stt import OpenAIRealtimeSTTService"],
+    "palabra_stt": ["from pipecat.services.palabra.stt import PalabraSTTService"],
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],
@@ -149,6 +150,7 @@ IMPORTS = {
         "from pipecat.services.nvidia.sagemaker.tts import NvidiaSageMakerTTSService"
     ],
     "openai_tts": ["from pipecat.services.openai.tts import OpenAITTSService"],
+    "palabra_tts": ["from pipecat.services.palabra.tts import PalabraTTSService"],
     "piper_tts": ["from pipecat.services.piper.tts import PiperTTSService"],
     "pockettts_tts": ["from pipecat.services.pocket_tts.tts import PocketTTSService"],
     "resemble_tts": ["from pipecat.services.resembleai.tts import ResembleAITTSService"],

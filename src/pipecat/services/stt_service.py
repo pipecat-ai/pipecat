@@ -529,6 +529,11 @@ class STTService(AIService):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
+        await self._update_transcription_metrics(frame)
+        await super().push_frame(frame, direction)
+
+    async def _update_transcription_metrics(self, frame):
+        """Track transcript timing and report metrics on finalization."""
         if isinstance(frame, TranscriptionFrame):
             # Store the transcript time for TTFB calculation
             self._last_transcript_time = time.time()
@@ -543,8 +548,6 @@ class STTService(AIService):
                 await self.stop_ttfb_metrics()
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
-
-        await super().push_frame(frame, direction)
 
     @property
     def supports_ttfs(self) -> bool:

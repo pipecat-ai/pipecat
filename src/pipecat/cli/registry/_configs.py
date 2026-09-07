@@ -76,6 +76,7 @@ SERVICE_CONFIGS = {
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "palabra_stt": 'PalabraSTTService(api_key=os.getenv("PALABRA_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
@@ -578,6 +579,14 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("SMALLEST_API_KEY"),\n'
         "        settings=SmallestTTSService.Settings(\n"
         '            voice=os.getenv("SMALLEST_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "palabra_tts": (
+        "PalabraTTSService(\n"
+        '        api_key=os.getenv("PALABRA_API_KEY"),\n'
+        "        settings=PalabraTTSService.Settings(\n"
+        '            voice=os.getenv("PALABRA_VOICE_ID", "default_low"),\n'
         "        ),\n"
         "    )\n"
     ),

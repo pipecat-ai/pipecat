@@ -436,6 +436,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="palabra_stt",
+            label="Palabra",
+            package="pipecat-ai[palabra]",
+            class_name=["PalabraSTTService"],
+            env_prefix="PALABRA",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="sarvam_stt",
             label="Sarvam",
             package="pipecat-ai[sarvam]",
@@ -954,6 +962,16 @@ class ServiceRegistry:
             env_prefix="OPENAI",
             include_params=["api_key"],
             settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="palabra_tts",
+            label="Palabra",
+            package="pipecat-ai[palabra]",
+            class_name=["PalabraTTSService"],
+            env_prefix="PALABRA",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "default_low"},
         ),
         ServiceDefinition(
             value="piper_tts",
