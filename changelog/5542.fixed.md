@@ -1,0 +1,1 @@
+- Fixed the `realtime-ultravox-text` example to use `inworld-tts-2`; Inworld discontinued `inworld-tts-1` on 2026-06-15.
