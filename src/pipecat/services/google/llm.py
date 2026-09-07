@@ -38,7 +38,12 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
-from pipecat.services.llm_service import BaseModelT, FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import (
+    BaseModelT,
+    FunctionCallFromLLM,
+    LLMService,
+    StructuredInferenceResult,
+)
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -341,8 +346,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         output_type: type[BaseModelT],
         max_tokens: int | None = None,
         system_instruction: str | None = None,
-    ) -> BaseModelT | None:
-        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+    ) -> StructuredInferenceResult[BaseModelT]:
+        """Run a one-shot, out-of-band inference with structured output and metadata.
 
         Args:
             context: The LLM context containing conversation history.
@@ -353,8 +358,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                 If provided, overrides any system instruction in the context.
 
         Returns:
-            A validated ``output_type`` instance, or None if no structured response
-            is produced.
+            Structured output, token usage, and completion or refusal details.
         """
         effective_instruction = system_instruction or self._settings.system_instruction
         adapter = self.get_llm_adapter()
@@ -386,8 +390,61 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
-        # The genai SDK validates the JSON into an `output_type` instance.
-        return response.parsed
+        result = StructuredInferenceResult[BaseModelT](
+            parsed=None, status="failed", raw_response=response
+        )
+        if usage := response.usage_metadata:
+            # Gemini reports reasoning separately from candidate output tokens.
+            result.usage = LLMTokenUsage(
+                prompt_tokens=usage.prompt_token_count or 0,
+                completion_tokens=(usage.candidates_token_count or 0)
+                + (usage.thoughts_token_count or 0),
+                total_tokens=usage.total_token_count or 0,
+                cache_read_input_tokens=usage.cached_content_token_count,
+                reasoning_tokens=usage.thoughts_token_count,
+            )
+
+        feedback = response.prompt_feedback
+        if (
+            feedback
+            and feedback.block_reason
+            and feedback.block_reason != "BLOCKED_REASON_UNSPECIFIED"
+        ):
+            result.status = "refused"
+            result.reason = feedback.block_reason.value
+            result.refusal = feedback.block_reason_message
+            return result
+        if not response.candidates:
+            result.reason = "no_structured_output"
+            return result
+
+        candidate = response.candidates[0]
+        reason = candidate.finish_reason.value if candidate.finish_reason else None
+        if reason == "MAX_TOKENS":
+            result.status = "incomplete"
+            result.reason = reason
+        elif reason in {
+            "SAFETY",
+            "RECITATION",
+            "BLOCKLIST",
+            "PROHIBITED_CONTENT",
+            "SPII",
+            "IMAGE_SAFETY",
+            "IMAGE_PROHIBITED_CONTENT",
+            "IMAGE_RECITATION",
+        }:
+            result.status = "refused"
+            result.reason = reason
+            result.refusal = candidate.finish_message
+        elif reason != "STOP":
+            result.reason = reason
+        elif isinstance(response.parsed, output_type):
+            result.parsed = response.parsed
+            result.status = "success"
+        else:
+            # The SDK leaves parsed unset when JSON does not validate.
+            result.reason = "invalid_response" if response.text else "no_structured_output"
+        return result
 
     def _build_generation_params(
         self,

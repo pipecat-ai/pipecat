@@ -13,12 +13,13 @@ import json
 import uuid
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
     Generic,
+    Literal,
     Protocol,
     cast,
 )
@@ -56,6 +57,7 @@ from pipecat.frames.frames import (
     RealtimeServiceMetadataFrame,
     StartFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -250,9 +252,35 @@ class FunctionCallRunnerItem:
 # matching the pre-generic behavior of `get_llm_adapter()`.
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
 
-# Bound for `run_structured_inference()`'s output model, so the returned instance
-# is typed as the exact Pydantic model class the caller passed in.
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
+
+
+@dataclass
+class StructuredInferenceResult(Generic[BaseModelT]):
+    """Structured output and metadata from a single inference request.
+
+    Parameters:
+        parsed: Validated output, populated only on success.
+        status: ``success`` for validated output, ``refused`` for a refusal or
+            safety block, ``incomplete`` for interrupted generation, or ``failed``
+            for another response without usable structured output. These are
+            Pipecat outcomes, not the provider's response status.
+        usage: Token usage reported by the provider, including unsuccessful
+            generations. None when usage is unavailable.
+        reason: Provider reason code on an unsuccessful response, or
+            ``invalid_response`` / ``no_structured_output`` when the response
+            cannot be validated or contains no structured output.
+        refusal: Refusal or safety-block explanation, when provided.
+        raw_response: Native SDK response for provider-specific metadata.
+
+    """
+
+    parsed: BaseModelT | None
+    status: Literal["success", "refused", "incomplete", "failed"]
+    usage: LLMTokenUsage | None = None
+    reason: str | None = None
+    refusal: str | None = None
+    raw_response: object | None = field(default=None, repr=False)
 
 
 class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
@@ -433,11 +461,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         output_type: type[BaseModelT],
         max_tokens: int | None = None,
         system_instruction: str | None = None,
-    ) -> BaseModelT | None:
-        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+    ) -> StructuredInferenceResult[BaseModelT]:
+        """Run a one-shot, out-of-band inference with structured output and metadata.
 
         Structured-output sibling of :meth:`run_inference`. Must be implemented by
         subclasses whose provider supports structured output.
+
+        Returns metadata directly without emitting pipeline metrics or creating
+        tracing spans. Transport, authentication, and request errors propagate
+        as exceptions.
 
         Args:
             context: The LLM context containing conversation history.
@@ -448,8 +480,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 If provided, overrides any system instruction in the context.
 
         Returns:
-            A validated ``output_type`` instance, or None if no structured response
-            is produced (e.g. a provider refusal).
+            Structured output, token usage, and completion or refusal details.
+            The result's ``parsed`` field is an ``output_type`` instance on success.
         """
         raise NotImplementedError(
             f"run_structured_inference() not supported by {self.__class__.__name__}"

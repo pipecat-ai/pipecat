@@ -23,8 +23,8 @@ from openai import (
     DefaultAsyncHttpxClient,
 )
 from openai._types import NotGiven as OpenAINotGiven
-from openai.types.chat import ChatCompletionChunk
-from pydantic import BaseModel, Field
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
+from pydantic import BaseModel, Field, ValidationError
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
@@ -37,7 +37,12 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import BaseModelT, FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import (
+    BaseModelT,
+    FunctionCallFromLLM,
+    LLMService,
+    StructuredInferenceResult,
+)
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.deprecation import deprecated
@@ -414,8 +419,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         output_type: type[BaseModelT],
         max_tokens: int | None = None,
         system_instruction: str | None = None,
-    ) -> BaseModelT | None:
-        """Run a one-shot, out-of-band inference returning a validated Pydantic model.
+    ) -> StructuredInferenceResult[BaseModelT]:
+        """Run a one-shot, out-of-band inference with structured output and metadata.
 
         Args:
             context: The LLM context containing conversation history.
@@ -426,7 +431,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 If provided, overrides any system instruction in the context.
 
         Returns:
-            A validated ``output_type`` instance, or None if the model refused.
+            Structured output, token usage, and completion or refusal details.
         """
         effective_instruction = system_instruction or self._settings.system_instruction
         adapter = self.get_llm_adapter()
@@ -436,7 +441,6 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             convert_developer_to_user=not self.supports_developer_role,
         )
 
-        # Build params using the same method as streaming completions
         params = self.build_chat_completion_params(invocation_params)
 
         # The structured-output helper is inherently non-streaming and rejects
@@ -444,9 +448,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         params.pop("stream", None)
         params.pop("stream_options", None)
 
-        # Override max_tokens if provided
         if max_tokens is not None:
-            # Use max_completion_tokens for newer models, fallback to max_tokens
             if "max_completion_tokens" in params:
                 params["max_completion_tokens"] = max_tokens
             else:
@@ -454,10 +456,53 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         params["response_format"] = output_type
 
-        # Parse into the requested Pydantic model
-        response = await self._client.chat.completions.parse(**params)
+        # Defer SDK parsing: length and content-filter errors can discard metadata.
+        raw = await self._client.chat.completions.with_raw_response.parse(**params)
+        response = ChatCompletion.construct(**raw.http_response.json())
+        response._request_id = raw.request_id
+        result = StructuredInferenceResult[BaseModelT](
+            parsed=None, status="failed", raw_response=response
+        )
+        if usage := response.usage:
+            result.usage = LLMTokenUsage(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                cache_read_input_tokens=(
+                    usage.prompt_tokens_details.cached_tokens
+                    if usage.prompt_tokens_details
+                    else None
+                ),
+                reasoning_tokens=(
+                    usage.completion_tokens_details.reasoning_tokens
+                    if usage.completion_tokens_details
+                    else None
+                ),
+            )
 
-        return response.choices[0].message.parsed
+        if not response.choices:
+            result.reason = "no_structured_output"
+            return result
+
+        choice = response.choices[0]
+        result.refusal = choice.message.refusal
+        if choice.finish_reason == "length":
+            result.status = "incomplete"
+            result.reason = choice.finish_reason
+        elif result.refusal is not None or choice.finish_reason == "content_filter":
+            result.status = "refused"
+            result.reason = choice.finish_reason
+        elif choice.finish_reason != "stop":
+            result.reason = choice.finish_reason
+        elif not choice.message.content:
+            result.reason = "no_structured_output"
+        else:
+            try:
+                result.parsed = output_type.model_validate_json(choice.message.content)
+                result.status = "success"
+            except ValidationError:
+                result.reason = "invalid_response"
+        return result
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
