@@ -1,0 +1,1 @@
+- Added `speed` to Inworld Realtime's `AudioOutput`, so a session can set the agent's speaking rate.
