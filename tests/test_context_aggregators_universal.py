@@ -726,6 +726,46 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         # The user mute strategies should have muted the user.
         self.assertFalse(user_turn)
 
+    async def test_muted_vad_stop_allows_active_turn_to_time_out(self):
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[VADUserTurnStartStrategy()],
+                    stop=[ExternalUserTurnStopStrategy()],
+                ),
+                user_mute_strategies=[FirstSpeechUserMuteStrategy()],
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+
+        timed_out = False
+
+        @user_aggregator.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(aggregator):
+            nonlocal timed_out
+            timed_out = True
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            # The turn starts before the bot's first speech activates muting.
+            VADUserStartedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+            # This frame is suppressed while muted, but it must still clear the
+            # controller's raw speaking state so the watchdog can close the turn.
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
+        ]
+        (down_frames, _) = await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertTrue(timed_out)
+        self.assertFalse(
+            any(isinstance(frame, VADUserStoppedSpeakingFrame) for frame in down_frames)
+        )
+
     async def test_pending_transcription_emitted_on_end_frame(self):
         """Pending user transcription should be emitted when EndFrame arrives."""
         context = LLMContext()

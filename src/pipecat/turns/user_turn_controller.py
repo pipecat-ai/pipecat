@@ -202,15 +202,9 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
-        if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
-            await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
-            await self._handle_user_stopped_speaking(frame)
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._handle_vad_user_started_speaking(frame)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._handle_vad_user_stopped_speaking(frame)
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+        await self._update_user_speaking_state(frame)
+
+        if isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
 
         for strategy in self._user_turn_strategies.start or []:
@@ -222,6 +216,21 @@ class UserTurnController(BaseObject):
             result = await strategy.process_frame(frame)
             if result == ProcessFrameResult.STOP:
                 break
+
+    async def _update_user_speaking_state(self, frame: Frame) -> None:
+        """Update raw user speaking state without invoking turn strategies.
+
+        Args:
+            frame: A user speaking lifecycle frame.
+        """
+        if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
+            await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._handle_vad_user_started_speaking(frame)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_user_stopped_speaking(frame)
 
     async def _setup_strategies(self):
         if not self._setup:

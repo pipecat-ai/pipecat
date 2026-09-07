@@ -802,6 +802,18 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().process_frame(frame, direction)
 
         if await self._maybe_mute_frame(frame):
+            if isinstance(
+                frame,
+                (
+                    VADUserStoppedSpeakingFrame,
+                    ProposedUserStoppedSpeakingFrame,
+                    UserStoppedSpeakingFrame,
+                ),
+            ):
+                # Muting suppresses turn signals and strategy processing, but a
+                # stop must still clear raw speaking state. Otherwise a turn
+                # that began before muting can never reach its watchdog.
+                await self._user_turn_controller._update_user_speaking_state(frame)
             return
 
         if isinstance(frame, StartFrame):
