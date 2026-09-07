@@ -29,7 +29,8 @@ from pipecat.services.dograh.mps_billing import (
     MPS_BILLING_VERSION_V2,
     get_correlation_id,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -77,9 +78,9 @@ class DograhTTSSettings(TTSSettings):
         volume: Volume control (0.0 to 1.0).
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DograhTTSService(WebsocketTTSService):

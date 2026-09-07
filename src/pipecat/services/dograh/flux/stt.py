@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )
@@ -355,6 +355,6 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         await self.push_error(error_msg=f"STT error: {error_msg}")
 
-    async def _report_error(self, error):
+    async def _report_error(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

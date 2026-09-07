@@ -20,7 +20,8 @@ import aiohttp
 from loguru import logger
 
 from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import STTSettings
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 from pipecat.services.stt_latency import HUGGINGFACE_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -52,8 +53,8 @@ class HuggingFaceSTTSettings(STTSettings):
         generation_parameters: Optional provider/model generation parameters.
     """
 
-    return_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    generation_parameters: dict[str, Any] | None | _NotGiven = field(
+    return_timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    generation_parameters: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 

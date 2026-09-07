@@ -246,13 +246,16 @@ class DograhSTTService(STTService, WebsocketService):
 
         await self._disconnect_websocket()
 
-    async def _report_error(self, frame: ErrorFrame):
+    async def _report_error(self, frame: ErrorFrame, force_treat_as_permanent: bool = False):
         """Report an error to the pipeline.
 
         Args:
             frame: The error frame to push upstream.
+            force_treat_as_permanent: Whether the error leaves the service unable
+                to do any more work. Forwarded so a websocket that has exhausted
+                its reconnection attempts costs the service its usability.
         """
-        await self.push_frame(frame, FrameDirection.UPSTREAM)
+        await self.push_error_frame(frame, force_treat_as_permanent=force_treat_as_permanent)
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from Dograh."""
