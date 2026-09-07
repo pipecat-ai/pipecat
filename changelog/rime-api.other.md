@@ -1,0 +1,1 @@
+- Use the published `rime-api` package for Rime WebSocket v1 protocol definitions. Install `pipecat-ai[rime]` for v1 support. HTTP and legacy WebSocket services work without this extra.
