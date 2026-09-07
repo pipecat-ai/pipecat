@@ -1,6 +1,9 @@
 .vscode
 env/
 __pycache__/
+
+# provider-watch reports checkout (see .claude/skills/provider-watch)
+_reports/
 *~
 venv
 .venv
@@ -13,6 +16,7 @@ local.properties
 *.lock
 smart_turn_audio_log
 #*#
+.#*
 
 # Distribution / Packaging
 .Python
@@ -72,3 +76,5 @@ whisker_setup.py
 
 # MoQ transport
 *.pem
+# Release-eval run artifacts (logs and conversation recordings)
+scripts/release-evals/test-runs/

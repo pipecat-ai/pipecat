@@ -12,7 +12,7 @@ from loguru import logger
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -38,28 +38,30 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
     worker = PipelineWorker(
         Pipeline([tts, transport.output()]),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
-
-    # Register an event handler so we can play the audio when the client joins
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        await worker.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
+
+    # Register an event handler so we can play the audio when the client joins
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        await worker.queue_frames([TTSSpeakFrame("Hello there!"), EndFrame()])
+
     await runner.run()
 
 

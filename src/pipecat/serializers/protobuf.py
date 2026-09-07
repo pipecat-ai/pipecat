@@ -156,10 +156,10 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         # Set special fields
         if id:
-            setattr(instance, "id", id)
+            instance.id = id
         if name:
-            setattr(instance, "name", name)
+            instance.name = name
         if pts:
-            setattr(instance, "pts", pts)
+            instance.pts = pts
 
         return instance

@@ -15,8 +15,8 @@ from pipecat.frames.frames import (
     Frame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
 
@@ -73,11 +73,11 @@ class FrameSerializer(BaseObject):
             return True
         return False
 
-    async def setup(self, frame: StartFrame):
-        """Initialize the serializer with startup configuration.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Initialize the serializer with pipeline configuration.
 
         Args:
-            frame: StartFrame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
         pass
 

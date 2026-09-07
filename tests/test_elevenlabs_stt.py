@@ -10,6 +10,7 @@ import aiohttp
 import pytest
 from aiohttp import web
 
+from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.elevenlabs.stt import (
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
@@ -17,6 +18,32 @@ from pipecat.services.elevenlabs.stt import (
     audio_format_from_sample_rate,
 )
 from pipecat.transcriptions.language import Language
+
+COMMITTED_TEXT = "Hello. This is a test of the speech-to-text service."
+
+PLAIN_COMMITTED_MESSAGE = {
+    "message_type": "committed_transcript",
+    "text": COMMITTED_TEXT,
+}
+
+TIMESTAMPED_COMMITTED_MESSAGE = {
+    "message_type": "committed_transcript_with_timestamps",
+    "text": COMMITTED_TEXT,
+    "language_code": "en",
+    "words": [{"text": "Hello.", "start": 0.0, "end": 0.5, "type": "word"}],
+}
+
+
+def _capture_transcriptions(service: ElevenLabsRealtimeSTTService) -> list[TranscriptionFrame]:
+    """Collect the TranscriptionFrames a service pushes."""
+    captured: list[TranscriptionFrame] = []
+
+    async def push_frame(frame, direction=None):
+        if isinstance(frame, TranscriptionFrame):
+            captured.append(frame)
+
+    service.push_frame = push_frame
+    return captured
 
 
 @pytest.mark.asyncio
@@ -162,3 +189,71 @@ async def test_elevenlabs_realtime_websocket_url_omits_unset_filter_background_a
 
     query = parse_qs(urlparse(captured["url"]).query)
     assert "filter_background_audio" not in query
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_language_detection_emits_single_final():
+    """Language detection turns on the timestamped message, which alone carries language."""
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_language_detection=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    # The server sends the timestamped message first in this configuration.
+    await service._process_response(TIMESTAMPED_COMMITTED_MESSAGE)
+    await service._process_response(PLAIN_COMMITTED_MESSAGE)
+
+    assert len(captured) == 1
+    assert captured[0].text == COMMITTED_TEXT
+    assert captured[0].language == "en"
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_timestamps_emits_single_final():
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_timestamps=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response(PLAIN_COMMITTED_MESSAGE)
+    await service._process_response(TIMESTAMPED_COMMITTED_MESSAGE)
+
+    assert len(captured) == 1
+    assert captured[0].text == COMMITTED_TEXT
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_both_options_emit_single_final():
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_timestamps=True,
+        include_language_detection=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response(PLAIN_COMMITTED_MESSAGE)
+    await service._process_response(TIMESTAMPED_COMMITTED_MESSAGE)
+
+    assert len(captured) == 1
+    assert captured[0].language == "en"
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
+    """Without either option the server sends only the plain message, so it must be emitted."""
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response(PLAIN_COMMITTED_MESSAGE)
+
+    assert len(captured) == 1
+    assert captured[0].text == COMMITTED_TEXT
+    assert captured[0].language is None

@@ -10,33 +10,34 @@ import re
 
 from pipecat.frames.frames import AggregationType
 
-_UNIT_MAP: dict[str, str] = {
-    "km": "kilometers",
-    "m": "meters",
-    "cm": "centimeters",
-    "mm": "millimeters",
-    "mi": "miles",
-    "ft": "feet",
-    "in": "inches",
-    "yd": "yards",
-    "kg": "kilograms",
-    "g": "grams",
-    "mg": "milligrams",
-    "lb": "pounds",
-    "oz": "ounces",
-    "l": "liters",
-    "ml": "milliliters",
-    "mph": "miles per hour",
-    "kph": "kilometers per hour",
-    "kmh": "kilometers per hour",
-    "gb": "gigabytes",
-    "mb": "megabytes",
-    "kb": "kilobytes",
-    "tb": "terabytes",
-    "hz": "hertz",
-    "khz": "kilohertz",
-    "mhz": "megahertz",
-    "ghz": "gigahertz",
+# Maps unit abbreviation to (singular, plural) spoken forms.
+_UNIT_MAP: dict[str, tuple[str, str]] = {
+    "km": ("kilometer", "kilometers"),
+    "m": ("meter", "meters"),
+    "cm": ("centimeter", "centimeters"),
+    "mm": ("millimeter", "millimeters"),
+    "mi": ("mile", "miles"),
+    "ft": ("foot", "feet"),
+    "in": ("inch", "inches"),
+    "yd": ("yard", "yards"),
+    "kg": ("kilogram", "kilograms"),
+    "g": ("gram", "grams"),
+    "mg": ("milligram", "milligrams"),
+    "lb": ("pound", "pounds"),
+    "oz": ("ounce", "ounces"),
+    "l": ("liter", "liters"),
+    "ml": ("milliliter", "milliliters"),
+    "mph": ("mile per hour", "miles per hour"),
+    "kph": ("kilometer per hour", "kilometers per hour"),
+    "kmh": ("kilometer per hour", "kilometers per hour"),
+    "gb": ("gigabyte", "gigabytes"),
+    "mb": ("megabyte", "megabytes"),
+    "kb": ("kilobyte", "kilobytes"),
+    "tb": ("terabyte", "terabytes"),
+    "hz": ("hertz", "hertz"),
+    "khz": ("kilohertz", "kilohertz"),
+    "mhz": ("megahertz", "megahertz"),
+    "ghz": ("gigahertz", "gigahertz"),
 }
 
 # Single-letter units that are also common English words: only expand when
@@ -65,6 +66,8 @@ _AMBIGUOUS_UNIT_RE = re.compile(
 async def expand_units(text: str, aggregation_type: str | AggregationType) -> str:
     """Expand unit abbreviations to their full spoken form.
 
+    A quantity of exactly one takes the singular form of the unit.
+
     Args:
         text: Input text possibly containing unit expressions.
         aggregation_type: Aggregation type of the text frame (unused).
@@ -76,12 +79,17 @@ async def expand_units(text: str, aggregation_type: str | AggregationType) -> st
 
         result = await expand_units("Run 5km at 100kph", "*")
         # "Run 5 kilometers at 100 kilometers per hour"
+
+        result = await expand_units("Only 1km left", "*")
+        # "Only 1 kilometer left"
     """
 
     def _replace(match: re.Match) -> str:
         number = match.group(1)
-        unit = _UNIT_MAP[match.group(2).lower()]
-        return f"{number} {unit}"
+        singular, plural = _UNIT_MAP[match.group(2).lower()]
+        # Only a bare "1" takes the singular; a decimal such as "1.0" reads as
+        # plural in speech.
+        return f"{number} {singular if number == '1' else plural}"
 
     text = _UNIT_RE.sub(_replace, text)
     return _AMBIGUOUS_UNIT_RE.sub(_replace, text)

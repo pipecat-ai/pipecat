@@ -38,9 +38,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import aiobotocore.session
@@ -68,10 +69,10 @@ class AWSBedrockLLMSettings(LLMSettings):
         additional_model_request_fields: Additional model-specific parameters.
     """
 
-    stop_sequences: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    additional_model_request_fields: dict[str, Any] | _NotGiven = field(
+    stop_sequences: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_model_request_fields: dict[str, Any] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -363,7 +364,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
-            except (TimeoutError, ReadTimeoutError) as e:
+            except (TimeoutError, ReadTimeoutError):
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying converse_stream due to timeout")
                 response = await client.converse_stream(**request_params)
@@ -538,8 +539,6 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 # Call AWS Bedrock with streaming
                 response = await self._create_converse_stream(client, request_params)
 
-                await self.stop_ttfb_metrics()
-
                 # Process the streaming response. Bedrock emits each tool call as
                 # its own content block, identified by contentBlockIndex, so we key
                 # accumulators by index to capture parallel tool calls instead of
@@ -550,6 +549,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 function_calls = []
 
                 async for event in response["stream"]:
+                    # The events that open the stream (messageStart) carry no
+                    # model output, so TTFB ends at the first content block.
+                    if "contentBlockStart" in event or "contentBlockDelta" in event:
+                        await self.stop_ttfb_metrics()
+
                     # Handle text content
                     if "contentBlockDelta" in event:
                         block = event["contentBlockDelta"]
@@ -572,6 +576,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockStart"]
                         content_block_start = block["start"]
                         if "toolUse" in content_block_start:
+                            # A turn that only calls tools produces no answer text,
+                            # so the call itself is what the caller gets and TTFAT
+                            # ends here rather than going unmeasured.
+                            await self.stop_ttfat_metrics()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),

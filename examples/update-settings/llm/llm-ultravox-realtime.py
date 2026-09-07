@@ -16,7 +16,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -53,7 +53,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     system_prompt = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
@@ -106,7 +106,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Ultravox doesn't emit user-turn frames, so on_user_turn_stopped
     # won't fire. If you uncomment the local-VAD opt-in above, also
@@ -131,7 +136,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
@@ -148,12 +153,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

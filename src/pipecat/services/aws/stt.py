@@ -27,21 +27,23 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import (
     build_event_message,
     decode_event,
     get_presigned_url,
     resolve_credentials,
 )
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.errors import ErrorCategory, extract_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import assert_given
 
 
 @dataclass
@@ -61,6 +63,17 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
     Settings = AWSTranscribeSTTSettings
     _settings: Settings
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Treat rejected credentials as recoverable.
+
+        Every connection is signed afresh, so a rejected signature can be an
+        expired one rather than a misconfigured service, and reconnecting is
+        what clears it.
+        """
+        if extract_http_status_code(exception) in (401, 403):
+            return ErrorCategory.CONNECTIVITY
+        return None
 
     def __init__(
         self,
@@ -179,13 +192,13 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Initialize the connection when the service starts.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Start frame signaling service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -222,8 +235,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
                 # Send the formatted event message
                 await self._websocket.send(event_message)
-                # Start metrics after first chunk sent
-                await self.start_processing_metrics()
             except Exception as e:
                 yield ErrorFrame(error=f"Error sending audio: {e}")
 
@@ -568,7 +579,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                         is_final,
                                         language,
                                     )
-                                    await self.stop_processing_metrics()
                                 else:
                                     await self.push_frame(
                                         InterimTranscriptionFrame(

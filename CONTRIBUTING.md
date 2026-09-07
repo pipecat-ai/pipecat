@@ -69,6 +69,8 @@ If you respond on a `needs-repro` issue, any comment resets the 30-day clock. Wh
 
 Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
 
+A fix or follow-up to a change that has not shipped yet needs no entry of its own: the unreleased change's entry covers it — update that entry instead if the follow-up alters what it should say.
+
 ### Creating a Changelog Fragment
 
 1. Create a new file in the `changelog/` directory with this naming pattern:
@@ -279,6 +281,11 @@ For the *runtime* warning, the mechanism depends on what is being deprecated:
 - **Parameters, module moves, behavior/value changes** → the decorator can't
   mark these, so call `warnings.warn(..., DeprecationWarning)` by hand. These
   don't get static-checker detection; the directive documents them.
+- **Fields whose reads are intercepted by `__getattribute__`** → call
+  `warn_deprecated_read()` (`from pipecat.utils.deprecation import
+  warn_deprecated_read`). Such a field is read wherever its object travels, so a
+  hand-rolled `warnings.warn` repeats itself on every read; the helper warns once
+  per call site, and reports the line that performed the read.
 
 ```python
 from pipecat.utils.deprecation import deprecated

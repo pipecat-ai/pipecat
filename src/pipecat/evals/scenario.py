@@ -24,52 +24,72 @@ the bot emits, and asserts on them in order.
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
-``llm_response``, ``tts_response``, ``function_call``. The ``vad_*`` events are the raw
+``llm_response``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
+``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
 The bot's reply can be asserted three ways:
-    response       the transcription of the bot's *actual synthesized audio* (a
-                   local STT — Moonshine or Whisper — run by the harness) in
-                   audio modality, or the LLM text in text modality. The real
-                   end-to-end check — prefer this.
-    llm_response   the LLM's text output (``bot-llm-text``). Available in both
-                   modalities.
-    tts_response   the text the TTS reports speaking (``bot-tts-text``, with
-                   word timing). Audio modality only.
+
+``response``
+    the transcription of the bot's *actual synthesized audio* (a local STT —
+    Moonshine or Whisper — run by the harness) in audio modality, or the LLM
+    text in text modality. The real end-to-end check — prefer this.
+
+``llm_response``
+    the LLM's text output (``bot-llm-text``). Available in both modalities.
+
+``tts_response``
+    the text the TTS reports speaking (``bot-tts-text``, with word timing).
+    Audio modality only.
 
 Supported expectation fields (per event):
-    event: <name>              required — event type name
-    within_ms: <int>           latency budget from the most recent anchor
-                               (optional; defaults to 60s when omitted)
-    text_contains: <str>       substring check on the event's text content
-    calls:                     for ``function_call`` — the set of calls the turn
-                               should make, matched by name in any order; the
-                               expectation passes only when all are found::
 
-                                   - event: function_call
-                                     calls:
-                                       - name: get_current_weather
-                                         args: { location: San Francisco }
-                                       - name: get_restaurant_recommendation
+``event: <name>``
+    required — event type name
 
-    eval: <str>                natural-language criterion the event's text content
-                               must satisfy, evaluated by a judge LLM (see
-                               :mod:`pipecat.evals.judge`).
+``within_ms: <int>``
+    latency budget from the most recent anchor (optional; defaults to 60s when
+    omitted)
 
-    absent: true               invert the expectation: assert that NO event of
-                               this type arrives before the ``within_ms`` budget
-                               expires (default 60s — set ``within_ms`` explicitly
-                               to keep the quiet-window wait short). Matches on
-                               event type only, so it cannot be combined with
-                               ``text_contains``, ``eval:``, or ``calls:``. Used
-                               for duplicate-output regressions::
+``text_contains: <str>``
+    substring check on the event's text content
 
-                                   - event: response
-                                     eval: "answers the question"
-                                   - event: response
-                                     absent: true
-                                     within_ms: 30000
+``calls:``
+    for ``function_call`` — the set of calls the turn should make, matched by
+    name in any order; the expectation passes only when all are found::
+
+        - event: function_call
+          calls:
+            - name: get_current_weather
+              args: { location: San Francisco }
+            - name: get_restaurant_recommendation
+
+    ``function_call_stopped`` takes the same ``calls:`` shape, and its ``args``
+    say how the call ended — which is how a scenario tells work that was stopped
+    from work that finished on its own::
+
+        - event: function_call_stopped
+          calls:
+            - name: write_report
+              args: { cancelled: true }
+
+``eval: <str>``
+    natural-language criterion the event's text content must satisfy, evaluated
+    by a judge LLM (see :mod:`pipecat.evals.judge`).
+
+``absent: true``
+    invert the expectation: assert that NO event of this type arrives before the
+    ``within_ms`` budget expires (default 60s — set ``within_ms`` explicitly to
+    keep the quiet-window wait short). Matches on event type only, so it cannot
+    be combined with ``text_contains``, ``eval:``, or ``calls:``. Used for
+    duplicate-output regressions::
+
+        - event: response
+          eval: "answers the question"
+        - event: response
+          absent: true
+          within_ms: 30000
 
 Instead of ``user:``, a turn may press DTMF keys with ``dtmf:`` (the two are
 mutually exclusive — you press keys or you talk)::
@@ -98,36 +118,56 @@ across ``dtmf`` turns to exercise the aggregator's idle-timeout flush.
 ``expect:`` is optional; omit it for a turn that only sends input or only waits.
 
 Top-level optional fields:
-    context: LLM messages the bot's context should start from. When given, the
-            harness sends them before driving turns (replacing the bot's
-            context); omit to leave the bot's own context untouched.
-    user:   how user turns are delivered::
 
-                user:
-                  modality: audio          # audio | text (default text)
-                  speech:                  # required when modality is audio
-                    service: kokoro        # local TTS that synthesizes the user turns
-                    voice: af_heart
-                    sample_rate: 16000     # optional
+``context:``
+    LLM messages the bot's context should start from. When given, the harness
+    sends them before driving turns (replacing the bot's context); omit to leave
+    the bot's own context untouched.
 
-            ``audio`` streams synthesized user audio to the bot (exercising its
-            STT for real); ``text`` (the default) sends RTVI ``send-text``.
-    judge:  what the judge evaluates, and with which LLM::
+``stop_on_failure:``
+    whether the first failed turn ends the scenario (default true). A failure
+    leaves the conversation in an unknown state, so the remaining turns usually
+    just burn a timeout each. Set it false for a scenario that scores every turn
+    independently — a benchmark that reports a per-turn pass rate needs all of
+    its turns driven, not just the ones before the first miss::
 
-                judge:
-                  modality: audio          # audio | text (default text)
-                  eval:                    # the judge LLM (default ollama)
-                    service: openai
-                    model: gpt-4o-mini
-                  transcription:           # required when modality is audio
-                    service: moonshine     # STT for the bot's audio (or whisper)
-                    model: small-streaming # optional
-                    padding_secs: 0        # optional; silence padded around the
-                                           # segment (default: 2)
+        stop_on_failure: false
 
-            ``audio`` makes the bot speak and judges the transcription of its
-            actual audio (``tts_response``); ``text`` (the default) skips TTS and
-            judges the LLM text (``llm_response``), which is faster and silent.
+    Give those turns an explicit ``within_ms``: with the 60s default, a silent
+    bot costs one full budget per remaining turn.
+
+``user:``
+    how user turns are delivered::
+
+        user:
+          modality: audio          # audio | text (default text)
+          speech:                  # required when modality is audio
+            service: kokoro        # local TTS that synthesizes the user turns
+            voice: af_heart        # voices are language-specific
+            language: en           # optional; must match the voice
+            sample_rate: 16000     # optional
+
+    ``audio`` streams synthesized user audio to the bot (exercising its STT for
+    real); ``text`` (the default) sends RTVI ``send-text``.
+
+``judge:``
+    what the judge evaluates, and with which LLM::
+
+        judge:
+          modality: audio          # audio | text (default text)
+          eval:                    # the judge LLM (default ollama)
+            service: openai
+            model: gpt-4o-mini
+          transcription:           # required when modality is audio
+            service: moonshine     # STT for the bot's audio (or whisper)
+            model: small-streaming # optional
+            language: en           # optional; the language the bot speaks
+            padding_secs: 0        # optional; silence padded around the
+                                   # segment (default: 2)
+
+    ``audio`` makes the bot speak and judges the transcription of its actual
+    audio (``tts_response``); ``text`` (the default) skips TTS and judges the
+    LLM text (``llm_response``), which is faster and silent.
 
 Any value can be pulled from a separate file with ``!include``, resolved
 relative to the scenario file's directory. This is handy for sharing the
@@ -146,6 +186,7 @@ import yaml
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
+from pipecat.evals.services import DEFAULT_OLLAMA_JUDGE_EXTRA, DEFAULT_OLLAMA_JUDGE_MODEL
 
 
 class _ScenarioLoader(yaml.SafeLoader):
@@ -206,6 +247,11 @@ def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path
 # ``response`` is the modality-agnostic alias, resolved to one of the others
 # after parsing (see _resolve_response_events).
 JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
+
+# Events carrying a function call, matched by name and arguments rather than by
+# text: ``function_call`` when one starts, ``function_call_stopped`` when it ends
+# (its ``args`` say whether it was cancelled or ran to completion).
+FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 
 @dataclass
@@ -343,39 +389,55 @@ class EvalScenario:
             Omitted or empty (the default): the harness sends nothing and the
             bot keeps the context it set up itself.
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
-            and optional ``endpoint``. Defaults to
-            ``{"service": "ollama", "model": "gemma2:9b"}``.
+            optional ``endpoint``, and an optional ``extra`` mapping forwarded to
+            the model as top-level request parameters. Defaults to
+            ``{"service": "ollama", "model": "gemma4:12b",
+            "extra": {"reasoning_effort": "none"}}``.
         bot_audio: Whether the bot produces speech, derived from
             ``judge.modality``. False (text, the default): the bot skips TTS —
             the harness configures skip-TTS at connect, so even an on-connect
             greeting is silent. True (audio): the bot speaks, and the judge
             evaluates the transcription of its actual audio.
         transcriber: Parsed from the ``judge.transcription:`` block; the STT
-            config (``service`` defaults to ``moonshine``, plus ``model``) used to
-            transcribe the bot's audio for the ``response`` event (``None`` in
-            text modality).
+            config (``service`` defaults to ``moonshine``, plus ``model`` and an
+            optional ``language`` code) used to transcribe the bot's audio for the
+            ``response`` event (``None`` in text modality). Set ``language`` when
+            the bot speaks a non-English language so the STT doesn't default to
+            English.
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
-            ``voice``, and optional ``model`` / ``sample_rate`` /
-            ``api_key``. Omit for text-only evals (default).
+            ``voice``, and optional ``model`` / ``language`` / ``sample_rate`` /
+            ``api_key``. Set ``language`` (a code like ``zh``) to synthesize
+            non-English user turns. Omit for text-only evals (default).
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when this scenario's connection
             ends. Bots often cancel their pipeline there, so this is False by
             default to avoid that between scenarios; set True to exercise the
             bot's disconnect path. Independent of ``--stop-bot``, which tears the
             bot down via ``eval-cancel`` regardless of the handler.
+        stop_on_failure: Whether the first failed turn ends the scenario
+            (default True). A failed turn leaves the conversation in an unknown
+            state, so continuing usually costs one timeout per remaining turn.
+            Set False for a scenario whose turns are scored independently, where
+            the turns after a failure are still worth driving; each turn's
+            outcome is reported in
+            :attr:`~pipecat.evals.harness.EvalResult.turns`. This governs
+            turn-to-turn progression only: within a turn, an expectation that
+            times out still ends that turn's matching, because a turn's
+            expectations share one deadline anchored at the send.
         source_path: Path the scenario was loaded from, for error messages.
     """
 
     name: str
     turns: list[EvalTurn]
     context: list[dict] = field(default_factory=list)
-    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "gemma2:9b"})
+    judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
     bot_audio: bool = False
     transcriber: dict | None = None
     user_audio: dict | None = None
     trigger_disconnect: bool = False
+    stop_on_failure: bool = True
     source_path: Path | None = None
 
     @classmethod
@@ -451,11 +513,16 @@ class EvalScenario:
             transcriber=transcriber,
             user_audio=user_audio,
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+            stop_on_failure=bool(data.get("stop_on_failure", True)),
             source_path=path,
         )
 
 
-_DEFAULT_JUDGE = {"service": "ollama", "model": "gemma2:9b"}
+_DEFAULT_JUDGE = {
+    "service": "ollama",
+    "model": DEFAULT_OLLAMA_JUDGE_MODEL,
+    "extra": dict(DEFAULT_OLLAMA_JUDGE_EXTRA),
+}
 
 
 def _parse_user_block(user: Any, path: Path) -> dict | None:
@@ -545,7 +612,7 @@ def describe_config(scenario: EvalScenario, *, color: bool = False) -> str:
         separated by ``|``, e.g.::
 
             user  -> modality: audio | speech: kokoro/af_heart
-            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma2:9b
+            judge -> modality: audio | transcription: moonshine/small-streaming | eval: ollama/gemma4:12b
     """
 
     def paint(text: str, code: str) -> str:
@@ -732,7 +799,7 @@ def _parse_function_calls(
     A bare ``function_call`` (neither) becomes one ``EvalFunctionCall(name=None)``
     that matches any single call. Returns None for non-function_call events.
     """
-    if event != "function_call":
+    if event not in FUNCTION_CALL_EVENTS:
         return None
 
     where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"

@@ -1,0 +1,9 @@
+# Codex-side skill metadata (read from .agents/skills/provider-watch via the
+# symlink). A sweep spawns dozens of researcher agents and can open PRs, so it
+# runs only when someone invokes it explicitly — the counterpart of
+# `disable-model-invocation` in SKILL.md.
+interface:
+  display_name: "Provider watch"
+  short_description: "Research every provider behind Pipecat's services and report what's new"
+policy:
+  allow_implicit_invocation: false

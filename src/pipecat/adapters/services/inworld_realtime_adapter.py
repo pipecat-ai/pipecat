@@ -27,7 +27,7 @@ from pipecat.services.inworld.realtime import events
 class InworldRealtimeLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Inworld Realtime API.
 
-    Attributes:
+    Parameters:
         system_instruction: System prompt/instructions for the session.
         messages: List of conversation items formatted for Inworld Realtime.
         tools: List of tool definitions.

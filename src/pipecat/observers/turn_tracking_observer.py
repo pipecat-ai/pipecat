@@ -49,6 +49,12 @@ class TurnTrackingObserver(BaseObserver):
     strategies suppress them at the user aggregator, so speech detected during
     a mute window (e.g. echo of the bot's own audio) must not advance turns or
     report user speech timing.
+
+    Events:
+
+    - on_turn_started: Triggered when a turn starts, providing the turn number
+    - on_turn_ended: Triggered when a turn ends, providing the turn number, the turn's
+      duration in seconds, and whether it was interrupted
     """
 
     def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):

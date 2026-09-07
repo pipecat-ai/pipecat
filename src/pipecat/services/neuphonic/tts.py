@@ -25,15 +25,16 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_neuphonic_lang_code(language: Language) -> str:
@@ -72,7 +73,7 @@ class NeuphonicTTSSettings(TTSSettings):
         speed: Speech speed multiplier. Defaults to 1.0.
     """
 
-    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -221,13 +222,13 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.info(f"Switching TTS to settings: [{self._settings}]")
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Neuphonic TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def flush_audio(self, context_id: str | None = None):
@@ -506,14 +507,6 @@ class NeuphonicHttpTTSService(TTSService):
             The Neuphonic-specific language code, or None if not supported.
         """
         return language_to_neuphonic_lang_code(language)
-
-    async def start(self, frame: StartFrame):
-        """Start the Neuphonic HTTP TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis.

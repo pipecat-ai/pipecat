@@ -22,10 +22,10 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -134,13 +134,13 @@ class DeepgramTTSService(WebsocketTTSService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def _connect(self):
@@ -216,7 +216,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}", exception=e))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -226,7 +226,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Deepgram WebSocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram WebSocket")
                 # Send Close message to gracefully close the connection
                 await self._websocket.send(json.dumps({"type": "Close"}))
                 await self._websocket.close()

@@ -21,11 +21,12 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import assert_given
 
 try:
     import requests
@@ -65,6 +66,11 @@ def _ensure_model_files(model_path: Path, voices_path: Path):
 def language_to_kokoro_language(language: Language) -> str:
     """Convert a Language enum to kokoro-onnx language code.
 
+    kokoro-onnx phonemizes through espeak-ng, so these are espeak-ng voice names
+    rather than ISO codes. They differ for Mandarin (``cmn``, not ``zh``) and
+    French, which espeak-ng only offers per-region (``fr-fr``, no bare ``fr``);
+    an unsupported name fails at synthesis time.
+
     Args:
         language: The Language enum value to convert.
 
@@ -77,12 +83,22 @@ def language_to_kokoro_language(language: Language) -> str:
         Language.EN_US: "en-us",
         Language.EN_GB: "en-gb",
         Language.ES: "es",
-        Language.FR: "fr",
+        Language.FR: "fr-fr",
+        Language.FR_BE: "fr-be",
+        Language.FR_CA: "fr-fr",
+        Language.FR_CH: "fr-ch",
+        Language.FR_FR: "fr-fr",
         Language.HI: "hi",
         Language.IT: "it",
         Language.JA: "ja",
         Language.PT: "pt",
-        Language.ZH: "zh",
+        Language.PT_BR: "pt-br",
+        Language.CMN: "cmn",
+        Language.YUE: "yue",
+        Language.ZH: "cmn",
+        Language.ZH_CN: "cmn",
+        Language.ZH_HK: "cmn",
+        Language.ZH_TW: "cmn",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)

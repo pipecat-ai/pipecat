@@ -12,7 +12,7 @@ voice conversations. The Grok Voice Agent provides:
 
 - Real-time audio streaming with low latency
 - Built-in voice activity detection (VAD)
-- Multiple voice options (Ara, Rex, Sal, Eve, Leo)
+- Built-in and custom voice IDs
 - Built-in tools: web_search, x_search, file_search
 - Custom function calling
 
@@ -37,7 +37,7 @@ from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -139,8 +139,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Configure Grok session properties
     session_properties = SessionProperties(
-        # Voice options: Ara, Rex, Sal, Eve, Leo
-        voice="Ara",
+        voice="rex",
         # Grok-specific built-in tools can be added here:
         # tools=[
         #     WebSearchTool(),  # Enable web search
@@ -199,14 +198,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #     vad_analyzer=SileroVADAnalyzer(),
         #     user_turn_strategies=UserTurnStrategies(
         #         start=[
-        #             VADUserTurnStartStrategy(
-        #                 enable_interruptions=True,
-        #                 enable_user_speaking_frames=False,  # Grok already emits turn frames
-        #             ),
+        #             VADUserTurnStartStrategy(enable_interruptions=True),
         #             ExternalUserTurnStartStrategy(),
         #         ],
         #         stop=[ExternalUserTurnStopStrategy()],
-        #     ),  # Grok already emits turn frames
+        #     ),
         # ),
     )
 
@@ -231,7 +227,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[TranscriptionLogObserver()],
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -242,7 +243,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await worker.cancel()
+        await runner.cancel()
 
     # Subscribe to user turn lifecycle events. Grok emits its own
     # user-turn frames from server VAD, so on_user_turn_stopped fires at
@@ -272,9 +273,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

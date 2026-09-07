@@ -14,22 +14,31 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from pipecat.cli.main import _build_app, _enable_hint, app
+from pipecat.cli.main import _KNOWN_EXTENSIONS, _build_app, _enable_hint, app
 
 runner = CliRunner()
 
 # rich emits ANSI color codes when it thinks the output is a terminal (e.g. in CI).
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
-# The stub path only exists when an official plugin is NOT installed; if one is,
-# its real Typer app is mounted instead. Scoped to the tests that exercise a stub
-# rather than applied module-wide, so a developer with a plugin installed still
-# runs everything else here.
 _installed = {ep.name for ep in importlib_metadata.entry_points(group="pipecat_cli.extensions")}
-_needs_stub = pytest.mark.skipif(
-    "cloud" in _installed,
-    reason="official CLI plugins are installed; stub path not exercised",
-)
+
+# Driven off the registry rather than a hard-coded list, so a new official plugin
+# is covered the moment it is registered.
+_OFFICIAL = sorted((name, pkg, help_text) for name, (pkg, help_text) in _KNOWN_EXTENSIONS.items())
+
+
+def _skip_if_installed(name: str) -> None:
+    """Skip a stub assertion for a plugin that is actually installed.
+
+    The stub only exists when a plugin is absent; when it is installed its real
+    Typer app is mounted instead. Skipping per plugin rather than per module
+    means having one installed doesn't silently drop the assertions for the
+    others — with two official plugins, a module-level skip is wrong in both
+    directions.
+    """
+    if name in _installed:
+        pytest.skip(f"the `{name}` plugin is installed; its stub path is not exercised")
 
 
 def _norm(text: str) -> str:
@@ -40,44 +49,55 @@ def _norm(text: str) -> str:
     return " ".join(text.split())
 
 
-@_needs_stub
+@pytest.mark.parametrize("name,package,help_text", _OFFICIAL)
 class TestExtensionDiscovery:
     """`pipecat --help` advertises the official plugins even when uninstalled."""
 
-    def test_help_lists_official_plugins_as_stubs(self):
+    def test_help_lists_official_plugins_as_stubs(self, name, package, help_text):
+        _skip_if_installed(name)
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         out = _norm(result.output)
         # The official sub-CLI is listed though it isn't installed...
-        assert "cloud" in out
+        assert name in out
         # ...annotated with the package that provides it.
-        assert "requires pipecatcloud" in out
+        assert f"requires {package}" in out
 
 
+@pytest.mark.parametrize("name,package,help_text", _OFFICIAL)
 class TestEnableHint:
     """Invoking an uninstalled official plugin prints an actionable hint."""
 
-    @_needs_stub
-    def test_invoking_uninstalled_plugin_prints_hint_and_exits_1(self):
-        result = runner.invoke(app, ["cloud"])
+    def test_invoking_uninstalled_plugin_prints_hint_and_exits_1(self, name, package, help_text):
+        _skip_if_installed(name)
+        result = runner.invoke(app, [name])
         assert result.exit_code == 1
         # The actionable enable hint, not the bare Click error.
         assert "No such command" not in result.output
-        assert "--with pipecatcloud" in result.output
+        assert f"--with {package}" in result.output
 
-    @_needs_stub
-    def test_uninstalled_plugin_swallows_subcommands_and_options(self):
+    def test_uninstalled_plugin_swallows_subcommands_and_options(self, name, package, help_text):
         # `pipecat cloud deploy --region x` must still reach the hint, not error on
         # the unknown `deploy` subcommand / `--region` option.
-        result = runner.invoke(app, ["cloud", "deploy", "--region", "x"])
+        _skip_if_installed(name)
+        result = runner.invoke(app, [name, "somesubcommand", "--someflag", "x"])
         assert result.exit_code == 1
         assert "No such command" not in result.output
-        assert "--with pipecatcloud" in result.output
+        assert f"--with {package}" in result.output
 
-    def test_enable_hint_shows_both_install_forms(self):
-        hint = _enable_hint("cloud", "pipecatcloud")
-        assert 'uv tool install "pipecat-ai[cli]" --with pipecatcloud' in hint
-        assert "pip install pipecatcloud" in hint
+    def test_help_on_an_uninstalled_plugin_explains_how_to_install(self, name, package, help_text):
+        """`--help` is the natural thing to type after spotting the command in
+        `pipecat --help`. Without an empty help_option_names it renders an empty
+        options panel and says nothing about installing the plugin.
+        """
+        _skip_if_installed(name)
+        result = runner.invoke(app, [name, "--help"])
+        assert f"--with {package}" in result.output
+
+    def test_enable_hint_shows_both_install_forms(self, name, package, help_text):
+        hint = _enable_hint(name, package)
+        assert f'uv tool install "pipecat-ai[cli]" --with {package}' in hint
+        assert f"pip install {package}" in hint
 
 
 class _FakeEntryPoint:
@@ -181,7 +201,7 @@ class TestEnableHintPreservesInstalledPlugins:
     """
 
     def test_installed_plugins_are_repeated(self):
-        hint = _enable_hint("mcp", "pipecat-ai-context-hub", ["pipecatcloud"])
+        hint = _enable_hint("context-hub", "pipecat-ai-context-hub", ["pipecatcloud"])
         assert (
             'uv tool install "pipecat-ai[cli]" --with pipecatcloud '
             "--with pipecat-ai-context-hub" in hint
@@ -199,6 +219,6 @@ class TestEnableHintPreservesInstalledPlugins:
 
     def test_pip_form_names_only_the_missing_package(self):
         """`uv pip install` adds to a venv, so it has no replacement problem."""
-        hint = _enable_hint("mcp", "pipecat-ai-context-hub", ["pipecatcloud"])
+        hint = _enable_hint("context-hub", "pipecat-ai-context-hub", ["pipecatcloud"])
         assert "uv pip install pipecat-ai-context-hub" in hint
         assert "uv pip install pipecatcloud" not in hint

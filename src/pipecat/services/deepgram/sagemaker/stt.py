@@ -35,20 +35,19 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
-from pipecat.services.settings import STTSettings, is_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import is_given
 
 
 @dataclass
@@ -239,13 +238,13 @@ class DeepgramSageMakerSTTService(STTService):
 
         return changed
 
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram SageMaker STT service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -382,7 +381,7 @@ class DeepgramSageMakerSTTService(STTService):
             self._connection_task = None
 
         if self._client and self._client.is_active:
-            logger.debug("Disconnecting from Deepgram on SageMaker...")
+            logger.debug(f"{self}: Disconnecting from Deepgram on SageMaker...")
 
             # Send CloseStream message to Deepgram
             try:
@@ -502,7 +501,6 @@ class DeepgramSageMakerSTTService(STTService):
                 )
             )
             await self._handle_transcription(transcript, is_final, language)
-            await self.stop_processing_metrics()
         else:
             # Interim transcription
             await self.push_frame(
@@ -532,10 +530,6 @@ class DeepgramSageMakerSTTService(STTService):
         """
         pass
 
-    async def _start_metrics(self):
-        """Start processing metrics collection."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram SageMaker-specific handling.
 
@@ -545,10 +539,7 @@ class DeepgramSageMakerSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        # Start metrics when user starts speaking (if VAD is not provided by Deepgram)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             self.request_finalize()

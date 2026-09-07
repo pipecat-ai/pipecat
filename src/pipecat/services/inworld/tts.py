@@ -41,18 +41,18 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 def language_to_inworld_language(language: Language) -> str:
@@ -99,9 +99,9 @@ class InworldTTSSettings(TTSSettings):
             Only supported by ``inworld-tts-2``.
     """
 
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | _NotGiven = field(
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -277,13 +277,13 @@ class InworldHttpTTSService(TTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -771,13 +771,13 @@ class InworldTTSService(WebsocketTTSService):
         """
         return language_to_inworld_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Inworld WebSocket TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._audio_sample_rate = self.sample_rate
         await self._connect()
 

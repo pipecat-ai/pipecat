@@ -18,17 +18,11 @@ from pipecat.services.openai.realtime.llm import (
     OpenAIRealtimeLLMService,
     OpenAIRealtimeLLMSettings,
 )
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    LLMSettings,
-    ServiceSettings,
-    STTSettings,
-    TTSSettings,
-    _NotGiven,
-    is_given,
-)
+from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.services.xai.realtime import events as grok_events
 from pipecat.services.xai.realtime.llm import GrokRealtimeLLMSettings
+from pipecat.transcriptions.language import Language
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel
@@ -38,8 +32,8 @@ from pipecat.services.xai.realtime.llm import GrokRealtimeLLMSettings
 class TestNotGiven:
     def test_singleton(self):
         """NOT_GIVEN is a singleton — every reference is the same object."""
-        assert _NotGiven() is _NotGiven()
-        assert NOT_GIVEN is _NotGiven()
+        assert NotGiven() is NotGiven()
+        assert NOT_GIVEN is NotGiven()
 
     def test_repr(self):
         assert repr(NOT_GIVEN) == "NOT_GIVEN"
@@ -602,6 +596,24 @@ class TestDeepgramSTTSettingsExtraSync:
         assert kwargs["language"] == "es"
         assert kwargs["punctuate"] == "true"
         assert kwargs["diarize"] == "false"
+
+    def test_build_connect_kwargs_serializes_language_enum_to_value(self):
+        """A Language member serializes to its code, not its enum name."""
+        svc = self._make_service(settings=DeepgramSTTService.Settings(language=Language.EN))
+
+        assert svc._build_connect_kwargs()["language"] == "en"
+
+    def test_build_connect_kwargs_serializes_regional_language_enum(self):
+        """Regional members keep the exact code, which differs from the member name."""
+        svc = self._make_service(settings=DeepgramSTTService.Settings(language=Language.ES_MX))
+
+        assert svc._build_connect_kwargs()["language"] == "es-MX"
+
+    def test_build_connect_kwargs_passes_through_unrecognized_language(self):
+        """A language code with no matching Language member is forwarded as given."""
+        svc = self._make_service(settings=DeepgramSTTService.Settings(language="en-XX-custom"))
+
+        assert svc._build_connect_kwargs()["language"] == "en-XX-custom"
 
     def test_unknown_params_stay_in_extra_and_appear_in_kwargs(self):
         """Unknown params (not matching fields) stay in extra and get forwarded."""

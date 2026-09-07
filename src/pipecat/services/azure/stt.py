@@ -23,16 +23,17 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (
@@ -86,7 +87,7 @@ class AzureSTTSettings(STTSettings):
             <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
     """
 
-    profanity: AzureProfanity | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity: AzureProfanity | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):
@@ -257,21 +258,25 @@ class AzureSTTService(STTService):
             Frame: Either None for successful processing or ErrorFrame on failure.
         """
         try:
-            await self.start_processing_metrics()
             if self._audio_stream:
                 self._audio_stream.write(audio)
             yield None
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def start(self, frame: StartFrame):
-        """Start the speech recognition service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating the start of processing.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
+
+    async def cleanup(self):
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
@@ -289,11 +294,6 @@ class AzureSTTService(STTService):
             frame: Frame indicating cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
-
-    async def cleanup(self):
-        """Release resources at pipeline teardown."""
-        await super().cleanup()
         await self._disconnect()
 
     async def _connect(self):
@@ -334,7 +334,7 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_processing_metrics()
+        pass
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:

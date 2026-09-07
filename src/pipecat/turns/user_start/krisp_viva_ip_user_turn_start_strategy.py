@@ -253,7 +253,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            ip_prob = self._ip_session.process(ip_frame.tolist(), self._speech_active)
+            ip_prob = self._ip_session.process(ip_frame, self._speech_active)
 
             if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(

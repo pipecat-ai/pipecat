@@ -16,19 +16,28 @@ import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 from loguru import logger
 
 from pipecat.frames.frames import Frame, TranscriptionFrame
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import assert_given
 
 try:
-    from moonshine_voice import Transcriber, get_model_for_language, string_to_model_arch
+    from moonshine_voice import (
+        Transcriber,
+        get_model_for_language,
+        model_arch_to_string,
+        string_to_model_arch,
+        supported_languages,
+        supported_languages_friendly,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Moonshine, you need to `uv add "pipecat-ai[moonshine]"`.')
@@ -38,6 +47,41 @@ except ModuleNotFoundError as e:
 MOONSHINE_SAMPLE_RATE = 16000
 
 
+def language_to_moonshine_language(language: Language) -> str:
+    """Convert a pipecat Language to a Moonshine language code.
+
+    Moonshine publishes one model per language, keyed by base ISO code, so
+    regional variants (``Language.ES_MX``) resolve to their base code (``"es"``).
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The Moonshine language code.
+    """
+    LANGUAGE_MAP = {
+        Language.AR: "ar",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.UK: "uk",
+        Language.VI: "vi",
+        Language.ZH: "zh",
+    }
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+def moonshine_language_to_frame_language(language: str | None) -> Language | None:
+    """Map a Moonshine language code back to a pipecat ``Language`` when possible."""
+    if language is None:
+        return None
+    try:
+        return Language(language)
+    except ValueError:
+        return None
+
+
 class Model(StrEnum):
     """Well-known Moonshine model architectures.
 
@@ -45,11 +89,16 @@ class Model(StrEnum):
     ``model``. The larger models (``SMALL_STREAMING``, ``MEDIUM_STREAMING``) ship
     only in streaming form, but transcribe a whole segment in batch just the same.
 
+    Which architectures exist depends on the language: the streaming ones are
+    published for English only, and most other languages ship a single model. An
+    architecture unavailable for the configured language falls back to the best
+    one published for it.
+
     Parameters:
         TINY: Smallest and fastest, lowest accuracy.
         BASE: Good size/accuracy balance.
         TINY_STREAMING: Streaming-capable ``tiny``.
-        BASE_STREAMING: Streaming-capable ``base`` (not available for every language).
+        BASE_STREAMING: Streaming-capable ``base``.
         SMALL_STREAMING: Larger and more accurate than ``base`` (the default).
         MEDIUM_STREAMING: Largest, most accurate.
     """
@@ -70,8 +119,9 @@ class MoonshineSTTSettings(STTSettings):
         model: Moonshine model architecture, as a :class:`Model` or the equivalent
             string (e.g. ``Model.SMALL_STREAMING`` or ``"small-streaming"``).
             Defaults to ``Model.SMALL_STREAMING``.
-        language: Language for transcription. Moonshine supports a handful of
-            languages (English, Spanish, ...); the base code is used.
+        language: Language for transcription. Moonshine publishes models for
+            Arabic, Chinese, English, Japanese, Korean, Spanish, Ukrainian, and
+            Vietnamese; regional variants resolve to their base code.
     """
 
 
@@ -83,6 +133,10 @@ class MoonshineSTTService(SegmentedSTTService):
     transcribed in a single batch call (``transcribe_without_streaming``); any
     model works, including the streaming-capable ones. Audio is expected as 16-bit
     mono PCM at 16 kHz.
+
+    Models are language-specific, so a language change reloads the model. The
+    non-English models are released under the non-commercial Moonshine Community
+    License (https://www.moonshine.ai/license).
     """
 
     Settings = MoonshineSTTSettings
@@ -119,19 +173,65 @@ class MoonshineSTTService(SegmentedSTTService):
         """
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a pipecat language into a Moonshine language code."""
+        return language_to_moonshine_language(language)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, reloading the model when it changes.
+
+        Moonshine models are per-language and per-architecture, so a new
+        ``language`` or ``model`` only takes effect once the model is reloaded.
+        """
+        changed = await super()._update_settings(delta)
+
+        if "language" in changed or "model" in changed:
+            try:
+                self._transcriber = await asyncio.to_thread(self._load)
+            except Exception as e:
+                # Keep transcribing with the model already loaded.
+                logger.error(f"{self} error loading Moonshine model: {e}")
+                await self.push_error(f"Moonshine model load error: {e}", e)
+
+        return changed
+
     def _load(self) -> Transcriber:
         """Download (first time) and load the Moonshine model.
 
         Note:
             The first run downloads the model from the Moonshine model hub; later
             runs load it from the local cache.
+
+        Raises:
+            ValueError: If no language is set, or Moonshine publishes no model for it.
         """
         logger.debug("Loading Moonshine model...")
         model = assert_given(self._settings.model)
         model_str = model.value if isinstance(model, Model) else str(model)
-        language = str(assert_given(self._settings.language))
-        lang_code = language.split("-")[0].lower()
-        model_path, model_arch = get_model_for_language(lang_code, string_to_model_arch(model_str))
+
+        language = assert_given(self._settings.language)
+        if language is None:
+            raise ValueError("Moonshine requires a language; its models are language-specific")
+        lang_code = str(language)
+        if lang_code not in supported_languages():
+            raise ValueError(
+                f"Moonshine does not support language '{lang_code}'. "
+                f"Supported languages: {supported_languages_friendly()}"
+            )
+
+        wanted_arch = string_to_model_arch(model_str)
+        try:
+            model_path, model_arch = get_model_for_language(lang_code, wanted_arch)
+        except ValueError:
+            # The architecture isn't published for this language; take its best model.
+            model_path, model_arch = get_model_for_language(lang_code)
+            arch_str = model_arch_to_string(model_arch)
+            logger.warning(
+                f"Moonshine model '{model_str}' is unavailable for '{lang_code}'; "
+                f"using '{arch_str}' instead"
+            )
+            self._settings.model = arch_str
+
         transcriber = Transcriber(model_path, model_arch)
         logger.debug("Loaded Moonshine model")
         return transcriber
@@ -165,8 +265,8 @@ class MoonshineSTTService(SegmentedSTTService):
 
         await self.stop_processing_metrics()
 
-        language = self._settings.language
-        language = language if isinstance(language, Language) else None
+        lang_code = assert_given(self._settings.language)
+        language = moonshine_language_to_frame_language(str(lang_code) if lang_code else None)
         if text:
             await self._handle_transcription(text, True, language)
             logger.debug(f"Transcription: [{text}]")

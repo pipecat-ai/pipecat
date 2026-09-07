@@ -1,0 +1,35 @@
+name: async_tool_delivery
+
+# Text: an async function call (cancel_on_interruption=False) whose result
+# arrives after the conversation has moved on. The bot has to finish the turn
+# it's on, then report the weather it looked up earlier, unprompted.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Match the bot's on-connect greeting first, so it isn't taken for a reply to
+  # the turn below.
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What's the weather in San Francisco? Use Fahrenheit."
+    expect:
+      - event: function_call
+        calls:
+          - name: get_current_weather
+
+  # The delay leaves the bot room to get its function call out before the next
+  # request arrives.
+  - user: "Tell me a joke."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: response
+        eval: "tells a joke"
+
+  # No user turn: the weather lookup's result arrived while the bot was telling
+  # the joke, and the bot reports it on its own once the joke is done.
+  - expect:
+      - event: response
+        eval: "informs that the weather in San Francisco is 75 degrees"

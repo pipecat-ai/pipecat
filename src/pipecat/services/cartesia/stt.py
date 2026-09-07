@@ -24,19 +24,18 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 # Cartesia caps a connection at 100 keyterms totaling 1200 characters.
 _MAX_KEYTERMS = 100
@@ -46,7 +45,7 @@ _MAX_KEYTERM_CHARS = 1200
 _KEYTERM_MODEL_PREFIX = "ink-2"
 
 
-def _prepare_keyterms(keyterms: list[str] | None | _NotGiven) -> list[str]:
+def _prepare_keyterms(keyterms: list[str] | None | NotGiven) -> list[str]:
     """Normalize keyterms to the limits Cartesia accepts on a connection.
 
     Drops blank entries and truncates to :data:`_MAX_KEYTERMS` terms totaling
@@ -94,7 +93,7 @@ class CartesiaSTTSettings(STTSettings):
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
-    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @deprecated(
@@ -208,6 +207,7 @@ class CartesiaSTTService(WebsocketSTTService):
         encoding: str = "pcm_s16le",
         sample_rate: int | None = None,
         live_options: CartesiaLiveOptions | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = CARTESIA_TTFS_P99,
         **kwargs,
@@ -216,7 +216,8 @@ class CartesiaSTTService(WebsocketSTTService):
 
         Args:
             api_key: Authentication key for Cartesia API.
-            base_url: Custom API endpoint URL. If empty, uses default.
+            base_url: Custom API endpoint, either a bare host ("api.cartesia.ai") or a
+                URL with a scheme ("ws://localhost:8000"). If empty, uses default.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
@@ -227,6 +228,8 @@ class CartesiaSTTService(WebsocketSTTService):
                     and direct init parameters for encoding/sample_rate instead.
                     Will be removed in 2.0.0.
 
+            extra_headers: Additional headers to send on the websocket handshake. Merged
+                after the default headers, so it can override them.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -268,7 +271,12 @@ class CartesiaSTTService(WebsocketSTTService):
         )
 
         self._api_key = api_key
-        self._base_url = base_url or "api.cartesia.ai"
+        # Accept either a bare host ("api.cartesia.ai") or a full URL carrying a
+        # scheme ("ws://localhost:8000"); urlsplit only finds a netloc after "//".
+        url_parts = urllib.parse.urlsplit(base_url if "//" in base_url else f"//{base_url}")
+        self._base_url = url_parts.netloc or "api.cartesia.ai"
+        self._scheme = url_parts.scheme or "wss"
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
         self._receive_task = None
 
         # Init-only audio config (not runtime-updatable).
@@ -282,13 +290,13 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         return True
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating service should start.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -309,10 +317,6 @@ class CartesiaSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
@@ -322,9 +326,7 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send("finalize")
@@ -412,8 +414,14 @@ class CartesiaSTTService(WebsocketSTTService):
             # Cartesia expects spaces inside a keyterm as %20, which urlencode
             # only emits with quote_via=quote.
             query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-            ws_url = f"wss://{self._base_url}/stt/websocket?{query}"
-            headers = {"Cartesia-Version": "2026-03-01", "X-API-Key": self._api_key}
+            ws_url = urllib.parse.urlunsplit(
+                (self._scheme, self._base_url, "/stt/websocket", query, "")
+            )
+            headers = {
+                "Cartesia-Version": "2026-03-01",
+                "X-API-Key": self._api_key,
+                **self._extra_headers,
+            }
 
             self._websocket = await self._websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
@@ -425,7 +433,7 @@ class CartesiaSTTService(WebsocketSTTService):
         ws = self._websocket
         try:
             if ws and ws.state is State.OPEN:
-                logger.debug("Disconnecting from Cartesia STT")
+                logger.debug(f"{self}: Disconnecting from Cartesia STT")
                 await ws.send("done")
                 await ws.close()
         except Exception as e:
@@ -497,7 +505,6 @@ class CartesiaSTTService(WebsocketSTTService):
                     )
                 )
                 await self._handle_transcription(transcript, is_final, language)
-                await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(

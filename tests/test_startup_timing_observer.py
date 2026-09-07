@@ -8,13 +8,16 @@ from pipecat.frames.frames import (
     StartFrame,
     TextFrame,
 )
+from pipecat.observers.base_observer import FramePushed
 from pipecat.observers.startup_timing_observer import (
     StartupTimingObserver,
     StartupTimingReport,
     TransportTimingReport,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class SlowStartProcessor(FrameProcessor):
@@ -28,6 +31,22 @@ class SlowStartProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             await asyncio.sleep(self._delay)
+        await self.push_frame(frame, direction)
+
+
+class SlowSetupProcessor(FrameProcessor):
+    """A processor that sleeps while being set up, as a connecting one does."""
+
+    def __init__(self, delay: float = 0.1, **kwargs):
+        super().__init__(**kwargs)
+        self._delay = delay
+
+    async def setup(self, setup):
+        await super().setup(setup)
+        await asyncio.sleep(self._delay)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
 
@@ -73,6 +92,73 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(slow_timings), 1)
         self.assertGreaterEqual(slow_timings[0].duration_secs, 0.05)
+
+    async def test_setup_time_counts_towards_what_a_processor_cost(self):
+        """A processor that connects while being set up is measured for it.
+
+        Services connect during setup rather than while handling the
+        StartFrame, so a report that only measured start() would show a fast
+        startup for a pipeline that spent its time connecting.
+        """
+        observer = StartupTimingObserver()
+        processor = SlowSetupProcessor(delay=0.1)
+
+        reports = []
+
+        @observer.event_handler("on_startup_timing_report")
+        async def on_report(obs, report):
+            reports.append(report)
+
+        await run_test(
+            processor,
+            frames_to_send=[TextFrame(text="hello")],
+            expected_down_frames=[TextFrame],
+            observers=[observer],
+        )
+
+        timings = [
+            t for t in reports[0].processor_timings if "SlowSetupProcessor" in t.processor_name
+        ]
+        self.assertEqual(len(timings), 1)
+        timing = timings[0]
+
+        self.assertGreaterEqual(timing.setup_duration_secs, 0.05)
+        # Setting up is what this processor cost, and start() added nothing.
+        self.assertGreaterEqual(timing.duration_secs, timing.setup_duration_secs)
+
+    async def test_total_is_the_span_rather_than_the_sum(self):
+        """Processors are set up concurrently, so their cost does not add up.
+
+        Summing what each cost would report three concurrent 0.1s connections
+        as 0.3s, so a pipeline reads as slower the more it overlaps.
+        """
+        observer = StartupTimingObserver()
+        pipeline = Pipeline(
+            [SlowSetupProcessor(delay=0.1) for _ in range(3)],
+        )
+
+        reports = []
+
+        @observer.event_handler("on_startup_timing_report")
+        async def on_report(obs, report):
+            reports.append(report)
+
+        await run_test(
+            pipeline,
+            frames_to_send=[TextFrame(text="hello")],
+            expected_down_frames=[TextFrame],
+            observers=[observer],
+        )
+
+        report = reports[0]
+        summed = sum(t.duration_secs for t in report.processor_timings)
+
+        self.assertGreaterEqual(summed, 0.25, "each processor should be measured")
+        self.assertLess(
+            report.total_duration_secs,
+            summed,
+            "the three setups overlapped, so the span is shorter than the sum",
+        )
 
     async def test_processor_types_filter(self):
         """Test that processor_types filter limits which processors appear."""
@@ -243,27 +329,36 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(transport_reports), 1)
 
-    async def test_transport_timing_without_start_frame(self):
-        """Test that ClientConnectedFrame before StartFrame does not crash."""
-        observer = StartupTimingObserver()
+    async def test_transport_timing_before_the_start_frame(self):
+        """A client that connects before the StartFrame is still measured.
 
-        # Directly call on_push_frame with a ClientConnectedFrame before any
-        # StartFrame has been seen. This should be a no-op (no crash).
-        from pipecat.observers.base_observer import FramePushed
+        A transport connects while it is being set up, so it can report a
+        connection before the StartFrame is pushed. Timings run from the
+        pipeline starting to set up, so there is nothing to wait for.
+        """
+        observer = StartupTimingObserver()
+        await observer.setup(TaskManager())
+
+        reports = []
+
+        @observer.event_handler("on_transport_timing_report")
+        async def on_report(obs, report):
+            reports.append(report)
 
         processor = FastProcessor()
-        destination = FastProcessor()
         data = FramePushed(
             source=processor,
-            destination=destination,
+            destination=FastProcessor(),
             frame=ClientConnectedFrame(),
             direction=FrameDirection.DOWNSTREAM,
-            timestamp=1000,
+            timestamp=250_000_000,
         )
         await observer.on_push_frame(data)
+        await asyncio.sleep(0)
 
-        # No event should have been emitted.
-        self.assertFalse(observer._transport_timing_reported)
+        self.assertTrue(observer._transport_timing_reported)
+        self.assertEqual(len(reports), 1)
+        self.assertAlmostEqual(reports[0].client_connected_secs, 0.25, places=3)
 
     async def test_bot_and_client_connected(self):
         """Test that BotConnectedFrame timing is included in the transport report."""

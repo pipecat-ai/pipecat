@@ -1,0 +1,180 @@
+name: Provider watch
+
+# Weekly provider research: runs the /provider-watch skill, which researches
+# every service unit, writes reports to pipecat-ai/provider-watch-reports, opens draft
+# PRs here for clear-cut updates, and files a digest issue on the reports repo.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated providers or unit ids (e.g. openai,deepgram/stt); empty = all"
+        required: false
+        type: string
+      limit:
+        description: "Research only the first N selected units"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run: push nothing, open nothing; reports are uploaded as an artifact"
+        required: false
+        type: boolean
+        default: false
+
+# One sweep at a time; a manual run waits for a scheduled one to finish.
+concurrency:
+  group: provider-watch
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    # GitHub-hosted runners hard-cap jobs at 360 minutes; staying under it and
+    # timing out the Claude step first keeps the always() push/artifact steps alive.
+    timeout-minutes: 355
+    # Provider API keys live in this environment (deployment branch: main only).
+    environment: provider-watch
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
+          private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
+          owner: pipecat-ai
+          repositories: |
+            pipecat
+            provider-watch-reports
+
+      - name: Checkout pipecat
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout reports
+        uses: actions/checkout@v4
+        with:
+          repository: pipecat-ai/provider-watch-reports
+          token: ${{ steps.app-token.outputs.token }}
+          path: _reports
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # The extras excluded here need system libraries or Apple hardware; the
+        # same set is excluded by the Read the Docs build.
+        run: |
+          uv sync --group dev --all-extras \
+            --no-extra gstreamer \
+            --no-extra local \
+            --no-extra local-smart-turn \
+            --no-extra moondream \
+            --no-extra mlx-whisper
+
+      - name: Export provider credentials
+        # Every environment/repository secret whose name appears in env.example
+        # becomes an environment variable for the probes. Adding a provider key
+        # to the environment is enough; the workflow needs no edit.
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, re
+          wanted = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", open("env.example").read(), re.M))
+          secrets = json.loads(os.environ["SECRETS_JSON"])
+          exported = []
+          with open(os.environ["GITHUB_ENV"], "a") as env_file:
+              for name, value in secrets.items():
+                  if name in wanted and value:
+                      delimiter = f"__PW_{name}__"
+                      env_file.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
+                      exported.append(name)
+          print(f"Exported {len(exported)} provider variables: {', '.join(sorted(exported))}")
+          EOF
+
+      - name: Configure git identity
+        run: |
+          for dir in . _reports; do
+            git -C "$dir" config user.name "pipecat-provider-watch-bot[bot]"
+            git -C "$dir" config user.email "321038859+pipecat-provider-watch-bot[bot]@users.noreply.github.com"
+          done
+
+      - name: Compose skill arguments
+        id: args
+        run: |
+          ARGS="--non-interactive"
+          [ "${{ inputs.dry_run }}" != "true" ] && ARGS="$ARGS --publish"
+          [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
+          [ -n "${{ inputs.limit }}" ] && ARGS="$ARGS --limit ${{ inputs.limit }}"
+          echo "value=$ARGS" >> "$GITHUB_OUTPUT"
+          echo "Running: /provider-watch $ARGS"
+
+      - name: Run provider watch
+        timeout-minutes: 330
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        with:
+          # The provider-watch environment holds the bot's dedicated key,
+          # shadowing the repo-level ANTHROPIC_API_KEY for this job.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          prompt: |
+            Run the provider-watch skill unattended:
+
+            /provider-watch ${{ steps.args.outputs.value }}
+
+            Read `.claude/skills/provider-watch/SKILL.md` and follow it exactly,
+            including its "Unattended runs" section. The reports repo is checked
+            out at `./_reports` on `main`; `gh` is authenticated with a token
+            that can push to pipecat-ai/pipecat branches, open pull requests
+            there, and push/open issues on pipecat-ai/provider-watch-reports. Use
+            `$GITHUB_WORKSPACE/.pw-scratch` as the scratch directory.
+
+            Without `--publish` this is a dry run: write reports into
+            `./_reports` and leave branches locally, but push nothing and open
+            nothing; a later workflow step uploads the results.
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 300
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
+
+      - name: Push any reports the run left uncommitted
+        if: always() && inputs.dry_run != true
+        working-directory: _reports
+        run: |
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git status --porcelain)" ]; then
+            echo "Reports checkout is clean."
+            exit 0
+          fi
+          git add -A
+          git commit -m "provider-watch: $(date -u +%F) (uncommitted remainder)"
+          git push
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-watch-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            _reports/reports
+            _reports/digests
+            .pw-scratch/run.jsonl
+            .pw-scratch/highlights.md

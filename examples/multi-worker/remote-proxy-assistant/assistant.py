@@ -69,20 +69,15 @@ class AcmeAssistant(LLMWorker):
         Args:
             reason (str): Why the conversation is ending.
         """
-        logger.info(f"Task '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        logger.info(f"Worker '{self.name}': ending conversation ({reason})")
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handle a WebSocket connection from the main bot's proxy."""
     await websocket.accept()
-
-    runner = WorkerRunner(handle_sigint=False)
 
     proxy = WebSocketProxyServer(
         "gateway",
@@ -92,6 +87,12 @@ async def websocket_endpoint(websocket: WebSocket):
         forward_messages=(BusFrameMessage,),
     )
 
+    assistant = AcmeAssistant()
+
+    runner = WorkerRunner(handle_sigint=False)
+
+    await runner.add_workers(proxy, assistant)
+
     @proxy.event_handler("on_client_connected")
     async def on_client_connected(proxy, client):
         logger.info("WebSocket client connected")
@@ -100,10 +101,6 @@ async def websocket_endpoint(websocket: WebSocket):
     async def on_client_disconnected(proxy, client):
         logger.info("WebSocket client disconnected")
         await runner.cancel()
-
-    assistant = AcmeAssistant()
-
-    await runner.add_workers(proxy, assistant)
 
     logger.info("Assistant server ready, waiting for activation")
     await runner.run()

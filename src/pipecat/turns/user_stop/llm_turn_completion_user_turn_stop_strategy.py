@@ -31,7 +31,7 @@ class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrate
 
     Finalization itself is inherited: when the LLM service's
     :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionLLMServiceMixin`
-    detects a ``✓`` marker, it broadcasts a
+    detects a ``●`` marker, it broadcasts a
     :class:`~pipecat.frames.frames.UserTurnInferenceCompletedFrame` and the
     base class fires ``on_user_turn_stopped``. On
     ``incomplete_short`` / ``incomplete_long`` markers the mixin

@@ -14,7 +14,7 @@ from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -54,7 +54,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     llm = GrokRealtimeLLMService(api_key=os.environ["XAI_API_KEY"])
 
@@ -79,8 +79,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #     vad_analyzer=SileroVADAnalyzer(),
         #     user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy(
         #         enable_interruptions=True,
-        #         enable_user_speaking_frames=False,  # Grok already emits turn frames
-        #     )], stop=[]) # Grok already emits turn frames
+        #     )], stop=[])
         # ),
     )
 
@@ -101,7 +100,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Grok emits user-turn frames from server VAD, so
     # on_user_turn_stopped fires at the turn boundary. In realtime mode
@@ -124,27 +128,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Grok Realtime LLM settings: voice='Rex'")
+        logger.info("Updating Grok Realtime LLM settings: voice='rex'")
         await worker.queue_frame(
             LLMUpdateSettingsFrame(
                 delta=GrokRealtimeLLMService.Settings(
-                    session_properties=events.SessionProperties(voice="Rex")
+                    session_properties=events.SessionProperties(voice="rex")
                 )
             )
         )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

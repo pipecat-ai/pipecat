@@ -23,17 +23,19 @@ class FrameQueue(asyncio.Queue):
     Items may be raw ``Frame`` objects or tuples whose first element is a
     ``Frame`` (e.g. ``(frame, direction, callback)``).  Pass a ``frame_getter``
     callable to extract the frame from each item; the default treats the item
-    itself as the frame.
+    itself as the frame. Queues that also carry non-frame items should return
+    ``None`` from their getter for those.
 
     Also exposes a ``reset()`` helper that drains all non-``UninterruptibleFrame``
     items while keeping uninterruptible ones in place.
     """
 
-    def __init__(self, frame_getter: Callable[[Any], Frame] = lambda item: item):
+    def __init__(self, frame_getter: Callable[[Any], Frame | None] = lambda item: item):
         """Initialize the FrameQueue.
 
         Args:
-            frame_getter: Callable that extracts a ``Frame`` from a queue item.
+            frame_getter: Callable that extracts a ``Frame`` from a queue item,
+                or ``None`` when the item holds no frame.
                 Defaults to the identity function (item is a raw ``Frame``).
                 Pass ``lambda item: item[0]`` when items are
                 ``(frame, direction, callback)`` tuples.

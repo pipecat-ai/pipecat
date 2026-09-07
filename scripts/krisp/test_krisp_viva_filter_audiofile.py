@@ -122,7 +122,7 @@ async def process_audio_file(
         print(f"Warning: Sample rate {sample_rate} not in supported rates {supported_rates}")
         print("Resampling may be required. Continuing anyway...")
 
-    print(f"\nInitializing VIVA filter:")
+    print("\nInitializing VIVA filter:")
     print(f"  - Model path: {model_path}")
     print(f"  - Noise suppression level: {noise_suppression_level}")
     print(f"  - Frame duration: {frame_duration_ms}ms (processing chunk size)")

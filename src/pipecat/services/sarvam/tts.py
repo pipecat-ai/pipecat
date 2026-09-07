@@ -53,17 +53,18 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given, is_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 class _SpeakableTextFilter(BaseTextFilter):
@@ -299,11 +300,11 @@ class SarvamHttpTTSSettings(TTSSettings):
             **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
     """
 
-    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pace: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -321,8 +322,8 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
 
     _aliases: ClassVar[dict[str, str]] = {"target_language_code": "language"}
 
-    min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_buffer_size: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamHttpTTSService(TTSService):
@@ -597,14 +598,6 @@ class SarvamHttpTTSService(TTSService):
             The Sarvam AI-specific language code, or None if not supported.
         """
         return language_to_sarvam_language(language)
-
-    async def start(self, frame: StartFrame):
-        """Start the Sarvam TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
@@ -1041,14 +1034,13 @@ class SarvamTTSService(InterruptibleTTSService):
         """
         return language_to_sarvam_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Sarvam TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-
+        await super().setup(setup)
         # WebSocket API expects sample rate as string
         self._speech_sample_rate = str(self.sample_rate)
         await self._connect()

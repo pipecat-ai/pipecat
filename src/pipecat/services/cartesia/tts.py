@@ -9,6 +9,7 @@
 import base64
 import json
 import re
+import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -22,15 +23,36 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+
+# The Cartesia API version these services are written against. The request
+# payloads and message handling below are tied to it, so it is pinned here
+# rather than configured.
+_CARTESIA_API_VERSION = "2026-03-01"
+
+
+def _resolve_cartesia_version(cartesia_version: str | None) -> str:
+    """Resolve the API version header value, warning on a deprecated override."""
+    if cartesia_version is None:
+        return _CARTESIA_API_VERSION
+
+    warnings.warn(
+        "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+        "No replacement. The service sends the API version it is written against, "
+        "so overriding it can break request and response handling.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return cartesia_version
 
 
 class GenerationConfig(BaseModel):
@@ -190,10 +212,8 @@ class CartesiaTTSSettings(TTSSettings):
             custom pronunciations.
     """
 
-    generation_config: GenerationConfig | None | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    pronunciation_dict_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTTSService(WebsocketTTSService):
@@ -226,7 +246,7 @@ class CartesiaTTSService(WebsocketTTSService):
         *,
         api_key: str,
         voice_id: str | None = None,
-        cartesia_version: str = "2026-03-01",
+        cartesia_version: str | None = None,
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str | None = None,
         sample_rate: int | None = None,
@@ -234,6 +254,7 @@ class CartesiaTTSService(WebsocketTTSService):
         container: str = "raw",
         max_buffer_delay_ms: int | None = None,
         params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
@@ -250,6 +271,11 @@ class CartesiaTTSService(WebsocketTTSService):
                     Will be removed in 2.0.0.
 
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
             url: WebSocket URL for Cartesia TTS API.
             model: TTS model to use.
 
@@ -272,6 +298,8 @@ class CartesiaTTSService(WebsocketTTSService):
                     Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
                     be removed in 2.0.0.
 
+            extra_headers: Optional additional HTTP headers to send with the
+                WebSocket handshake.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             text_aggregation_mode: How to aggregate incoming text before synthesis.
@@ -349,8 +377,9 @@ class CartesiaTTSService(WebsocketTTSService):
         )
 
         self._api_key = api_key
-        self._cartesia_version = cartesia_version
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
         self._url = url
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
         # Audio output format — init-only, not runtime-updatable
         self._output_container = container
@@ -428,7 +457,22 @@ class CartesiaTTSService(WebsocketTTSService):
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
-        text = self._CARTESIA_TAG_RE.sub(" ", text)
+        """Remove Cartesia SSML tags from a word-timestamp token.
+
+        A tag standing between two alphanumeric characters is replaced by a space,
+        since it is the only thing separating two words (``"to<spell>1234"``).
+        Anywhere else it is removed outright: a space there would not join anything,
+        and it would split a word from its own punctuation
+        (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
+        token no longer matches the text that was sent for synthesis).
+        """
+
+        def replace(match: re.Match) -> str:
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            return " " if before.isalnum() and after.isalnum() else ""
+
+        text = self._CARTESIA_TAG_RE.sub(replace, text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
@@ -521,13 +565,13 @@ class CartesiaTTSService(WebsocketTTSService):
 
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._output_sample_rate = self.sample_rate
         await self._connect()
 
@@ -554,7 +598,12 @@ class CartesiaTTSService(WebsocketTTSService):
                 return
             logger.debug("Connecting to Cartesia TTS")
             self._websocket = await self._websocket_connect(
-                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
+                self._url,
+                additional_headers={
+                    "X-API-Key": self._api_key,
+                    "Cartesia-Version": self._cartesia_version,
+                    **self._extra_headers,
+                },
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -567,7 +616,7 @@ class CartesiaTTSService(WebsocketTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia")
+                logger.debug(f"{self}: Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -630,6 +679,16 @@ class CartesiaTTSService(WebsocketTTSService):
             return changed
 
         if changed.keys() & {"voice", "model", "language"}:
+            if self._turn_context_id:
+                # Finalize the old context's still-pending sentence so its
+                # already-heard prefix still emits progress frames (mirrors the
+                # LLMFullResponseEnd / TTSSpeak close paths). A mid-sentence
+                # settings change would otherwise abandon it before promotion,
+                # dropping that prefix from the transcript.
+                await self._push_sequencer_frames(
+                    await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                    self._turn_context_id,
+                )
             if self._turn_context_id and self.audio_context_available(self._turn_context_id):
                 await self.flush_audio(context_id=self._turn_context_id)
             # Assign a new turn context ID so subsequent sentences in this
@@ -756,12 +815,13 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str | None = None,
         model: str | None = None,
         base_url: str = "https://api.cartesia.ai",
-        cartesia_version: str = "2026-03-01",
+        cartesia_version: str | None = None,
         aiohttp_session: aiohttp.ClientSession | None = None,
         sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -783,6 +843,11 @@ class CartesiaHttpTTSService(TTSService):
 
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
             aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
                 If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate. If None, uses default.
@@ -794,6 +859,8 @@ class CartesiaHttpTTSService(TTSService):
                     Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
+            extra_headers: Optional additional HTTP headers to send with each
+                synthesis request.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
@@ -840,7 +907,8 @@ class CartesiaHttpTTSService(TTSService):
 
         self._api_key = api_key
         self._base_url = base_url
-        self._cartesia_version = cartesia_version
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
         # Audio output format — init-only, not runtime-updatable
         self._output_container = container
@@ -869,13 +937,14 @@ class CartesiaHttpTTSService(TTSService):
         """
         return language_to_cartesia_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
+
         self._output_sample_rate = self.sample_rate
         if self._owns_session:
             self._session = aiohttp.ClientSession()
@@ -935,6 +1004,7 @@ class CartesiaHttpTTSService(TTSService):
                 "Cartesia-Version": self._cartesia_version,
                 "X-API-Key": self._api_key,
                 "Content-Type": "application/json",
+                **self._extra_headers,
             }
 
             url = f"{self._base_url}/tts/bytes"

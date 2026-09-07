@@ -24,7 +24,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -34,19 +34,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import (
-    NOT_GIVEN,
-    TTSSettings,
-    _NotGiven,
-    assert_given,
-    is_given,
-)
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     import google.genai as genai
@@ -505,18 +500,18 @@ class GoogleHttpTTSSettings(TTSSettings):
         google_style: Google-specific voice style.
     """
 
-    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | _NotGiven = field(
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    gender: Literal["male", "female", "neutral"] | None | _NotGiven = field(
+    gender: Literal["male", "female", "neutral"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     google_style: (
-        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | _NotGiven
+        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | NotGiven
     ) = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -528,7 +523,7 @@ class GoogleTTSSettings(TTSSettings):
         speaking_rate: The speaking rate, in the range [0.25, 2.0].
     """
 
-    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 #: *Deprecated since 0.0.105:* Use ``GoogleTTSService.Settings`` instead.
@@ -545,9 +540,9 @@ class GeminiTTSSettings(TTSSettings):
         speaker_configs: List of speaker configurations for multi-speaker mode.
     """
 
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    multi_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_configs: list[dict[str, Any]] | None | _NotGiven = field(
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multi_speaker: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_configs: list[dict[str, Any]] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -762,7 +757,11 @@ class GoogleHttpTTSService(TTSService):
         Args:
             delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        if isinstance(delta, self.Settings) and is_given(delta.speaking_rate):
+        if (
+            isinstance(delta, self.Settings)
+            and is_given(delta.speaking_rate)
+            and delta.speaking_rate is not None  # None == "up to Google"; no check needed
+        ):
             rate_value = float(delta.speaking_rate)
             if not (0.25 <= rate_value <= 2.0):
                 logger.warning(
@@ -890,6 +889,13 @@ class GoogleBaseTTSService(TTSService):
     This is an abstract base class. Use GoogleTTSService or GeminiTTSService instead.
     """
 
+    _location: str | None
+
+    # Subclasses build the client in __init__. Gemini can run against the GenAI API
+    # instead of GCP, so each backend's code path casts to the client it holds.
+    # Not isinstance: tests patch these SDK classes, and a patched class isn't a type.
+    _client: "texttospeech_v1.TextToSpeechAsyncClient | genai.Client"
+
     def _create_client(
         self, credentials: str | None, credentials_path: str | None
     ) -> texttospeech_v1.TextToSpeechAsyncClient:
@@ -978,14 +984,16 @@ class GoogleBaseTTSService(TTSService):
 
         async def request_generator():
             yield config_request
-            synthesis_input_params = {"text": text}
+            synthesis_input_params: dict[str, Any] = {"text": text}
             if prompt is not None:
                 synthesis_input_params["prompt"] = prompt
             yield texttospeech_v1.StreamingSynthesizeRequest(
                 input=texttospeech_v1.StreamingSynthesisInput(**synthesis_input_params)
             )
 
-        streaming_responses = await self._client.streaming_synthesize(request_generator())
+        # Streaming synthesis is the GCP path; the GenAI backend has its own.
+        client = cast("texttospeech_v1.TextToSpeechAsyncClient", self._client)
+        streaming_responses = await client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
         audio_buffer = b""
@@ -1130,9 +1138,7 @@ class GoogleTTSService(GoogleBaseTTSService):
 
         self._location = location
         self._voice_cloning_key = voice_cloning_key
-        self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
-            credentials, credentials_path
-        )
+        self._client = self._create_client(credentials, credentials_path)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Override to handle speaking_rate validation.
@@ -1140,7 +1146,11 @@ class GoogleTTSService(GoogleBaseTTSService):
         Args:
             delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        if isinstance(delta, self.Settings) and is_given(delta.speaking_rate):
+        if (
+            isinstance(delta, self.Settings)
+            and is_given(delta.speaking_rate)
+            and delta.speaking_rate is not None  # None == "up to Google"; no check needed
+        ):
             rate_value = float(delta.speaking_rate)
             if not (0.25 <= rate_value <= 2.0):
                 logger.warning(
@@ -1404,8 +1414,8 @@ class GeminiTTSService(GoogleBaseTTSService):
         # Warn once now about settings the GenAI backend ignores, rather than on
         # every utterance in run_tts.
         self._warn_unsupported_genai_settings(
-            multi_speaker=default_settings.multi_speaker,
-            prompt=default_settings.prompt,
+            multi_speaker=assert_given(default_settings.multi_speaker),
+            prompt=assert_given(default_settings.prompt),
         )
 
     def _create_client(
@@ -1438,8 +1448,9 @@ class GeminiTTSService(GoogleBaseTTSService):
         # Only the GenAI client owns a closable async session; the GCP client
         # manages its own lifecycle.
         if self._use_genai:
+            client = cast("genai.Client", self._client)
             try:
-                await self._client.aio.aclose()
+                await client.aio.aclose()
             except Exception:
                 # Do nothing - we're shutting down anyway.
                 pass
@@ -1476,13 +1487,13 @@ class GeminiTTSService(GoogleBaseTTSService):
         """
         return language_to_gemini_tts_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Gemini TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         if self.sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS requires {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
@@ -1501,10 +1512,11 @@ class GeminiTTSService(GoogleBaseTTSService):
         if is_given(delta.voice) and delta.voice not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")
 
-        self._warn_unsupported_genai_settings(
-            multi_speaker=delta.multi_speaker if is_given(delta.multi_speaker) else None,
-            prompt=delta.prompt if is_given(delta.prompt) else None,
-        )
+        if isinstance(delta, self.Settings):
+            self._warn_unsupported_genai_settings(
+                multi_speaker=delta.multi_speaker if is_given(delta.multi_speaker) else None,
+                prompt=delta.prompt if is_given(delta.prompt) else None,
+            )
 
         return await super()._update_settings(delta)
 
@@ -1587,7 +1599,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 speech_config=genai.types.SpeechConfig(
                     voice_config=genai.types.VoiceConfig(
                         prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
-                            voice_name=self._settings.voice
+                            voice_name=assert_given(self._settings.voice)
                         )
                     )
                 ),
@@ -1595,8 +1607,13 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            response = await self._client.aio.models.generate_content_stream(
-                model=self._settings.model,
+            client = cast("genai.Client", self._client)
+
+            model = assert_given(self._settings.model)
+            assert model is not None
+
+            response = await client.aio.models.generate_content_stream(
+                model=model,
                 contents=text,
                 config=config,
             )

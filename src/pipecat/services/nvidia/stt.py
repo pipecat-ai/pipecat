@@ -30,13 +30,15 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import grpc
@@ -120,15 +122,15 @@ class _NvidiaBaseSTTSettings(STTSettings):
         diarization_max_speakers: Maximum number of speakers for diarization.
     """
 
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_alternatives: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_time_offsets: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_diarization: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    diarization_max_speakers: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_alternatives: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_time_offsets: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_diarization: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarization_max_speakers: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -139,7 +141,7 @@ class NvidiaSTTSettings(_NvidiaBaseSTTSettings):
         interim_results: Whether to return interim (partial) results.
     """
 
-    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -470,6 +472,19 @@ class NvidiaSTTService(STTService):
             model: Model name to set.
         """
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._initialize_client()
+        self._config = self._create_recognition_config()
+        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
+        self._create_keepalive_task()
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
+
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Nemotron Speech STT service and initialize streaming configuration.
 
@@ -477,16 +492,9 @@ class NvidiaSTTService(STTService):
             frame: StartFrame indicating pipeline start.
         """
         await super().start(frame)
-        self._initialize_client()
-        self._config = self._create_recognition_config()
-        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
-
-        self._create_keepalive_task()
-
-        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Nemotron Speech STT service and clean up resources.
@@ -617,7 +625,6 @@ class NvidiaSTTService(STTService):
                 # Language is a StrEnum so downstream handles either.
                 language = cast("Language | None", assert_given(self._settings.language))
                 if result.is_final:
-                    await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
                     # Report usage before the transcription frame so tracing
                     # can attach it to the STT span the frame closes.
@@ -658,7 +665,6 @@ class NvidiaSTTService(STTService):
         Yields:
             None - transcription results are pushed to the pipeline via frames.
         """
-        await self.start_processing_metrics()
         iterator = self._audio_iterator
         if iterator is not None and not iterator.closed:
             await iterator.put(audio)

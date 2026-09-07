@@ -15,6 +15,7 @@ jobs:
   coverage:
     name: "Coverage"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -26,11 +27,6 @@ jobs:
 
       - name: Set up Python
         run: uv python install 3.12
-
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y portaudio19-dev
 
       - name: Install dependencies
         run: |
@@ -50,6 +46,7 @@ jobs:
             --extra redis \
             --extra runner \
             --extra sagemaker \
+            --extra sarvam \
             --extra tracing \
             --extra websocket
 

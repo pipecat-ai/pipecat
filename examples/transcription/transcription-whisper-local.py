@@ -13,7 +13,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper.stt import WhisperSTTService
@@ -54,7 +54,7 @@ async def main():
 
     pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
-    worker = PipelineWorker(pipeline)
+    worker = PipelineWorker(pipeline, processor_unusable_policy=ProcessorUnusablePolicy.END)
 
     runner = WorkerRunner(handle_sigint=False if sys.platform == "win32" else True)
 

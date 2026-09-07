@@ -23,19 +23,20 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.cartesia.stt import _prepare_keyterms
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
@@ -53,7 +54,7 @@ class CartesiaTurnsSTTSettings(STTSettings):
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
     """
 
-    keyterm: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTurnsSTTService(WebsocketSTTService):
@@ -68,11 +69,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     Transcripts are cumulative per turn; there is no ``is_final`` flag and no
     ``finalize`` command — closing the socket ends the session.
 
-    Each ``turn.start`` pushes a :class:`UserStartedSpeakingFrame`; each
+    Each ``turn.start`` pushes a :class:`ProposedUserStartedSpeakingFrame`; each
     ``turn.update`` pushes an :class:`InterimTranscriptionFrame`; ``turn.end``
     pushes a final :class:`TranscriptionFrame` followed by a
-    :class:`UserStoppedSpeakingFrame`. ``turn.eager_end`` and ``turn.resume``
-    are surfaced only via their respective event handlers.
+    :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` and
+    ``turn.resume`` are surfaced only via their respective event handlers.
 
     Event handlers available (in addition to the base
     ``on_connected`` / ``on_disconnected`` / ``on_connection_error``):
@@ -112,8 +113,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             url: WebSocket URL for the Cartesia Streaming ASR v2 endpoint.
             sample_rate: Audio sample rate in Hz. If ``None``, uses the pipeline
                 sample rate.
-            should_interrupt: Whether to broadcast an interruption when the
-                server signals the start of a new turn.
+            should_interrupt: Whether to interrupt the bot when the server
+                signals the start of a new turn. Passed along to the user turn
+                strategies this service recommends, which own the interruption;
+                a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it.
             watchdog_min_timeout: Minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
@@ -186,25 +190,27 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         """Recommend external turn strategies: this service detects turns server-side.
 
         Cartesia's turn-detection STT defines turn boundaries on the server and
-        emits ``UserStarted/StoppedSpeakingFrame``, so the user aggregator defers to
-        those rather than running local VAD/smart-turn. Applied unless the user
-        passed their own ``user_turn_strategies``.
+        emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
+        resolves those rather than running local VAD/smart-turn. Applied unless
+        the user passed their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies()
+        frame.user_turn_strategies = ExternalUserTurnStrategies(
+            enable_interruptions=self._should_interrupt,
+        )
         return frame
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, frame: StartFrame):
-        """Start the STT service and establish the WebSocket connection.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -352,7 +358,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia Ink-2 ASR")
+                logger.debug(f"{self}: Disconnecting from Cartesia Ink-2 ASR")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -498,10 +504,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         transcript = data.get("transcript", "")
         logger.debug("Cartesia Ink-2 ASR turn.start")
         self._user_is_speaking = True
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_turn_start", transcript)
 
     async def _handle_turn_update(self, data: dict):
@@ -552,8 +555,7 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
                 )
             )
             await self._handle_transcription(transcript, True, self._language)
-        await self.stop_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_turn_end", transcript)
 
     async def _handle_server_error(self, data: dict):

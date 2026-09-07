@@ -1674,6 +1674,45 @@ class TestFinalizeEndOfTurn(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# finalize rescues a mid-sentence prefix when a context is closed early
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRescuesMidSentencePrefix(unittest.IsolatedAsyncioTestCase):
+    """A context closed mid-sentence (e.g. a TTS settings change re-mints the
+    turn context) must finalize its pending sentence, or the already-heard
+    prefix's word-timestamps land on no slot and are dropped from the transcript.
+    """
+
+    async def test_word_after_finalize_emits_progress_for_heard_prefix(self):
+        seq = _seq(streaming=True)
+        # A sentence is mid-stream: two tokens, no terminal boundary yet.
+        await _stream(seq, "ctx1", "Hi", " there")
+        self.assertEqual(seq._slots, [])
+        # The context is closed early — finalize force-promotes the prefix.
+        await seq.finalize("ctx1")
+        # A word-timestamp for the flushed prefix now lands on the promoted slot
+        # and emits both the word frame and a progress frame.
+        result = seq.process_word("Hi", pts=10, context_id="ctx1")
+        self.assertTrue(any(isinstance(f, TTSTextFrame) and f.text == "Hi" for f in result))
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].accumulated_text, "Hi")
+
+    async def test_word_without_finalize_emits_no_progress(self):
+        # Same setup, but the prefix is never finalized (the pre-fix bug): the
+        # word for the still-pending sentence is buffered and no progress frame
+        # is emitted for the heard prefix.
+        seq = _seq(streaming=True)
+        await _stream(seq, "ctx1", "Hi", " there")
+        self.assertEqual(seq._slots, [])
+        result = seq.process_word("Hi", pts=10, context_id="ctx1")
+        self.assertEqual(result, [])
+        self.assertFalse(any(isinstance(f, AggregatedTextProgressFrame) for f in result))
+        self.assertEqual(len(seq._buffered_words), 1)
+
+
+# ---------------------------------------------------------------------------
 # Concurrent contexts — two audio contexts in flight at once must not bleed
 # ---------------------------------------------------------------------------
 

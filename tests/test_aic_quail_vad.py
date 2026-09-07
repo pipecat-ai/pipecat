@@ -19,7 +19,7 @@ except ImportError:
     aic_sdk = None
     HAS_AIC_SDK = False
 
-from tests.aic_mocks import MockModel, MockProcessorSync  # noqa: E402
+from tests.aic_mocks import MockModel, MockVadSync  # noqa: E402
 
 # Module path for patching
 AIC_QUAIL_VAD_MODULE = "pipecat.audio.vad.aic_quail_vad"
@@ -40,14 +40,14 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         cls.DEFAULT_QUAIL_VAD_MODEL_ID = DEFAULT_QUAIL_VAD_MODEL_ID
 
     def setUp(self):
-        self.mock_model = MockModel(model_id="quail-vad-2.0-xxs-16khz", optimal_num_frames=160)
-        self.mock_processor = MockProcessorSync()
+        self.mock_model = MockModel(model_id="vad-2.1-xxs-16khz", optimal_block_size=160)
+        self.mock_vad = MockVadSync()
 
     def _create_analyzer(self, **kwargs):
         """Construct the analyzer with all SDK touchpoints mocked.
 
         Returns the constructed analyzer plus the patched mock-class objects so
-        tests can assert on download/from_file/Processor call shapes that
+        tests can assert on download/from_file/Vad call shapes that
         happened during ``__init__``.
         """
         analyzer_kwargs = {"license_key": "test-key"}
@@ -56,9 +56,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             patch(f"{AIC_QUAIL_VAD_MODULE}.set_sdk_id") as mock_sdk_id,
             patch(f"{AIC_QUAIL_VAD_MODULE}.Model") as mock_model_cls,
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=self.mock_processor
-            ) as mock_processor_cls,
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=self.mock_vad) as mock_vad_cls,
         ):
             mock_model_cls.from_file.return_value = self.mock_model
             mock_model_cls.download.return_value = "/tmp/test.aicmodel"
@@ -66,26 +64,25 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             analyzer = self.AICQuailVADAnalyzer(**analyzer_kwargs)
         return analyzer, {
             "Model": mock_model_cls,
-            "Processor": mock_processor_cls,
+            "Vad": mock_vad_cls,
             "ProcessorConfig": mock_config_cls,
             "set_sdk_id": mock_sdk_id,
         }
 
     def _initialize_at(self, analyzer, sample_rate: int = 16000):
-        """Drive ``set_sample_rate`` with Processor + ProcessorConfig patched.
+        """Drive ``set_sample_rate`` with Vad + ProcessorConfig patched.
 
         Model patching is unnecessary because the analyzer already holds a
         reference to the mocked model from ``__init__``.
         """
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=self.mock_processor
-            ) as mock_processor_cls,
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=self.mock_vad) as mock_vad_cls,
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(sample_rate)
-            return mock_processor_cls
+            self.last_config_cls = mock_config_cls
+            return mock_vad_cls
 
     # --- Construction --------------------------------------------------------
 
@@ -170,8 +167,8 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
                 self.AICQuailVADAnalyzer(license_key="test-key")
         mock_executor_instance.shutdown.assert_called_once_with(wait=False)
 
-    def test_init_shuts_down_executor_on_processor_init_failure(self):
-        """Processor() failing during eager init (sample_rate passed to __init__)
+    def test_init_shuts_down_executor_on_vad_init_failure(self):
+        """Vad() failing during eager init (sample_rate passed to __init__)
         triggers the same executor-shutdown cleanup as earlier failure modes."""
         from concurrent.futures import ThreadPoolExecutor
 
@@ -181,7 +178,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             patch(f"{AIC_QUAIL_VAD_MODULE}.Model") as mock_model_cls,
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor",
+                f"{AIC_QUAIL_VAD_MODULE}.Vad",
                 side_effect=RuntimeError("license expired"),
             ),
             patch(
@@ -197,9 +194,9 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         mock_executor_instance.shutdown.assert_called_once_with(wait=False)
 
     def test_default_model_id(self):
-        """Default model_id is the published standalone Quail VAD."""
+        """Default model_id is the SDK's current dedicated VAD model."""
         analyzer, _ = self._create_analyzer()
-        self.assertEqual(analyzer._model_id, "quail-vad-2.0-xxs-16khz")
+        self.assertEqual(analyzer._model_id, "vad-2.1-xxs-16khz")
         self.assertEqual(analyzer._model_id, self.DEFAULT_QUAIL_VAD_MODEL_ID)
 
     def test_default_download_dir(self):
@@ -241,7 +238,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         """__init__ downloads and loads the model so cold-start happens off-hot-path."""
         _, mocks = self._create_analyzer()
         mocks["Model"].download.assert_called_once_with(
-            "quail-vad-2.0-xxs-16khz",
+            "vad-2.1-xxs-16khz",
             str(Path.home() / ".cache" / "pipecat" / "aic-models"),
         )
         mocks["Model"].from_file.assert_called_once_with("/tmp/test.aicmodel")
@@ -253,22 +250,25 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         mocks["Model"].from_file.assert_called_once_with("/tmp/custom.aicmodel")
 
     def test_eager_init_when_sample_rate_supplied(self):
-        """sample_rate in __init__ triggers immediate processor construction."""
+        """sample_rate in __init__ triggers immediate VAD construction."""
         analyzer, mocks = self._create_analyzer(sample_rate=16000)
         self.assertEqual(analyzer._frames_per_block, 160)
         self.assertIsNotNone(analyzer._in_f32)
-        self.assertEqual(analyzer._in_f32.shape, (1, 160))
-        mocks["Processor"].assert_called_once()
+        self.assertEqual(analyzer._in_f32.shape, (160,))
+        mocks["Vad"].assert_called_once()
 
     # --- set_sample_rate -----------------------------------------------------
 
-    def test_set_sample_rate_creates_processor(self):
-        """set_sample_rate after construction creates the processor."""
+    def test_set_sample_rate_creates_vad(self):
+        """set_sample_rate after construction creates the VAD."""
         analyzer, _ = self._create_analyzer()
-        mock_processor_cls = self._initialize_at(analyzer, 16000)
-        mock_processor_cls.assert_called_once()
+        mock_vad_cls = self._initialize_at(analyzer, 16000)
+        mock_vad_cls.assert_called_once()
         self.assertEqual(analyzer.sample_rate, 16000)
         self.assertEqual(analyzer._frames_per_block, 160)
+        # The VAD is configured with the model's optimal block size for this rate.
+        config_kw = self.last_config_cls.call_args[1]
+        self.assertEqual(config_kw, {"sample_rate": 16000, "block_size": 160})
 
     def test_set_sample_rate_does_not_reload_model(self):
         """A second set_sample_rate call must not re-call Model.from_file/download."""
@@ -279,20 +279,20 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.Model") as fresh_model_cls,
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=self.mock_processor),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=self.mock_vad),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
             fresh_model_cls.from_file.assert_not_called()
             fresh_model_cls.download.assert_not_called()
 
-    def test_set_sample_rate_processor_init_failure_propagates(self):
-        """Processor() raising at init propagates so the pipeline crashes loudly."""
+    def test_set_sample_rate_vad_init_failure_propagates(self):
+        """Vad() raising at init propagates so the pipeline crashes loudly."""
         analyzer, _ = self._create_analyzer()
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor",
+                f"{AIC_QUAIL_VAD_MODULE}.Vad",
                 side_effect=RuntimeError("license expired"),
             ),
         ):
@@ -300,16 +300,16 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 analyzer.set_sample_rate(16000)
 
-    def test_set_sample_rate_rolls_back_state_on_processor_init_failure(self):
-        """If Processor() raises mid-set_sample_rate, the previous state is restored.
+    def test_set_sample_rate_rolls_back_state_on_vad_init_failure(self):
+        """If Vad() raises mid-set_sample_rate, the previous state is restored.
 
         Regression guard against a half-initialized analyzer with new
-        frames_per_block but no working processor.
+        frames_per_block but no working VAD.
         """
         analyzer, _ = self._create_analyzer()
         # Successfully initialize at 16000 first.
         self._initialize_at(analyzer, 16000)
-        old_processor = analyzer._processor
+        old_vad = analyzer._vad
         old_vad_ctx = analyzer._vad_ctx
         old_frames = analyzer._frames_per_block
         old_in_f32 = analyzer._in_f32
@@ -318,7 +318,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor",
+                f"{AIC_QUAIL_VAD_MODULE}.Vad",
                 side_effect=RuntimeError("license expired"),
             ),
         ):
@@ -326,31 +326,31 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 analyzer.set_sample_rate(8000)
 
-        self.assertIs(analyzer._processor, old_processor)
+        self.assertIs(analyzer._vad, old_vad)
         self.assertIs(analyzer._vad_ctx, old_vad_ctx)
         self.assertEqual(analyzer._frames_per_block, old_frames)
         self.assertIs(analyzer._in_f32, old_in_f32)
 
-    def test_set_sample_rate_failure_preserves_old_processor_vad_state(self):
-        """Rollback must not silently reset the old processor's VAD state.
+    def test_set_sample_rate_failure_preserves_old_vad_state(self):
+        """Rollback must not tear down the VAD it is about to restore.
 
-        Regression guard for the round-2 bug where the old-processor reset()
-        ran before the new Processor() was constructed.
+        The previous VAD must survive a failed re-init so the analyzer keeps
+        working at its old sample rate.
         """
         analyzer, _ = self._create_analyzer()
-        first_processor = MockProcessorSync()
+        first_vad = MockVadSync()
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=first_processor),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=first_vad),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
 
-        # Fail the next set_sample_rate at Processor construction.
+        # Fail the next set_sample_rate at Vad construction.
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(
-                f"{AIC_QUAIL_VAD_MODULE}.Processor",
+                f"{AIC_QUAIL_VAD_MODULE}.Vad",
                 side_effect=RuntimeError("license expired"),
             ),
         ):
@@ -358,63 +358,63 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 analyzer.set_sample_rate(8000)
 
-        # The old processor must NOT have been reset — otherwise the rollback
-        # restores a wiped processor instead of the working one.
-        self.assertFalse(first_processor.processor_ctx.reset_called)
+        # The old VAD must NOT have been terminated — otherwise the rollback
+        # restores a dead VAD instead of the working one.
+        self.assertFalse(first_vad.terminated)
 
-    def test_set_sample_rate_reinit_resets_old_processor(self):
-        """A second set_sample_rate calls reset() on the previous processor."""
+    def test_set_sample_rate_reinit_terminates_old_vad(self):
+        """A second set_sample_rate terminates the previous VAD's session."""
         analyzer, _ = self._create_analyzer()
         # First init at 16000.
-        first_processor = MockProcessorSync()
+        first_vad = MockVadSync()
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=first_processor),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=first_vad),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
 
-        self.assertFalse(first_processor.processor_ctx.reset_called)
+        self.assertFalse(first_vad.terminated)
 
-        # Second init triggers reset on the first processor.
+        # Second init terminates the first VAD.
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=MockProcessorSync()),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=MockVadSync()),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
 
-        self.assertTrue(first_processor.processor_ctx.reset_called)
+        self.assertTrue(first_vad.terminated)
 
-    def test_set_sample_rate_reinit_tolerates_old_processor_reset_failure(self):
-        """Old processor's reset() failing during re-init is logged, not raised."""
+    def test_set_sample_rate_reinit_tolerates_old_vad_termination_failure(self):
+        """Old VAD's terminate_session() failing during re-init is logged, not raised."""
         analyzer, _ = self._create_analyzer()
         # First init.
-        first_processor = MockProcessorSync()
+        first_vad = MockVadSync()
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=first_processor),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=first_vad),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
 
-        # Make the old processor's reset fail. Re-init must still succeed.
-        first_processor.processor_ctx.reset = MagicMock(side_effect=RuntimeError("flaky"))
+        # Make the old VAD's termination fail. Re-init must still succeed.
+        first_vad.terminate_session = MagicMock(side_effect=RuntimeError("flaky"))
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=MockProcessorSync()),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=MockVadSync()),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)  # must not raise
 
     def test_set_sample_rate_uses_correct_frames_per_block_when_model_optimal_differs(self):
-        """num_frames_required reflects model.get_optimal_num_frames after init.
+        """num_frames_required reflects model.get_optimal_block_size after init.
 
         Regression guard for the ordering bug where super().set_sample_rate ran
-        before _initialize_processor — base sized internal buffers against the
+        before _initialize_vad — base sized internal buffers against the
         160-fallback even when the model wanted a different window.
         """
-        self.mock_model._optimal_num_frames = 240  # e.g. 16 kHz Quail VAD model
+        self.mock_model._optimal_block_size = 240  # e.g. 16 kHz Quail VAD model
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
         self.assertEqual(analyzer._frames_per_block, 240)
@@ -442,14 +442,14 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         the fallback exists in case subclasses set _sample_rate directly.
         """
         analyzer, _ = self._create_analyzer(sample_rate=None)
-        analyzer._sample_rate = 24000  # Simulate base setting rate without _initialize_processor
+        analyzer._sample_rate = 24000  # Simulate base setting rate without _initialize_vad
         self.assertEqual(analyzer._frames_per_block, 0)
         self.assertEqual(analyzer.num_frames_required(), 240)  # 24000 * 0.01
 
     # --- voice_confidence ----------------------------------------------------
 
     def test_voice_confidence_before_init_returns_zero(self):
-        """No processor yet → no confidence."""
+        """No VAD yet → no confidence."""
         analyzer, _ = self._create_analyzer()
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
 
@@ -461,45 +461,45 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         """
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.raw_probability = 0.42
+        self.mock_vad.vad_ctx.raw_probability = 0.42
         # 10 ms at 16 kHz int16 → 320 bytes.
         confidence = analyzer.voice_confidence(b"\x00" * 320)
         self.assertAlmostEqual(confidence, 0.42)
-        self.assertEqual(len(self.mock_processor.process_calls), 1)
-        self.assertEqual(self.mock_processor.process_calls[0].shape, (1, 160))
+        self.assertEqual(len(self.mock_vad.process_calls), 1)
+        self.assertEqual(self.mock_vad.process_calls[0].shape, (160,))
 
     def test_voice_confidence_reports_high_and_low(self):
         """High raw probability ≈ speech, low ≈ silence — both pass through."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.raw_probability = 0.97
+        self.mock_vad.vad_ctx.raw_probability = 0.97
         self.assertAlmostEqual(analyzer.voice_confidence(b"\x00" * 320), 0.97)
-        self.mock_processor.vad_ctx.raw_probability = 0.01
+        self.mock_vad.vad_ctx.raw_probability = 0.01
         self.assertAlmostEqual(analyzer.voice_confidence(b"\x00" * 320), 0.01)
 
     def test_voice_confidence_clamps_out_of_range(self):
         """Probabilities outside [0.0, 1.0] are clamped to the VADAnalyzer range."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.raw_probability = 1.5
+        self.mock_vad.vad_ctx.raw_probability = 1.5
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
-        self.mock_processor.vad_ctx.raw_probability = -0.2
+        self.mock_vad.vad_ctx.raw_probability = -0.2
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
 
     def test_voice_confidence_passes_through_exact_boundaries(self):
         """The in-range boundaries 0.0 and 1.0 pass through unchanged (not clamped away)."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.vad_ctx.raw_probability = 0.0
+        self.mock_vad.vad_ctx.raw_probability = 0.0
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
-        self.mock_processor.vad_ctx.raw_probability = 1.0
+        self.mock_vad.vad_ctx.raw_probability = 1.0
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 1.0)
 
     def test_voice_confidence_swallows_sdk_errors(self):
-        """Exceptions from processor.process() return 0.0 (pipeline stays alive)."""
+        """Exceptions from Vad.process() return 0.0 (pipeline stays alive)."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.process = MagicMock(side_effect=RuntimeError("boom"))
+        self.mock_vad.process = MagicMock(side_effect=RuntimeError("boom"))
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
 
     def test_voice_confidence_swallows_raw_probability_errors(self):
@@ -508,7 +508,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
         # process() succeeds; the failure happens in raw_vad_probability().
-        self.mock_processor.vad_ctx.raise_on_detect = True
+        self.mock_vad.vad_ctx.raise_on_detect = True
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 320), 0.0)
         self.assertTrue(analyzer._inference_error_logged)
 
@@ -516,7 +516,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         """Persistent SDK errors log at ERROR once, then go silent."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.process = MagicMock(side_effect=RuntimeError("boom"))
+        self.mock_vad.process = MagicMock(side_effect=RuntimeError("boom"))
 
         self.assertFalse(analyzer._inference_error_logged)
         analyzer.voice_confidence(b"\x00" * 320)
@@ -532,11 +532,11 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
         # First call fails — sets the latch.
-        self.mock_processor.process = MagicMock(side_effect=RuntimeError("transient"))
+        self.mock_vad.process = MagicMock(side_effect=RuntimeError("transient"))
         analyzer.voice_confidence(b"\x00" * 320)
         self.assertTrue(analyzer._inference_error_logged)
         # Recovery: a successful call clears the latch.
-        self.mock_processor.process = MagicMock(return_value=None)
+        self.mock_vad.process = MagicMock(return_value=None)
         analyzer.voice_confidence(b"\x00" * 320)
         self.assertFalse(analyzer._inference_error_logged)
 
@@ -547,7 +547,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         # 161 frames * 2 bytes = 322 bytes (off by one frame).
         self.assertEqual(analyzer.voice_confidence(b"\x00" * 322), 0.0)
         self.assertTrue(analyzer._buffer_size_warning_logged)
-        self.assertEqual(len(self.mock_processor.process_calls), 0)
+        self.assertEqual(len(self.mock_vad.process_calls), 0)
 
     def test_buffer_size_warning_latch_resets_on_reinit(self):
         """A successful set_sample_rate reset re-arms the buffer-size warning latch."""
@@ -560,7 +560,7 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
         # call at the new configuration logs again.
         with (
             patch(f"{AIC_QUAIL_VAD_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_QUAIL_VAD_MODULE}.Processor", return_value=MockProcessorSync()),
+            patch(f"{AIC_QUAIL_VAD_MODULE}.Vad", return_value=MockVadSync()),
         ):
             mock_config_cls.return_value = MagicMock()
             analyzer.set_sample_rate(16000)
@@ -569,25 +569,25 @@ class TestAICQuailVADAnalyzer(unittest.IsolatedAsyncioTestCase):
     # --- Cleanup -------------------------------------------------------------
 
     async def test_cleanup_releases_resources(self):
-        """cleanup() resets the processor context and nils out state."""
+        """cleanup() terminates the VAD session and nils out state."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.assertIsNotNone(analyzer._processor)
+        self.assertIsNotNone(analyzer._vad)
         await analyzer.cleanup()
-        self.assertIsNone(analyzer._processor)
+        self.assertIsNone(analyzer._vad)
         self.assertIsNone(analyzer._vad_ctx)
         self.assertIsNone(analyzer._model)
         self.assertIsNone(analyzer._in_f32)
         self.assertEqual(analyzer._frames_per_block, 0)
-        self.assertTrue(self.mock_processor.processor_ctx.reset_called)
+        self.assertTrue(self.mock_vad.terminated)
 
-    async def test_cleanup_tolerates_reset_failure(self):
-        """cleanup() logs and continues if ProcessorContext.reset raises."""
+    async def test_cleanup_tolerates_termination_failure(self):
+        """cleanup() logs and continues if terminate_session raises."""
         analyzer, _ = self._create_analyzer()
         self._initialize_at(analyzer, 16000)
-        self.mock_processor.processor_ctx.reset = MagicMock(side_effect=RuntimeError("nope"))
+        self.mock_vad.terminate_session = MagicMock(side_effect=RuntimeError("nope"))
         await analyzer.cleanup()  # must not raise
-        self.assertIsNone(analyzer._processor)
+        self.assertIsNone(analyzer._vad)
 
     async def test_cleanup_without_init_is_safe(self):
         """cleanup() can be called before set_sample_rate."""

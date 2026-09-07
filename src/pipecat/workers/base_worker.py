@@ -16,7 +16,7 @@ import dataclasses
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from loguru import logger
 
@@ -52,8 +52,11 @@ from pipecat.pipeline.job_context import (
     JobGroupContext,
     JobGroupError,
     JobGroupEvent,
+    JobGroupParams,
     JobGroupResponse,
+    JobParams,
     JobStatus,
+    resolve_job_params,
 )
 from pipecat.pipeline.job_decorator import _collect_job_handlers
 from pipecat.pipeline.worker_ready_decorator import _collect_worker_ready_handlers
@@ -61,6 +64,9 @@ from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerErrorData, WorkerReadyData
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+if TYPE_CHECKING:
+    from pipecat.workers.runner import WorkerRunner
 
 
 @dataclass
@@ -97,6 +103,17 @@ class WorkerActivationArgs:
             for f in dataclasses.fields(self)
             if getattr(self, f.name) is not None
         }
+
+
+#: Messages an inactive worker still receives: the ones that change whether it
+#: is active, and the ones that stop it. Gating these would leave it with no
+#: way to be woken or shut down.
+_ALWAYS_DELIVERED = (
+    BusActivateWorkerMessage,
+    BusDeactivateWorkerMessage,
+    BusEndWorkerMessage,
+    BusCancelWorkerMessage,
+)
 
 
 class BaseWorker(BaseObject, BusSubscriber):
@@ -170,7 +187,11 @@ class BaseWorker(BaseObject, BusSubscriber):
             name: Unique name for this worker. If ``None``, an auto-generated
                 name is used (useful for instances that don't participate
                 in inter-worker communication).
-            active: Whether the worker starts active. Defaults to True.
+            active: Whether the worker starts out accepting bus messages
+                (see :attr:`active`). Starting one inactive is for
+                multi-worker setups where workers take turns: it stays out
+                of the way, doing nothing, until another worker or the
+                application activates it. Defaults to True.
             check_dangling_tasks: Whether to warn about tasks left running when
                 the worker finishes. Only applies when the worker owns its task
                 manager; a worker sharing the runner's task manager leaves the
@@ -190,6 +211,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         # before ``attach()`` raises.
         self._bus: WorkerBus | None = None
         self._registry: WorkerRegistry | None = None
+        self._worker_runner: WorkerRunner | None = None
 
         # Activation. Pending activation is deferred until the worker
         # starts, then on_activated fires.
@@ -252,7 +274,20 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     @property
     def active(self) -> bool:
-        """Whether this worker is currently active."""
+        """Whether this worker is accepting bus messages.
+
+        An active worker takes everything addressed to it. An inactive
+        one takes only activation, deactivation, end or cancel messages,
+        so no job request, frame or UI event reaches it and none of its
+        :meth:`on_bus_message` handling runs.
+
+        It matters mainly in multi-worker setups, where a worker is put
+        out of the way while the others carry on.
+
+        Registry watches sit outside this: ``@worker_ready`` handlers
+        fire from :class:`~pipecat.registry.WorkerRegistry` whatever this
+        returns, because they never travel over the bus.
+        """
         return self._active
 
     @property
@@ -275,6 +310,20 @@ class BaseWorker(BaseObject, BusSubscriber):
         if self._registry is None:
             raise RuntimeError(f"Worker '{self}': registry is not set; call attach() first.")
         return self._registry
+
+    @property
+    def worker_runner(self) -> "WorkerRunner":
+        """The runner this worker is attached to.
+
+        Use it to reach another worker on the same runner by name, e.g.
+        ``self.worker_runner.get_worker("ui-jobs")``.
+
+        Raises:
+            RuntimeError: If accessed before :meth:`attach` has been called.
+        """
+        if self._worker_runner is None:
+            raise RuntimeError(f"Worker '{self}': runner is not set; call attach() first.")
+        return self._worker_runner
 
     @property
     def started_at(self) -> float | None:
@@ -305,7 +354,13 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Active job groups launched by this worker, keyed by job_id."""
         return self._job_groups
 
-    async def attach(self, *, registry: WorkerRegistry, bus: WorkerBus) -> None:
+    async def attach(
+        self,
+        *,
+        registry: WorkerRegistry,
+        bus: WorkerBus,
+        worker_runner: "WorkerRunner",
+    ) -> None:
         """Attach the worker to a runner-provided registry and bus.
 
         Called by the runner (typically from ``add_workers()``) before
@@ -317,9 +372,12 @@ class BaseWorker(BaseObject, BusSubscriber):
         Args:
             registry: The shared worker registry.
             bus: The shared worker bus.
+            worker_runner: The runner hosting the worker, reachable
+                afterwards as :attr:`worker_runner`.
         """
         self._registry = registry
         self._bus = bus
+        self._worker_runner = worker_runner
         await self._bus.subscribe(self)
 
     async def cleanup(self) -> None:
@@ -433,6 +491,26 @@ class BaseWorker(BaseObject, BusSubscriber):
             data: Information about the error.
         """
         pass
+
+    def accepts_bus_message(self, message: BusMessage) -> bool:
+        """Take bus messages only while active.
+
+        An inactive worker is handed only activation, deactivation, end
+        or cancel messages. Work addressed to it, and everything it
+        would merely observe, is dropped by the bus rather than reaching
+        :meth:`on_bus_message`.
+
+        Registry notifications are unaffected, since ``@worker_ready``
+        watches fire from :class:`~pipecat.registry.WorkerRegistry`
+        rather than travelling over the bus.
+
+        Args:
+            message: The bus message about to be delivered.
+
+        Returns:
+            Whether to deliver the message.
+        """
+        return self._active or isinstance(message, _ALWAYS_DELIVERED)
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Called for every bus message after built-in lifecycle handling.
@@ -608,7 +686,9 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Activate a worker by name.
 
         The target worker's ``on_activated`` hook will be called
-        with the provided arguments.
+        with the provided arguments. The target need not be active
+        already: an activation reaches an inactive worker, which is what
+        lets it become active.
 
         Args:
             worker_name: The name of the worker to activate.
@@ -660,6 +740,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         self,
         worker_name: str,
         *,
+        params: JobParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
@@ -673,21 +754,32 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Args:
             worker_name: Name of the worker to send the job to.
-            name: Optional job name for routing to a named ``@job``
-                handler on the worker.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. If set, the job is
-                automatically cancelled after this duration.
+            params: How to run the job. See :class:`JobParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(payload=...)`` instead. Will be
+                    removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(timeout=...)`` instead. Will be
+                    removed in 2.0.0.
 
         Returns:
             The generated job_id.
         """
+        job_params = resolve_job_params(
+            params, JobParams, name=name, payload=payload, timeout=timeout
+        )
         group = await self.create_job_group_and_request_job(
             [worker_name],
-            name=name,
-            payload=payload,
-            timeout=timeout,
-            cancel_on_error=True,
+            params=JobGroupParams(**job_params.model_dump()),
         )
         return group.job_id
 
@@ -695,6 +787,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         self,
         worker_name: str,
         *,
+        params: JobParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
@@ -711,17 +804,29 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Args:
             worker_name: Name of the worker to send the job to.
-            name: Optional job name for routing to a named ``@job``
-                handler on the worker.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds.
+            params: How to run the job. See :class:`JobParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(payload=...)`` instead. Will be
+                    removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobParams(timeout=...)`` instead. Will be
+                    removed in 2.0.0.
 
         Returns:
             A ``JobContext`` to use with ``async with``.
 
         Example::
 
-            async with self.job("worker", payload=data) as t:
+            async with self.job("worker", params=JobParams(payload=data)) as t:
                 async for event in t:
                     if event.type == JobEvent.UPDATE:
                         print(event.data)
@@ -731,18 +836,19 @@ class BaseWorker(BaseObject, BusSubscriber):
         return JobContext(
             self,
             worker_name,
-            name=name,
-            payload=payload,
-            timeout=timeout,
+            params=resolve_job_params(
+                params, JobParams, name=name, payload=payload, timeout=timeout
+            ),
         )
 
     async def request_job_group(
         self,
         *worker_names: str,
+        params: JobGroupParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
-        cancel_on_error: bool = True,
+        cancel_on_error: bool | None = None,
     ) -> str:
         """Send a job request to multiple workers (fire-and-forget).
 
@@ -753,13 +859,27 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Args:
             *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. If set, the job is
-                automatically cancelled after this duration.
-            cancel_on_error: Whether to cancel the entire group if a
-                worker responds with an error status. Defaults to True.
+            params: How to run the group. See :class:`JobGroupParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(payload=...)`` instead. Will
+                    be removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(timeout=...)`` instead. Will
+                    be removed in 2.0.0.
+            cancel_on_error: Whether a worker error cancels the group.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(cancel_on_error=...)``
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             The generated job_id shared by all workers in the group.
@@ -770,22 +890,28 @@ class BaseWorker(BaseObject, BusSubscriber):
                     f"{self} Expected worker name as str, got {type(worker_name).__name__}"
                 )
 
-        group = await self.create_job_group_and_request_job(
-            list(worker_names),
+        group_params = resolve_job_params(
+            params,
+            JobGroupParams,
             name=name,
             payload=payload,
             timeout=timeout,
             cancel_on_error=cancel_on_error,
+        )
+        group = await self.create_job_group_and_request_job(
+            list(worker_names),
+            params=group_params,
         )
         return group.job_id
 
     def job_group(
         self,
         *worker_names: str,
+        params: JobGroupParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
-        cancel_on_error: bool = True,
+        cancel_on_error: bool | None = None,
     ) -> JobGroupContext:
         """Create a job group context manager.
 
@@ -800,19 +926,34 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Args:
             *worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named ``@job``
-                handlers on the workers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
+            params: How to run the group. See :class:`JobGroupParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(payload=...)`` instead. Will
+                    be removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(timeout=...)`` instead. Will
+                    be removed in 2.0.0.
+            cancel_on_error: Whether a worker error cancels the group.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(cancel_on_error=...)``
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             A ``JobGroupContext`` to use with ``async with``.
 
         Example::
 
-            async with self.job_group("w1", "w2", payload=data) as tg:
+            async with self.job_group("w1", "w2", params=JobGroupParams(payload=data)) as tg:
                 async for event in tg:
                     if event.type == JobGroupEvent.UPDATE:
                         print(f"{event.worker_name}: {event.data}")
@@ -826,13 +967,18 @@ class BaseWorker(BaseObject, BusSubscriber):
                     f"{self} Expected worker name as str, got {type(worker_name).__name__}"
                 )
 
-        return JobGroupContext(
-            self,
-            worker_names,
+        group_params = resolve_job_params(
+            params,
+            JobGroupParams,
             name=name,
             payload=payload,
             timeout=timeout,
             cancel_on_error=cancel_on_error,
+        )
+        return JobGroupContext(
+            self,
+            worker_names,
+            params=group_params,
         )
 
     async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
@@ -844,7 +990,10 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         group = self._job_groups.pop(job_id, None)
         if group:
-            if group.timeout_task:
+            # On the timeout path this runs on the timeout task itself, which is
+            # already on its last statement. Cancelling it here would abandon the
+            # rest of this method, leaving the group's waiter blocked forever.
+            if group.timeout_task and group.timeout_task is not asyncio.current_task():
                 await self.cancel_task(group.timeout_task)
             for worker_name in group.worker_names:
                 await self.send_bus_message(
@@ -853,6 +1002,29 @@ class BaseWorker(BaseObject, BusSubscriber):
                     )
                 )
             group.fail(reason)
+
+    async def request_cancel_job_group(self, job_id: str, *, reason: str | None = None) -> bool:
+        """Honor an externally requested cancellation, if the group allows it.
+
+        The door for cancellation asked for from outside the worker, by a client
+        UI or an operator endpoint, which :attr:`JobGroupParams.cancellable`
+        governs. Cancellation the worker decides on itself (shutdown, a timeout,
+        ``cancel_on_error``) goes straight to :meth:`cancel_job_group` and is
+        never refused.
+
+        Args:
+            job_id: The job identifier to cancel.
+            reason: Optional human-readable reason for cancellation.
+
+        Returns:
+            Whether the group was cancelled. False means it is unknown or
+            was dispatched as non-cancellable.
+        """
+        group = self._job_groups.get(job_id)
+        if group is None or not group.cancellable:
+            return False
+        await self.cancel_job_group(job_id, reason=reason)
+        return True
 
     async def request_job_update(self, job_id: str, worker_name: str) -> None:
         """Request a progress update from a worker.
@@ -869,10 +1041,11 @@ class BaseWorker(BaseObject, BusSubscriber):
         self,
         worker_names: list[str],
         *,
+        params: JobGroupParams | None = None,
         name: str | None = None,
         payload: dict | None = None,
         timeout: float | None = None,
-        cancel_on_error: bool = True,
+        cancel_on_error: bool | None = None,
     ) -> JobGroup:
         """Wait for workers to be ready, create a job group, and send requests.
 
@@ -883,12 +1056,27 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Args:
             worker_names: Names of the workers to send the job to.
-            name: Optional job name for routing to named handlers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. Covers both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
+            params: How to run the group. See :class:`JobGroupParams`.
+            name: Job name.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(name=...)`` instead. Will be
+                    removed in 2.0.0.
+            payload: Structured data describing the work.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(payload=...)`` instead. Will
+                    be removed in 2.0.0.
+            timeout: Timeout in seconds.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(timeout=...)`` instead. Will
+                    be removed in 2.0.0.
+            cancel_on_error: Whether a worker error cancels the group.
+
+                .. deprecated:: 1.8.0
+                    Use ``params=JobGroupParams(cancel_on_error=...)``
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             The created ``JobGroup``.
@@ -896,18 +1084,29 @@ class BaseWorker(BaseObject, BusSubscriber):
         Raises:
             JobGroupError: If workers are not ready within the timeout.
         """
+        group_params = resolve_job_params(
+            params,
+            JobGroupParams,
+            name=name,
+            payload=payload,
+            timeout=timeout,
+            cancel_on_error=cancel_on_error,
+        )
         all_ready = await self._wait_workers_ready(worker_names)
         try:
-            await asyncio.wait_for(all_ready, timeout=timeout)
+            await asyncio.wait_for(all_ready, timeout=group_params.timeout)
         except TimeoutError:
             raise JobGroupError("workers not ready within timeout")
 
-        group = self._create_job_group(
-            worker_names, timeout=timeout, cancel_on_error=cancel_on_error
-        )
+        group = self._create_job_group(worker_names, params=group_params)
 
         for worker_name in worker_names:
-            await self._send_job_request(worker_name, group.job_id, job_name=name, payload=payload)
+            await self._send_job_request(
+                worker_name,
+                group.job_id,
+                job_name=group_params.name,
+                payload=group_params.payload,
+            )
 
         return group
 
@@ -1225,6 +1424,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
     ) -> None:
         """Handle a job response and track group completion."""
+        self._mark_worker_terminated(message.job_id, message.source)
         await self.on_job_response(message)
         await self._call_event_handler("on_job_response", message)
 
@@ -1241,6 +1441,18 @@ class BaseWorker(BaseObject, BusSubscriber):
                 return
 
         await self._track_job_group_response(message.job_id, message.source, message.response)
+
+    def _mark_worker_terminated(self, job_id: str, worker_name: str) -> None:
+        """Record that a worker of a group has reached a terminal state.
+
+        A worker terminates either by responding or by ending its stream.
+        ``cancel_job_group`` reads this to tell apart the workers a
+        cancellation actually cut short from those that had already
+        finished on their own.
+        """
+        group = self._job_groups.get(job_id)
+        if group:
+            group.terminated.add(worker_name)
 
     async def _handle_job_update(
         self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage
@@ -1295,6 +1507,7 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     async def _handle_job_stream_end(self, message: BusJobStreamEndMessage) -> None:
         """Handle the end of a streaming job response."""
+        self._mark_worker_terminated(message.job_id, message.source)
         await self.on_job_stream_end(message)
         await self._call_event_handler("on_job_stream_end", message)
         self._push_job_group_event(
@@ -1306,18 +1519,21 @@ class BaseWorker(BaseObject, BusSubscriber):
         self,
         worker_names: list[str],
         *,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
+        params: JobGroupParams,
     ) -> JobGroup:
         job_id = str(uuid.uuid4())
         group = JobGroup(
-            job_id=job_id, worker_names=set(worker_names), cancel_on_error=cancel_on_error
+            job_id=job_id,
+            worker_names=list(worker_names),
+            cancel_on_error=params.cancel_on_error,
+            label=params.label,
+            cancellable=params.cancellable,
         )
         self._job_groups[job_id] = group
 
-        if timeout is not None:
+        if params.timeout is not None:
             group.timeout_task = self.create_task(
-                self._task_timeout(job_id, timeout), f"task_timeout_{job_id[:8]}"
+                self._task_timeout(job_id, params.timeout), f"task_timeout_{job_id[:8]}"
             )
 
         return group
@@ -1382,7 +1598,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         group = self._job_groups.get(job_id)
         if group:
             group.responses[source] = response or {}
-            if group.responses.keys() >= group.worker_names:
+            if group.responses.keys() >= set(group.worker_names):
                 if group.timeout_task:
                     await self.cancel_task(group.timeout_task)
                 del self._job_groups[job_id]

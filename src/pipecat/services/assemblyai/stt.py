@@ -26,22 +26,21 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -74,7 +73,7 @@ HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 MAX_LANGUAGE_CODES = 10
 
 
-def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
+def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
@@ -84,7 +83,7 @@ def is_u3_pro_model(model: str | None | _NotGiven) -> bool:
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
-            (``str | None | _NotGiven``); anything that is not a matching
+            (``str | None | NotGiven``); anything that is not a matching
             string returns False.
 
     Returns:
@@ -256,33 +255,33 @@ class AssemblyAISTTSettings(STTSettings):
             to None (not sent).
     """
 
-    formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    word_finalization_max_wait_time: int | None | _NotGiven = field(
+    formatted_finals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_finalization_max_wait_time: int | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    end_of_turn_confidence_threshold: float | None | _NotGiven = field(
+    end_of_turn_confidence_threshold: float | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    min_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_turn_silence: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterms_prompt: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    continuous_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    agent_context: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    previous_context_n_turns: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    voice_focus: Literal["near-field", "far-field"] | None | _NotGiven = field(
+    min_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_turn_silence: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms_prompt: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_detection: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interruption_delay: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    agent_context: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    previous_context_n_turns: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_focus: Literal["near-field", "far-field"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    voice_focus_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | _NotGiven = field(
+    voice_focus_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -314,7 +313,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         api_key: str,
         language: Language | None = None,
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
-        sample_rate: int = 16000,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         connection_params: AssemblyAIConnectionParams | None = None,
         vad_force_turn_endpoint: bool = True,
@@ -335,7 +334,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                     Will be removed in 2.0.0.
 
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Audio sample rate in Hz. If None, uses the input sample
+                rate from the start frame.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             connection_params: Connection configuration parameters.
 
@@ -357,7 +357,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in AssemblyAI turn detection mode (vad_force_turn_endpoint=False). Only applies
-                when using AssemblyAI's built-in turn detection. Defaults to True.
+                when using AssemblyAI's built-in turn detection. Passed along to the
+                user turn strategies this service recommends, which own the
+                interruption; a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
@@ -655,15 +658,17 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Request external turn strategies in AssemblyAI's turn-detection mode.
 
         With ``vad_force_turn_endpoint=False`` AssemblyAI's model decides turn
-        endings and emits ``UserStarted/StoppedSpeakingFrame``, so the user
-        aggregator defers to those rather than running local VAD/smart-turn. In the
-        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT emits no turn
-        frames, so the defaults are left in place. Applied unless the user passed
+        endings and emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user
+        aggregator resolves those rather than running local VAD/smart-turn. In the
+        default Pipecat mode (``vad_force_turn_endpoint=True``) the STT proposes no
+        turns, so the defaults are left in place. Applied unless the user passed
         their own ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if not self._vad_force_turn_endpoint:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
@@ -736,13 +741,13 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_codes=_prepare_language_codes(language_codes)
         )
 
-    async def start(self, frame: StartFrame):
-        """Start the speech-to-text service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Start frame to begin processing.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
@@ -788,16 +793,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames for VAD and metrics handling.
+        """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
 
         Args:
             frame: Frame to process.
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            pass
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
                 and self._websocket
@@ -805,7 +808,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -1118,10 +1120,10 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _handle_speech_started(self, message: SpeechStartedMessage):
         """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
 
-        Broadcasts UserStartedSpeakingFrame to signal the start of user
-        speech, then pushes an interruption to cancel any bot audio.
-        SpeechStarted fires before any transcript arrives, so the turn
-        is cleanly started before any transcription frames are pushed.
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption. SpeechStarted fires
+        before any transcript arrives, so the turn is cleanly started before any
+        transcription frames are pushed.
 
         Only applies when using AssemblyAI's built-in turn detection. When using
         Pipecat turn detection, VAD + smart turn analyzer handle interruptions.
@@ -1129,10 +1131,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._vad_force_turn_endpoint:
             return  # Pipecat mode: handled by aggregator
 
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):
@@ -1212,7 +1211,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
@@ -1244,11 +1242,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
                 await self._trace_transcription(transcript_text, True, language)
-                await self.stop_processing_metrics()
-                # AAI is authoritative — emit UserStoppedSpeakingFrame immediately.
-                # broadcast_frame pushes downstream (same queue as TranscriptionFrame
-                # above, so ordering is preserved) and upstream.
-                await self.broadcast_frame(UserStoppedSpeakingFrame)
+                # Propose the turn stop immediately. broadcast_frame pushes
+                # downstream (same queue as TranscriptionFrame above, so ordering
+                # is preserved) and upstream.
+                await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
                 self._user_speaking = False
                 await self._call_event_handler("on_end_of_turn", transcript_text)
             else:

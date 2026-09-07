@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.deepgram.flux.base import (
+from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxEventType,
@@ -141,7 +141,11 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                     Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
-            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
+            should_interrupt: Whether to interrupt the bot when Flux detects that
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -370,7 +374,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             if self._websocket:
                 await self._send_close_stream()
-                logger.debug("Disconnecting from Deepgram Flux Websocket")
+                logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -453,6 +457,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             else:
                 logger.warning(f"Received non-string message: {type(message)}")
 
-    async def _report_error(self, error):
+    async def _report_error(self, error, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        await self.push_error_frame(error, force_treat_as_permanent=force_treat_as_permanent)

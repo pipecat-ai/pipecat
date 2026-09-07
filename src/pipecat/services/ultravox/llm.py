@@ -55,8 +55,9 @@ from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Result shipped as the client_tool_result when we see an async-tool
 # "started" message — i.e. when an async-registered function call
@@ -84,7 +85,7 @@ class UltravoxRealtimeLLMSettings(LLMSettings):
         output_medium: The output medium for the model ("voice" or "text").
     """
 
-    output_medium: str | None | _NotGiven = field(default=NOT_GIVEN)
+    output_medium: str | None | NotGiven = field(default=NOT_GIVEN)
 
 
 class AgentInputParams(BaseModel):
@@ -301,7 +302,7 @@ class UltravoxRealtimeLLMService(LLMService):
             self._socket = await websocket_client.connect(join_url)
             self._receive_task = self.create_task(self._receive_messages())
         except Exception as e:
-            await self.push_error("Failed to connect to Ultravox", e, fatal=True)
+            await self.push_error("Failed to connect to Ultravox", e, force_treat_as_permanent=True)
 
     @staticmethod
     def _output_medium_to_api(medium: Literal["text", "voice"] | None) -> str | None:
@@ -530,7 +531,7 @@ class UltravoxRealtimeLLMService(LLMService):
                     result = (
                         content
                         if isinstance(content, str)
-                        else "".join(t.get("text") for t in content)
+                        else "".join(t.get("text", "") for t in content or [])
                     )
                     await self._send_tool_result(tool_call_id, result)
                     self._completed_tool_calls.add(tool_call_id)
@@ -585,14 +586,16 @@ class UltravoxRealtimeLLMService(LLMService):
             return
         await self._send({"type": "user_text_message", "text": text})
 
-    async def _update_output_medium(self, output_medium: str):
-        output_medium = output_medium.lower()
-        if output_medium == "audio":
-            output_medium = "voice"
-        if output_medium.lower() not in {"voice", "text"}:
+    async def _update_output_medium(self, output_medium: str | None):
+        # Known quirk: None is the default but setting it back to None
+        # doesn't actually take effect
+        medium = (output_medium or "").lower()
+        if medium == "audio":
+            medium = "voice"
+        if medium not in {"voice", "text"}:
             logger.warning(f"Unsupported Ultravox output medium: {output_medium}")
             return
-        await self._send({"type": "set_output_medium", "medium": output_medium})
+        await self._send({"type": "set_output_medium", "medium": medium})
 
     async def _send(self, content: bytes | dict[str, Any]):
         """Send content via the WebSocket connection.
@@ -611,7 +614,7 @@ class UltravoxRealtimeLLMService(LLMService):
         except Exception as e:
             if self._disconnecting or not self._socket:
                 return
-            await self.push_error("Ultravox websocket send error", e, fatal=True)
+            await self.push_error("Ultravox websocket send error", e, force_treat_as_permanent=True)
 
     #
     # response handling
@@ -676,7 +679,9 @@ class UltravoxRealtimeLLMService(LLMService):
                 except Exception as e:
                     if self._disconnecting or not self._socket:
                         return
-                    await self.push_error("Ultravox websocket receive error", e, fatal=True)
+                    await self.push_error(
+                        "Ultravox websocket receive error", e, force_treat_as_permanent=True
+                    )
         except ConnectionClosed:
             if self._disconnecting or not self._socket:
                 return
@@ -742,11 +747,12 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_agent_transcript(
         self, medium: str, text: str | None, delta: str | None, final: bool
     ):
+        transcript = text or delta
         if medium == "voice":
             # In voice mode, audio is handled by _handle_audio(). Here we push
             # text transcripts of the audio for downstream consumers.
-            if (text or delta) and not final:
-                frame = LLMTextFrame(text=text or delta)
+            if transcript and not final:
+                frame = LLMTextFrame(text=transcript)
                 frame.append_to_context = False
                 await self.push_frame(frame)
             if delta:
@@ -758,10 +764,10 @@ class UltravoxRealtimeLLMService(LLMService):
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
                 self._bot_responding = None
-            elif text or delta:
+            elif transcript:
                 if not self._bot_responding:
                     await self.start_processing_metrics()
                     await self.stop_ttfb_metrics()
                     await self.push_frame(LLMFullResponseStartFrame())
                     self._bot_responding = "text"
-                await self.push_frame(LLMTextFrame(text=text or delta))
+                await self.push_frame(LLMTextFrame(text=transcript))

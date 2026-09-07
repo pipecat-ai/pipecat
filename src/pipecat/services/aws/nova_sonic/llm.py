@@ -44,7 +44,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
-    StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -56,15 +55,16 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
     SessionContinuationParams,
 )
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from aws_sdk_bedrock_runtime.client import (
@@ -78,10 +78,12 @@ try:
         InvokeModelWithBidirectionalStreamInputChunk,
         InvokeModelWithBidirectionalStreamOperationOutput,
         InvokeModelWithBidirectionalStreamOutput,
+        InvokeModelWithBidirectionalStreamOutputChunk,
     )
     from smithy_aws_core.auth.sigv4 import SigV4AuthScheme
     from smithy_aws_core.identity.static import StaticCredentialsResolver
     from smithy_core.aio.eventstream import DuplexEventStream
+    from smithy_core.shapes import ShapeID
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use AWS services, you need to `uv add "pipecat-ai[aws-nova-sonic]"`.')
@@ -127,14 +129,15 @@ class CurrentContent:
     Parameters:
         type: The type of content (audio, text, or tool).
         role: The role generating the content (user, assistant, etc.).
-        text_stage: The stage of text generation (final or speculative).
-        text_content: The actual text content if applicable.
+        text_stage: The stage of text generation (final or speculative), or None
+            for content that isn't text.
+        text_content: The text content, filled in as it arrives, or None until then.
     """
 
     type: ContentType
     role: Role
-    text_stage: TextStage  # None if not text
-    text_content: str  # starts as None, then fills in if text
+    text_stage: TextStage | None
+    text_content: str | None
 
     def __str__(self):
         """String representation of the current content."""
@@ -198,14 +201,21 @@ class Params(BaseModel):
     @property
     def audio_config(self) -> "AudioConfig":
         """Return an ``AudioConfig`` populated from this instance's audio fields."""
-        return AudioConfig(
-            input_sample_rate=self.input_sample_rate,
-            input_sample_size=self.input_sample_size,
-            input_channel_count=self.input_channel_count,
-            output_sample_rate=self.output_sample_rate,
-            output_sample_size=self.output_sample_size,
-            output_channel_count=self.output_channel_count,
-        )
+        # These params type their audio fields as optional; an unset one takes
+        # the AudioConfig default, which carries the same value.
+        given = {
+            field: value
+            for field in (
+                "input_sample_rate",
+                "input_sample_size",
+                "input_channel_count",
+                "output_sample_rate",
+                "output_sample_size",
+                "output_channel_count",
+            )
+            if (value := getattr(self, field)) is not None
+        }
+        return AudioConfig(**given)
 
 
 class AudioConfig(BaseModel):
@@ -221,14 +231,14 @@ class AudioConfig(BaseModel):
     """
 
     # Input
-    input_sample_rate: int | None = Field(default=16000)
-    input_sample_size: int | None = Field(default=16)
-    input_channel_count: int | None = Field(default=1)
+    input_sample_rate: int = Field(default=16000)
+    input_sample_size: int = Field(default=16)
+    input_channel_count: int = Field(default=1)
 
     # Output
-    output_sample_rate: int | None = Field(default=24000)
-    output_sample_size: int | None = Field(default=16)
-    output_channel_count: int | None = Field(default=1)
+    output_sample_rate: int = Field(default=24000)
+    output_sample_size: int = Field(default=16)
+    output_channel_count: int = Field(default=1)
 
 
 @dataclass
@@ -241,8 +251,8 @@ class AWSNovaSonicLLMSettings(LLMSettings):
             user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH".
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing_sensitivity: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
@@ -498,13 +508,13 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     # standard AIService frame handling
     #
 
-    async def start(self, frame: StartFrame):
-        """Start the service and initiate connection to AWS Nova Sonic.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame triggering service initialization.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         self._wants_connection = True
         await self._start_connecting()
 
@@ -882,7 +892,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             aws_secret_access_key=self._secret_access_key,
             aws_session_token=self._session_token,
             aws_credentials_identity_resolver=StaticCredentialsResolver(),
-            auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="bedrock")},
+            auth_schemes={ShapeID("aws.auth#sigv4"): SigV4AuthScheme(service="bedrock")},
         )
         return BedrockRuntimeClient(config=config)
 
@@ -922,7 +932,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         await self.send_prompt_start(tools, self._prompt_name, self._stream)
 
     async def _send_audio_input_start_event(self):
-        if not self._prompt_name:
+        if not self._prompt_name or not self._input_audio_content_name:
             return
         await self.send_audio_input_start(
             self._prompt_name, self._input_audio_content_name, self._stream
@@ -944,7 +954,12 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         await self.send_text(text, role.value, self._prompt_name, self._stream, interactive)
 
     async def _send_user_audio_event(self, audio: bytes):
-        if not self._stream or not self._audio_input_started:
+        if (
+            not self._stream
+            or not self._audio_input_started
+            or not self._prompt_name
+            or not self._input_audio_content_name
+        ):
             return
         await self.send_audio(
             audio, self._prompt_name, self._input_audio_content_name, self._stream
@@ -1324,6 +1339,16 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                 if stream is not self._stream:
                     return
 
+                if result is None:
+                    # The service has no more events to send. Our own disconnect
+                    # and a session-continuation handoff are both handled above,
+                    # so reaching here means the stream ended while we still
+                    # wanted it: reconnect via the handler below.
+                    raise RuntimeError("AWS Bedrock ended the response stream")
+
+                if not isinstance(result, InvokeModelWithBidirectionalStreamOutputChunk):
+                    raise RuntimeError(f"AWS Bedrock stream reported: {result}")
+
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
                     json_data = json.loads(response_data)
@@ -1656,7 +1681,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if not self._user_text_buffer:
             return
 
-        logger.debug(f"User transcription ended")
+        logger.debug("User transcription ended")
 
         # Report to the upstream user context aggregator that some new user
         # transcription text is available.

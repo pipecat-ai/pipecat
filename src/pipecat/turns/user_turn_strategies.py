@@ -80,23 +80,32 @@ class UserTurnStrategies:
 
 @dataclass
 class ExternalUserTurnStrategies(UserTurnStrategies):
-    """Default container for external user turn start and stop strategies.
+    """Container for turn strategies driven by another component in the pipeline.
 
-    This class provides a convenience default for configuring external turn
-    control. It preconfigures `UserTurnStrategies` with
-    `ExternalUserTurnStartStrategy` and `ExternalUserTurnStopStrategy`, allowing
-    external processors (such as services) to control when user turn starts and
-    stops.
+    Preconfigures :class:`UserTurnStrategies` with
+    :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy` and
+    :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`, so a service
+    with its own turn detection — or a shared
+    :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor` — controls when
+    user turns start and stop.
 
-    When using this container, the user aggregator does not push
-    `UserStartedSpeakingFrame` or `UserStoppedSpeakingFrame` frames, and does
-    not generate interruptions. These signals are expected to be provided by an
-    external processor.
+    What the aggregator emits depends on which signal drives the turn.
+    ``ProposedUserStarted/StoppedSpeakingFrame`` leaves the decision here, so the
+    aggregator pushes the turn frames and broadcasts interruptions.
+    ``UserStarted/StoppedSpeakingFrame`` means the emitter already announced the
+    turn, so the aggregator emits nothing and the parameter below doesn't apply.
+
+    Parameters:
+        enable_interruptions: Whether to broadcast an interruption when a
+            proposal starts a turn. Services route their ``should_interrupt``
+            setting here.
 
     """
 
+    enable_interruptions: bool = True
+
     def __post_init__(self):
-        self.start = [ExternalUserTurnStartStrategy()]
+        self.start = [ExternalUserTurnStartStrategy(enable_interruptions=self.enable_interruptions)]
         self.stop = [ExternalUserTurnStopStrategy()]
 
 
@@ -105,8 +114,8 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     """Stop strategies gated on the LLM's turn-completion verdict.
 
     The LLM is asked to begin every response with one of three markers:
-    ✓ (complete), ○ (incomplete short), or ◐ (incomplete long). Only ✓
-    finalizes the user turn; ○ / ◐ keep the turn open so the user can
+    ● (complete), ◐ (incomplete short), or ○ (incomplete long). Only ●
+    finalizes the user turn; ◐ / ○ keep the turn open so the user can
     continue speaking and the LLM can re-evaluate later.
 
     Configuring strategies this way preserves the existing detector

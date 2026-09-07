@@ -46,6 +46,9 @@ class TransportParams(BaseModel):
             for realtime/speech-to-speech LLMs). Lower this for realtime models
             so bot-stopped-speaking fires promptly after the output queue
             drains.
+        audio_out_write_timeout_secs: How long a single write to the transport may take
+            before the peer is considered gone. A client that stops reading leaves the
+            write waiting with nothing to fail, so it would otherwise never return.
         audio_in_enabled: Enable audio input streaming.
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_in_channels: Number of input audio channels.
@@ -85,6 +88,7 @@ class TransportParams(BaseModel):
     audio_out_sleep_between_failures: float = 0.5
     audio_out_drain_timeout_secs: float = 5.0
     bot_vad_stop_secs: float = 3.0
+    audio_out_write_timeout_secs: float = 10.0
     audio_in_enabled: bool = False
     audio_in_sample_rate: int | None = None
     audio_in_channels: int = 1

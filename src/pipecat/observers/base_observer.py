@@ -67,6 +67,26 @@ class FramePushed:
     timestamp: int
 
 
+@dataclass
+class ProcessorSetUp:
+    """Event data for a processor having been set up.
+
+    Processors are set up concurrently and before any frame flows, so this is
+    what a timing observer measures the work a processor does to get ready by.
+    The times come from :func:`time.monotonic_ns`, since the pipeline clock
+    only starts once the pipeline does.
+
+    Parameters:
+        processor: The processor that was set up.
+        started_at_ns: When the processor's ``setup()`` began.
+        finished_at_ns: When the processor's ``setup()`` returned.
+    """
+
+    processor: "FrameProcessor"
+    started_at_ns: int
+    finished_at_ns: int
+
+
 class BaseObserver(BaseObject):
     """Base class for pipeline frame observers.
 
@@ -97,6 +117,19 @@ class BaseObserver(BaseObject):
 
         Args:
             data: The event data containing details about the frame transfer.
+        """
+        pass
+
+    async def on_processor_setup(self, data: ProcessorSetUp):
+        """Handle the event when a processor has been set up.
+
+        A processor connects and does its other slow start-up work here, so
+        this is where that cost can be measured. Processors are set up
+        concurrently, so these arrive in the order they finish rather than in
+        pipeline order.
+
+        Args:
+            data: The event data containing details about the processor setup.
         """
         pass
 

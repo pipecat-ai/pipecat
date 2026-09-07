@@ -12,6 +12,10 @@ configurations and event-driven processing.
 """
 
 import time
+import warnings
+from dataclasses import dataclass
+
+from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
@@ -28,7 +32,31 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+
+# Events superseded by on_user_turn_audio and on_bot_turn_audio.
+_DEPRECATED_TURN_AUDIO_EVENTS = {
+    "on_user_turn_audio_data": "on_user_turn_audio",
+    "on_bot_turn_audio_data": "on_bot_turn_audio",
+}
+
+
+@dataclass
+class TurnAudioData:
+    """One speaker's audio for one conversation turn.
+
+    Parameters:
+        turn_number: The turn this audio belongs to.
+        audio: Everything the speaker said during the turn, as raw PCM, with
+            the pauses between their runs of speech left out.
+        sample_rate: Sample rate of the audio in Hz.
+        num_channels: Number of channels in the audio.
+    """
+
+    turn_number: int
+    audio: bytes
+    sample_rate: int
+    num_channels: int
 
 
 class AudioBufferProcessor(FrameProcessor):
@@ -42,10 +70,23 @@ class AudioBufferProcessor(FrameProcessor):
 
     - on_audio_data: Triggered when buffer_size is reached, providing merged audio
     - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-    - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
-    - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
+    - on_user_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudioData` with
+      everything the user said during it
+    - on_bot_turn_audio: Triggered when a turn ends, providing a :class:`TurnAudioData` with
+      everything the bot said during it
     - on_recording_started: Triggered when recording starts (state transitions to active)
     - on_recording_stopped: Triggered after recording stops and the final audio has been emitted
+    - on_user_turn_audio_data: Triggered when the user stops speaking, providing that run of
+      speech
+
+      .. deprecated:: 1.8.0
+          Use ``on_user_turn_audio`` instead. Will be removed in 2.0.0.
+
+    - on_bot_turn_audio_data: Triggered when the bot stops speaking, providing that run of
+      speech
+
+      .. deprecated:: 1.8.0
+          Use ``on_bot_turn_audio`` instead. Will be removed in 2.0.0.
 
     Audio handling:
 
@@ -92,8 +133,14 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._user_speaking = False
         self._bot_speaking = False
+        # Audio for the run of speech in progress, folded into the turn buffer
+        # once the speaker stops.
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
+        # Everything each speaker has said so far in the current turn.
+        self._user_turn_audio = bytearray()
+        self._bot_turn_audio = bytearray()
+        self._turn_tracker_attached = False
 
         self._recording = False
 
@@ -106,8 +153,27 @@ class AudioBufferProcessor(FrameProcessor):
         self._register_event_handler("on_track_audio_data")
         self._register_event_handler("on_user_turn_audio_data")
         self._register_event_handler("on_bot_turn_audio_data")
+        self._register_event_handler("on_user_turn_audio")
+        self._register_event_handler("on_bot_turn_audio")
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
+
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        replacement = _DEPRECATED_TURN_AUDIO_EVENTS.get(event_name)
+        if replacement:
+            warnings.warn(
+                f"`{event_name}` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+                f"Use `{replacement}` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().add_event_handler(event_name, handler)
 
     @property
     def sample_rate(self) -> int:
@@ -155,6 +221,16 @@ class AudioBufferProcessor(FrameProcessor):
         else:
             return b""
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        self._audio_buffer_size_1s = self._sample_rate * 2
+
     async def start_recording(self):
         """Start recording audio from both user and bot.
 
@@ -178,7 +254,7 @@ class AudioBufferProcessor(FrameProcessor):
         if not self._recording:
             return
         await self._call_on_audio_data_handler()
-        self._reset_recording()
+        self._reset_recording(clear_turn_audio=False)
         self._recording = False
         await self._call_event_handler("on_recording_stopped")
 
@@ -191,9 +267,9 @@ class AudioBufferProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        # Update output sample rate if necessary.
         if isinstance(frame, StartFrame):
-            self._update_sample_rate(frame)
+            if self._enable_turn_audio:
+                self._attach_turn_tracker()
             if self._auto_start_recording:
                 await self.start_recording()
 
@@ -209,11 +285,6 @@ class AudioBufferProcessor(FrameProcessor):
             await self.stop_recording()
 
         await self.push_frame(frame, direction)
-
-    def _update_sample_rate(self, frame: StartFrame):
-        """Update the sample rate from the start frame."""
-        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
-        self._audio_buffer_size_1s = self._sample_rate * 2
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
@@ -361,12 +432,12 @@ class AudioBufferProcessor(FrameProcessor):
             await self._call_event_handler(
                 "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
             )
-            self._user_turn_audio_buffer = bytearray()
+            self._end_user_run()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._call_event_handler(
                 "on_bot_turn_audio_data", self._bot_turn_audio_buffer, self.sample_rate, 1
             )
-            self._bot_turn_audio_buffer = bytearray()
+            self._end_bot_run()
 
         if isinstance(frame, InputAudioRawFrame) and resampled_audio:
             self._user_turn_audio_buffer.extend(resampled_audio)
@@ -381,6 +452,69 @@ class AudioBufferProcessor(FrameProcessor):
                 self._user_turn_audio_buffer = self._user_turn_audio_buffer[discarded:]
         elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame) and resampled_audio:
             self._bot_turn_audio_buffer.extend(resampled_audio)
+
+    def _attach_turn_tracker(self):
+        """Emit turn audio when the pipeline's turn tracker ends a turn."""
+        if self._turn_tracker_attached:
+            return
+
+        worker = self.pipeline_worker
+        turn_tracker = worker.turn_tracking_observer if worker else None
+        if turn_tracker is None:
+            logger.warning(
+                f"{self}: enable_turn_audio is set but turn tracking is off, so no turn audio "
+                "will be reported. Construct the pipeline worker with enable_turn_tracking=True."
+            )
+            return
+
+        @turn_tracker.event_handler("on_turn_ended")
+        async def on_turn_ended(tracker, turn_number: int, duration: float, interrupted: bool):
+            await self._emit_turn_audio(turn_number)
+
+        self._turn_tracker_attached = True
+
+    def _end_user_run(self):
+        """Fold the user's finished run of speech into the current turn."""
+        self._user_turn_audio.extend(self._user_turn_audio_buffer)
+        self._user_turn_audio_buffer = bytearray()
+
+    def _end_bot_run(self):
+        """Fold the bot's finished run of speech into the current turn."""
+        self._bot_turn_audio.extend(self._bot_turn_audio_buffer)
+        self._bot_turn_audio_buffer = bytearray()
+
+    async def _emit_turn_audio(self, turn_number: int):
+        """Report each speaker's audio for a turn that just ended."""
+        # A barge-in ends the turn before the bot stops, so the bot's last run is
+        # closed here. Closing the user's would pull the start of their
+        # interruption into the turn it interrupted.
+        self._end_bot_run()
+
+        user_audio = self._user_turn_audio
+        bot_audio = self._bot_turn_audio
+        self._user_turn_audio = bytearray()
+        self._bot_turn_audio = bytearray()
+
+        if user_audio:
+            await self._call_event_handler(
+                "on_user_turn_audio",
+                TurnAudioData(
+                    turn_number=turn_number,
+                    audio=bytes(user_audio),
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
+            )
+        if bot_audio:
+            await self._call_event_handler(
+                "on_bot_turn_audio",
+                TurnAudioData(
+                    turn_number=turn_number,
+                    audio=bytes(bot_audio),
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
+            )
 
     async def _call_on_audio_data_handler(self):
         """Call the audio data event handlers with buffered audio."""
@@ -412,16 +546,17 @@ class AudioBufferProcessor(FrameProcessor):
         """Check if a buffer contains audio data."""
         return buffer is not None and len(buffer) > 0
 
-    def _reset_recording(self):
+    def _reset_recording(self, clear_turn_audio: bool = True):
         """Reset recording state and buffers."""
-        self._reset_all_audio_buffers()
+        self._reset_all_audio_buffers(clear_turn_audio=clear_turn_audio)
         self._last_user_buffer_update_time = None
         self._last_bot_buffer_update_time = None
 
-    def _reset_all_audio_buffers(self):
+    def _reset_all_audio_buffers(self, clear_turn_audio: bool = True):
         """Reset all audio buffers to empty state."""
         self._reset_primary_audio_buffers()
-        self._reset_turn_audio_buffers()
+        if clear_turn_audio:
+            self._reset_turn_audio_buffers()
 
     def _reset_primary_audio_buffers(self):
         """Clear user and bot buffers while preserving turn buffers and timestamps."""
@@ -435,6 +570,8 @@ class AudioBufferProcessor(FrameProcessor):
         """Clear user and bot turn buffers while preserving primary buffers and timestamps."""
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
+        self._user_turn_audio = bytearray()
+        self._bot_turn_audio = bytearray()
 
     def _align_track_buffers(self):
         """Pad the shorter track with silence so both tracks stay in sync."""

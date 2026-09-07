@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContext,
     LLMContextAggregatorPair,
@@ -56,7 +56,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramFluxSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
@@ -68,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = DeepgramFluxTTSService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramFluxTTSService.Settings(
-            voice="flux-drew-en",
+            voice="flux-cole-en",
         ),
     )
 
@@ -104,11 +104,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -117,16 +122,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     @stt.event_handler("on_update")
     async def on_deepgram_flux_update(stt, transcript):
         logger.debug(f"On deeggram flux update: {transcript}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
     await runner.run()
 
 

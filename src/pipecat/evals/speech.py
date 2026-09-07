@@ -27,7 +27,6 @@ mapping (dispatch + a ``user_audio.factory`` escape hatch) and wraps it;
 rate.
 """
 
-import asyncio
 import hashlib
 import importlib
 import os
@@ -38,6 +37,7 @@ from typing import cast
 
 from loguru import logger
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.evals.services import cartesia_service, kokoro_service
 from pipecat.services.tts_service import TTSService
 from pipecat.services.websocket_service import WebsocketService
@@ -66,14 +66,15 @@ def tts_sample_rate(voice_cfg: dict) -> int:
 def tts_cache_key(voice_cfg: dict) -> str:
     """A stable identity for a ``user_audio`` config, for caching synthesized audio.
 
-    Covers the audio's semantic identity (service, voice, model) but not the
-    sample rate, so different rates reuse the same slot (a mismatch just triggers
-    regeneration in :meth:`EvalSpeech.generate`).
+    Covers the audio's semantic identity (service, voice, model, language) but not
+    the sample rate, so different rates reuse the same slot (a mismatch just
+    triggers regeneration in :meth:`EvalSpeech.generate`).
     """
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))
     model = str(voice_cfg.get("model", ""))
-    return "\x00".join((service, voice, model))
+    language = str(voice_cfg.get("language") or "")
+    return "\x00".join((service, voice, model, language))
 
 
 class EvalSpeech:
@@ -219,24 +220,23 @@ class EvalSpeech:
         from pipecat.clocks.system_clock import SystemClock
         from pipecat.frames.frames import StartFrame
         from pipecat.processors.frame_processor import FrameProcessorSetup
-        from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+        from pipecat.utils.asyncio.task_manager import TaskManager
 
         task_manager = TaskManager()
-        task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
         clock = SystemClock()
         clock.start()
         # There deliberately is no PipelineWorker: the service runs out-of-pipeline,
         # and the FrameProcessor.pipeline_worker property keeps raising if touched.
         await self._service.setup(
             FrameProcessorSetup(
+                audio_out_sample_rate=self._sample_rate,
                 clock=clock,
+                enable_metrics=False,
                 task_manager=task_manager,
                 pipeline_worker=None,  # pyright: ignore[reportArgumentType]
             )
         )
-        await self._service.start(
-            StartFrame(audio_out_sample_rate=self._sample_rate, enable_metrics=False)
-        )
+        await self._service.start(StartFrame())
         self._started = True
 
     async def generate(self, text: str) -> tuple[bytes, int]:
@@ -350,8 +350,4 @@ class EvalSpeech:
     @staticmethod
     def _write_wav(path: Path, pcm: bytes, sample_rate: int) -> None:
         """Write mono 16-bit PCM to a WAV file."""
-        with wave.open(str(path), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(pcm)
+        path.write_bytes(pcm_to_wav(pcm, sample_rate))

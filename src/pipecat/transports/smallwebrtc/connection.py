@@ -143,6 +143,7 @@ class SmallWebRTCTrack:
         self._enabled = True
         self._last_recv_time: float = 0.0
         self._idle_task: asyncio.Task | None = None
+        self._renegotiation_task: asyncio.Task | None = None
         self._idle_timeout: float = 2.0  # seconds before discarding old frames
 
     def set_enabled(self, enabled: bool) -> None:
@@ -401,10 +402,10 @@ class SmallWebRTCConnection(BaseObject):
         self.force_transceivers_to_send_recv()
 
         # this answer does not contain the ice candidates, which will be gathered later, after the setLocalDescription
-        logger.debug(f"Creating answer")
+        logger.debug("Creating answer")
         local_answer = await self._pc.createAnswer()
         await self._pc.setLocalDescription(local_answer)
-        logger.debug(f"Setting the answer after the local description is created")
+        logger.debug("Setting the answer after the local description is created")
         self._answer = self._pc.localDescription
 
     async def initialize(self, sdp: str, type: str):
@@ -466,8 +467,13 @@ class SmallWebRTCConnection(BaseObject):
         async def delayed_task():
             await asyncio.sleep(2)
             self._renegotiation_in_progress = False
+            # A renegotiation arriving inside the two seconds replaces this task.
+            if self._renegotiation_task is asyncio.current_task():
+                self._renegotiation_task = None
 
-        asyncio.create_task(delayed_task())
+        # Held on self so the task cannot be collected before it clears the flag,
+        # which would leave renegotiation blocked for the rest of the session.
+        self._renegotiation_task = asyncio.create_task(delayed_task())
 
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""

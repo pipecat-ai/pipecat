@@ -9,7 +9,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 import websockets
 from loguru import logger
@@ -20,6 +20,27 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
+
+
+class ReportErrorCallback(Protocol):
+    """Reports an error a websocket service ran into.
+
+    Implemented by the owning service, which usually pairs pushing the error
+    frame with a connection-error event of its own.
+    """
+
+    async def __call__(self, error: ErrorFrame, force_treat_as_permanent: bool = False) -> None:
+        """Report the error.
+
+        Args:
+            error: The error frame to report.
+            force_treat_as_permanent: Whether to treat the error as one that will
+                keep recurring, leaving the service unable to do any more
+                work. Leaving it False doesn't keep the service usable, since
+                the error's own category may cost it its usability.
+        """
+        ...
+
 
 # Default ceiling, in seconds, on the websocket closing handshake. Disconnect
 # runs while a service handles the EndFrame, before the frame continues
@@ -66,6 +87,14 @@ class WebsocketService(ABC):
     Provides websocket connection management, automatic reconnection with
     exponential backoff, connection verification, and error handling.
     Subclasses implement service-specific connection and message handling logic.
+
+    Reconnection gives up in two ways, both leaving the service unusable: the
+    provider rejects the configuration, which no amount of retrying will fix,
+    or the attempts are exhausted. Errors are reported through a
+    ``report_error`` callback, which takes the same optional
+    ``force_treat_as_permanent`` flag as
+    :meth:`~pipecat.processors.frame_processor.FrameProcessor.push_error_frame`,
+    so that giving up and saying so are the same act.
     """
 
     def __init__(
@@ -98,6 +127,16 @@ class WebsocketService(ABC):
         # survives after being established.
         self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
+
+    @property
+    def _is_service_usable(self) -> bool:
+        """Whether the service this is mixed into can still be given work.
+
+        Always a
+        :class:`~pipecat.processors.frame_processor.FrameProcessor` in practice,
+        but this is a mixin and can't require it.
+        """
+        return getattr(self, "is_usable", True)
 
     async def _websocket_connect(self, uri: str, **kwargs):
         """Open a websocket connection with the service's close timeout applied.
@@ -155,11 +194,16 @@ class WebsocketService(ABC):
     async def _try_reconnect(
         self,
         max_retries: int = 3,
-        report_error: Callable[[ErrorFrame], Awaitable[None]] | None = None,
+        report_error: ReportErrorCallback | None = None,
     ) -> bool:
         # Prevent concurrent reconnection attempts
         if self._reconnect_in_progress:
             logger.warning(f"{self} reconnect attempt aborted: already in progress")
+            return False
+
+        # Reconnecting can't fix whatever made the service unusable.
+        if not self._is_service_usable:
+            logger.error(f"{self} not reconnecting: the service is no longer usable")
             return False
 
         self._reconnect_in_progress = True
@@ -181,9 +225,14 @@ class WebsocketService(ABC):
                     # error logs and error frames.
                     if report_error:
                         logger.warning(attempt_msg)
-                        await report_error(ErrorFrame(attempt_msg))
+                        await report_error(ErrorFrame(attempt_msg, exception=e))
                     else:
                         logger.error(attempt_msg)
+                # A rejected attempt may have been rejected for a reason
+                # reporting it identified as terminal.
+                if not self._is_service_usable:
+                    logger.error(f"{self} abandoning reconnection: the service is no longer usable")
+                    return False
                 wait_time = exponential_backoff_time(attempt)
                 await asyncio.sleep(wait_time)
             msg = f"{self} failed to reconnect after {max_retries} attempts"
@@ -191,14 +240,16 @@ class WebsocketService(ABC):
                 msg += f": {last_exception}"
             if report_error:
                 logger.warning(msg)
-                await report_error(ErrorFrame(msg))
+                await report_error(
+                    ErrorFrame(msg, exception=last_exception), force_treat_as_permanent=True
+                )
             else:
                 logger.error(msg)
             return False
         finally:
             self._reconnect_in_progress = False
 
-    async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+    async def send_with_retry(self, message, report_error: ReportErrorCallback):
         """Attempt to send a message, retrying after reconnect if necessary."""
         try:
             # If websocket isn't connected/present, treat as a send failure —
@@ -222,7 +273,7 @@ class WebsocketService(ABC):
     async def _maybe_try_reconnect(
         self,
         error_message: str,
-        report_error: Callable[[ErrorFrame], Awaitable[None]],
+        report_error: ReportErrorCallback,
         error: Exception | None = None,
     ) -> bool:
         """Check if reconnection should be attempted and try if appropriate.
@@ -264,7 +315,7 @@ class WebsocketService(ABC):
                     f"times immediately after connecting"
                 )
                 logger.warning(msg)
-                await report_error(ErrorFrame(msg))
+                await report_error(ErrorFrame(msg), force_treat_as_permanent=True)
                 return False
 
         # Log the message
@@ -275,11 +326,13 @@ class WebsocketService(ABC):
             success = await self._try_reconnect(report_error=report_error)
             return success
         else:
-            # Reconnection disabled
-            await report_error(ErrorFrame(error_message))
+            # `reconnect_on_error` governs this loop only: services that turn it
+            # off reconnect on demand in `send_with_retry` instead. Reporting
+            # the drop as terminal would close that path too.
+            await report_error(ErrorFrame(error_message, exception=error))
             return False
 
-    async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+    async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Handle websocket message receiving with automatic retry logic.
 
         Continuously receives messages with automatic reconnection on errors.

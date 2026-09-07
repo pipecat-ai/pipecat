@@ -334,11 +334,9 @@ class LLMContextSummarizationUtil:
             context: LLM context to estimate.
 
         Returns:
-            Estimated total token count including:
-            - Message content (text, images)
-            - Tool calls and their arguments
-            - Tool results
-            - Structural overhead (TOKEN_OVERHEAD_PER_MESSAGE per message)
+            The estimated total token count, covering message content (text and
+            images), tool calls and their arguments, tool results, and
+            ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
         """
         total = 0
 
@@ -581,7 +579,7 @@ class LLMContextSummarizationUtil:
         )
 
     @staticmethod
-    def format_messages_for_summary(messages: list[dict]) -> str:
+    def format_messages_for_summary(messages: list[LLMContextMessage]) -> str:
         """Format messages as a transcript for summarization.
 
         Args:

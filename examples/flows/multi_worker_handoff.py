@@ -54,7 +54,7 @@ from pipecat.bus import BusBridgeProcessor
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.flows import NO_RESPONSE, ConsolidatedFunctionResult, FlowManager, NodeConfig
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -161,6 +161,7 @@ def build_reservation_worker(
         name=RESERVATION_NAME,
         active=False,
         bridged=(),
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     flow_manager = FlowManager(
@@ -456,6 +457,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
     # Each LLM worker gets its own LLM service instance.
@@ -465,6 +467,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context_aggregator=aggregators,
         reservation_system=MockReservationSystem(),
     )
+
+    await runner.add_workers(router, reservation, worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -493,8 +497,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
-
-    await runner.add_workers(router, reservation, worker)
 
     await runner.run()
 
