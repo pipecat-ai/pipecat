@@ -48,11 +48,15 @@ try:
         AgentSttAsyncClient,
         AudioFormat,
         AudioEncoding,
+        AuthenticationError,
+        ConfigurationError,
         Model,
         Segment,
+        SessionError,
         SpeakerDiarizationConfig,
         SpeakerIdentifier,
         TranscriptionConfig,
+        TranscriptionError,
         TurnConfig,
     )
     from speechmatics.agent_stt import ClientMessageType as AgentClientMessageType
@@ -62,6 +66,17 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+
+# Connect-time failures that will never clear on retry (auth, bad config, rejected session).
+# These are surfaced as fatal and never trigger a reconnect; every other connect exception is
+# treated as a transient drop and retried with backoff.
+_FATAL_CONNECT_ERRORS = (
+    AuthenticationError,
+    ConfigurationError,
+    TranscriptionError,
+    SessionError,
+)
 
 
 def _resolve_model(model: Model | str | None, operating_point: Model | str | None) -> str:
@@ -604,11 +619,19 @@ class SpeechmaticsSTTService(STTService):
         if self._settings.enable_diarization:
             self._client.on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
 
-        # Connect. A rejected session (e.g. invalid config) or transport failure surfaces
-        # via push_error so it reaches the pipeline instead of dying silently.
+        # Connect. Errors reach the pipeline via push_error instead of dying silently, and are
+        # split by recoverability: an unrecoverable rejection (auth / bad config / rejected
+        # session) is fatal and stops the session, while any other failure is a transient drop the
+        # caller retries with backoff.
         try:
             await self._client.connect()
             logger.debug(f"{self} connected")
+        except _FATAL_CONNECT_ERRORS as e:
+            self._client = None
+            await self._fail_fatally(
+                error_msg=f"Speechmatics STT rejected the session: {e}", exception=e
+            )
+            return False
         except Exception as e:
             self._client = None
             if report_error:
@@ -623,6 +646,17 @@ class SpeechmaticsSTTService(STTService):
         if not self._stt_msg_task:
             self._stt_msg_task = self.create_task(self._process_stt_messages())
         return True
+
+    async def _fail_fatally(self, error_msg: str, exception: Exception | None = None) -> None:
+        """Surface an unrecoverable error and stop the session from reconnecting.
+
+        Auth/config/rejected-session failures and server ``Error`` messages will not clear on
+        retry, so they go out as a fatal ``ErrorFrame`` and mark the session closed. Marking it
+        closed makes ``_schedule_reconnect`` a no-op and unwinds any in-flight reconnect loop, so
+        the failure propagates once instead of spinning silently against a permanent error.
+        """
+        self._closed = True
+        await self.push_error(error_msg=error_msg, exception=exception, fatal=True)
 
     def _schedule_reconnect(self) -> None:
         """Start the background reconnect loop, unless one is already running or the
@@ -848,10 +882,10 @@ class SpeechmaticsSTTService(STTService):
     async def _handle_error(self, message: dict[str, Any]) -> None:
         """Handle Error events.
 
-        An Error ends the session server-side, so surface it upstream via
-        ``push_error`` instead of letting the session die silently.
+        A server Error ends the session and will not clear on retry, so it is fatal: surface it
+        upstream and stop reconnecting, instead of letting the session die silently or spin.
         """
-        await self.push_error(f"Speechmatics STT error: {self._describe_status(message)}")
+        await self._fail_fatally(f"Speechmatics STT error: {self._describe_status(message)}")
 
     def _handle_warning(self, message: dict[str, Any]) -> None:
         """Handle Warning events.
