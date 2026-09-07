@@ -15,6 +15,7 @@ source should break the test.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from speechmatics.agent_stt import AudioEncoding, Model
@@ -397,3 +398,77 @@ def test_schedule_reconnect_noop_when_already_running():
     service._schedule_reconnect()
 
     assert service._reconnect_task is sentinel
+
+
+# ---------------------------------------------------------------------------
+# _update_settings — runtime model / operating_point re-resolution
+#
+# `_build_config` reads only `s.model`, and `_resolve_model` runs once at
+# construction. A runtime settings update must re-fold `operating_point` (and
+# `model`) into `model`, or the reconnect it triggers rebuilds the *same* config
+# — an audio gap that changes nothing, silently.
+# ---------------------------------------------------------------------------
+
+
+def _stub_reconnect(service) -> None:
+    """Neutralize the connection side effects so _update_settings exercises only
+    the settings/config logic (no socket, no pipeline)."""
+    service._disconnect = AsyncMock()
+    service._connect = AsyncMock()
+    service.set_usable = AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_update_settings_operating_point_reresolves_into_model():
+    """Changing the deprecated `operating_point` at runtime must update `model` (the
+    only field the wire config reads) and rebuild the config to match — not silently
+    reconnect onto the model it started with."""
+    service = _service()  # model defaults to linden-1, operating_point unset
+    _stub_reconnect(service)
+
+    with pytest.warns(DeprecationWarning):
+        await service._update_settings(SpeechmaticsSTTService.Settings(operating_point="linden-2"))
+
+    assert service._settings.model == "linden-2"
+    assert service._config.model == "linden-2"  # config was rebuilt with the new model
+    service._connect.assert_awaited_once()  # a reconnect actually happened
+
+
+@pytest.mark.asyncio
+async def test_update_settings_operating_point_does_not_clash_with_resolved_model():
+    """The landmine: after construction `model` is the *resolved* string, so a naive
+    re-resolve of both fields would raise (model != operating_point). A lone
+    `operating_point` update must win on its own instead of raising."""
+    service = _service(settings=SpeechmaticsSTTService.Settings(model="linden-1"))
+    _stub_reconnect(service)
+
+    # would raise ValueError if resolved against the stale model="linden-1"
+    with pytest.warns(DeprecationWarning):
+        await service._update_settings(SpeechmaticsSTTService.Settings(operating_point="linden-2"))
+
+    assert service._settings.model == "linden-2"
+
+
+@pytest.mark.asyncio
+async def test_update_settings_model_reresolves_into_model():
+    """Changing `model` directly at runtime must take effect in the rebuilt config."""
+    service = _service()
+    _stub_reconnect(service)
+
+    await service._update_settings(SpeechmaticsSTTService.Settings(model="linden-2"))
+
+    assert service._settings.model == "linden-2"
+    assert service._config.model == "linden-2"
+
+
+@pytest.mark.asyncio
+async def test_update_settings_unrelated_field_leaves_model_untouched():
+    """An update that touches neither `model` nor `operating_point` must not re-resolve
+    (which would otherwise re-run the deprecation/validation path spuriously)."""
+    service = _service()  # model resolved to linden-1
+    _stub_reconnect(service)
+
+    await service._update_settings(SpeechmaticsSTTService.Settings(domain="finance"))
+
+    assert service._settings.model == "linden-1"
+    assert service._settings.domain == "finance"

@@ -527,6 +527,20 @@ class SpeechmaticsSTTService(STTService):
         if not changed:
             return changed
 
+        # A runtime change to `model` or the deprecated `operating_point` alias must be
+        # re-reconciled into `model` (the only field `_build_config` reads); resolve from
+        # just the fields that actually changed so a new `operating_point` wins on its own
+        # instead of clashing with the already-resolved `model` (which would raise).
+        if "model" in changed or "operating_point" in changed:
+            new_model = self._settings.model if "model" in changed else NOT_GIVEN
+            new_operating_point = (
+                self._settings.operating_point if "operating_point" in changed else NOT_GIVEN
+            )
+            self._settings.model = _resolve_model(
+                new_model if is_given(new_model) else None,
+                new_operating_point if is_given(new_operating_point) else None,
+            )
+
         if changed.keys() - self.Settings.LOCAL_FIELDS:
             logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
             # Connection-level fields changed — rebuild the config, then reconnect.
