@@ -83,13 +83,25 @@ class XAISTTSettings(STTSettings):
         interim_results: When True, partial transcripts are emitted
             approximately every 500ms.
         endpointing: Silence duration in milliseconds that triggers a
-            speech-final event. Range 0-5000. Server default is 10ms.
+            speech-final event. Range 0-5000. Server default is 400ms.
         multichannel: When True, transcribes each interleaved channel
             independently. Requires ``channels`` >= 2.
         channels: Number of interleaved channels (2-8). Required when
             ``multichannel`` is True.
         diarize: When True, the server attaches a ``speaker`` field to each
             word identifying the detected speaker.
+        keyterm: Terms to bias recognition towards, such as product or proper
+            names. Up to 100 terms of 50 characters each.
+        filler_words: When True, transcripts keep disfluencies such as "uh"
+            and "um" instead of dropping them.
+        vad_threshold: Speech probability, 0.0-1.0, above which audio is sent
+            for transcription. Server default is 0.08; lower it for quiet or
+            noisy speech.
+        smart_turn: Confidence threshold, 0.0-1.0, for the server's semantic
+            end-of-turn detection. When set, ``speech_final`` follows the
+            detected turn rather than the ``endpointing`` silence timer.
+        smart_turn_timeout: Milliseconds, 1-5000, after which the server marks
+            the turn final even if end-of-turn detection has not fired.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -97,6 +109,11 @@ class XAISTTSettings(STTSettings):
     multichannel: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     channels: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filler_words: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_turn: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_turn_timeout: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAISTTService(WebsocketSTTService):
@@ -135,7 +152,7 @@ class XAISTTService(WebsocketSTTService):
                 16000, 22050, 24000, 44100, 48000. If None, uses the input
                 sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
-                ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
+                ``"mulaw"``, ``"alaw"``, or ``"opus"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
             ttfs_p99_latency: P99 latency from speech end to final transcript
                 in seconds. See https://github.com/pipecat-ai/stt-benchmark.
@@ -149,6 +166,11 @@ class XAISTTService(WebsocketSTTService):
             multichannel=None,
             channels=None,
             diarize=None,
+            keyterm=None,
+            filler_words=None,
+            vad_threshold=None,
+            smart_turn=None,
+            smart_turn_timeout=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -241,6 +263,11 @@ class XAISTTService(WebsocketSTTService):
             "multichannel": s.multichannel,
             "channels": s.channels,
             "diarize": s.diarize,
+            "keyterm": s.keyterm,
+            "filler_words": s.filler_words,
+            "vad_threshold": s.vad_threshold,
+            "smart_turn": s.smart_turn,
+            "smart_turn_timeout": s.smart_turn_timeout,
         }
         for key, val in optional_fields.items():
             if val is None:
@@ -250,7 +277,9 @@ class XAISTTService(WebsocketSTTService):
             else:
                 params[key] = val
 
-        return f"{self._ws_url}?{urlencode(params)}"
+        # `keyterm` is a repeatable parameter, so its list value expands into
+        # one query pair per term.
+        return f"{self._ws_url}?{urlencode(params, doseq=True)}"
 
     async def _connect(self):
         """Establish the WebSocket connection and start the receive task."""
