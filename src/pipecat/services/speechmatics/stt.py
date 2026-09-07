@@ -720,6 +720,12 @@ class SpeechmaticsSTTService(STTService):
             await self.cancel_task(self._stt_msg_task)
             self._stt_msg_task = None
 
+        # Drain any messages buffered from this session. The consumer task is cancelled
+        # above, so anything still queued would otherwise be replayed into the next
+        # session by the fresh consumer started on reconnect (the queue is reused).
+        while not self._stt_msg_queue.empty():
+            self._stt_msg_queue.get_nowait()
+
         # Disconnect the client
         logger.debug(f"{self} disconnecting from Speechmatics STT service")
         try:

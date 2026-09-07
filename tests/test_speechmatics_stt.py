@@ -400,6 +400,22 @@ def test_schedule_reconnect_noop_when_already_running():
     assert service._reconnect_task is sentinel
 
 
+@pytest.mark.asyncio
+async def test_disconnect_drains_message_queue():
+    """Messages buffered from one session must not survive into the next. The consumer
+    task is cancelled on disconnect, so anything left queued would be replayed by the
+    fresh consumer started on reconnect (the queue is reused). Disconnect must clear it."""
+    service = _service()
+    # Simulate messages the client buffered but the (now-cancelled) consumer never drained.
+    service._stt_msg_queue.put_nowait({"message": "AddSegment", "stale": True})
+    service._stt_msg_queue.put_nowait({"message": "EndOfTurn", "stale": True})
+    assert service._stt_msg_queue.qsize() == 2
+
+    await service._disconnect()  # no client/tasks set — exercises the drain path only
+
+    assert service._stt_msg_queue.empty()
+
+
 # ---------------------------------------------------------------------------
 # _update_settings — runtime model / operating_point re-resolution
 #
