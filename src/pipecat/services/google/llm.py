@@ -422,7 +422,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Returns:
             Structured output, token usage, and completion or refusal details.
         """
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
@@ -446,9 +448,13 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         generation_config = GenerateContentConfig(**generation_params)
 
+        assert self._client is not None
+        model = assert_given(self._settings.model)
+        assert model is not None
+
         response = await self._client.aio.models.generate_content(
-            model=self._settings.model,
-            contents=messages,
+            model=model,
+            contents=cast(Any, messages),
             config=generation_config,
         )
 

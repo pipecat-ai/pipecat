@@ -457,7 +457,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         Returns:
             Structured output, token usage, and completion or refusal details.
         """
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         adapter = self.get_llm_adapter()
         invocation_params = adapter.get_llm_invocation_params(
             context,
