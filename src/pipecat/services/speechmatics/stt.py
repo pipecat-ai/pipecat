@@ -79,6 +79,32 @@ _FATAL_CONNECT_ERRORS = (
     SessionError,
 )
 
+# HTTP statuses a WebSocket handshake returns when the credentials are rejected.
+_AUTH_REJECTION_STATUSES = frozenset({401, 403})
+
+
+def _is_auth_rejection(exc: BaseException) -> bool:
+    """Whether ``exc`` is a WebSocket handshake rejected for authentication (HTTP 401/403).
+
+    A rejected credential surfaces as a ``ConnectionError`` carrying the underlying
+    ``websockets`` handshake error in its exception chain. The status is read from that error
+    (``InvalidStatus.response.status_code``, or the legacy ``InvalidStatusCode.status_code``),
+    with the status in the message text as a fallback.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is None:
+            status = getattr(current, "status_code", None)
+        if status in _AUTH_REJECTION_STATUSES:
+            return True
+        current = current.__cause__ or current.__context__
+    text = str(exc)
+    return any(f"HTTP {status}" in text for status in _AUTH_REJECTION_STATUSES)
+
 
 def _resolve_model(model: Model | str | None, operating_point: Model | str | None) -> str:
     """Resolve the transcription model, preferring `model` over the deprecated
@@ -649,6 +675,13 @@ class SpeechmaticsSTTService(STTService):
             return False
         except Exception as e:
             self._client = None
+            # A rejected credential arrives as a ConnectionError; surface it as fatal
+            # (like the other unrecoverable rejections) instead of retrying.
+            if _is_auth_rejection(e):
+                await self._fail_fatally(
+                    error_msg=f"Speechmatics STT rejected the credentials: {e}", exception=e
+                )
+                return False
             if report_error:
                 await self.push_error(
                     error_msg=f"Error connecting to STT service: {e}", exception=e

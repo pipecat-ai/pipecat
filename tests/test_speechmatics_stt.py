@@ -24,6 +24,7 @@ from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.services.speechmatics.stt import (
     SpeechmaticsSTTService,
     TurnDetectionMode,
+    _is_auth_rejection,
     _resolve_model,
 )
 from pipecat.transcriptions.language import Language
@@ -414,6 +415,141 @@ async def test_disconnect_drains_message_queue():
     await service._disconnect()  # no client/tasks set — exercises the drain path only
 
     assert service._stt_msg_queue.empty()
+
+
+# ---------------------------------------------------------------------------
+# _is_auth_rejection — classifying a rejected credential out of the generic
+# ConnectionError so a bad key is fatal, not retried forever.
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class _NewStyleInvalidStatus(Exception):
+    """Shape of websockets>=13 InvalidStatus: status on `.response.status_code`."""
+
+    def __init__(self, status_code: int):
+        self.response = _FakeResponse(status_code)
+        super().__init__(f"server rejected WebSocket connection: HTTP {status_code}")
+
+
+class _LegacyInvalidStatusCode(Exception):
+    """Shape of legacy websockets InvalidStatusCode: status on `.status_code`."""
+
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        super().__init__(f"server rejected WebSocket connection: HTTP {status_code}")
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_is_auth_rejection_new_style_status(status):
+    """A websockets>=13 handshake rejection exposes the status on `.response.status_code`."""
+    assert _is_auth_rejection(_NewStyleInvalidStatus(status)) is True
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_is_auth_rejection_legacy_status(status):
+    """The legacy websockets handshake rejection exposes it on `.status_code`."""
+    assert _is_auth_rejection(_LegacyInvalidStatusCode(status)) is True
+
+
+def test_is_auth_rejection_reads_chained_cause():
+    """The SDK re-wraps the handshake error in a ConnectionError; the status must still be
+    found through the exception chain (__cause__/__context__), not just the top exception."""
+    try:
+        try:
+            raise _NewStyleInvalidStatus(401)
+        except Exception as inner:
+            raise ConnectionError("WebSocket connection error") from inner
+    except ConnectionError as wrapped:
+        assert _is_auth_rejection(wrapped) is True
+
+
+def test_is_auth_rejection_message_fallback():
+    """When only the status text survives (no structured attribute), the message is used."""
+    assert (
+        _is_auth_rejection(
+            ConnectionError("WebSocket connection error: server rejected connection: HTTP 403")
+        )
+        is True
+    )
+
+
+def test_is_auth_rejection_false_for_transient_drop():
+    """A plain network drop carries no auth status and must stay retryable (not fatal)."""
+    assert _is_auth_rejection(ConnectionError("WebSocket connection error: timed out")) is False
+
+
+def test_is_auth_rejection_false_for_other_http_status():
+    """A non-auth handshake status (e.g. 500) is not an auth rejection."""
+    assert _is_auth_rejection(_NewStyleInvalidStatus(500)) is False
+
+
+class _StubClient:
+    """Minimal AgentSttAsyncClient stand-in whose connect() raises a chosen error."""
+
+    def __init__(self, error: Exception):
+        self._error = error
+
+    def __call__(self, *args, **kwargs):  # constructed as AgentSttAsyncClient(...)
+        return self
+
+    def on(self, *args, **kwargs):
+        pass
+
+    async def connect(self):
+        raise self._error
+
+
+def _connection_error_with_status(status: int) -> ConnectionError:
+    try:
+        raise _NewStyleInvalidStatus(status)
+    except Exception as inner:
+        try:
+            raise ConnectionError("WebSocket connection error") from inner
+        except ConnectionError as wrapped:
+            return wrapped
+
+
+@pytest.mark.asyncio
+async def test_open_connection_auth_rejection_is_fatal(monkeypatch):
+    """A 401 handshake rejection must stop the session (fatal error, no reconnect), not
+    fall into the retryable branch that reconnects forever."""
+    service = _service()
+    service.push_error = AsyncMock()
+    monkeypatch.setattr(
+        "pipecat.services.speechmatics.stt.AgentSttAsyncClient",
+        _StubClient(_connection_error_with_status(401)),
+    )
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is False
+    assert service._closed is True  # _fail_fatally ran → no reconnect
+    service.push_error.assert_awaited_once()
+    assert service.push_error.call_args.kwargs.get("fatal") is True
+
+
+@pytest.mark.asyncio
+async def test_open_connection_transient_drop_stays_retryable(monkeypatch):
+    """A plain connection drop must remain retryable — surfaced, but not fatal — so the
+    reconnect loop can heal it."""
+    service = _service()
+    service.push_error = AsyncMock()
+    monkeypatch.setattr(
+        "pipecat.services.speechmatics.stt.AgentSttAsyncClient",
+        _StubClient(ConnectionError("WebSocket connection error: timed out")),
+    )
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is False
+    assert service._closed is False  # still retryable
+    service.push_error.assert_awaited_once()
+    assert service.push_error.call_args.kwargs.get("fatal") is not True
 
 
 # ---------------------------------------------------------------------------
