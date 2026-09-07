@@ -77,8 +77,20 @@ SERVICE_CONFIGS = {
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
-    "moonshine_stt": "MoonshineSTTService()",
-    "whisper_stt": "WhisperSTTService()",
+    "moonshine_stt": (
+        "MoonshineSTTService(\n"
+        "        settings=MoonshineSTTService.Settings(\n"
+        '            model=os.getenv("MOONSHINE_MODEL", "small-streaming"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "whisper_stt": (
+        "WhisperSTTService(\n"
+        "        settings=WhisperSTTService.Settings(\n"
+        '            model=os.getenv("WHISPER_MODEL", "Systran/faster-distil-whisper-medium.en"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
