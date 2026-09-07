@@ -97,10 +97,16 @@ class NvidiaTTSSettings(TTSSettings):
             expects values in the range ``1`` to ``40``.
         synthesis_mode: Whether to synthesize one sentence per request or stitch
             multiple sentences across a single streaming request.
+        custom_configuration: Model-specific key/value parameters forwarded to the
+            synthesizer, e.g. Magpie's streaming controls ``flush``,
+            ``chunk_len_threshold`` and ``max_chunk_threshold``, or Chatterbox's
+            ``exaggeration_factor``. See
+            https://docs.nvidia.com/nim/speech/latest/tts/customization.html
     """
 
     quality: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     synthesis_mode: NvidiaTTSSynthesisMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    custom_configuration: dict[str, str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -444,6 +450,9 @@ class NvidiaTTSService(TTSService):
             req.voice_name = voice
         if self._custom_dictionary:
             req.custom_dictionary = self._custom_dictionary
+        if is_given(self._settings.custom_configuration):
+            for key, value in self._settings.custom_configuration.items():
+                req.custom_configuration[key] = str(value)
         if self._zero_shot_audio_prompt_data is not None:
             req.zero_shot_data.audio_prompt = self._zero_shot_audio_prompt_data
             if self._audio_prompt_encoding is not None:
