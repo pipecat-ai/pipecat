@@ -587,7 +587,7 @@ class SpeechmaticsSTTService(STTService):
             api_key=self._api_key,
             url=self._base_url,
             app=f"pipecat/{pipecat_version()}",
-            config=self._config,
+            transcription_config=self._config,
             turn_config=TurnConfig(
                 turn_detection_mode=_handle_turn_detection_mode(
                     assert_given(self._settings.turn_detection_mode)
