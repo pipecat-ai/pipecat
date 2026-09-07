@@ -1,0 +1,1 @@
+- `OpenAIImageGenService` now defaults to `gpt-image-2`. Its previous default, `dall-e-3`, was removed from the OpenAI API on May 12, 2026 and every request naming it is rejected.
