@@ -48,8 +48,6 @@ class CloudonixFrameSerializer(TwilioFrameSerializer):
             params: Configuration parameters.
         """
         self._call_id = call_id
-        self._domain_id = domain_id
-        self._bearer_token = bearer_token
 
         super().__init__(
             stream_sid=stream_sid,

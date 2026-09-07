@@ -1,12 +1,11 @@
 """Speaches TTS Service — uses the OpenAI-compatible /v1/audio/speech endpoint."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 from openai import BadRequestError
 
-from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
+from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame
 from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
 from pipecat.utils.tracing.service_decorators import traced_tts
 

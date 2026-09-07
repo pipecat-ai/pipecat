@@ -59,13 +59,7 @@ class ProvisionalVADUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def cleanup(self):
         """Clean up strategy state."""
         await super().cleanup()
-        await self._cancel_resume_task()
-        # The timeout task we just cancelled was the only remaining path that
-        # would resume output audio. If a pause is still armed, resume here so
-        # we don't leave the output transport paused after teardown.
-        if self._provisional_pause_active:
-            await self._resume_output_audio()
-        self._provisional_pause_active = False
+        await self._clear_provisional_pause()
 
     async def handle_user_turn_started(self):
         """Ready the strategy to detect the next user turn start."""

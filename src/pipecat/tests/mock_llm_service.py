@@ -25,6 +25,7 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import assert_given
 
 
 class MockLLMService(OpenAILLMService):
@@ -124,7 +125,7 @@ class MockLLMService(OpenAILLMService):
 
         params_from_context: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
             context,
-            system_instruction=self._settings.system_instruction,
+            system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
         )
 

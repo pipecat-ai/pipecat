@@ -18,10 +18,12 @@ sees it. Reasoning content is re-emitted as ``LLMThought*Frame`` objects so
 observers and logging can still see it.
 """
 
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
 
+from loguru import logger
 from openai.types.chat import ChatCompletionChunk
 
 from pipecat.frames.frames import (
@@ -179,18 +181,23 @@ class MiniMaxLLMService(OpenAILLMService):
                 self._think_buffer = self._think_buffer[safe_end:]
         return None
 
-    async def _flush_think_state(self):
-        """Flush buffered state at normal stream completion.
+    async def _finalize_think_state(self, *, flush_buffered_text: bool):
+        """Finalize buffered state when a stream completes or is closed early.
 
-        Emits any buffered trailing thought text, closes an open thought block,
-        and forwards any buffered pre-content text that was held while deciding
-        whether the stream began with ``<think>``.
+        Args:
+            flush_buffered_text: Whether buffered text should be emitted. This
+                is true after normal exhaustion and false when cancellation or
+                early iterator closure cut the response short.
         """
         if self._think_state == _ThinkTagState.IN_THOUGHT:
-            if self._think_buffer:
+            if self._think_buffer and flush_buffered_text:
                 await self.push_frame(LLMThoughtTextFrame(text=self._think_buffer))
             await self.push_frame(LLMThoughtEndFrame())
-        elif self._think_state == _ThinkTagState.DETECTING and self._think_buffer:
+        elif (
+            self._think_state == _ThinkTagState.DETECTING
+            and self._think_buffer
+            and flush_buffered_text
+        ):
             await super()._push_llm_text(self._think_buffer)
 
         self._think_buffer = ""
@@ -216,10 +223,9 @@ class MiniMaxLLMService(OpenAILLMService):
         """Strip ``<think>`` blocks from ``delta.content`` across the stream.
 
         Every chunk is still yielded so the base streaming loop can process
-        metadata such as token usage, model name, and tool calls. Stream
-        cleanup is owned by the base OpenAI processing loop
-        (:meth:`BaseOpenAILLMService._process_context`), which wraps the stream
-        in its own closing context manager.
+        metadata such as token usage, model name, and tool calls. The wrapper
+        closes the underlying OpenAI stream itself because closing this outer
+        async generator does not otherwise cascade to the inner stream.
 
         Args:
             stream: The original chat completion stream.
@@ -228,14 +234,34 @@ class MiniMaxLLMService(OpenAILLMService):
             Chat completion chunks with leading ``<think>`` content removed
             from ``delta.content`` before they reach the base OpenAI loop.
         """
-        async for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    delta.content = await self._filter_thinking_content(delta.content)
-            yield chunk
+        completed = False
+        try:
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        delta.content = await self._filter_thinking_content(delta.content)
+                yield chunk
+            completed = True
+        finally:
+            try:
+                await self._finalize_think_state(flush_buffered_text=completed)
+            finally:
+                await self._close_inner_stream(stream)
 
-        await self._flush_think_state()
+    async def _close_inner_stream(self, stream: AsyncIterator[ChatCompletionChunk]) -> None:
+        """Eagerly close the underlying OpenAI streaming response."""
+        close = getattr(stream, "close", None) or getattr(stream, "aclose", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception(
+                "MiniMaxLLMService: error while closing underlying chat completion stream"
+            )
 
     async def _process_context(self, context: LLMContext):
         """Process a context through the LLM, resetting think-tag state first.

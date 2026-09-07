@@ -84,7 +84,9 @@ class TestBaseOutputTransportFailures(unittest.IsolatedAsyncioTestCase):
             )
 
             for _ in range(20):
-                if any(isinstance(frame, CancelWorkerFrame) for frame, _ in transport.pushed_frames):
+                if any(
+                    isinstance(frame, CancelWorkerFrame) for frame, _ in transport.pushed_frames
+                ):
                     break
                 await asyncio.sleep(0.01)
 
@@ -487,6 +489,32 @@ def _one_second_of_audio() -> OutputAudioRawFrame:
 
 class TestBaseOutputTransportWriteTimeout(unittest.IsolatedAsyncioTestCase):
     """A peer that stops reading blocks the write on buffers that never drain."""
+
+    async def test_timeout_defers_disposition_without_watchdog_sleep_or_cancel(self):
+        """The permanent timeout error owns disposition after 1.8.1."""
+        never_returns = asyncio.Event()
+
+        async def wedged(_frame):
+            await never_returns.wait()
+            return True
+
+        write = AsyncMock(side_effect=wedged)
+        transport = await _make_wedging_transport(write, timeout=0.01)
+
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+
+        # The old fork watchdog slept 0.5s between each queued failure and
+        # eventually forced a CancelWorkerFrame. Once the timeout has marked
+        # the transport unusable, the queue should instead drain immediately.
+        await asyncio.wait_for(
+            transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM), timeout=0.5
+        )
+
+        pushed = [call.args[0] for call in transport.push_frame.call_args_list]
+        self.assertEqual(write.call_count, 1)
+        self.assertFalse(transport.is_usable)
+        self.assertFalse(any(isinstance(frame, CancelWorkerFrame) for frame in pushed))
 
     async def test_end_frame_still_reaches_downstream(self):
         """`process_frame` pushes the EndFrame only after `stop()` returns."""

@@ -1,7 +1,6 @@
 """Speaches STT Service — uses the OpenAI-compatible /v1/audio/transcriptions endpoint."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pipecat.services.openai.stt import OpenAISTTService, OpenAISTTSettings
 

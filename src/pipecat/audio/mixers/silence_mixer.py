@@ -20,11 +20,9 @@ class SilenceAudioMixer(BaseAudioMixer):
 
     def __init__(self):
         """Initialize the silence audio mixer."""
-        self._enabled = True
 
     async def start(self, sample_rate: int):
         """Initialize the mixer with the output sample rate."""
-        self._sample_rate = sample_rate
 
     async def stop(self):
         """Stop the mixer."""

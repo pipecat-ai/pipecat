@@ -30,10 +30,10 @@ from pipecat.services.dograh.mps_billing import (
     get_correlation_id,
 )
 from pipecat.services.settings import TTSSettings
-from pipecat.utils.types import NOT_GIVEN, NotGiven
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 try:
     import websockets
@@ -156,7 +156,6 @@ class DograhTTSService(WebsocketTTSService):
 
         # State management
         self._cumulative_time = 0
-        self._accumulated_text = ""
         self._start_metadata = None
         self._remote_initialized_context_ids: set[str] = set()
         self._finished_context_ids: set[str] = set()
@@ -225,7 +224,7 @@ class DograhTTSService(WebsocketTTSService):
 
             await ws.send(json.dumps(config_msg))
 
-            logger.info(f"Connected to Dograh TTS service")
+            logger.info("Connected to Dograh TTS service")
 
         except Exception as e:
             self._websocket = None
@@ -359,12 +358,11 @@ class DograhTTSService(WebsocketTTSService):
                     if is_quota_error:
                         logger.info(f"TTS quota exceeded: {error_msg}")
 
-                        # Push the error frame to trigger pipeline shutdown
-                        await self.push_frame(
-                            ErrorFrame(
-                                error=f"TTS service quota exceeded: {error_msg}", fatal=True
-                            ),
-                            direction=FrameDirection.UPSTREAM,
+                        # Mark the service unusable. Dograh workers use the
+                        # v1.8 ProcessorUnusablePolicy.CANCEL contract.
+                        await self.push_error(
+                            error_msg=f"TTS service quota exceeded: {error_msg}",
+                            force_treat_as_permanent=True,
                         )
 
                         # Close the websocket gracefully
@@ -470,7 +468,6 @@ class DograhTTSService(WebsocketTTSService):
 
                 # Send text for synthesis
                 await self._send_text(text, context_id)
-                self._accumulated_text += text
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield TTSStoppedFrame(context_id=context_id)
@@ -482,20 +479,6 @@ class DograhTTSService(WebsocketTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _flush_usage_metrics(self):
-        """Bill the turn's accumulated text, then clear the buffer."""
-        if self._accumulated_text:
-            await self.start_tts_usage_metrics(self._accumulated_text)
-            self._accumulated_text = ""
-
-    async def _finalize_context_state(self):
-        """Flush usage metrics and reset word-timestamp state.
-
-        Used on interruption, where no completion hook fires for the context.
-        """
-        await self._flush_usage_metrics()
-        self._reset_state()
-
     async def _finish_context(self, context_id: str):
         """Finalize a context at end of turn.
 
@@ -503,9 +486,9 @@ class DograhTTSService(WebsocketTTSService):
         provider and a terminal ``final`` is emitted right after the last audio
         byte, instead of the context completing via the audio-context idle timeout.
 
-        Only usage is billed here; word-timestamp state is reset later in
-        ``on_audio_context_completed`` (once the context has drained), because
-        alignment can still arrive after this message.
+        Word-timestamp state is reset later in ``on_audio_context_completed``
+        (once the context has drained), because alignment can still arrive
+        after this message.
 
         Args:
             context_id: The context ID to finalize.
@@ -521,8 +504,6 @@ class DograhTTSService(WebsocketTTSService):
             except Exception as e:
                 logger.error(f"Error finishing context: {e}")
 
-        await self._flush_usage_metrics()
-
     async def _cancel_context(self, context_id: str):
         """Abort a context on interruption.
 
@@ -530,8 +511,8 @@ class DograhTTSService(WebsocketTTSService):
         immediately rather than letting the provider finish the buffered audio.
         Requires server-side ``cancel`` handling; a server without it ignores the
         message. The base class abandons the interrupted context
-        (``on_audio_context_completed`` does not fire for it), so usage is billed
-        and word-timestamp state is reset here.
+        (``on_audio_context_completed`` does not fire for it), so word-timestamp
+        state is reset here. Usage has already been reported per input text.
 
         Args:
             context_id: The context ID to cancel.
@@ -545,17 +526,19 @@ class DograhTTSService(WebsocketTTSService):
             except Exception as e:
                 logger.error(f"Error cancelling context: {e}")
 
-        await self._finalize_context_state()
+        self._reset_state()
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Cancel the Dograh context when the bot is interrupted."""
         await self._cancel_context(context_id)
         await super().on_audio_context_interrupted(context_id)
+        self._cancelled_context_ids.discard(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Reset word-timestamp state after all audio for the context has played."""
         self._reset_state()
         await super().on_audio_context_completed(context_id)
+        self._finished_context_ids.discard(context_id)
 
     async def on_turn_context_completed(self):
         """Finish the server-side context at end of turn."""

@@ -7,6 +7,7 @@
 import asyncio
 import threading
 import unittest
+from unittest.mock import patch
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
@@ -19,12 +20,17 @@ except ImportError:
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -106,6 +112,25 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         """Return finished spans with the given name."""
         return [s for s in self._exporter.get_finished_spans() if s.name == name]
 
+    def _get_turn_spans(self):
+        """Return finished conversation turns, including their numbered names."""
+        return [s for s in self._exporter.get_finished_spans() if "turn.number" in s.attributes]
+
+    def test_trace_url_can_be_retrieved_for_persistence(self):
+        _, _, trace_observer, _ = self._create_observers(conversation_id="persisted-call")
+        trace_observer.start_conversation_tracing("persisted-call")
+        trace_id = trace_observer.get_trace_id()
+        self.assertIsNotNone(trace_id)
+        expected_url = f"https://langfuse.example/project/test/traces/{trace_id}"
+
+        with patch("langfuse.get_client") as get_client:
+            get_client.return_value.get_trace_url.return_value = expected_url
+
+            self.assertEqual(trace_observer.get_trace_url(), expected_url)
+            get_client.return_value.get_trace_url.assert_called_once_with(trace_id=trace_id)
+
+        trace_observer.end_conversation_tracing()
+
     async def test_conversation_span_created_on_start_frame(self):
         """Test that a conversation span is created when StartFrame is observed."""
         _, _, trace_observer, _ = self._create_observers(conversation_id="test-conv")
@@ -179,8 +204,9 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
             observers=self._all_observers(trace_observer),
         )
 
-        turn_spans = self._get_spans_by_name("turn")
+        turn_spans = self._get_turn_spans()
         self.assertEqual(len(turn_spans), 2)
+        self.assertEqual({s.name for s in turn_spans}, {"turn-1", "turn-2"})
         turn_numbers = {s.attributes["turn.number"] for s in turn_spans}
         self.assertEqual(turn_numbers, {1, 2})
 
@@ -215,7 +241,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         trace_observer.end_conversation_tracing()
 
         conv_spans = self._get_spans_by_name("conversation")
-        turn_spans = self._get_spans_by_name("turn")
+        turn_spans = self._get_turn_spans()
         self.assertEqual(len(conv_spans), 1)
         self.assertEqual(len(turn_spans), 1)
 
@@ -255,7 +281,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         # End conversation to flush remaining spans
         trace_observer.end_conversation_tracing()
 
-        turn_spans = self._get_spans_by_name("turn")
+        turn_spans = self._get_turn_spans()
         self.assertGreaterEqual(len(turn_spans), 1)
         # First turn should be interrupted
         interrupted_turns = [s for s in turn_spans if s.attributes.get("turn.was_interrupted")]
@@ -428,7 +454,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conv_ids, {"conv-a", "conv-b"})
 
         # Turn spans should be children of their own conversation span, not cross-linked
-        turn_spans = self._get_spans_by_name("turn")
+        turn_spans = self._get_turn_spans()
         conv_span_map = {s.context.span_id: s.attributes["conversation.id"] for s in conv_spans}
         for turn_span in turn_spans:
             parent_id = turn_span.parent.span_id
@@ -439,6 +465,60 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
                 parent_conv_id,
                 f"Turn span for {turn_conv_id} parented under {parent_conv_id}",
             )
+
+    async def test_terminal_frames_preserve_parent_for_downstream_service_spans(self):
+        """Early terminal notifications must preserve parentage until cleanup."""
+        for terminal_frame_type in (EndFrame, CancelFrame):
+            with self.subTest(frame=terminal_frame_type.__name__):
+                self._exporter.clear()
+                turn_tracker, _, trace_observer, tracing_context = self._create_observers()
+                processor = IdentityFilter()
+
+                async def notify_tracker(frame, tracker=turn_tracker, source=processor):
+                    await tracker.on_push_frame(
+                        FramePushed(
+                            source=source,
+                            destination=source,
+                            frame=frame,
+                            direction=FrameDirection.DOWNSTREAM,
+                            timestamp=0,
+                        )
+                    )
+
+                await notify_tracker(StartFrame())
+                await notify_tracker(BotStartedSpeakingFrame())
+                await notify_tracker(BotStoppedSpeakingFrame())
+                turn_span = trace_observer._current_span
+                turn_context = tracing_context.get_turn_context()
+                end_timer = turn_tracker._end_turn_timer
+                self.assertIsNotNone(turn_span)
+                self.assertIsNotNone(turn_context)
+                self.assertIsNotNone(end_timer)
+
+                try:
+                    await notify_tracker(terminal_frame_type())
+
+                    self.assertTrue(end_timer.cancelled())
+                    self.assertIsNone(turn_tracker._end_turn_timer)
+                    self.assertIs(trace_observer._current_span, turn_span)
+                    self.assertTrue(turn_span.is_recording())
+                    self.assertIs(tracing_context.get_turn_context(), turn_context)
+
+                    with self._tracer.start_as_current_span(
+                        "downstream-service", context=tracing_context.get_turn_context()
+                    ):
+                        pass
+
+                    service_span = self._get_spans_by_name("downstream-service")[0]
+                    self.assertEqual(
+                        service_span.parent.span_id, turn_span.get_span_context().span_id
+                    )
+                finally:
+                    trace_observer.end_conversation_tracing()
+
+                self.assertFalse(turn_span.is_recording())
+                self.assertIsNone(tracing_context.get_turn_context())
+                self.assertEqual(len(self._get_turn_spans()), 1)
 
     async def test_end_conversation_closes_active_turn(self):
         """Test that end_conversation_tracing closes any active turn span."""
@@ -458,7 +538,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(trace_observer._conversation_span)
 
         # Check span attributes
-        turn_spans = self._get_spans_by_name("turn")
+        turn_spans = self._get_turn_spans()
         self.assertEqual(len(turn_spans), 1)
         self.assertTrue(turn_spans[0].attributes["turn.was_interrupted"])
         self.assertTrue(turn_spans[0].attributes["turn.ended_by_conversation_end"])

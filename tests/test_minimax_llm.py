@@ -172,7 +172,7 @@ class TestFlushThinkState:
             assert result is None
             assert service._think_state == _ThinkTagState.DETECTING
 
-            await service._flush_think_state()
+            await service._finalize_think_state(flush_buffered_text=True)
 
             mock_push.assert_awaited_once_with("<th")
 
@@ -188,7 +188,7 @@ class TestFlushThinkState:
         await _drain(["<think>unfinished reasoning"], service)
         assert service._think_state == _ThinkTagState.IN_THOUGHT
 
-        await service._flush_think_state()
+        await service._finalize_think_state(flush_buffered_text=True)
 
         pushed_frames = [call.args[0] for call in service.push_frame.call_args_list]
         # Last frame pushed should be the end-of-thought marker.
@@ -231,3 +231,33 @@ class TestStreamWrapping:
         # Every chunk is still yielded (so the base loop can read metadata),
         # but reasoning content is dropped from delta.content.
         assert out_chunks == [None, "visible answer"]
+
+    @pytest.mark.asyncio
+    async def test_early_close_balances_thought_frames_and_closes_inner_stream(self):
+        service = _build_service()
+        service.push_frame = AsyncMock()
+
+        class ClosableStream:
+            def __init__(self):
+                self._chunks = iter([_make_chunk("<think>unfinished reasoning")])
+                self.close = AsyncMock()
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._chunks)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        inner = ClosableStream()
+        wrapped = service._handle_thinking_content(inner)
+
+        await anext(wrapped)
+        await wrapped.aclose()
+
+        frames = [call.args[0] for call in service.push_frame.call_args_list]
+        assert sum(isinstance(frame, LLMThoughtStartFrame) for frame in frames) == 1
+        assert sum(isinstance(frame, LLMThoughtEndFrame) for frame in frames) == 1
+        inner.close.assert_awaited_once_with()

@@ -1120,6 +1120,7 @@ def _capture_class(frames):
     "language, expected",
     [
         (Language.HI_IN, "hi-IN"),
+        (Language.OR_IN, "od-IN"),
         (Language.UR_IN, "ur-IN"),
         (Language.KOK_IN, "kok-IN"),
         (Language.MAI_IN, "mai-IN"),

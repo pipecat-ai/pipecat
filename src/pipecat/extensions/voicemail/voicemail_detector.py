@@ -44,14 +44,13 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
@@ -412,7 +411,6 @@ class ClassificationProcessor(FrameProcessor):
         elif "VOICEMAIL" in response:
             # Voicemail detected - trigger voicemail handling
             self._decision_made = True
-            self._voicemail_detected = True
             logger.info(f"{self}: VOICEMAIL detected")
             await self._gate_notifier.notify()  # Close the classifier gate
             await self._voicemail_notifier.notify()  # Clear buffered TTS frames

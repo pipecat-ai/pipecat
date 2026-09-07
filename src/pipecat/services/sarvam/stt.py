@@ -374,12 +374,11 @@ class SarvamSTTService(STTService):
         # mapping keys compare equal either way.
         language = cast(Language, assert_given(self._settings.language))
         if language:
-            # String passthrough for BCP-47 codes that have no Language enum entry
-            # (e.g. ne-IN, sat-IN). Sarvam accepts them directly per
-            # https://docs.sarvam.ai/api-reference-docs/speech-to-text/transcribe
-            if isinstance(language, str):
-                return language
-            return language_to_sarvam_language(language)
+            # Already a service code: STTService maps through
+            # language_to_service_language on init and on every settings update,
+            # and BCP-47 codes with no Language entry (ne-IN, sat-IN) pass
+            # through verbatim, which Sarvam accepts.
+            return language
         return self._config.default_language
 
     def can_generate_metrics(self) -> bool:

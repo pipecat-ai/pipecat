@@ -10,7 +10,6 @@ import base64
 import json
 from typing import TYPE_CHECKING, cast
 
-import aiohttp
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -188,12 +187,10 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        frame_reason = None
         if isinstance(frame, (EndFrame, CancelFrame)):
             frame_reason = getattr(frame, "reason", None)
             logger.debug(f"Processing {type(frame).__name__} with reason: {frame_reason}")
 
-        if isinstance(frame, (EndFrame, CancelFrame)):
             if frame_reason == EndTaskReason.TRANSFER_CALL.value and not self._transfer_attempted:
                 self._transfer_attempted = True
                 if self._transfer_strategy:

@@ -5,13 +5,16 @@
 #
 
 import base64
+from unittest.mock import AsyncMock
 
 import pytest
 
+from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.huggingface.stt import (
     HuggingFaceSTTService,
     HuggingFaceSTTSettings,
 )
+from pipecat.transcriptions.language import Language
 
 
 class _FakeResponse:
@@ -31,9 +34,8 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    closed = False
-
     def __init__(self):
+        self.closed = False
         self.url = None
         self.payload = None
         self.headers = None
@@ -43,6 +45,9 @@ class _FakeSession:
         self.payload = json
         self.headers = headers
         return _FakeResponse()
+
+    async def close(self):
+        self.closed = True
 
 
 @pytest.mark.asyncio
@@ -73,3 +78,47 @@ async def test_huggingface_stt_sends_router_payload():
         "return_timestamps": True,
         "generation_parameters": {"temperature": 0.0},
     }
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_close_a_borrowed_session():
+    session = _FakeSession()
+    service = HuggingFaceSTTService(api_key="hf_test", aiohttp_session=session)
+
+    await service.cleanup()
+
+    assert service._session is session
+    assert not session.closed
+
+
+@pytest.mark.asyncio
+async def test_cleanup_closes_and_releases_an_owned_session():
+    session = _FakeSession()
+    service = HuggingFaceSTTService(api_key="hf_test")
+    service._session = session
+
+    await service.cleanup()
+
+    assert session.closed
+    assert service._session is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [(Language.EN_US, "en"), ("custom-provider-code", "custom-provider-code")],
+)
+async def test_transcription_frame_preserves_language_metadata(language, expected):
+    service = HuggingFaceSTTService(
+        api_key="hf_test",
+        settings=HuggingFaceSTTSettings(language=language),
+    )
+    service._transcribe_audio = AsyncMock(return_value={"text": "hello"})
+    service.start_processing_metrics = AsyncMock()
+    service.stop_processing_metrics = AsyncMock()
+
+    frames = [frame async for frame in service.run_stt(b"RIFF")]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], TranscriptionFrame)
+    assert frames[0].language == expected

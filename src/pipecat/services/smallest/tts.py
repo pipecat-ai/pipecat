@@ -90,7 +90,7 @@ class SmallestTTSSettings(TTSSettings):
     """Settings for SmallestTTSService.
 
     Parameters:
-        speed: Speech speed multiplier (0.5-2.0).
+        speed: Speech speed multiplier (0.5–2.0).
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

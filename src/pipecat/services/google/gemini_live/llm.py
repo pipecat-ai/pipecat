@@ -1009,7 +1009,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # freezes during tool execution, so the "keep talking while the tool
         # runs" intent of the flag is structurally not achievable. Surface a
         # one-time warning so users see they're not getting what they expect.
-        logger.debug(f"In _process_completed_function_calls send_new_results: {send_new_results}")
         if not self._supports_non_blocking_tools and not self._async_tool_warning_logged:
             for message in self._context.get_messages():
                 if isinstance(message, LLMSpecificMessage):
@@ -1299,12 +1298,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             if self._context:
                 params = adapter.get_llm_invocation_params(
                     self._context,
-                    system_instruction=self._settings.system_instruction,
+                    system_instruction=assert_given(self._settings.system_instruction),
                 )
                 system_instruction = params["system_instruction"]
                 tools = params["tools"]
             else:
-                system_instruction = self._settings.system_instruction
+                system_instruction = assert_given(self._settings.system_instruction)
             # Context-provided tools take precedence; fall back to the service's own tools.
             if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
@@ -1350,9 +1349,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         try:
-            async with self._client.aio.live.connect(
-                model=self._settings.model, config=config
-            ) as session:
+            model = assert_given(self._settings.model)
+            if model is None:
+                raise ValueError("Gemini Live model must be specified")
+            async with self._client.aio.live.connect(model=model, config=config) as session:
                 logger.info("Connected to Gemini service")
 
                 # Mark connection start time
@@ -1731,7 +1731,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # Enforce Gemini 2.5's "seed must end with user turn" requirement.
         # With no history, send a blank user turn so the session has a valid
         # seed to commit.
-        seed_messages = messages
+        seed_messages: list[Content | ContentDict] = messages
         if not self._is_gemini_3:
             if messages:
                 last_role = getattr(messages[-1], "role", None)

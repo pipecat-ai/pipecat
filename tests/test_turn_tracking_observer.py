@@ -218,7 +218,7 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
     async def test_user_interrupts_bot(self):
         """Test when user interrupts bot speaking, should end current turn and start new one.
 
-        Note: This test also verifies that the EndFrame ends the turn correctly.
+        EndFrame must leave the final turn active for downstream tracing cleanup.
         """
         # Create observer with a short timeout
         turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
@@ -266,10 +266,10 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             "Turn 1 started",
             "Turn 1 ended (interrupted: True)",  # First turn was interrupted
             "Turn 2 started",  # New turn started after interruption
-            "Turn 2 ended (interrupted: True)",  # Second turn ends due to EndFrame
         ]
         self.assertEqual(turn_events, expected_events)
         self.assertEqual(turn_observer._turn_count, 2)
+        self.assertTrue(turn_observer._is_turn_active)
 
     async def test_late_bot_stop_retains_interrupted_turn_owner(self):
         """A physical bot stop after interruption remains associated with the old turn."""
@@ -364,9 +364,9 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn_events, expected_events)
         self.assertEqual(turn_observer._turn_count, 1)
 
-    async def test_cancel_frame_flushes_active_turn(self):
-        """Test that CancelFrame properly flushes an active turn."""
-        # Create observer with a long timeout to ensure CancelFrame is what ends the turn
+    async def test_cancel_frame_preserves_active_turn_for_downstream_tracing(self):
+        """CancelFrame must not end tracing before downstream processors finish."""
+        # Keep the turn active until cancellation reaches downstream processors.
         turn_observer = TurnTrackingObserver(turn_end_timeout_secs=5.0)
 
         # Create identity filter (passes all frames through)
@@ -407,13 +407,14 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             send_end_frame=False,  # Don't send EndFrame since we're testing CancelFrame
         )
 
-        # Verify that the turn was ended due to CancelFrame (marked as interrupted)
+        # The trace observer closes the active span during conversation cleanup.
         expected_events = [
             "Turn 1 started",
-            "Turn 1 ended (interrupted: True)",  # Should be interrupted due to CancelFrame
         ]
         self.assertEqual(turn_events, expected_events)
         self.assertEqual(turn_observer._turn_count, 1)
+        self.assertTrue(turn_observer._is_turn_active)
+        self.assertIsNone(turn_observer._end_turn_timer)
 
     async def test_muted_user_speech_is_ignored(self):
         """Speech detected while the user is muted must not advance turns or report speech.

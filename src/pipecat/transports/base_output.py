@@ -993,6 +993,14 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Handle write failures
                 if not push_downstream and isinstance(frame, OutputAudioRawFrame):
+                    # A bounded-write timeout already reports a permanent error
+                    # and marks the transport unusable. From that point the
+                    # worker's ProcessorUnusablePolicy owns disposition; drain
+                    # the remaining queue without sleeping or overriding that
+                    # policy with the older fork-level cancellation watchdog.
+                    if not self._transport.is_usable:
+                        continue
+
                     consecutive_failures += 1
                     logger.warning(
                         f"Failed to write audio frame (consecutive failures: {consecutive_failures}/{max_consecutive_failures})"

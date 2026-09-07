@@ -6,8 +6,8 @@
 
 import asyncio
 import unittest
-from unittest.mock import Mock
 import warnings
+from unittest.mock import Mock
 
 from pipecat.frames.frames import (
     BotOutputAudioPauseFrame,
@@ -30,8 +30,8 @@ from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
 )
-from tests.frame_processor_helpers import frame_processor_setup
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):

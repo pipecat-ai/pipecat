@@ -13,7 +13,7 @@ syntax aloud.
 
 import re
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 

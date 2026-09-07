@@ -1,7 +1,6 @@
 """Speaches LLM Service — uses an OpenAI-compatible /v1/chat/completions endpoint."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService

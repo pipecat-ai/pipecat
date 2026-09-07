@@ -90,7 +90,9 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             ws_path: WebSocket path for the Flux STT endpoint. Defaults to
                 "/api/v1/stt/flux".
             correlation_id: Optional server-generated correlation ID for MPS
-                billing v2. Falls back to the StartFrame metadata when omitted.
+                billing v2. Pass this explicitly for the initial connection,
+                which Pipecat 1.8 opens during setup. StartFrame metadata is
+                available only to later reconnects.
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
             flux_encoding: Audio encoding format required by Flux. Must be
@@ -189,9 +191,7 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     # ------------------------------------------------------------------
 
     async def start(self, frame: StartFrame):
-        """Capture StartFrame metadata (for billing) before connecting."""
-        # Must run before super().start(), which triggers _connect() and the
-        # query-string build that resolves the correlation id from metadata.
+        """Capture StartFrame metadata for correlation on later reconnects."""
         self._start_metadata = frame.metadata
         await super().start(frame)
 
@@ -260,6 +260,11 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 self._last_stt_time = None
 
             self._connection_established_event.clear()
+            # A Configure sent on the old connection can no longer be
+            # acknowledged. Discard both the in-flight marker and any pending
+            # coalesced fields; the reconnect applies current settings in its
+            # URL before accepting further updates.
+            self._reset_configure_state()
             await self.stop_all_metrics()
 
             if self._websocket:
@@ -339,9 +344,9 @@ class DograhFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         if is_quota_error:
             logger.info(f"STT quota exceeded: {error_msg}")
-            await self.push_frame(
-                ErrorFrame(error=f"STT service quota exceeded: {error_msg}", fatal=True),
-                direction=FrameDirection.UPSTREAM,
+            await self.push_error(
+                error_msg=f"STT service quota exceeded: {error_msg}",
+                force_treat_as_permanent=True,
             )
             try:
                 if self._websocket:

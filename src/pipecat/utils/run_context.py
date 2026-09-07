@@ -13,7 +13,6 @@ async contexts.
 """
 
 import contextvars
-from typing import Optional
 
 # Context variable for tracking the current workflow run ID across the pipeline
 run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("run_id", default=None)

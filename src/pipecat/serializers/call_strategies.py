@@ -7,8 +7,6 @@ to delegate call operations (transfer, hangup) to provider-specific implementati
 from abc import ABC, abstractmethod
 from typing import Any
 
-from loguru import logger
-
 
 class CallOperationStrategy(ABC):
     """Base strategy for call operations."""

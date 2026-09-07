@@ -6,11 +6,13 @@
 
 """Dograh LLM Service implementation using OpenAI-compatible interface."""
 
+from collections.abc import AsyncIterator
+
 from loguru import logger
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
-from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
+from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.dograh.mps_billing import (
@@ -126,17 +128,18 @@ class DograhLLMService(OpenAILLMService):
 
     async def get_chat_completions(
         self, context: LLMContext
-    ) -> AsyncStream[ChatCompletionChunk] | None:
+    ) -> AsyncStream[ChatCompletionChunk] | AsyncIterator[ChatCompletionChunk]:
         """Override to handle Dograh-specific quota errors.
 
         Args:
             context: Context to use for the chat completion.
 
         Returns:
-            The chat completion response, or None if a quota error was handled.
+            The chat completion response, or an empty stream if a quota error
+            was handled.
 
-        Raises:
-            Pushes a fatal ErrorFrame for quota errors
+        Side effects:
+            Marks the service permanently unusable for quota errors.
         """
         try:
             return await super().get_chat_completions(context)
@@ -147,14 +150,23 @@ class DograhLLMService(OpenAILLMService):
                 # Extract the meaningful error message
                 error_msg = "Dograh Service quota exceeded"
 
-                # Push a fatal error frame to trigger pipeline shutdown
-                await self.push_frame(
-                    ErrorFrame(error=error_msg, fatal=True), direction=FrameDirection.UPSTREAM
+                # Mark the service unusable. Dograh workers use the v1.8
+                # ProcessorUnusablePolicy.CANCEL contract.
+                await self.push_error(
+                    error_msg,
+                    exception=e,
+                    force_treat_as_permanent=True,
                 )
 
-                # Return from here and do not reraise the error. Let
-                # ErrorFrae terminate the Pipeline
-                return
+                # The v1.8 OpenAI processing loop always consumes the return
+                # value as an async iterator. Yield no chunks after reporting
+                # the fatal error so it can finish that loop without raising a
+                # second, misleading AttributeError on ``None.__aiter__``.
+                async def empty_stream() -> AsyncIterator[ChatCompletionChunk]:
+                    if False:  # pragma: no cover - makes this an async generator
+                        yield ChatCompletionChunk()
+
+                return empty_stream()
 
             # Re-raise the exception for normal error handling
             raise
