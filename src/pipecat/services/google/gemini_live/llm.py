@@ -116,6 +116,15 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+# TranslationConfig arrived in google-genai 2.8.0, above the 1.68.0 floor this package
+# declares, so it is imported separately: naming it in the block above would stop the
+# whole service importing on an older google-genai. Only the translation setting needs
+# it, and _connect() checks before using it.
+try:
+    from google.genai.types import TranslationConfig
+except ImportError:
+    TranslationConfig = None
+
 
 # Connection management constants
 MAX_CONSECUTIVE_FAILURES = 3
@@ -310,6 +319,21 @@ class ContextWindowCompressionParams(BaseModel):
     trigger_tokens: int | None = Field(default=None)  # None = use default (80% of context window)
 
 
+class TranslationParams(BaseModel):
+    """Parameters for stream translation in Gemini Live.
+
+    Parameters:
+        target_language_code: Language the model translates into, as a BCP-47
+            code (e.g. "en", "es", "fr").
+        echo_target_language: Whether the model also produces audio when the
+            target language is the one being spoken, parroting the input.
+            Defaults to None, which leaves the model's own behavior.
+    """
+
+    target_language_code: str
+    echo_target_language: bool | None = Field(default=None)
+
+
 @deprecated(
     "`InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
     "`GeminiLiveLLMService.Settings` instead."
@@ -387,6 +411,8 @@ class GeminiLiveLLMSettings(LLMSettings):
         thinking: Thinking configuration.
         enable_affective_dialog: Whether to enable affective dialog.
         proactivity: Proactivity configuration.
+        translation: Stream translation configuration. Requires a model that
+            supports translation.
     """
 
     voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -401,6 +427,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     thinking: ThinkingConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_affective_dialog: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     proactivity: ProactivityConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    translation: TranslationParams | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
@@ -536,6 +563,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             thinking={},
             enable_affective_dialog=False,
             proactivity={},
+            translation={},
             extra={},
         )
 
@@ -1213,6 +1241,21 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 proactivity = ProactivityConfig(**proactivity) if proactivity else None
             if proactivity:
                 config.proactivity = proactivity
+
+            # Add translation configuration to configuration, if provided
+            translation = assert_given(self._settings.translation)
+            if isinstance(translation, dict):
+                translation = TranslationParams(**translation) if translation else None
+            if translation:
+                if TranslationConfig is None:
+                    raise ImportError(
+                        "Gemini Live translation requires google-genai >= 2.8.0. "
+                        'Upgrade with `uv add "google-genai>=2.8.0"`.'
+                    )
+                config.translation_config = TranslationConfig(
+                    target_language_code=translation.target_language_code,
+                    echo_target_language=translation.echo_target_language,
+                )
 
             # Add VAD configuration to configuration, if provided
             vad_params = assert_given(self._settings.vad)
