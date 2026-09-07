@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UIWorker, ui_event
 
 
@@ -52,7 +52,6 @@ async def _make_worker(cls=_StubUIWorker, **kwargs) -> UIWorker:
     """
     worker = cls("ui", llm=MagicMock(), **kwargs)
     tm = TaskManager()
-    tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     worker._task_manager = tm
 
     recorded: list = []

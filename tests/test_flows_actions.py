@@ -31,7 +31,7 @@ from tests.flows_test_helpers import (
     assert_end_frame_queued,
     assert_tts_speak_frames_queued,
     get_queued_tts_speak_frames,
-    make_mock_task,
+    make_mock_worker,
 )
 
 
@@ -65,9 +65,9 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         - Mock PipelineTask for frame queueing
         - ActionManager instance with mocked dependencies
         """
-        self.mock_task = make_mock_task()
+        self.mock_worker = make_mock_worker()
         self.mock_flow_manager = AsyncMock()
-        self.action_manager = ActionManager(self.mock_task, self.mock_flow_manager)
+        self.action_manager = ActionManager(self.mock_worker, self.mock_flow_manager)
 
     async def test_initialization(self):
         """Test ActionManager initialization and default handlers."""
@@ -79,7 +79,7 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         """Test basic TTS action execution."""
         action = {"type": "tts_say", "text": "Hello"}
         await self.action_manager.execute_actions([action])
-        assert_tts_speak_frames_queued(self.mock_task, ["Hello"])
+        assert_tts_speak_frames_queued(self.mock_worker, ["Hello"])
 
     async def test_end_conversation_action(self):
         """Test basic end conversation action."""
@@ -87,7 +87,7 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         await self.action_manager.execute_actions([action])
 
         # Verify EndFrame was queued
-        assert_end_frame_queued(self.mock_task)
+        assert_end_frame_queued(self.mock_worker)
 
     async def test_end_conversation_with_goodbye(self):
         """Test end conversation action with goodbye message."""
@@ -95,10 +95,10 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         await self.action_manager.execute_actions([action])
 
         # Verify TTSSpeakFrame
-        assert_tts_speak_frames_queued(self.mock_task, ["Goodbye!"])
+        assert_tts_speak_frames_queued(self.mock_worker, ["Goodbye!"])
 
         # Verify EndFrame
-        assert_end_frame_queued(self.mock_task)
+        assert_end_frame_queued(self.mock_worker)
 
     async def test_tts_action_append_text_to_context(self):
         """Test that tts_say maps append_text_to_context onto the TTSSpeakFrame."""
@@ -106,26 +106,26 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         await self.action_manager.execute_actions(
             [{"type": "tts_say", "text": "Hello", "append_text_to_context": True}]
         )
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, True)
 
         # Explicitly False
-        self.mock_task.queue_frame.reset_mock()
+        self.mock_worker.queue_frame.reset_mock()
         await self.action_manager.execute_actions(
             [{"type": "tts_say", "text": "Hello", "append_text_to_context": False}]
         )
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, False)
 
         # Omitted: Flows applies its own default of True (and never passes None,
         # so no append_to_context deprecation warning fires).
-        self.mock_task.queue_frame.reset_mock()
+        self.mock_worker.queue_frame.reset_mock()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             await self.action_manager.execute_actions([{"type": "tts_say", "text": "Hello"}])
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, True)
         self.assertEqual(
@@ -140,29 +140,29 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         await self.action_manager.execute_actions(
             [{"type": "end_conversation", "text": "Goodbye!", "append_text_to_context": False}]
         )
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, False)
-        assert_end_frame_queued(self.mock_task)
+        assert_end_frame_queued(self.mock_worker)
 
         # Explicitly True
-        self.mock_task.queue_frame.reset_mock()
+        self.mock_worker.queue_frame.reset_mock()
         await self.action_manager.execute_actions(
             [{"type": "end_conversation", "text": "Goodbye!", "append_text_to_context": True}]
         )
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, True)
 
         # Omitted: Flows applies its own default of True (and never passes None,
         # so no append_to_context deprecation warning fires).
-        self.mock_task.queue_frame.reset_mock()
+        self.mock_worker.queue_frame.reset_mock()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             await self.action_manager.execute_actions(
                 [{"type": "end_conversation", "text": "Goodbye!"}]
             )
-        frames = get_queued_tts_speak_frames(self.mock_task)
+        frames = get_queued_tts_speak_frames(self.mock_worker)
         self.assertEqual(len(frames), 1)
         self.assertIs(frames[0].append_to_context, True)
         self.assertEqual(
@@ -236,7 +236,7 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         await self.action_manager.execute_actions(actions)
 
         # Verify TTS was called twice in correct order
-        assert_tts_speak_frames_queued(self.mock_task, ["First", "Second"])
+        assert_tts_speak_frames_queued(self.mock_worker, ["First", "Second"])
 
     def test_register_invalid_handler(self):
         """Test registering invalid action handlers."""
@@ -254,17 +254,17 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         """Test handling None or empty action lists."""
         # Test None actions
         await self.action_manager.execute_actions(None)
-        self.mock_task.queue_frame.assert_not_called()
+        self.mock_worker.queue_frame.assert_not_called()
 
         # Test empty list
         await self.action_manager.execute_actions([])
-        self.mock_task.queue_frame.assert_not_called()
+        self.mock_worker.queue_frame.assert_not_called()
 
     @patch("loguru.logger.error")
     async def test_action_error_handling(self, mock_logger):
         """Test error handling during action execution."""
-        # Configure task mock to raise an error
-        self.mock_task.queue_frame = AsyncMock(side_effect=Exception("Frame error"))
+        # Configure worker mock to raise an error
+        self.mock_worker.queue_frame = AsyncMock(side_effect=Exception("Frame error"))
 
         action = {"type": "tts_say", "text": "Hello"}
         await self.action_manager.execute_actions([action])
@@ -274,7 +274,7 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
 
     async def test_action_execution_error_handling(self):
         """Test error handling during action execution."""
-        action_manager = ActionManager(self.mock_task, self.mock_flow_manager)
+        action_manager = ActionManager(self.mock_worker, self.mock_flow_manager)
 
         # Test action with missing handler
         with self.assertRaises(ActionError):

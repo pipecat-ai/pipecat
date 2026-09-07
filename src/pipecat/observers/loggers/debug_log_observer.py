@@ -135,7 +135,7 @@ class DebugLogObserver(BaseObserver):
         elif isinstance(value, (bytes, bytearray)):
             return f"{len(value)} bytes"
         elif hasattr(value, "get_messages_for_logging") and callable(
-            getattr(value, "get_messages_for_logging")
+            value.get_messages_for_logging
         ):
             # Special case for OpenAI context
             return f"{value.__class__.__name__} with messages: {value.get_messages_for_logging()}"

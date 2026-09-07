@@ -292,6 +292,7 @@ from dataclasses import dataclass, field
 
 from pipecat.services.settings import TTSSettings, NOT_GIVEN
 
+
 @dataclass
 class MyTTSSettings(TTSSettings):
     """Settings for MyTTS service.
@@ -322,6 +323,7 @@ Add a `Settings` **class attribute** that points to your settings dataclass. Thi
 
 ```python
 from typing import Optional
+
 
 class MyTTSService(TTSService):
     Settings = MyTTSSettings
@@ -429,6 +431,7 @@ The base `STTService` and `LLMService` already return a sensible frame, so most 
 ```python
 from pipecat.frames.frames import STTMetadataFrame
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
 
 def service_metadata_frame(self) -> STTMetadataFrame:
     # This service defines turn boundaries server-side and emits

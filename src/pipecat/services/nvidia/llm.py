@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
-from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -55,8 +54,6 @@ class NvidiaLLMService(OpenAILLMService):
     This service extends OpenAILLMService to work with NVIDIA's NIM API while
     maintaining compatibility with the OpenAI-style interface. It handles:
 
-    - Incremental token usage reporting (NIM sends per-chunk counts instead
-      of a final summary)
     - Detection and filtering of leading ``<think>``/``</think>`` content for
       models that emit reasoning inline before visible output (e.g.
       DeepSeek-R1, some nemotron models)
@@ -87,7 +84,7 @@ class NvidiaLLMService(OpenAILLMService):
             base_url: The base URL for NIM API. Defaults to NVIDIA's cloud endpoint.
                 For local deployments, pass the local address (e.g. ``http://localhost:8000/v1``).
             model: The model identifier to use. Defaults to
-                "nvidia/nemotron-3-nano-30b-a3b".
+                "nvidia/nemotron-3-super-120b-a12b".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaLLMService.Settings(model=...)`` instead.
@@ -98,7 +95,7 @@ class NvidiaLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="nvidia/nemotron-3-nano-30b-a3b")
+        default_settings = self.Settings(model="nvidia/nemotron-3-super-120b-a12b")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -120,18 +117,12 @@ class NvidiaLLMService(OpenAILLMService):
                 "Set base_url to your local NIM endpoint for local deployments."
             )
 
-        # NVIDIA repeats a cumulative usage snapshot on every streamed chunk, so
-        # the latest one holds the totals for the whole completion.
-        self._token_usage: LLMTokenUsage | None = None
-
     def _reset_response_state(self):
         """Reset per-response state at the start of each LLM call.
 
-        Resets the held token usage, leading-think-tag detection state, and
-        reasoning-content field tracking.
+        Resets leading-think-tag detection state and reasoning-content field
+        tracking.
         """
-        self._token_usage = None
-
         self._think_tag_state = _ThinkTagState.DETECTING
         self._think_tag_buffer = ""
 
@@ -180,6 +171,7 @@ class NvidiaLLMService(OpenAILLMService):
                 return passthrough
 
             if self._think_tag_buffer.startswith(_THINK_OPEN):
+                await self.stop_ttfb_metrics()
                 self._think_tag_state = _ThinkTagState.IN_THOUGHT
                 await self.push_frame(LLMThoughtStartFrame())
                 self._think_tag_buffer = self._think_tag_buffer[len(_THINK_OPEN) :]
@@ -296,6 +288,7 @@ class NvidiaLLMService(OpenAILLMService):
                     )
                     if rc:
                         if not self._has_reasoning_field:
+                            await self.stop_ttfb_metrics()
                             self._has_reasoning_field = True
                             await self.push_frame(LLMThoughtStartFrame())
                         await self.push_frame(LLMThoughtTextFrame(text=rc))
@@ -336,40 +329,16 @@ class NvidiaLLMService(OpenAILLMService):
             )
 
     async def _process_context(self, context: LLMContext):
-        """Process a context through the LLM and accumulate token usage metrics.
+        """Process a context through the LLM.
 
-        Delegates to the base OpenAI streaming loop while adding
-        NVIDIA-specific behavior:
-
-        - ``reasoning_content`` and leading ``<think>`` content are
-          intercepted via the ``get_chat_completions`` stream wrapper and
-          emitted as
-          ``LLMThought*Frame`` objects.
-        - Token usage is reported once per completion rather than per chunk.
+        Delegates to the base OpenAI streaming loop, resetting the per-response
+        state it needs to emit ``LLMThought*Frame`` objects for
+        ``reasoning_content`` and leading ``<think>`` content, which the
+        ``get_chat_completions`` stream wrapper intercepts.
 
         Args:
             context: The context to process, containing messages and other
                 information needed for the LLM interaction.
         """
         self._reset_response_state()
-
-        try:
-            await super()._process_context(context)
-        finally:
-            # Only the base implementation emits the metrics; report through it
-            # even if the response is interrupted or cancelled mid-stream.
-            if self._token_usage:
-                await super().start_llm_usage_metrics(self._token_usage)
-                self._token_usage = None
-
-    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        """Hold the latest usage snapshot rather than reporting it.
-
-        The inherited streaming loop calls this for every chunk carrying usage.
-        Holding the snapshot here suppresses that per-chunk reporting, leaving
-        :meth:`_process_context` to report the final one when the completion ends.
-
-        Args:
-            tokens: Cumulative token usage for the completion so far.
-        """
-        self._token_usage = tokens
+        await super()._process_context(context)

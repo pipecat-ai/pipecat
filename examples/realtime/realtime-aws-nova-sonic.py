@@ -15,7 +15,7 @@ from loguru import logger
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -78,7 +78,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     # Specify initial system instruction.
     system_instruction = (
@@ -95,13 +95,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        # as of 2025-12-09, these are the supported regions:
+        # as of 2026-08-31, these are the supported regions:
         # - Nova 2 Sonic (the default model):
         #   - us-east-1
         #   - us-west-2
+        #   - eu-north-1
         #   - ap-northeast-1
         # - Nova Sonic (the older model):
         #   - us-east-1
+        #   - eu-north-1
         #   - ap-northeast-1
         region=os.environ["AWS_REGION"],
         session_token=os.getenv("AWS_SESSION_TOKEN"),
@@ -169,12 +171,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -188,8 +195,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
     # See comment above the user_aggregator for details on why this is
     # commented out and instructions for enabling it.
@@ -213,9 +220,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    # Run the pipeline
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

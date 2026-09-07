@@ -148,7 +148,7 @@ class ActionManager:
             actions: List of action configurations to execute.
 
         Raises:
-            ActionError: If action execution fails.
+            ~pipecat.flows.ActionError: If action execution fails.
 
         Note:
             Each action must have a 'type' field matching a registered handler.

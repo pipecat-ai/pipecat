@@ -11,7 +11,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
-from anthropic import NOT_GIVEN, NotGiven
+from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
+from anthropic import NotGiven as AnthropicNotGiven
 from anthropic.types.message_param import MessageParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
@@ -29,31 +30,31 @@ from pipecat.processors.aggregators.llm_context import (
 _T = TypeVar("_T")
 
 
-def is_given(value: _T | NotGiven) -> TypeGuard[_T]:
-    """Check whether a value was explicitly provided.
+def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the Anthropic SDK.
 
-    Typically used when checking whether a parameter or field typed with
-    Anthropic's ``NotGiven`` was set::
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
 
-        if is_given(system):
+        if anthropic_is_given(system):
             ...
 
     Also acts as a type guard: inside a true branch, the value is narrowed
-    to exclude ``NotGiven`` (e.g. ``str | NotGiven`` becomes ``str``).
+    to exclude ``AnthropicNotGiven`` (e.g. ``str | AnthropicNotGiven`` becomes ``str``).
 
     Args:
         value: The value to check.
 
     Returns:
-        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
     """
-    return not isinstance(value, NotGiven)
+    return not isinstance(value, AnthropicNotGiven)
 
 
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
-    system: str | NotGiven
+    system: str | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
 
@@ -98,12 +99,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         if ensure_last_message_is_user:
             self._ensure_last_message_is_user(converted.messages)
         system = self._resolve_system_instruction(
-            converted.system if is_given(converted.system) else None,
+            converted.system if anthropic_is_given(converted.system) else None,
             system_instruction,
             discard_context_system=True,
         )
         return {
-            "system": system if system is not None else NOT_GIVEN,
+            "system": system if system is not None else ANTHROPIC_NOT_GIVEN,
             "messages": (
                 self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
@@ -150,7 +151,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Container for Anthropic-formatted messages converted from universal context."""
 
         messages: list[MessageParam]
-        system: str | NotGiven
+        system: str | AnthropicNotGiven
 
     def _from_universal_context_messages(
         self,
@@ -158,7 +159,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         *,
         system_instruction: str | None = None,
     ) -> ConvertedMessages:
-        system = NOT_GIVEN
+        system = ANTHROPIC_NOT_GIVEN
 
         # Extract initial system message from universal messages BEFORE conversion,
         # so the helper works with standard message format (not provider-specific).

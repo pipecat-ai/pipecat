@@ -8,15 +8,14 @@
 
 from typing import Any
 
-from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
-
 from pipecat.bus.adapters.base import DeserializeFunc, SerializeFunc, TypeAdapter
 from pipecat.bus.adapters.tools_schema_adapter import ToolsSchemaAdapter
 from pipecat.processors.aggregators.llm_context import (
+    NOT_GIVEN,
     LLMContext,
     LLMSpecificMessage,
-    NotGiven,
 )
+from pipecat.utils.types import is_given
 
 
 class LLMContextAdapter(TypeAdapter):
@@ -44,9 +43,9 @@ class LLMContextAdapter(TypeAdapter):
         result: dict[str, Any] = {
             "messages": [self._serialize_message(m, serialize_value) for m in obj.messages],
         }
-        if not isinstance(obj.tools, NotGiven):
+        if is_given(obj.tools):
             result["tools"] = self._tools_schema_adapter.serialize(obj.tools, serialize_value)
-        if not isinstance(obj.tool_choice, NotGiven):
+        if is_given(obj.tool_choice):
             result["tool_choice"] = serialize_value(obj.tool_choice)
         return result
 
@@ -59,7 +58,7 @@ class LLMContextAdapter(TypeAdapter):
         """Reconstruct an ``LLMContext`` from a serialized dict.
 
         Missing ``tools`` and ``tool_choice`` keys are restored as
-        OpenAI's ``NOT_GIVEN`` sentinel.
+        ``NOT_GIVEN``.
 
         Args:
             data: A dict produced by ``serialize()``.
@@ -73,11 +72,9 @@ class LLMContextAdapter(TypeAdapter):
         tools = (
             self._tools_schema_adapter.deserialize(data["tools"], deserialize_value)
             if "tools" in data
-            else OPENAI_NOT_GIVEN
+            else NOT_GIVEN
         )
-        tool_choice = (
-            deserialize_value(data["tool_choice"]) if "tool_choice" in data else OPENAI_NOT_GIVEN
-        )
+        tool_choice = deserialize_value(data["tool_choice"]) if "tool_choice" in data else NOT_GIVEN
         return LLMContext(messages=messages, tools=tools, tool_choice=tool_choice)
 
     def _serialize_message(self, msg: Any, serialize_value: SerializeFunc) -> dict[str, Any]:

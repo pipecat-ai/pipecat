@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -45,7 +45,7 @@ async def main():
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -80,14 +80,16 @@ async def main():
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
-
-    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
-    await worker.queue_frames([LLMRunFrame()])
 
     runner = WorkerRunner()
 
     await runner.add_workers(worker)
+
+    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
+    await worker.queue_frames([LLMRunFrame()])
+
     await runner.run()
 
 

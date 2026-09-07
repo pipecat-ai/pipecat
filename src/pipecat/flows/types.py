@@ -475,7 +475,7 @@ class FlowsDirectFunctionWrapper(BaseDirectFunctionWrapper):
             function: The function to validate.
 
         Raises:
-            InvalidFunctionError: If the function does not meet the requirements.
+            ~pipecat.flows.InvalidFunctionError: If the function does not meet the requirements.
         """
         try:
             super().validate_function(function)

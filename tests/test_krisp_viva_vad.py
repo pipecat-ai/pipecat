@@ -129,10 +129,9 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
                 KrispVivaVadAnalyzer()
 
             self.assertIn("Model path", str(context.exception))
-            # acquire() is not called because exception is raised before it
+            # A constructor that fails before acquiring releases nothing
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in the initialization exception handler
-            self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+            self.mock_sdk_manager.release.assert_not_called()
 
     def test_initialization_with_invalid_extension(self):
         """Test analyzer initialization fails with non-.kef file."""
@@ -145,10 +144,9 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
                 KrispVivaVadAnalyzer(model_path=tmp_path)
 
             self.assertIn(".kef extension", str(context.exception))
-            # acquire() is not called because exception is raised before it
+            # A constructor that fails before acquiring releases nothing
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in the initialization exception handler
-            self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+            self.mock_sdk_manager.release.assert_not_called()
         finally:
             os.unlink(tmp_path)
 
@@ -157,10 +155,9 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             KrispVivaVadAnalyzer(model_path="/nonexistent/path/model.kef")
 
-        # acquire() is not called because exception is raised before it
+        # A constructor that fails before acquiring releases nothing
         self.mock_sdk_manager.acquire.assert_not_called()
-        # release() is called in the initialization exception handler
-        self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
+        self.mock_sdk_manager.release.assert_not_called()
 
     def test_initialization_with_custom_frame_duration(self):
         """Test analyzer initialization with custom frame duration."""
@@ -359,6 +356,33 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
 
         # Verify SDK was released and session was cleared
         self.mock_sdk_manager.release.assert_called_once()
+        self.assertIsNone(analyzer._session)
+
+    def test_cleanup_is_idempotent(self):
+        """Test that repeated cleanup releases the SDK reference only once."""
+        analyzer = KrispVivaVadAnalyzer(model_path=self.model_path)
+        analyzer.set_sample_rate(16000)
+
+        asyncio.run(analyzer.cleanup())
+        asyncio.run(analyzer.cleanup())
+
+        self.mock_sdk_manager.release.assert_called_once()
+
+    def test_cleanup_clears_a_session_created_after_a_previous_cleanup(self):
+        """Test that cleanup drops the session even once the SDK reference is gone.
+
+        An analyzer reused across sessions gets a new session from
+        set_sample_rate(), which cleanup() must release regardless of whether it
+        still holds an SDK reference.
+        """
+        analyzer = KrispVivaVadAnalyzer(model_path=self.model_path)
+        analyzer.set_sample_rate(16000)
+        asyncio.run(analyzer.cleanup())
+
+        analyzer.set_sample_rate(16000)
+        self.assertIsNotNone(analyzer._session)
+
+        asyncio.run(analyzer.cleanup())
         self.assertIsNone(analyzer._session)
 
     def test_initialization_with_vad_params(self):

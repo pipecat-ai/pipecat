@@ -19,7 +19,7 @@ name: starter_audio
 # The first run downloads the local speech models — expect a one-time delay.
 #
 # `eval:` criteria are scored by a judge LLM — by default a local Ollama
-# (`ollama pull gemma2:9b`); add `eval: {service: openai, model: gpt-4.1}` under
+# (`ollama pull gemma4:12b`); add `eval: {service: openai, model: gpt-4.1}` under
 # `judge:` to use OpenAI instead.
 
 # Synthesize each `user:` turn as speech, so the bot's VAD + STT run for real.

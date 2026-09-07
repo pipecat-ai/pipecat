@@ -47,6 +47,35 @@ def test_cartesia_turns_websocket_url_omits_keyterm_when_not_set():
     assert "keyterm" not in query
 
 
+def test_cartesia_turns_websocket_url_includes_turn_detection_thresholds():
+    service = _service(
+        settings=CartesiaTurnsSTTService.Settings(
+            turn_start_threshold=0.7,
+            turn_eager_end_threshold=0.5,
+            turn_end_threshold=0.4,
+            turn_end_timeout_ms=4500,
+        )
+    )
+
+    query = parse_qs(urlparse(service._websocket_url()).query)
+
+    assert query["turn_start_threshold"] == ["0.7"]
+    assert query["turn_eager_end_threshold"] == ["0.5"]
+    assert query["turn_end_threshold"] == ["0.4"]
+    assert query["turn_end_timeout_ms"] == ["4500"]
+
+
+def test_cartesia_turns_websocket_url_omits_unset_turn_detection_thresholds():
+    service = _service(settings=CartesiaTurnsSTTService.Settings(turn_end_timeout_ms=8000))
+
+    query = parse_qs(urlparse(service._websocket_url()).query)
+
+    assert query["turn_end_timeout_ms"] == ["8000"]
+    assert "turn_start_threshold" not in query
+    assert "turn_eager_end_threshold" not in query
+    assert "turn_end_threshold" not in query
+
+
 def test_cartesia_turns_websocket_url_clamps_keyterms_to_limits():
     service = _service(
         settings=CartesiaTurnsSTTService.Settings(keyterm=[f"term{i}" for i in range(150)])

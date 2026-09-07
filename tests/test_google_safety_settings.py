@@ -14,7 +14,7 @@ from google.genai.types import (
 )
 
 from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
-from pipecat.services.settings import is_given
+from pipecat.utils.types import is_given
 
 
 def _safety_setting(

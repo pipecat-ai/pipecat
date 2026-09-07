@@ -1,0 +1,1 @@
+- `LiveAvatarNewSessionRequest` now defaults to `H264` video encoding, matching the LiveAvatar API's own default. LiveAvatar has deprecated `VP8`; pass `video_settings=VideoSettings(encoding=VideoEncoding.VP8)` to keep the previous encoding while it lasts.

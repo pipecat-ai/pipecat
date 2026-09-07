@@ -15,19 +15,21 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
-    from speechmatics.rt import __version__
+    import speechmatics.rt  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
@@ -44,8 +46,8 @@ class SpeechmaticsTTSSettings(TTSSettings):
 
     # Speechmatics requires a voice (the URL path includes it), so narrow
     # the inherited TTSSettings.voice field to disallow None.
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_retries: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_retries: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SpeechmaticsTTSService(TTSService):
@@ -299,7 +301,7 @@ def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:
     """
     query_params = {}
     query_params["output_format"] = f"pcm_{sample_rate}"
-    query_params["sm-app"] = f"pipecat/{__version__}"
+    query_params["sm-app"] = f"pipecat/{pipecat_version()}"
     query = urlencode(query_params)
 
     return f"{base_url}/generate/{voice}?{query}"

@@ -31,7 +31,7 @@ class SambaNovaLLMSettings(BaseOpenAILLMService.Settings):
     pass
 
 
-class SambaNovaLLMService(OpenAILLMService):  # type: ignore
+class SambaNovaLLMService(OpenAILLMService):
     """A service for interacting with SambaNova using the OpenAI-compatible interface.
 
     This service extends OpenAILLMService to connect to SambaNova's API endpoint while
@@ -52,7 +52,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         model: str | None = None,
         base_url: str = "https://api.sambanova.ai/v1",
         settings: Settings | None = None,
-        **kwargs: dict[Any, Any],
+        **kwargs,
     ) -> None:
         """Initialize SambaNova LLM service.
 
@@ -89,7 +89,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        **kwargs: dict[Any, Any],
+        **kwargs,
     ) -> Any:
         """Create OpenAI-compatible client for SambaNova API endpoint.
 
@@ -107,8 +107,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for SambaNova chat completion request.
 
-        SambaNova doesn't support some OpenAI parameters like frequency_penalty,
-        presence_penalty, and seed.
+        SambaNova doesn't support OpenAI's ``service_tier``.
 
         Args:
             params_from_context: Parameters, derived from the LLM context, to
@@ -122,6 +121,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             "model": self._settings.model,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "frequency_penalty": self._settings.frequency_penalty,
+            "presence_penalty": self._settings.presence_penalty,
+            "seed": self._settings.seed,
             "temperature": self._settings.temperature,
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
@@ -135,7 +137,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         return params
 
-    @traced_llm  # type: ignore
+    @traced_llm
     async def _process_context(self, context: LLMContext):
         """Process OpenAI LLM context and stream chat completion chunks.
 
@@ -158,62 +160,94 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         chunk_stream = await self.get_chat_completions(context)
 
-        # Use context manager to ensure stream is closed on cancellation/exception.
-        # Without this, CancelledError during iteration leaves the underlying socket open.
-        async with chunk_stream:
-            async for chunk in chunk_stream:
-                if chunk.usage:
-                    tokens = LLMTokenUsage(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens,
-                    )
-                    await self.start_llm_usage_metrics(tokens)
+        # Providers differ in how often they send usage: some once at the end,
+        # others a cumulative snapshot on every chunk. Holding the latest and
+        # reporting it after the stream keeps that to one report per completion.
+        token_usage: LLMTokenUsage | None = None
 
-                if chunk.choices is None or len(chunk.choices) == 0:
-                    continue
+        try:
+            # Use context manager to ensure stream is closed on cancellation/exception.
+            # Without this, CancelledError during iteration leaves the underlying socket open.
+            async with chunk_stream:
+                async for chunk in chunk_stream:
+                    if chunk.usage:
+                        prompt_tokens_details = getattr(chunk.usage, "prompt_tokens_details", None)
+                        cached_tokens = (
+                            prompt_tokens_details.cached_tokens if prompt_tokens_details else None
+                        )
+                        # Tokens written into the prompt cache, billed above the
+                        # input rate. Providers without prompt caching omit the
+                        # field, which reads as "not reported" rather than zero.
+                        cache_write_tokens = (
+                            getattr(prompt_tokens_details, "cache_write_tokens", None)
+                            if prompt_tokens_details
+                            else None
+                        )
+                        completion_tokens_details = getattr(
+                            chunk.usage, "completion_tokens_details", None
+                        )
+                        reasoning_tokens = (
+                            completion_tokens_details.reasoning_tokens
+                            if completion_tokens_details
+                            else None
+                        )
+                        token_usage = LLMTokenUsage(
+                            prompt_tokens=chunk.usage.prompt_tokens,
+                            completion_tokens=chunk.usage.completion_tokens,
+                            total_tokens=chunk.usage.total_tokens,
+                            cache_read_input_tokens=cached_tokens,
+                            cache_creation_input_tokens=cache_write_tokens,
+                            reasoning_tokens=reasoning_tokens,
+                        )
 
-                await self.stop_ttfb_metrics()
+                    if chunk.choices is None or len(chunk.choices) == 0:
+                        continue
 
-                if not chunk.choices[0].delta:
-                    continue
+                    await self.stop_ttfb_metrics()
 
-                if chunk.choices[0].delta.tool_calls:
-                    # We're streaming the LLM response to enable the fastest response times.
-                    # For text, we just yield each chunk as we receive it and count on consumers
-                    # to do whatever coalescing they need (eg. to pass full sentences to TTS)
-                    #
-                    # If the LLM is a function call, we'll do some coalescing here.
-                    # If the response contains a function name, we'll yield a frame to tell consumers
-                    # that they can start preparing to call the function with that name.
-                    # We accumulate all the arguments for the rest of the streamed response, then when
-                    # the response is done, we package up all the arguments and the function name and
-                    # yield a frame containing the function name and the arguments.
+                    if not chunk.choices[0].delta:
+                        continue
 
-                    tool_call = chunk.choices[0].delta.tool_calls[0]
-                    if tool_call.index != func_idx:
-                        functions_list.append(function_name)
-                        arguments_list.append(arguments)
-                        tool_id_list.append(tool_call_id)
-                        function_name = ""
-                        arguments = ""
-                        tool_call_id = ""
-                        func_idx += 1
-                    if tool_call.function and tool_call.function.name:
-                        function_name += tool_call.function.name
-                        tool_call_id = tool_call.id  # type: ignore
-                    if tool_call.function and tool_call.function.arguments:
-                        # Keep iterating through the response to collect all the argument fragments
-                        arguments += tool_call.function.arguments
-                elif chunk.choices[0].delta.content:
-                    await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                    if chunk.choices[0].delta.tool_calls:
+                        # We're streaming the LLM response to enable the fastest response times.
+                        # For text, we just yield each chunk as we receive it and count on consumers
+                        # to do whatever coalescing they need (eg. to pass full sentences to TTS)
+                        #
+                        # If the LLM is a function call, we'll do some coalescing here.
+                        # If the response contains a function name, we'll yield a frame to tell consumers
+                        # that they can start preparing to call the function with that name.
+                        # We accumulate all the arguments for the rest of the streamed response, then when
+                        # the response is done, we package up all the arguments and the function name and
+                        # yield a frame containing the function name and the arguments.
 
-                # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
-                # we need to get LLMTextFrame for the transcript
-                elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
-                    "transcript"
-                ):
-                    await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+                        tool_call = chunk.choices[0].delta.tool_calls[0]
+                        if tool_call.index != func_idx:
+                            functions_list.append(function_name)
+                            arguments_list.append(arguments)
+                            tool_id_list.append(tool_call_id)
+                            function_name = ""
+                            arguments = ""
+                            tool_call_id = ""
+                            func_idx += 1
+                        if tool_call.function and tool_call.function.name:
+                            function_name += tool_call.function.name
+                            tool_call_id = tool_call.id
+                        if tool_call.function and tool_call.function.arguments:
+                            # Keep iterating through the response to collect all the argument fragments
+                            arguments += tool_call.function.arguments
+                    elif chunk.choices[0].delta.content:
+                        await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+
+                    # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
+                    # we need to get LLMTextFrame for the transcript
+                    elif (audio := getattr(chunk.choices[0].delta, "audio", None)) and audio.get(
+                        "transcript"
+                    ):
+                        await self.push_frame(LLMTextFrame(audio["transcript"]))
+        finally:
+            # Report even if the response is interrupted or cancelled mid-stream.
+            if token_usage:
+                await self.start_llm_usage_metrics(token_usage)
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to

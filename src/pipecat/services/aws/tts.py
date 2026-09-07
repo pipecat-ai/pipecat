@@ -24,11 +24,12 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.services.aws.utils import resolve_credentials
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 try:
     import aiobotocore.session
@@ -71,8 +72,10 @@ def language_to_aws_language(language: Language) -> str:
         Language.EN: "en-US",  # Default to US English
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
         Language.EN_IN: "en-IN",
         Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
         Language.EN_US: "en-US",
         Language.EN_ZA: "en-ZA",
         # Finnish
@@ -137,11 +140,11 @@ class AWSPollyTTSSettings(TTSSettings):
         lexicon_names: List of pronunciation lexicons to apply.
     """
 
-    engine: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lexicon_names: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSPollyTTSService(TTSService):

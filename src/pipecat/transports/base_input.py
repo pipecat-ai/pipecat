@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     StopFrame,
     SystemFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.deprecation import deprecated
 
@@ -52,7 +52,7 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        # Input sample rate. It will be initialized on StartFrame.
+        # Input sample rate. It will be initialized during setup.
         self._sample_rate = 0
 
         # Track bot speaking state for interruption logic
@@ -116,6 +116,27 @@ class BaseInputTransport(FrameProcessor):
         """
         return self._sample_rate
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
+
+        # Start audio filter. Paired with the stop in cleanup(), which is the
+        # only other call guaranteed to happen exactly once.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.start(self._sample_rate)
+
+    async def cleanup(self):
+        """Release input transport resources at teardown."""
+        await super().cleanup()
+        await self._cancel_audio_task()
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
+
     async def start(self, frame: StartFrame):
         """Start the input transport and initialize components.
 
@@ -125,12 +146,6 @@ class BaseInputTransport(FrameProcessor):
         self._paused = False
         self._user_speaking = False
 
-        self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
-
-        # Start audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.start(self._sample_rate)
-
     async def stop(self, frame: EndFrame):
         """Stop the input transport and cleanup resources.
 
@@ -139,9 +154,6 @@ class BaseInputTransport(FrameProcessor):
         """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
-        # Stop audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
 
     async def pause(self, frame: StopFrame):
         """Pause the input transport temporarily.
@@ -163,16 +175,6 @@ class BaseInputTransport(FrameProcessor):
         """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
-        # Stop audio filter.
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
-
-    async def cleanup(self):
-        """Release input transport resources at teardown."""
-        await super().cleanup()
-        await self._cancel_audio_task()
-        if self._params.audio_in_filter:
-            await self._params.audio_in_filter.stop()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.

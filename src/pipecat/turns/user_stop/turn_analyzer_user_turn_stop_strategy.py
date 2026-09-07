@@ -26,9 +26,9 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -140,13 +140,14 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
 
         Args:
-            task_manager: The task manager to be associated with this instance.
+            setup: Configuration object containing setup parameters.
         """
-        await super().setup(task_manager)
+        await super().setup(setup)
+        self._turn_analyzer.set_sample_rate(setup.audio_in_sample_rate)
 
     async def cleanup(self):
         """Cleanup the strategy."""
@@ -197,7 +198,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""
-        self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
         await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):

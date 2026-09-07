@@ -26,10 +26,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 ValidVoice = Literal[
     "alloy",
@@ -73,8 +74,8 @@ class OpenAITTSSettings(TTSSettings):
         speed: Voice speed control (0.25 to 4.0, default 1.0).
     """
 
-    instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    instructions: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):

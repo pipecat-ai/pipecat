@@ -441,7 +441,7 @@ def add_openai_realtime_span_attributes(
             if isinstance(tool, dict) and "name" in tool:
                 tool_names.append(tool["name"])
             elif hasattr(tool, "name"):
-                tool_names.append(getattr(tool, "name"))
+                tool_names.append(getattr(tool, "name"))  # noqa: B009
             elif isinstance(tool, dict) and "function" in tool and "name" in tool["function"]:
                 tool_names.append(tool["function"]["name"])
 
@@ -456,7 +456,10 @@ def add_openai_realtime_span_attributes(
         if function_calls:
             call = function_calls[0]
             if hasattr(call, "name"):
-                span.set_attribute("function_calls.first_name", getattr(call, "name"))
+                span.set_attribute(
+                    "function_calls.first_name",
+                    getattr(call, "name"),  # noqa: B009
+                )
             elif isinstance(call, dict) and "name" in call:
                 span.set_attribute("function_calls.first_name", call["name"])
 

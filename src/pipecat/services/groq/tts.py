@@ -20,11 +20,12 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from groq import AsyncGroq
@@ -55,15 +56,15 @@ class GroqTTSSettings(TTSSettings):
         speed: Speech speed multiplier. Defaults to 1.0.
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GroqTTSService(TTSService):
     """Groq text-to-speech service implementation.
 
     Provides text-to-speech synthesis using Groq's TTS API. The service
-    operates at a fixed 48kHz sample rate and supports various voices
-    and output formats.
+    operates at a default 24kHz sample rate and supports various voices,
+    output formats, and sample rates.
     """
 
     Settings = GroqTTSSettings
@@ -88,8 +89,6 @@ class GroqTTSService(TTSService):
         language: Language | None = Language.EN
         speed: float | None = 1.0
 
-    GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
-
     def __init__(
         self,
         *,
@@ -98,7 +97,7 @@ class GroqTTSService(TTSService):
         params: InputParams | None = None,
         model_name: str | None = None,
         voice_id: str | None = None,
-        sample_rate: int | None = GROQ_SAMPLE_RATE,
+        sample_rate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -125,14 +124,11 @@ class GroqTTSService(TTSService):
                     Use ``settings=GroqTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
+            sample_rate: Audio sample rate. If None, uses default sample rate.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        if sample_rate != self.GROQ_SAMPLE_RATE:
-            logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="canopylabs/orpheus-v1-english",

@@ -14,10 +14,11 @@ from typing import Any
 from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame
-from pipecat.services.settings import TTSSettings, assert_given
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import assert_given
 
 try:
     import torch
@@ -37,13 +38,17 @@ def language_to_pocket_tts_language(language: Language) -> str:
     Returns:
         The corresponding pocket-tts model language name.
     """
+    # pocket-tts ships a distilled 6-layer model per language plus an
+    # undistilled 24-layer variant that is higher quality but too slow to
+    # synthesize in real time on a typical CPU. French has no distilled model,
+    # so its 24-layer release is the only one available.
     LANGUAGE_MAP = {
-        Language.DE: "german_24l",
+        Language.DE: "german",
         Language.EN: "english",
-        Language.ES: "spanish_24l",
+        Language.ES: "spanish",
         Language.FR: "french_24l",
-        Language.IT: "italian_24l",
-        Language.PT: "portuguese_24l",
+        Language.IT: "italian",
+        Language.PT: "portuguese",
     }
 
     result = resolve_language(language, LANGUAGE_MAP, use_base_code=True)

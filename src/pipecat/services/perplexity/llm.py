@@ -7,16 +7,13 @@
 """Perplexity LLM service implementation.
 
 This module provides a service for interacting with Perplexity's API using
-an OpenAI-compatible interface. It handles Perplexity's unique token usage
-reporting patterns while maintaining compatibility with the Pipecat framework.
+an OpenAI-compatible interface.
 """
 
 from dataclasses import dataclass
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
-from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -32,9 +29,7 @@ class PerplexityLLMService(OpenAILLMService):
     """A service for interacting with Perplexity's API.
 
     This service extends OpenAILLMService to work with Perplexity's API while maintaining
-    compatibility with the OpenAI-style interface. It specifically handles the difference
-    in token usage reporting between Perplexity (a cumulative snapshot on every streamed
-    chunk) and OpenAI (a final summary).
+    compatibility with the OpenAI-style interface.
     """
 
     adapter_class = PerplexityLLMAdapter
@@ -84,9 +79,6 @@ class PerplexityLLMService(OpenAILLMService):
             default_settings.apply_update(settings)
 
         super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
-        # Perplexity repeats a cumulative usage snapshot on every streamed chunk,
-        # so the latest one holds the totals for the whole completion.
-        self._token_usage: LLMTokenUsage | None = None
 
     def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for Perplexity chat completion request.
@@ -120,33 +112,3 @@ class PerplexityLLMService(OpenAILLMService):
             params["max_tokens"] = self._settings.max_tokens
 
         return params
-
-    async def _process_context(self, context: LLMContext):
-        """Process a context through the LLM, reporting usage once per completion.
-
-        Args:
-            context: The context to process, containing messages and other
-                information needed for the LLM interaction.
-        """
-        self._token_usage = None
-
-        try:
-            await super()._process_context(context)
-        finally:
-            # Only the base implementation emits the metrics; report through it
-            # even if the response is interrupted or cancelled mid-stream.
-            if self._token_usage:
-                await super().start_llm_usage_metrics(self._token_usage)
-                self._token_usage = None
-
-    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        """Hold the latest usage snapshot rather than reporting it.
-
-        The inherited streaming loop calls this for every chunk carrying usage.
-        Holding the snapshot here suppresses that per-chunk reporting, leaving
-        :meth:`_process_context` to report the final one when the completion ends.
-
-        Args:
-            tokens: Cumulative token usage for the completion so far.
-        """
-        self._token_usage = tokens

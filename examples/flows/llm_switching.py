@@ -39,7 +39,7 @@ from pipecat.frames.frames import ManuallySwitchServiceFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.service_switcher import ServiceSwitcherStrategyManual
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -183,7 +183,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -205,8 +205,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm_anthropic = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
     llm_aws = AWSBedrockLLMService(
         aws_region="us-west-2",
-        model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-        params=AWSBedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
+        model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        params=AWSBedrockLLMService.InputParams(temperature=0.8),
     )
     llm_switcher = LLMSwitcher(
         llms=[llm_openai, llm_google, llm_anthropic, llm_aws],
@@ -232,7 +232,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     # Initialize flow manager
     flow_manager = FlowManager(
@@ -248,11 +253,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await worker.cancel()
+        logger.info("Client disconnected")
+        await runner.cancel()
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.add_workers(worker)
     await runner.run()
 
 

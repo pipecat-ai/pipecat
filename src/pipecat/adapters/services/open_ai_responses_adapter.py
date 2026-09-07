@@ -14,6 +14,7 @@ from openai.types.responses import FunctionToolParam, ResponseInputItemParam, To
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_tools
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -63,27 +64,27 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         """
         messages = self.get_messages(context)
 
-        # Check for conflict: system_instruction + initial system message
-        if system_instruction and messages:
+        if messages:
             first_msg = messages[0] if not isinstance(messages[0], LLMSpecificMessage) else None
             if first_msg and first_msg.get("role") == "system":
+                self._warn_context_system_message()
+                # Check for conflict: system_instruction + initial system message.
                 # `content` is `str | Iterable[...]`; we only forward it for
                 # warning purposes. Coerce non-strings to None.
                 first_content = first_msg.get("content", "")
-                self._resolve_system_instruction(
-                    first_content if isinstance(first_content, str) else None,
-                    system_instruction,
-                    discard_context_system=False,
-                )
+                if system_instruction:
+                    self._resolve_system_instruction(
+                        first_content if isinstance(first_content, str) else None,
+                        system_instruction,
+                        discard_context_system=False,
+                    )
 
         input_items = self._convert_messages_to_input(messages)
 
         params: OpenAIResponsesLLMInvocationParams = {
             "input": input_items,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": cast(
-                "list[ToolParam] | OpenAINotGiven", self.from_standard_tools(context.tools)
-            ),
+            "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
         }
 
         if system_instruction:

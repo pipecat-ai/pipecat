@@ -224,7 +224,7 @@ class WhatsAppApi:
         whatsapp_token: Bearer token for API authentication
     """
 
-    BASE_URL = f"https://graph.facebook.com/v23.0/"
+    BASE_URL = "https://graph.facebook.com/v23.0/"
 
     def __init__(
         self, whatsapp_token: str, phone_number_id: str, session: aiohttp.ClientSession

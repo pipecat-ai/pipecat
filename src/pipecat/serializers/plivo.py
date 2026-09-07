@@ -24,8 +24,8 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -107,13 +107,13 @@ class PlivoFrameSerializer(FrameSerializer):
         )
         self._hangup_attempted = False
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, setup: FrameProcessorSetup):
         """Sets up the serializer with pipeline configuration.
 
         Args:
-            frame: The StartFrame containing pipeline configuration.
+            setup: Configuration object containing setup parameters.
         """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
+        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Plivo WebSocket format.

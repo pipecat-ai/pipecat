@@ -64,7 +64,13 @@ class VideoQuality(StrEnum):
 
 
 class VideoSettings(BaseModel):
-    """Video encoding settings for session configuration."""
+    """Video encoding settings for session configuration.
+
+    Parameters:
+        encoding: Video codec the avatar stream is encoded with. LiveAvatar has
+            deprecated ``VP8``, so prefer ``H264``.
+        quality: Rendering quality of the avatar stream.
+    """
 
     encoding: VideoEncoding
     quality: VideoQuality = VideoQuality.high
@@ -76,7 +82,7 @@ class LiveAvatarNewSessionRequest(BaseModel):
     Parameters:
         mode (str): Session mode (default: "LITE").
         avatar_id (str): Unique identifier for the avatar.
-        video_settings (VideoSettings): Video encoding settings.
+        video_settings (VideoSettings): Video encoding settings (default: H264, high quality).
         is_sandbox (bool): Enable sandbox mode (default: False).
         avatar_persona (AvatarPersona): Avatar persona configuration.
         livekit_config (CustomSDKLiveKitConfig): Custom LiveKit configuration.
@@ -84,7 +90,7 @@ class LiveAvatarNewSessionRequest(BaseModel):
 
     mode: str = "LITE"
     avatar_id: str
-    video_settings: VideoSettings | None = VideoSettings(encoding=VideoEncoding.VP8)
+    video_settings: VideoSettings | None = VideoSettings(encoding=VideoEncoding.H264)
     is_sandbox: bool | None = False
     avatar_persona: AvatarPersona | None = None
     livekit_config: CustomSDKLiveKitConfig | None = None
@@ -273,8 +279,8 @@ class LiveAvatarApi(BaseAvatarApi):
             }
             params["video_settings"] = video_settings
         else:
-            # Fall back to VP8 encoding if video_settings is not provided
-            params["video_settings"] = {"encoding": VideoEncoding.VP8.value}
+            # Fall back to H264 encoding if video_settings is not provided
+            params["video_settings"] = {"encoding": VideoEncoding.H264.value}
 
         if request_data.livekit_config is not None:
             params["livekit_config"] = {
@@ -285,7 +291,7 @@ class LiveAvatarApi(BaseAvatarApi):
 
         logger.debug(f"Creating LiveAvatar session token with params: {params}")
         response = await self._request("POST", "/sessions/token", params)
-        logger.debug(f"LiveAvatar session token created")
+        logger.debug("LiveAvatar session token created")
 
         return SessionTokenResponse.model_validate(response)
 
@@ -301,7 +307,7 @@ class LiveAvatarApi(BaseAvatarApi):
             Session information including room URL and session ID.
         """
         response = await self._request("POST", "/sessions/start", bearer_token=session_token)
-        logger.debug(f"LiveAvatar session started")
+        logger.debug("LiveAvatar session started")
 
         return LiveAvatarSessionResponse.model_validate(response)
 

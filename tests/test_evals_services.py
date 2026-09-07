@@ -12,8 +12,8 @@ from pipecat.evals.judge import EvalJudge
 from pipecat.evals.services import _cfg_language, cartesia_service
 from pipecat.evals.speech import EvalSpeech, tts_cache_key, tts_sample_rate
 from pipecat.evals.transcribe import EvalTranscriber
-from pipecat.services.settings import NOT_GIVEN
 from pipecat.transcriptions.language import Language
+from pipecat.utils.types import NOT_GIVEN
 
 
 def _fake_stt(config, sample_rate):

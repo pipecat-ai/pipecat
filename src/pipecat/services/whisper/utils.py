@@ -57,7 +57,7 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> float | None:
 
     Args:
         frame: TranscriptionFrame with result from OpenAISTTService
-            using GPT-4o-transcribe model (when include_prob_metrics=True).
+            using a GPT transcription model (when include_prob_metrics=True).
 
     Returns:
         Probability (0-1) if available, None otherwise.
@@ -67,7 +67,7 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> float | None:
         from pipecat.services.openai.stt import OpenAISTTService
         from pipecat.services.whisper.utils import extract_openai_gpt4o_probability
 
-        stt = OpenAISTTService(model="gpt-4o-transcribe", include_prob_metrics=True)
+        stt = OpenAISTTService(include_prob_metrics=True)
         # ... use stt in pipeline ...
         # In your frame processor:
         if isinstance(frame, TranscriptionFrame):
@@ -78,7 +78,7 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> float | None:
     if not frame.result:
         return None
 
-    # OpenAI GPT-4o-transcribe format: response.logprobs
+    # OpenAI GPT transcription format: response.logprobs
     if hasattr(frame.result, "logprobs"):
         logprobs = frame.result.logprobs
         if logprobs:

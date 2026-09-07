@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EndFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -27,7 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughMixer(BaseAudioMixer):
@@ -53,7 +54,6 @@ async def _make_transport(mixer: BaseAudioMixer | None = None) -> BaseOutputTran
     transport.write_audio_frame = AsyncMock(return_value=True)
 
     task_manager = TaskManager()
-    task_manager.setup(TaskManagerParams(loop=asyncio.get_event_loop()))
     await transport.setup(
         FrameProcessorSetup(
             clock=SystemClock(),
@@ -261,3 +261,95 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())
+
+
+async def _make_wedging_transport(
+    write_audio_frame: AsyncMock, *, timeout: float
+) -> BaseOutputTransport:
+    params = TransportParams(
+        audio_out_enabled=True,
+        audio_out_end_silence_secs=0,
+        audio_out_write_timeout_secs=timeout,
+    )
+    transport = BaseOutputTransport(params)
+    transport.push_frame = AsyncMock()
+    transport.write_audio_frame = write_audio_frame
+
+    await transport.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+    start_frame = StartFrame(audio_out_sample_rate=16000)
+    await transport.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+    await transport.set_transport_ready(start_frame)
+    return transport
+
+
+def _one_second_of_audio() -> OutputAudioRawFrame:
+    # 16kHz, 16-bit mono, which the sender splits into 40ms chunks.
+    return OutputAudioRawFrame(audio=b"\x00" * 16000 * 2, sample_rate=16000, num_channels=1)
+
+
+class TestBaseOutputTransportWriteTimeout(unittest.IsolatedAsyncioTestCase):
+    """A peer that stops reading blocks the write on buffers that never drain."""
+
+    async def test_end_frame_still_reaches_downstream(self):
+        """`process_frame` pushes the EndFrame only after `stop()` returns."""
+        never_returns = asyncio.Event()
+
+        async def wedged(_frame):
+            await never_returns.wait()
+            return True
+
+        transport = await _make_wedging_transport(AsyncMock(side_effect=wedged), timeout=0.5)
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.1)
+
+        end_frame = EndFrame()
+        await asyncio.wait_for(
+            transport.process_frame(end_frame, FrameDirection.DOWNSTREAM), timeout=10.0
+        )
+
+        pushed = [call.args[0] for call in transport.push_frame.call_args_list]
+        self.assertIn(end_frame, pushed)
+
+    async def test_peer_is_written_off_once(self):
+        """Paying the timeout per queued frame would hang shutdown by a slower route."""
+        never_returns = asyncio.Event()
+
+        async def wedged(_frame):
+            await never_returns.wait()
+            return True
+
+        write = AsyncMock(side_effect=wedged)
+        transport = await _make_wedging_transport(write, timeout=0.3)
+
+        # A second of audio is 25 chunks, so a per-frame timeout would show up here.
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(1.0)
+
+        self.assertEqual(write.call_count, 1)
+        self.assertFalse(transport.is_usable)
+
+    async def test_slow_write_within_the_bound_is_not_cut_short(self):
+        """Long playout is legitimately slow; only a stalled write is written off."""
+
+        async def slow(_frame):
+            await asyncio.sleep(0.05)
+            return True
+
+        write = AsyncMock(side_effect=slow)
+        transport = await _make_wedging_transport(write, timeout=1.0)
+
+        await transport.process_frame(_one_second_of_audio(), FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(
+            transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM), timeout=30.0
+        )
+
+        # A second of audio is ~25 chunks; a written-off peer would show one
+        # write, so the exact count (resampling shifts it) doesn't matter.
+        self.assertGreater(write.call_count, 20)
+        self.assertTrue(transport.is_usable)

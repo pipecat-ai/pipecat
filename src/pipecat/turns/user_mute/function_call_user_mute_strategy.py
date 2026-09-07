@@ -44,7 +44,7 @@ class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
         if isinstance(frame, FunctionCallsStartedFrame):
             await self._handle_function_calls_started(frame)
         elif isinstance(frame, (FunctionCallCancelFrame, FunctionCallResultFrame)):
-            # Untracked ids reach here: cancel_async_tool_call is excluded from
+            # Untracked ids reach here: a built-in cancel tool is excluded from
             # FunctionCallsStartedFrame yet still emits a result, async tools
             # emit a result frame per intermediate update, and a bus bridge can
             # re-deliver a result another worker already handled.

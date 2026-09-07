@@ -15,11 +15,17 @@ Requirements:
         --extra openai --extra runner
 
 Usage:
+    # Local dev — bot is its own MOQ server, mints a self-signed cert
+    # for `localhost`, browser pins the fingerprint. No relay needed:
     uv run python examples/transports/transports-moq.py
 
-    # Open http://localhost:7860
-    # Important!: Choose `Media over QUIC` from the top left dropdown menu
-    # click Connect
+    # Client mode — dial an external relay instead (works behind NAT,
+    # since neither the bot nor the browser needs a reachable address):
+    uv run python examples/transports/transports-moq.py \\
+        --moq-connect https://cdn.moq.dev/anon
+
+    # Then open http://localhost:7860, choose `Media over QUIC` from the
+    # top left dropdown menu, and click Connect.
 """
 
 import os
@@ -32,7 +38,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -101,7 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
 
@@ -150,7 +156,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport):
@@ -163,7 +174,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
         logger.info("Disconnected from MOQ relay")
-        await worker.cancel()
+        await runner.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):
@@ -171,10 +182,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # MOQInputTransport.start() auto-connects to the relay when the
     # pipeline starts, so we don't dial transport.connect() here.
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
     try:
-        await runner.add_workers(worker)
         await runner.run()
     finally:
         await transport.disconnect()

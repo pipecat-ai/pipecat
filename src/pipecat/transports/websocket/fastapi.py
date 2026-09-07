@@ -12,15 +12,14 @@ with configurable session timeouts and WAV header generation.
 """
 
 import asyncio
-import io
 import time
 import typing
-import wave
 from collections.abc import Awaitable, Callable
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
@@ -34,7 +33,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -151,7 +150,7 @@ class FastAPIWebsocketClient:
         self._ws_close_timeout = ws_close_timeout
         self._close_task: asyncio.Task | None = None
 
-    async def setup(self, _: StartFrame):
+    async def setup(self, _: FrameProcessorSetup):
         """Set up the WebSocket client.
 
         Args:
@@ -293,8 +292,24 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         self._receive_task = None
         self._monitor_websocket_task = None
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the input transport with the frame processor setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(setup)
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
+
+    async def cleanup(self):
+        """Clean up transport resources."""
+        await super().cleanup()
+        await self._teardown()
+        await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
         """Start the input transport and begin message processing.
@@ -304,22 +319,17 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(frame)
-        if self._params.serializer:
-            await self._params.serializer.setup(frame)
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(
                 self._monitor_websocket(self._params.session_timeout)
             )
+
         await self._client.trigger_client_connected()
         await self.push_frame(ClientConnectedFrame())
+
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())
+
         await self.set_transport_ready(frame)
 
     async def _stop_tasks(self):
@@ -358,12 +368,6 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         """
         await super().cancel(frame)
         await self._teardown()
-
-    async def cleanup(self):
-        """Clean up transport resources."""
-        await super().cleanup()
-        await self._teardown()
-        await self._transport.cleanup()
 
     async def _receive_messages(self):
         """Main message receiving loop for WebSocket messages."""
@@ -429,7 +433,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
-        # computed on StartFrame.
+        # computed during setup.
         self._send_interval = 0
         self._next_send_time = 0
 
@@ -441,8 +445,20 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         # emitted, preserving any remainder for subsequent sends.
         self._audio_send_buffer = bytearray()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the output transport with the frame processor setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
+        await super().setup(setup)
+
+        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+
+        await self._client.setup(setup)
+
+        if self._params.serializer:
+            await self._params.serializer.setup(setup)
 
     async def start(self, frame: StartFrame):
         """Start the output transport and initialize timing.
@@ -452,15 +468,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(frame)
-        if self._params.serializer:
-            await self._params.serializer.setup(frame)
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -535,34 +542,33 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         )
 
         if self._params.add_wav_header:
-            with io.BytesIO() as buffer:
-                with wave.open(buffer, "wb") as wf:
-                    wf.setsampwidth(2)
-                    wf.setnchannels(frame.num_channels)
-                    wf.setframerate(frame.sample_rate)
-                    wf.writeframes(frame.audio)
-                wav_frame = OutputAudioRawFrame(
-                    buffer.getvalue(),
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
-                frame = wav_frame
+            frame = OutputAudioRawFrame(
+                pcm_to_wav(frame.audio, frame.sample_rate, frame.num_channels),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
 
-        await self._write_frame(frame)
+        if not await self._write_frame(frame):
+            return False
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
 
         return True
 
-    async def _write_frame(self, frame: Frame):
-        """Serialize and send a frame through the WebSocket."""
+    async def _write_frame(self, frame: Frame) -> bool:
+        """Serialize and send a frame through the WebSocket.
+
+        Returns:
+            Whether the frame was sent.
+        """
         if self._client.is_closing or not self._client.is_connected:
-            return
+            return False
 
         if not self._params.serializer:
-            return
+            return False
 
+        success = False
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
@@ -579,11 +585,16 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                         chunk = bytes(self._audio_send_buffer[:packet_bytes])
                         del self._audio_send_buffer[:packet_bytes]
                         await self._client.send(chunk)
-                    return
+                    return True
 
                 await self._client.send(payload)
+
+                success = True
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
+            success = False
+
+        return success
 
     async def _write_audio_sleep(self):
         """Simulate audio playback timing with appropriate delays."""

@@ -1,0 +1,62 @@
+name: async_tool_cancellation_concurrent
+
+# Text: two calls of one cancellable tool are running at once, and the user
+# abandons one of them. The cancel tool can't tell the calls apart on its own, so
+# the bot has to name the one to stop by the tool_call_id the conversation
+# reported it running under, and stop only that one. The other has to survive and
+# still be delivered.
+
+judge: !include judge_text.yaml
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "Write me a report about sea turtles."
+    expect:
+      - event: function_call
+        calls:
+          - name: write_report
+
+  - user: "Also write one about volcanoes."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: write_report
+
+  # Both reports are now in flight. Which one stopped isn't asserted directly:
+  # one report being cancelled here, and volcanoes being the one announced at
+  # the end, together leave only the abandoned call.
+  - user: "Actually, never mind the sea turtle report. Tell me a joke instead."
+    send_after:
+      delay_ms: 3000
+    expect:
+      - event: function_call
+        calls:
+          - name: cancel_write_report
+      # Asking for the call to stop is not the same as it stopping: work that
+      # already finished stops too, and its result is delivered either way.
+      # `cancelled` is what separates the two.
+      - event: function_call_stopped
+        calls:
+          - name: write_report
+            args:
+              cancelled: true
+      # Presence only. The turn asks for a joke while abandoning a report, and
+      # a bot that answers either half has answered it; which one its speech
+      # gets segmented into isn't the behavior under test. What this catches is
+      # the bot falling silent, having cancelled without replying at all.
+      - event: response
+
+  # No user turn: the volcano report was never cancelled, so it finishes and the
+  # bot reports it unprompted. Speaking again here would race that — whichever
+  # reply the judge caught would depend on which landed first.
+  #
+  # Naming volcanoes is what shows the surviving report still gets delivered.
+  - expect:
+      - event: response
+        eval: "says a report about volcanoes is finished or ready"

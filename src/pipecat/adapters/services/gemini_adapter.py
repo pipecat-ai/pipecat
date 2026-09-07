@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict, cast
 
 from loguru import logger
-from openai import NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -21,6 +20,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMSpecificMessage,
     LLMStandardMessage,
+    NotGiven,
 )
 
 try:
@@ -47,6 +47,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     - Converting Pipecat's standardized tools schema to Gemini's function-calling format.
     - Extracting and sanitizing messages from the LLM context for logging with Gemini.
     """
+
+    def __init__(self):
+        """Initialize the adapter."""
+        super().__init__()
+        # (adaptation, tool name) pairs already reported, so a tool set needing
+        # them warns once rather than on every inference.
+        self._warned_schema_adaptations: set[tuple[str, str]] = set()
 
     @property
     def id_for_llm_specific_messages(self) -> str:
@@ -92,30 +99,53 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
 
-        def _strip_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
-            """Recursively remove "additionalProperties" fields from JSON schema, as they're not supported by Gemini.
+        def _adapt_schema(schema: Any, notes: set[str]) -> Any:
+            """Recursively adapt a JSON schema to the subset Gemini accepts.
+
+            Tool schemas are JSON Schema, but Gemini takes only a limited subset
+            of it — its schema object follows OpenAPI 3.0's, which predates JSON
+            Schema alignment — and it rejects anything outside that subset. Three
+            constructs need adapting:
+
+            - Keys it has no field for, namely ``additionalProperties`` and vendor
+              extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's
+              MCP server attaches to its tool properties), are dropped.
+            - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
+            - ``enum`` members must be strings, so an ``enum`` holding other values
+              is dropped and its constraint lost.
 
             Args:
-                schema: The JSON schema dict to process.
+                schema: The JSON schema to process.
+                notes: Collects one description per kind of adaptation applied.
 
             Returns:
-                JSON schema dict with "additionalProperties" stripped out.
+                The schema, in the form Gemini accepts.
             """
             if not isinstance(schema, dict):
                 return schema
 
-            result = {}
+            result: dict[str, Any] = {}
 
             for key, value in schema.items():
-                if key == "additionalProperties":
-                    continue
+                if key == "additionalProperties" or key.startswith("x-"):
+                    notes.add(f"dropped unsupported key '{key}'")
+                elif key == "properties" and isinstance(value, dict):
+                    # Keys here name the tool's parameters rather than schema
+                    # keywords, so adapt the values but keep every key.
+                    result[key] = {name: _adapt_schema(prop, notes) for name, prop in value.items()}
+                elif key == "type" and isinstance(value, list):
+                    notes.add("converted a union 'type' to 'anyOf'")
+                    result["anyOf"] = [{"type": member} for member in value]
+                elif (
+                    key == "enum"
+                    and isinstance(value, list)
+                    and not all(isinstance(member, str) for member in value)
+                ):
+                    notes.add("dropped a non-string 'enum', losing its constraint")
                 elif isinstance(value, dict):
-                    result[key] = _strip_additional_properties(value)
+                    result[key] = _adapt_schema(value, notes)
                 elif isinstance(value, list):
-                    result[key] = [
-                        _strip_additional_properties(item) if isinstance(item, dict) else item
-                        for item in value
-                    ]
+                    result[key] = [_adapt_schema(item, notes) for item in value]
                 else:
                     result[key] = value
 
@@ -124,12 +154,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         functions_schema = tools_schema.standard_tools
         if functions_schema:
             formatted_functions = []
+            adapted: dict[str, list[str]] = {}
             for func in functions_schema:
                 func_dict = func.to_default_dict()
-                func_dict["parameters"]["properties"] = _strip_additional_properties(
-                    func_dict["parameters"]["properties"]
-                )
+                notes: set[str] = set()
+                func_dict["parameters"] = _adapt_schema(func_dict["parameters"], notes)
+                for note in notes:
+                    adapted.setdefault(note, []).append(func_dict["name"])
                 formatted_functions.append(func_dict)
+            self._warn_schema_adaptations(adapted)
             formatted_standard_tools = [{"function_declarations": formatted_functions}]
         else:
             formatted_standard_tools = []
@@ -138,6 +171,30 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
         return formatted_standard_tools + custom_gemini_tools
+
+    def _warn_schema_adaptations(self, adapted: dict[str, list[str]]) -> None:
+        """Report tool schemas that had to be adapted before Gemini would accept them.
+
+        Each (adaptation, tool) pair is reported once, so a stable tool set warns
+        on the first inference rather than on all of them, while a tool added
+        later still gets reported.
+
+        Args:
+            adapted: Adaptation description mapped to the tools it applied to.
+        """
+        lines = []
+        for note, tools in sorted(adapted.items()):
+            fresh = [t for t in tools if (note, t) not in self._warned_schema_adaptations]
+            if not fresh:
+                continue
+            self._warned_schema_adaptations.update((note, t) for t in fresh)
+            listed = ", ".join(fresh[:3])
+            if len(fresh) > 3:
+                listed += f" and {len(fresh) - 3} more"
+            lines.append(f"  {note}: {listed}")
+
+        if lines:
+            logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
 
     @staticmethod
     def to_function_response_dict(content: Any) -> dict[str, Any]:
@@ -454,7 +511,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     )
                 elif c["type"] == "image_url":
                     url = c["image_url"]["url"]
-                    logger.warning(f"Unsupported 'image_url': {url}")
+                    parts.append(Part.from_uri(file_uri=url))
                 elif c["type"] == "input_audio":
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
@@ -638,7 +695,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 log_display_text = f"{text[:50]}..." if len(text) > 50 else text
                 logger.trace(f" - To text: {log_display_text}")
             elif bookmark.get("inline_data"):
-                logger.trace(f" - To inline data")
+                logger.trace(" - To inline data")
 
         # Get all assistant messages
         assistant_messages = [
@@ -739,7 +796,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # strict message order. Comparing actual data is expensive.
             and len(part.inline_data.data) == len(bookmark_inline_data.data)
         ):
-            logger.trace(f"Thought signature inline data match")
+            logger.trace("Thought signature inline data match")
             return True
 
         return False

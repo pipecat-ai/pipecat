@@ -1,0 +1,37 @@
+# Handing a conversation between two LLM workers on the bus: the greeter routes
+# a product question to support, support hands back when the user wants to
+# browse again, and whoever holds the conversation ends it.
+name: acme_handoff
+
+judge: !include judge_text.yaml
+
+turns:
+  - expect:
+      - event: response
+        eval: "the bot welcomes the user to Acme Corp and names products it can tell them about"
+
+  - user: "Tell me about the Rocket Boots."
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_agent
+            args: { agent: support }
+      - event: response
+        eval: "the bot describes the Acme Rocket Boots, for example their price or their top speed"
+
+  - user: "What else do you sell?"
+    expect:
+      - event: function_call
+        calls:
+          - name: transfer_to_agent
+            args: { agent: greeter }
+      - event: response
+        eval: "the bot offers the Acme products for the user to choose from"
+
+  # Terminal turn: end_conversation tears the pipeline down before any farewell
+  # reaches the harness, so assert the call alone.
+  - user: "That's everything, goodbye."
+    expect:
+      - event: function_call
+        calls:
+          - name: end_conversation

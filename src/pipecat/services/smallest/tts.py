@@ -27,14 +27,15 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 class SmallestTTSModel(StrEnum):
@@ -66,19 +67,34 @@ def language_to_smallest_tts_language(language: Language) -> str:
         Language.AR: "ar",
         Language.BN: "bn",
         Language.DE: "de",
+        Language.EL: "el",
         Language.EN: "en",
         Language.ES: "es",
+        Language.FI: "fi",
         Language.FR: "fr",
         Language.GU: "gu",
-        Language.HE: "he",
         Language.HI: "hi",
+        Language.ID: "id",
         Language.IT: "it",
+        Language.JA: "ja",
         Language.KN: "kn",
+        Language.KO: "ko",
+        Language.ML: "ml",
         Language.MR: "mr",
+        Language.MS: "ms",
         Language.NL: "nl",
+        Language.NO: "no",
+        Language.OR: "or",
+        Language.PA: "pa",
         Language.PL: "pl",
+        Language.PT: "pt",
         Language.RU: "ru",
+        Language.SV: "sv",
         Language.TA: "ta",
+        Language.TE: "te",
+        Language.TR: "tr",
+        Language.VI: "vi",
+        Language.ZH: "zh",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
@@ -92,7 +108,7 @@ class SmallestTTSSettings(TTSSettings):
         speed: Speech speed multiplier (0.5–2.0).
     """
 
-    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -252,13 +268,13 @@ class SmallestTTSService(InterruptibleTTSService):
         """Build the WebSocket URL."""
         return f"{self._base_url}/waves/v1/tts/live"
 
-    async def start(self, frame: StartFrame):
-        """Start the Smallest TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
         await self._connect()
 
     async def stop(self, frame: EndFrame):

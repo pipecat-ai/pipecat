@@ -10,7 +10,7 @@ fi
 
 # Build docs using uv
 echo "Installing dependencies with uv..."
-uv sync --group docs --all-extras --no-extra gstreamer --no-extra local_smart_turn --no-extra moondream --no-extra mlx-whisper --no-extra pocket-tts
+"$(dirname "$0")/install-deps.sh"
 
 # Check if sphinx-build is available
 if ! uv run sphinx-build --version &> /dev/null; then

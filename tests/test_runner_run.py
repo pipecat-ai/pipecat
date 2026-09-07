@@ -10,6 +10,7 @@ import sys
 import types
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -20,6 +21,7 @@ from starlette.testclient import WebSocketDisconnect
 from pipecat.runner.run import (
     _extract_ws_token,
     _generate_ws_token,
+    _parse_ice_servers,
     _print_startup_message,
     _setup_daily_routes,
     _setup_telephony_routes,
@@ -30,6 +32,72 @@ from pipecat.runner.run import (
     _transport_routes_enabled,
     _verify_and_consume_ws_token,
 )
+
+try:
+    import jwt as _jwt  # noqa: F401
+    from livekit import api as _livekit_api  # noqa: F401
+
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
+
+
+def _fake_smallwebrtc_modules(handler_kwargs: list | None = None) -> dict:
+    """Build stand-in smallwebrtc modules so WebRTC routes can be set up without aiortc.
+
+    Args:
+        handler_kwargs: Optional list that collects the keyword arguments each
+            ``SmallWebRTCRequestHandler`` is constructed with.
+
+    Returns:
+        Module map suitable for ``patch.dict(sys.modules, ...)``.
+    """
+    connection_module = types.ModuleType("pipecat.transports.smallwebrtc.connection")
+    connection_module.SmallWebRTCConnection = MagicMock()
+
+    @dataclass
+    class IceServer:
+        urls: str | list[str]
+        username: str | None = None
+        credential: str | None = None
+
+    connection_module.IceServer = IceServer
+
+    request_handler_module = types.ModuleType("pipecat.transports.smallwebrtc.request_handler")
+
+    class IceCandidate(BaseModel):
+        candidate: str
+        sdp_mid: str
+        sdp_mline_index: int
+
+    class SmallWebRTCPatchRequest(BaseModel):
+        pc_id: str
+        candidates: list[IceCandidate] = []
+
+    class SmallWebRTCRequest(BaseModel):
+        sdp: str
+        type: str
+        pc_id: str | None = None
+        restart_pc: bool | None = None
+        request_data: dict | None = None
+
+    class SmallWebRTCRequestHandler:
+        def __init__(self, *args, **kwargs):
+            if handler_kwargs is not None:
+                handler_kwargs.append(kwargs)
+
+        async def close(self):
+            pass
+
+    request_handler_module.IceCandidate = IceCandidate
+    request_handler_module.SmallWebRTCPatchRequest = SmallWebRTCPatchRequest
+    request_handler_module.SmallWebRTCRequest = SmallWebRTCRequest
+    request_handler_module.SmallWebRTCRequestHandler = SmallWebRTCRequestHandler
+
+    return {
+        "pipecat.transports.smallwebrtc.connection": connection_module,
+        "pipecat.transports.smallwebrtc.request_handler": request_handler_module,
+    }
 
 
 class TestRunnerRun(unittest.TestCase):
@@ -49,6 +117,7 @@ class TestRunnerRun(unittest.TestCase):
         self.assertEqual(_transport_route_dependencies("plivo"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("exotel"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("vonage"), ())
+        self.assertEqual(_transport_route_dependencies("livekit"), ("livekit.api",))
 
     def test_transport_routes_enabled_maps_transports_to_dependency_checks(self):
         def module_available(module: str) -> bool:
@@ -65,7 +134,7 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_skips_when_aiortc_is_missing(self):
         """WebRTC routes should be optional when the webrtc extra is not installed."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost")
+        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=False),
@@ -80,57 +149,68 @@ class TestRunnerRun(unittest.TestCase):
     def test_setup_webrtc_routes_registers_routes_when_webrtc_is_available(self):
         """WebRTC routes should be registered when dependencies are available."""
         app = FastAPI()
-        args = argparse.Namespace(folder=None, esp32=False, host="localhost")
-
-        connection_module = types.ModuleType("pipecat.transports.smallwebrtc.connection")
-        connection_module.SmallWebRTCConnection = MagicMock()
-
-        request_handler_module = types.ModuleType("pipecat.transports.smallwebrtc.request_handler")
-
-        class IceCandidate(BaseModel):
-            candidate: str
-            sdp_mid: str
-            sdp_mline_index: int
-
-        class SmallWebRTCPatchRequest(BaseModel):
-            pc_id: str
-            candidates: list[IceCandidate] = []
-
-        class SmallWebRTCRequest(BaseModel):
-            sdp: str
-            type: str
-            pc_id: str | None = None
-            restart_pc: bool | None = None
-            request_data: dict | None = None
-
-        request_handler_module.IceCandidate = IceCandidate
-        request_handler_module.SmallWebRTCPatchRequest = SmallWebRTCPatchRequest
-        request_handler_module.SmallWebRTCRequest = SmallWebRTCRequest
-
-        class MockSmallWebRTCRequestHandler:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def close(self):
-                pass
-
-        request_handler_module.SmallWebRTCRequestHandler = MockSmallWebRTCRequestHandler
+        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
 
         with (
             patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
-            patch.dict(
-                sys.modules,
-                {
-                    "pipecat.transports.smallwebrtc.connection": connection_module,
-                    "pipecat.transports.smallwebrtc.request_handler": request_handler_module,
-                },
-            ),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules()),
         ):
             _setup_webrtc_routes(app, args, {})
 
         paths = {route.path for route in app.routes}
         self.assertIn("/api/offer", paths)
         self.assertIn("/files/{filename:path}", paths)
+
+    def test_setup_webrtc_routes_gives_handler_no_ice_servers_when_unconfigured(self):
+        """The bot peer keeps its previous behaviour when nothing is configured."""
+        app = FastAPI()
+        args = argparse.Namespace(folder=None, esp32=False, host="localhost", ice_servers=[])
+        handler_kwargs = []
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, _fake_smallwebrtc_modules(handler_kwargs)),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        self.assertIsNone(handler_kwargs[0]["ice_servers"])
+
+    def test_setup_webrtc_routes_passes_configured_ice_servers_to_handler(self):
+        """Configured STUN and TURN servers must reach the bot's peer connection."""
+        app = FastAPI()
+        args = argparse.Namespace(
+            folder=None,
+            esp32=False,
+            host="localhost",
+            ice_servers=[
+                {"urls": "stun:stun.l.google.com:19302"},
+                {
+                    "urls": "turn:turn.example.com:3478",
+                    "username": "user",
+                    "credential": "secret",
+                },
+            ],
+        )
+        handler_kwargs = []
+
+        fake_modules = _fake_smallwebrtc_modules(handler_kwargs)
+        ice_server_cls = fake_modules["pipecat.transports.smallwebrtc.connection"].IceServer
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch.dict(sys.modules, fake_modules),
+        ):
+            _setup_webrtc_routes(app, args, {})
+
+        self.assertEqual(
+            handler_kwargs[0]["ice_servers"],
+            [
+                ice_server_cls(urls="stun:stun.l.google.com:19302"),
+                ice_server_cls(
+                    urls="turn:turn.example.com:3478", username="user", credential="secret"
+                ),
+            ],
+        )
 
     def test_setup_websocket_routes_skips_when_websocket_is_missing(self):
         """Plain WebSocket routes should be optional."""
@@ -237,7 +317,7 @@ class TestRunnerRun(unittest.TestCase):
 
     def test_start_rejects_disabled_transport_before_running_bot(self):
         app = FastAPI()
-        args = argparse.Namespace(transport=None)
+        args = argparse.Namespace(transport=None, ice_servers=[])
         _setup_unified_start_route(app, args, {})
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
@@ -271,6 +351,7 @@ class TestRunnerRun(unittest.TestCase):
                 "   → Open: http://localhost:7860\n"
                 "   → Enabled transports: telephony, websocket\n"
                 "   → Disabled transports: daily (install pipecat-ai[daily]), "
+                "livekit (install pipecat-ai[livekit]), "
                 "webrtc (install pipecat-ai[webrtc]), "
                 "moq (install pipecat-ai[moq])\n"
                 "   → Allowed origins: all (no restriction)\n"
@@ -292,7 +373,7 @@ class TestRunnerRun(unittest.TestCase):
                 "\n"
                 "🚀 Bot ready!\n"
                 "   → Open: http://localhost:7860\n"
-                "   → Enabled transports: daily, webrtc, telephony, websocket, moq\n"
+                "   → Enabled transports: daily, livekit, webrtc, telephony, websocket, moq\n"
                 "   → Allowed origins: all (no restriction)\n"
                 "\n"
             ),
@@ -334,6 +415,58 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitRunnerRoutes(unittest.TestCase):
+    def test_livekit_credentials_raises_when_unconfigured(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(Exception, "LIVEKIT_URL"):
+                livekit_credentials()
+
+    def test_livekit_credentials_returns_configured_values(self):
+        from pipecat.runner.livekit import livekit_credentials
+
+        env = {
+            "LIVEKIT_URL": "wss://test.livekit.cloud",
+            "LIVEKIT_API_KEY": "key",
+            "LIVEKIT_API_SECRET": "secret",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            url, api_key, api_secret = livekit_credentials()
+        self.assertEqual((url, api_key, api_secret), (env["LIVEKIT_URL"], "key", "secret"))
+
+    def test_generate_session_tokens_suffixes_identity_with_session_id(self):
+        """Regression: fixed identities collide across concurrent sessions sharing
+        a room (e.g. a fixed LIVEKIT_ROOM_NAME), evicting the earlier participant.
+        """
+        import uuid
+
+        import jwt
+
+        from pipecat.runner.livekit import generate_session_tokens
+
+        agent_token_1, user_token_1 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+        agent_token_2, user_token_2 = generate_session_tokens(
+            "shared-room", str(uuid.uuid4()), "key", "secret"
+        )
+
+        def identity(token: str) -> str:
+            return jwt.decode(token, options={"verify_signature": False})["sub"]
+
+        identities = {
+            identity(agent_token_1),
+            identity(user_token_1),
+            identity(agent_token_2),
+            identity(user_token_2),
+        }
+        self.assertEqual(
+            len(identities), 4, "every session/role pair should have a unique identity"
+        )
 
 
 class TestWsAuthTokens(unittest.TestCase):
@@ -466,6 +599,7 @@ class TestWsAuthStartEndpoint(unittest.TestCase):
             ws_auth=ws_auth,
             host="localhost",
             port=7860,
+            ice_servers=[],
         )
         _setup_unified_start_route(app, args, {})
         return app
@@ -691,6 +825,107 @@ class TestWsOriginConnectionBehavior(unittest.TestCase):
                 "/ws", headers={"Origin": "https://allowed.com"}
             ):
                 pass
+
+
+class TestIceServerParsing(unittest.TestCase):
+    """Unit tests for the --ice-servers and PIPECAT_ICE_SERVERS parser."""
+
+    def test_empty_input_yields_no_servers(self):
+        self.assertEqual(_parse_ice_servers(None), [])
+        self.assertEqual(_parse_ice_servers(""), [])
+        self.assertEqual(_parse_ice_servers([]), [])
+
+    def test_cli_tokens_of_bare_urls(self):
+        self.assertEqual(
+            _parse_ice_servers(["stun:stun.l.google.com:19302", "turn:turn.example.com:3478"]),
+            [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "turn:turn.example.com:3478"}],
+        )
+
+    def test_cli_token_of_json_object_keeps_credentials(self):
+        self.assertEqual(
+            _parse_ice_servers(
+                ['{"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"}']
+            ),
+            [{"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"}],
+        )
+
+    def test_env_value_is_split_on_commas(self):
+        self.assertEqual(
+            _parse_ice_servers("stun:stun.l.google.com:19302, turn:turn.example.com:3478"),
+            [{"urls": "stun:stun.l.google.com:19302"}, {"urls": "turn:turn.example.com:3478"}],
+        )
+
+    def test_env_value_may_be_a_json_array(self):
+        self.assertEqual(
+            _parse_ice_servers(
+                '[{"urls": ["turn:turn.example.com:3478"], "username": "u", "credential": "p"},'
+                ' "stun:stun.l.google.com:19302"]'
+            ),
+            [
+                {"urls": ["turn:turn.example.com:3478"], "username": "u", "credential": "p"},
+                {"urls": "stun:stun.l.google.com:19302"},
+            ],
+        )
+
+    def test_null_credentials_are_dropped(self):
+        self.assertEqual(
+            _parse_ice_servers('{"urls": "stun:stun.example.com:3478", "username": null}'),
+            [{"urls": "stun:stun.example.com:3478"}],
+        )
+
+    def test_entry_without_urls_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('{"username": "u", "credential": "p"}')
+
+    def test_unsupported_key_is_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            _parse_ice_servers('{"urls": "turn:turn.example.com:3478", "user": "u"}')
+        self.assertIn("user", str(cm.exception))
+
+    def test_malformed_json_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('{"urls": ')
+        with self.assertRaises(ValueError):
+            _parse_ice_servers('[{"urls": "turn:turn.example.com:3478"')
+
+    def test_json_scalar_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _parse_ice_servers("[7]")
+
+
+class TestStartIceConfig(unittest.TestCase):
+    """Tests for the iceConfig the WebRTC /start response hands to clients."""
+
+    def _post_start(self, ice_servers: list, body: dict) -> dict:
+        app = FastAPI()
+        args = argparse.Namespace(transport=None, ice_servers=ice_servers)
+        _setup_unified_start_route(app, args, {})
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            response = TestClient(app).post("/start", json={"transport": "webrtc", **body})
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_no_ice_config_without_configuration_or_request_flag(self):
+        self.assertIsNone(self._post_start([], {}).get("iceConfig"))
+
+    def test_request_flag_still_returns_the_public_stun_fallback(self):
+        result = self._post_start([], {"enableDefaultIceServers": True})
+        self.assertEqual(
+            result["iceConfig"],
+            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        )
+
+    def test_configured_servers_are_returned_to_the_client(self):
+        configured = [
+            {"urls": "turn:turn.example.com:3478", "username": "u", "credential": "p"},
+        ]
+        result = self._post_start(configured, {})
+        self.assertEqual(result["iceConfig"], {"iceServers": configured})
+
+    def test_configured_servers_take_precedence_over_the_fallback(self):
+        configured = [{"urls": "stun:stun.example.com:3478"}]
+        result = self._post_start(configured, {"enableDefaultIceServers": True})
+        self.assertEqual(result["iceConfig"], {"iceServers": configured})
 
 
 if __name__ == "__main__":
