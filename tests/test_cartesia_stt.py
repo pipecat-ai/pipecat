@@ -129,6 +129,51 @@ async def test_cartesia_connect_websocket_url_omits_keyterm_for_non_ink_2_model(
 
 
 @pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_includes_finalization_settings(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(min_volume=0.1, max_silence_duration_secs=2.5),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["min_volume"] == ["0.1"]
+    assert query["max_silence_duration_secs"] == ["2.5"]
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_omits_finalization_settings_when_not_set(monkeypatch):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service()
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert "min_volume" not in query
+    assert "max_silence_duration_secs" not in query
+
+
+@pytest.mark.asyncio
+async def test_cartesia_connect_websocket_url_omits_finalization_for_non_ink_whisper_model(
+    monkeypatch,
+):
+    captured = _capture_connect_url(monkeypatch)
+
+    service = _connected_service(
+        settings=CartesiaSTTService.Settings(model="ink-2", min_volume=0.1),
+    )
+
+    await service._connect_websocket()
+
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["model"] == ["ink-2"]
+    assert "min_volume" not in query
+
+
+@pytest.mark.asyncio
 async def test_cartesia_connect_websocket_url_clamps_keyterms_to_limits(monkeypatch):
     captured = _capture_connect_url(monkeypatch)
 
