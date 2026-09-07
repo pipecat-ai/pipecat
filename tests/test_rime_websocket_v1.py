@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 import websockets
 from google.protobuf import json_format
+from rime_api import text_to_speech_pb2 as proto
 from websockets.asyncio.server import serve
 from websockets.protocol import State
 
@@ -29,7 +30,6 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.rime._proto import websocket_v1_pb2 as proto
 from pipecat.services.rime._websocket_v1 import (
     AudioEvent,
     CancelledEvent,
