@@ -38,9 +38,6 @@ class TransportParams(BaseModel):
             When False, the transport will wait for audio data instead of inserting silence.
         audio_out_max_consecutive_failures: Max failure of transport write before givingup
         audio_out_sleep_between_failures: Sleep interval between subsequent failures
-        audio_out_drain_timeout_secs: How long the audio task may make no progress
-            before an ``EndFrame`` stops waiting for it and cancels it. Bounds the
-            stall rather than the total drain, so long queued playout still flushes.
         bot_vad_stop_secs: Fallback timeout (in seconds) used to mark the bot as
             stopped speaking when no explicit ``TTSStoppedFrame`` arrives (e.g.
             for realtime/speech-to-speech LLMs). Lower this for realtime models
@@ -86,7 +83,6 @@ class TransportParams(BaseModel):
     audio_out_auto_silence: bool = True
     audio_out_max_consecutive_failures: int = 10
     audio_out_sleep_between_failures: float = 0.5
-    audio_out_drain_timeout_secs: float = 5.0
     bot_vad_stop_secs: float = 3.0
     audio_out_write_timeout_secs: float = 10.0
     audio_in_enabled: bool = False
