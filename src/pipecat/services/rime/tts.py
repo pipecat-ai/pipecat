@@ -12,6 +12,7 @@ using Rime's API for streaming and batch audio synthesis.
 
 import asyncio
 import base64
+import importlib
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -346,6 +347,14 @@ class RimeTTSService(WebsocketTTSService):
         resolved_websocket_protocol: WebSocketProtocol | None = None
         resolved_v1_model: str | None = None
         if use_websocket_v1:
+            try:
+                importlib.import_module("rime_api.text_to_speech_pb2")
+            except ModuleNotFoundError as exc:
+                if exc.name != "rime_api":
+                    raise
+                raise ImportError(
+                    'Rime WebSocket v1 requires `uv add "pipecat-ai[rime]"`.'
+                ) from exc
             assert websocket_url is not None
             resolved_websocket_protocol = cast(WebSocketProtocol, websocket_protocol or "binary")
             explicit_model = cast(str, default_settings.model) if model_was_explicit else None
