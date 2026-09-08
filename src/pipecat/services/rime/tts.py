@@ -476,7 +476,7 @@ class RimeTTSService(WebsocketTTSService):
         )
         if not model.startswith("mist") and any(value is not None for value in mist_fields):
             raise ValueError("Rime WebSocket v1 Mist settings require a Mist model")
-        if model.startswith("mist") and settings.text_lookahead_tokens is not None:
+        if model != "coda" and settings.text_lookahead_tokens is not None:
             raise ValueError("text_lookahead_tokens requires the Coda model")
         if model == "mistv2" and settings.timeScaleFactor is not None:
             raise ValueError("timeScaleFactor is not supported by the mistv2 model")

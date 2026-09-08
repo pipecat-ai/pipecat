@@ -1,0 +1,1 @@
+- Reject Rime `text_lookahead_tokens` settings for models other than Coda, including runtime settings updates.
