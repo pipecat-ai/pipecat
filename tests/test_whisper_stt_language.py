@@ -49,6 +49,17 @@ def test_english_only_model_without_a_language_is_fine():
     assert service._settings.language == "en"
 
 
+def test_no_language_means_auto_detect_on_a_multilingual_model():
+    """``language=None`` hands language detection to Whisper rather than naming one."""
+    service = _build(["en", "es", "zh"], model="small", language=None)
+    assert service._settings.language is None
+
+
+def test_no_language_means_auto_detect_on_an_english_only_model():
+    service = _build(["en"], model="distil-medium.en", language=None)
+    assert service._settings.language is None
+
+
 def test_model_that_does_not_publish_languages_is_not_second_guessed():
     service = _build(None, model="custom", language=Language.ES)
     assert service._settings.language == "es"

@@ -351,14 +351,17 @@ class WhisperSTTService(SegmentedSTTService):
         The English-only models (every ``.en`` one, including the default) accept
         any language and transcribe as English regardless, so a mismatch would
         otherwise surface as fluent-looking output in the wrong language rather
-        than as an error.
+        than as an error. A language of ``None`` asks Whisper to detect the
+        language itself, which every model supports.
 
         Returns:
             An explanatory message, or ``None`` when the pairing is usable.
         """
         supported = getattr(self._model, "supported_languages", None)
         language = self._settings.language
-        if not supported or not is_given(language) or language in supported:
+        if not supported or not is_given(language) or language is None:
+            return None
+        if language in supported:
             return None
         return (
             f"Whisper model '{assert_given(self._settings.model)}' cannot transcribe "
