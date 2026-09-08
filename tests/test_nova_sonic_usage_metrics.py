@@ -8,10 +8,10 @@
 
 Nova Sonic emits a ``usageEvent`` whose ``details.delta`` carries the tokens
 consumed since the previous event, split into speech/text buckets for input and
-output. The service collapses those buckets into the modality-agnostic
-``LLMTokenUsage`` (``prompt_tokens`` / ``completion_tokens``) and reports the
-*delta* — not the cumulative ``details.total`` — so usage stays incremental per
-event, matching the other speech-to-speech services.
+output. The service reports combined ``prompt_tokens`` / ``completion_tokens``
+alongside their audio subsets in ``LLMTokenUsage``. It reports the *delta* — not
+the cumulative ``details.total`` — so usage stays incremental per event,
+matching the other speech-to-speech services.
 
 The service is imported with ``pytest.importorskip`` so the suite is skipped
 rather than failing collection when the optional AWS dependencies aren't
@@ -38,19 +38,19 @@ class TestAWSNovaSonicUsageMetrics(unittest.IsolatedAsyncioTestCase):
         service = self._service()
         self.assertTrue(service.can_generate_metrics())
 
-    async def test_usage_event_reports_collapsed_delta(self):
+    async def test_usage_event_reports_delta_with_audio_breakdown(self):
         service = self._service()
         service.start_llm_usage_metrics = AsyncMock()
 
         # A real usageEvent: delta is the increment for this event, total is the
-        # cumulative session count. We report the delta, collapsing speech + text.
+        # cumulative session count. Only the incremental counts are emitted.
         await service._handle_usage_event(
             {
                 "usageEvent": {
                     "details": {
                         "delta": {
-                            "input": {"speechTokens": 0, "textTokens": 3},
-                            "output": {"speechTokens": 20, "textTokens": 0},
+                            "input": {"speechTokens": 12, "textTokens": 3},
+                            "output": {"speechTokens": 20, "textTokens": 4},
                         },
                         "total": {
                             "input": {"speechTokens": 288, "textTokens": 3443},
@@ -64,9 +64,38 @@ class TestAWSNovaSonicUsageMetrics(unittest.IsolatedAsyncioTestCase):
         service.start_llm_usage_metrics.assert_awaited_once()
         (tokens,) = service.start_llm_usage_metrics.await_args.args
         self.assertIsInstance(tokens, LLMTokenUsage)
-        self.assertEqual(tokens.prompt_tokens, 3)  # 0 speech + 3 text
-        self.assertEqual(tokens.completion_tokens, 20)  # 20 speech + 0 text
-        self.assertEqual(tokens.total_tokens, 23)
+        self.assertEqual(tokens.prompt_tokens, 15)
+        self.assertEqual(tokens.completion_tokens, 24)
+        self.assertEqual(tokens.total_tokens, 39)
+        self.assertEqual(tokens.input_audio_tokens, 12)
+        self.assertEqual(tokens.output_audio_tokens, 20)
+
+    async def test_audio_counts_distinguish_unreported_and_zero(self):
+        for audio_tokens in (None, 0):
+            with self.subTest(audio_tokens=audio_tokens):
+                service = self._service()
+                service.start_llm_usage_metrics = AsyncMock()
+                input_tokens = {"textTokens": 3}
+                output_tokens = {"textTokens": 4}
+                if audio_tokens is not None:
+                    input_tokens["speechTokens"] = audio_tokens
+                    output_tokens["speechTokens"] = audio_tokens
+
+                await service._handle_usage_event(
+                    {
+                        "usageEvent": {
+                            "details": {"delta": {"input": input_tokens, "output": output_tokens}}
+                        }
+                    }
+                )
+
+                service.start_llm_usage_metrics.assert_awaited_once()
+                (tokens,) = service.start_llm_usage_metrics.await_args.args
+                self.assertEqual(tokens.prompt_tokens, 3)
+                self.assertEqual(tokens.completion_tokens, 4)
+                self.assertEqual(tokens.total_tokens, 7)
+                self.assertEqual(tokens.input_audio_tokens, audio_tokens)
+                self.assertEqual(tokens.output_audio_tokens, audio_tokens)
 
     async def test_usage_event_with_no_tokens_is_skipped(self):
         # A zero-token delta (e.g. an event carrying no new usage) must not emit
