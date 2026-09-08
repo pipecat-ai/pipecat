@@ -587,7 +587,8 @@ def test_mist_route_maps_model_and_settings() -> None:
     assert client_options.pause_between_brackets is True
 
 
-def test_service_maps_v1_settings_to_start_options() -> None:
+@pytest.mark.parametrize("lookahead", [0, 4])
+def test_service_maps_v1_settings_to_start_options(lookahead: int) -> None:
     service = RimeTTSService(
         api_key="key",
         websocket_url="wss://api.rime.ai/coda/ws",
@@ -595,7 +596,7 @@ def test_service_maps_v1_settings_to_start_options() -> None:
         settings=RimeTTSService.Settings(
             voice="astra",
             language="eng",
-            text_lookahead_tokens=4,
+            text_lookahead_tokens=lookahead,
             timeScaleFactor=1.2,
         ),
     )
@@ -603,9 +604,38 @@ def test_service_maps_v1_settings_to_start_options() -> None:
 
     assert service._build_v1_options() == _options(
         sample_rate=22050,
-        text_lookahead_tokens=4,
+        text_lookahead_tokens=lookahead,
         time_scale_factor=1.2,
     )
+
+
+@pytest.mark.parametrize("model", ["mist", "arcana", "future-model"])
+@pytest.mark.parametrize("lookahead", [0, 4])
+def test_non_coda_route_rejects_lookahead(model: str, lookahead: int) -> None:
+    with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
+        RimeTTSService(
+            api_key="key",
+            websocket_url=f"wss://api.rime.ai/{model}/ws",
+            settings=RimeTTSService.Settings(text_lookahead_tokens=lookahead),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["coda", "mist", "arcana", "future-model"])
+@pytest.mark.parametrize("lookahead", [0, 4])
+async def test_runtime_lookahead_requires_coda(model: str, lookahead: int) -> None:
+    service = RimeTTSService(
+        api_key="key",
+        websocket_url=f"wss://api.rime.ai/{model}/ws",
+    )
+    delta = RimeTTSService.Settings(text_lookahead_tokens=lookahead)
+    if model == "coda":
+        await service._update_settings(delta)
+        assert service._build_v1_options().text_lookahead_tokens == lookahead
+    else:
+        with pytest.raises(ValueError, match="text_lookahead_tokens requires the Coda model"):
+            await service._update_settings(delta)
+        assert service._build_v1_options().text_lookahead_tokens is None
 
 
 def test_v1_pcm_remainders_are_isolated_by_context() -> None:
