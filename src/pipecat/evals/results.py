@@ -32,7 +32,7 @@ FAILURE_KINDS = (
     "send_after_timeout",  # a turn's `send_after` event never fired
     "connect_failed",  # never connected to the bot's eval transport
     "handshake_timeout",  # connected, but the bot never sent bot-ready
-    "harness_error",  # the harness itself raised (sub-pipeline, judge, ...)
+    "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
 
 # Statuses for :attr:`EvalScriptTurnResult.status`. ``not_run`` is distinct from a pass:

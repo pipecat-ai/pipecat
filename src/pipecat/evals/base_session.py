@@ -131,7 +131,7 @@ class BaseEvalSession(BaseObject, Generic[R]):
         try:
             return await self._converse()
         except Exception as e:
-            return [self._harness_error(e)]
+            return [self._error_failure(e)]
         finally:
             await self._client.stop()
             # Progress handlers run as tasks; wait them out so every record is
@@ -149,12 +149,12 @@ class BaseEvalSession(BaseObject, Generic[R]):
         self._trace.log("handshake: ok (bot-ready)")
         return await self._driver.run()
 
-    def _harness_error(self, e: Exception) -> EvalAssertionFailure:
+    def _error_failure(self, e: Exception) -> EvalAssertionFailure:
         """Trace an unexpected error with its traceback and let the driver score it."""
         self._trace.log(f"error: {type(e).__name__}: {e}")
         for line in traceback.format_exc().rstrip().splitlines():
             self._trace.log(line)
-        failure = self._failure("<error>", f"{type(e).__name__}: {e}", "harness_error")
+        failure = self._failure("<error>", f"{type(e).__name__}: {e}", "error")
         self._driver.record_failure(failure)
         return failure
 
