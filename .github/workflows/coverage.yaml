@@ -47,6 +47,8 @@ jobs:
             --extra runner \
             --extra sagemaker \
             --extra sarvam \
+            --extra sip \
+            --extra sip-video \
             --extra tracing \
             --extra websocket
 
