@@ -135,6 +135,18 @@ class FluxEventType(StrEnum):
     UPDATE = "Update"
 
 
+# Deepgram Flux documents hard limits for these connection settings; an
+# out-of-range value is rejected when the connection is established, which
+# costs the session its STT instead of surfacing an error the caller can fix.
+# https://developers.deepgram.com/docs/keyterm
+# https://developers.deepgram.com/docs/flux/configure
+_MAX_KEYTERMS = 100
+_MAX_KEYTERM_TOKENS = 500
+_EOT_THRESHOLD_RANGE = (0.5, 1.0)
+_EAGER_EOT_THRESHOLD_RANGE = (0.3, 0.9)
+_EOT_TIMEOUT_MS_RANGE = (500, 60000)
+
+
 @dataclass
 class DeepgramFluxSTTSettings(STTSettings):
     """Settings for DeepgramFluxSTTService.
@@ -147,6 +159,8 @@ class DeepgramFluxSTTSettings(STTSettings):
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
+            Truncated to Deepgram's limits (100 keyterms, 500 tokens total) with a
+            warning; a keyterm's tokens are counted as its whitespace-separated words.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
             Read only from the connection URL, so an update is applied by
@@ -160,6 +174,13 @@ class DeepgramFluxSTTSettings(STTSettings):
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
             mid-stream via ``STTUpdateSettingsFrame``.
+
+    Raises:
+        ValueError: If ``eot_threshold`` is outside 0.5–1.0, if
+            ``eager_eot_threshold`` is outside 0.3–0.9 or exceeds
+            ``eot_threshold`` (when both are given), or if ``eot_timeout_ms``
+            is outside 500–60000 — ranges Deepgram enforces when the connection
+            is established.
     """
 
     eager_eot_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -171,6 +192,77 @@ class DeepgramFluxSTTSettings(STTSettings):
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     redact: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    def __post_init__(self):
+        # Initial settings and mid-stream update deltas both go through this
+        # constructor, so validating here keeps out-of-range values out of the
+        # connection URL and out of Configure messages. A Configure message
+        # Deepgram rejects is answered with ConfigureFailure and the stream
+        # continues; an invalid connection URL loses the session.
+        self._validate_thresholds()
+        self._truncate_keyterms()
+
+    def _validate_thresholds(self):
+        if is_given(self.eot_threshold) and self.eot_threshold is not None:
+            low, high = _EOT_THRESHOLD_RANGE
+            if not low <= self.eot_threshold <= high:
+                raise ValueError(
+                    f"eot_threshold must be between {low} and {high}; got {self.eot_threshold}. "
+                    "Deepgram Flux rejects out-of-range values when the connection is "
+                    "established: https://developers.deepgram.com/docs/flux/configure"
+                )
+        if is_given(self.eager_eot_threshold) and self.eager_eot_threshold is not None:
+            low, high = _EAGER_EOT_THRESHOLD_RANGE
+            if not low <= self.eager_eot_threshold <= high:
+                raise ValueError(
+                    f"eager_eot_threshold must be between {low} and {high}; got "
+                    f"{self.eager_eot_threshold}. Deepgram Flux rejects out-of-range values "
+                    "when the connection is established: "
+                    "https://developers.deepgram.com/docs/flux/configure"
+                )
+            if (
+                is_given(self.eot_threshold)
+                and self.eot_threshold is not None
+                and self.eager_eot_threshold > self.eot_threshold
+            ):
+                raise ValueError(
+                    f"eager_eot_threshold ({self.eager_eot_threshold}) must not exceed "
+                    f"eot_threshold ({self.eot_threshold}); Deepgram Flux rejects the "
+                    "connection when eager is set above eot."
+                )
+        if is_given(self.eot_timeout_ms) and self.eot_timeout_ms is not None:
+            low, high = _EOT_TIMEOUT_MS_RANGE
+            if not low <= self.eot_timeout_ms <= high:
+                raise ValueError(
+                    f"eot_timeout_ms must be between {low} and {high}; got {self.eot_timeout_ms}. "
+                    "Deepgram Flux rejects out-of-range values when the connection is "
+                    "established: https://developers.deepgram.com/docs/flux/configure"
+                )
+
+    def _truncate_keyterms(self):
+        """Normalize keyterms to the limits Deepgram accepts on a connection.
+
+        Drops blank entries and truncates to :data:`_MAX_KEYTERMS` keyterms
+        totaling :data:`_MAX_KEYTERM_TOKENS` tokens, warning about whatever is
+        dropped. Truncating keeps an oversized list from failing the connection.
+        """
+        if not is_given(self.keyterm) or not self.keyterm:
+            return
+        terms = [stripped for term in self.keyterm if (stripped := term.strip())]
+        prepared: list[str] = []
+        tokens = 0
+        for term in terms:
+            term_tokens = len(term.split())
+            if len(prepared) >= _MAX_KEYTERMS or tokens + term_tokens > _MAX_KEYTERM_TOKENS:
+                break
+            prepared.append(term)
+            tokens += term_tokens
+        if len(prepared) < len(terms):
+            logger.warning(
+                f"Deepgram Flux accepts at most {_MAX_KEYTERMS} keyterms totaling "
+                f"{_MAX_KEYTERM_TOKENS} tokens; dropping {len(terms) - len(prepared)} keyterm(s)"
+            )
+        self.keyterm = prepared
 
 
 class DeepgramFluxSTTBase(STTService):

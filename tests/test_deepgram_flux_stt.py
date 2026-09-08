@@ -386,5 +386,99 @@ async def test_connection_wait_returns_once_confirmed():
     await service._await_connection_established()
 
 
+# ---------------------------------------------------------------------------
+# Settings validation and keyterm limits
+# ---------------------------------------------------------------------------
+
+
+def _warnings_from(build):
+    """Return the WARNING-level log output produced while calling build."""
+    import io
+
+    from loguru import logger
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        build()
+    finally:
+        logger.remove(handler_id)
+    return sink.getvalue()
+
+
+def test_settings_rejects_eot_threshold_out_of_range():
+    with pytest.raises(ValueError, match="eot_threshold must be between 0.5 and 1.0"):
+        DeepgramFluxSTTSettings(eot_threshold=1.2)
+
+
+def test_settings_rejects_eager_eot_threshold_out_of_range():
+    with pytest.raises(ValueError, match="eager_eot_threshold must be between 0.3 and 0.9"):
+        DeepgramFluxSTTSettings(eager_eot_threshold=0.2)
+
+
+def test_settings_rejects_eager_eot_threshold_above_eot_threshold():
+    """The exact combination from the issue: eager 0.9 with eot 0.85."""
+    with pytest.raises(ValueError, match="must not exceed eot_threshold"):
+        DeepgramFluxSTTSettings(eot_threshold=0.85, eager_eot_threshold=0.9)
+
+
+def test_settings_rejects_eot_timeout_ms_out_of_range():
+    with pytest.raises(ValueError, match="eot_timeout_ms must be between 500 and 60000"):
+        DeepgramFluxSTTSettings(eot_timeout_ms=100)
+
+
+def test_settings_accepts_documented_boundary_values():
+    DeepgramFluxSTTSettings(eot_threshold=0.5)
+    DeepgramFluxSTTSettings(eot_threshold=1.0)
+    DeepgramFluxSTTSettings(eager_eot_threshold=0.3)
+    DeepgramFluxSTTSettings(eot_threshold=0.9, eager_eot_threshold=0.9)
+    DeepgramFluxSTTSettings(eot_timeout_ms=500)
+    DeepgramFluxSTTSettings(eot_timeout_ms=60000)
+
+
+def test_settings_allows_eager_without_eot_for_mid_stream_deltas():
+    """A Configure delta can carry eager alone; Deepgram answers ConfigureFailure
+    for an invalid combination and the stream continues, so one-sided
+    construction must be allowed (the provider is the backstop there)."""
+    DeepgramFluxSTTSettings(eager_eot_threshold=0.9)
+
+
+def test_settings_truncates_keyterms_to_term_limit():
+    settings = None
+
+    def build():
+        nonlocal settings
+        settings = DeepgramFluxSTTSettings(keyterm=[f"term-{i}" for i in range(120)])
+
+    warnings_text = _warnings_from(build)
+    assert len(settings.keyterm) == 100
+    assert settings.keyterm[0] == "term-0"
+    assert "dropping 20 keyterm(s)" in warnings_text
+
+
+def test_settings_truncates_keyterms_to_token_limit():
+    # 60 ten-word keyterms total 600 tokens; the 51st crosses the 500-token cap,
+    # well before the 100-keyterm cap can bind.
+    terms = [" ".join(f"w{i}_{j}" for j in range(10)) for i in range(60)]
+    settings = None
+
+    def build():
+        nonlocal settings
+        settings = DeepgramFluxSTTSettings(keyterm=terms)
+
+    _warnings_from(build)
+    assert len(settings.keyterm) == 50
+
+
+def test_settings_drops_blank_keyterms():
+    settings = DeepgramFluxSTTSettings(keyterm=["alpha", "  ", "", "beta"])
+    assert settings.keyterm == ["alpha", "beta"]
+
+
+def test_settings_keeps_valid_keyterms_unchanged():
+    settings = DeepgramFluxSTTSettings(keyterm=["Deepgram", "Flux STT"])
+    assert settings.keyterm == ["Deepgram", "Flux STT"]
+
+
 if __name__ == "__main__":
     unittest.main()
