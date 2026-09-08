@@ -26,6 +26,7 @@ from pipecat.services.deepgram.flux.stt_base import (
 )
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import extract_http_status_code
 
 # Re-export for backward compatibility
 __all__ = [
@@ -347,7 +348,17 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Mirror DeepgramSTTService's handshake handling: a 4xx rejection is
+            # a configuration-level failure (bad key, exhausted credit, ...)
+            # that reconnecting cannot clear, and this connect is one-shot
+            # anyway. Marking the service unusable lets a failover strategy
+            # switch away instead of leaving a dead service active.
+            status_code = extract_http_status_code(e)
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=status_code is not None and 400 <= status_code < 500,
+            )
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 

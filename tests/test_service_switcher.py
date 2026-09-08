@@ -953,6 +953,31 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         # Active service SHOULD have changed — the error came from a managed service
         self.assertEqual(switcher.strategy.active_service, backup_service)
 
+    async def test_quota_exhaustion_triggers_failover(self):
+        """Credit exhaustion (HTTP 402 -> QUOTA) fails over on category alone.
+
+        No force flag: the category's own permanence must cost the service its
+        usability, or a provider that runs out of credit keeps the failover
+        strategy from ever selecting the backup (#5608).
+        """
+        error_service = ErrorOnTextService(
+            "error_service", becomes_unusable=False, category=ErrorCategory.QUOTA
+        )
+        backup_service = MockFrameProcessor("backup_service")
+        switcher = ServiceSwitcher(
+            [error_service, backup_service],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[],
+        )
+
+        self.assertEqual(switcher.strategy.active_service, backup_service)
+
     async def test_failover_absorbs_the_error(self):
         """Test that an error the switcher recovered from goes no further.
 
