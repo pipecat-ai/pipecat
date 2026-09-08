@@ -36,12 +36,10 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Identifies the integration to Speechify's platform attribution. Speechify-Caller
 # and its companion Speechify-Caller-Version are the standard attribution pair
-# Speechify reads uniformly across every integration; X-Pipecat-Version is Pipecat's
-# own convention.
+# Speechify reads uniformly across every integration.
 CALLER_HEADERS = {
     "Speechify-Caller": "pipecat",
     "Speechify-Caller-Version": pipecat_version(),
-    "X-Pipecat-Version": pipecat_version(),
 }
 
 # PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
