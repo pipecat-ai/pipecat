@@ -12,6 +12,7 @@ API documented at https://docs.x.ai/developers/rest-api-reference/inference/voic
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -166,6 +167,11 @@ class XAISTTService(WebsocketSTTService):
 
         self._receive_task: asyncio.Task | None = None
         self._session_ready = asyncio.Event()
+
+        # Per-utterance state for de-duplicating the cumulative speech_final
+        # transcript. See _unrepeated_final.
+        self._emitted_final_norm = ""
+        self._utterance_closed = True
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -341,10 +347,71 @@ class XAISTTService(WebsocketSTTService):
         else:
             logger.debug(f"{self} unhandled xAI STT message: {message}")
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        """Alphanumerics only, lowercased: the comparable form of a transcript."""
+        return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+    def _begin_utterance(self) -> None:
+        """Drop leftover de-duplication state when a new utterance starts.
+
+        An utterance does not always end with a speech_final: an endpointing
+        timeout or a dropped connection can end it after segment finals only.
+        Clearing here, and not just after a speech_final, keeps one
+        utterance's text from being subtracted from the next one's.
+        """
+        if self._utterance_closed:
+            self._emitted_final_norm = ""
+            self._utterance_closed = False
+
+    def _unrepeated_final(self, cumulative: str) -> str:
+        """The part of a speech_final transcript not already emitted.
+
+        xAI sends a final per segment as speech arrives, then restates the
+        ENTIRE utterance at speech_final::
+
+            is_final=True  speech_final=False  "my order number"
+            is_final=True  speech_final=False  "is four two one."
+            is_final=True  speech_final=True   "my order number is four two one."
+
+        That last message is a summary, not new material. Pushing it as
+        another TranscriptionFrame gives every consumer that accumulates
+        frame text the utterance twice.
+
+        Compared on the normalized form because the restatement is
+        re-punctuated ("is four two one." appears as "is four two one"
+        inside the full utterance), so neither equality nor startswith on
+        the raw strings detects the repeat.
+
+        Returns the unemitted tail in its original formatting, or "" when
+        the message restates only what has already been sent.
+        """
+        already = self._emitted_final_norm
+        if not already:
+            return cumulative
+        if not self._norm(cumulative).startswith(already):
+            # Not a restatement of what was sent: pass it through whole
+            # rather than guess at a split point.
+            return cumulative
+        seen = 0
+        tail = ""
+        for i, ch in enumerate(cumulative):
+            if seen == len(already):
+                tail = cumulative[i:].strip()
+                break
+            if self._norm(ch):
+                seen += 1
+        # A punctuation-only tail is not new content: the restatement ends
+        # "one." where the segment final ended "one.", and emitting the
+        # leftover "." would append a stray token.
+        return tail if self._norm(tail) else ""
+
     async def _handle_transcript(self, message: dict[str, Any]):
         text = message.get("text", "")
         if not text:
             return
+
+        self._begin_utterance()
 
         is_final = bool(message.get("is_final"))
         speech_final = bool(message.get("speech_final"))
@@ -375,7 +442,22 @@ class XAISTTService(WebsocketSTTService):
     ):
         text = text if text is not None else message.get("text", "")
         if not text:
+            if speech_final:
+                # An empty speech_final still ends the utterance; returning
+                # without clearing would carry state into the next one.
+                self._emitted_final_norm = ""
+                self._utterance_closed = True
             return
+
+        if speech_final:
+            text = self._unrepeated_final(text)
+            self._emitted_final_norm = ""
+            self._utterance_closed = True
+            if not text:
+                return
+        else:
+            self._emitted_final_norm += self._norm(text)
+
         language = language if language is not None else self._language_for_frame()
 
         # Report usage before the transcription frame so tracing can attach
