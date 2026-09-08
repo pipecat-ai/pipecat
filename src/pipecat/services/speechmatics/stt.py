@@ -37,6 +37,7 @@ from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -246,11 +247,9 @@ class SpeechmaticsSTTService(STTService):
     SpeakerIdentifier = SpeakerIdentifier
     AdditionalVocabEntry = AdditionalVocabEntry
 
-    # Reconnect backoff: first retry after this many seconds, doubling each attempt up
-    # to the cap. Retries continue for the life of the session so a transient drop can
-    # never permanently deafen the pipeline.
-    RECONNECT_INITIAL_DELAY: ClassVar[float] = 1.0
-    RECONNECT_MAX_DELAY: ClassVar[float] = 30.0
+    # Attempts a single reconnect makes before giving up. Audio is buffered for the
+    # whole sequence, so the bound also caps how much is held and replayed at once.
+    RECONNECT_MAX_ATTEMPTS: ClassVar[int] = 3
 
     class InputParams(BaseModel):
         """Configuration parameters for Speechmatics STT service.
@@ -428,7 +427,9 @@ class SpeechmaticsSTTService(STTService):
         # Apply the migrated params whenever the legacy path was used — either an
         # explicit `params=` or deprecated kwargs migrated into `_params`.
         if (params is not None or _legacy_kwargs) and not settings:
-            encoding = self._apply_legacy_params(default_settings, _params)
+            legacy_encoding = self._apply_legacy_params(default_settings, _params)
+            if legacy_encoding is not None:
+                encoding = legacy_encoding
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
@@ -457,17 +458,16 @@ class SpeechmaticsSTTService(STTService):
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
 
-        # Reconnect state. `_closed` gates the reconnect loop off once the session is
-        # torn down (stop/cancel/cleanup); `_reconnect_task` holds the in-flight retry.
+        # Stops reconnect attempts once the session is torn down (stop/cancel/cleanup)
+        # or rejected outright.
         self._closed: bool = False
-        self._reconnect_task: asyncio.Task | None = None
 
         # Event handlers
         if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
     @staticmethod
-    def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding:
+    def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding | None:
         """Fold the deprecated ``InputParams`` into canonical ``Settings``.
 
         Every field the two shapes share by name is copied straight across. Two are
@@ -480,7 +480,9 @@ class SpeechmaticsSTTService(STTService):
             params: The deprecated input params to migrate from.
 
         Returns:
-            The audio encoding to use, taken from ``params``.
+            The audio encoding the caller set on ``params``, or None if they left it
+            unset — the field carries a default that would otherwise silently override
+            the ``encoding`` argument.
         """
         shared = type(settings).__dataclass_fields__.keys() & type(params).model_fields.keys()
         for name in shared - {"speaker_active_format"}:
@@ -492,7 +494,7 @@ class SpeechmaticsSTTService(STTService):
             fmt = "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
         settings.speaker_active_format = fmt
 
-        return params.audio_encoding
+        return params.audio_encoding if "audio_encoding" in params.model_fields_set else None
 
     @property
     def _service_closes_turns(self) -> bool:
@@ -571,8 +573,7 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
             # Connection-level fields changed — rebuild the config, then reconnect.
             self._config = self._build_config(self._settings)
-            await self._disconnect()
-            await self._connect()
+            await self._request_reconnect()
         else:
             # Only local (formatting) fields changed — effective immediately.
             logger.debug(f"{self} local settings update, no reconnect: {changed.keys()}")
@@ -598,9 +599,9 @@ class SpeechmaticsSTTService(STTService):
         await self._disconnect()
 
     async def _connect(self) -> None:
-        """Connect to the STT service, scheduling a retry if the attempt fails."""
+        """Connect to the STT service, retrying if the attempt fails."""
         if not await self._open_connection():
-            self._schedule_reconnect()
+            await self._request_reconnect()
 
     async def _open_connection(self, *, report_error: bool = True) -> bool:
         """Build the client, register handlers, and open the connection.
@@ -699,55 +700,37 @@ class SpeechmaticsSTTService(STTService):
         """Surface an unrecoverable error and stop the session from reconnecting.
 
         Auth/config/rejected-session failures and server ``Error`` messages will not clear on
-        retry, so they go out as a fatal ``ErrorFrame`` and mark the session closed. Marking it
-        closed makes ``_schedule_reconnect`` a no-op and unwinds any in-flight reconnect loop, so
-        the failure propagates once instead of spinning silently against a permanent error.
+        retry, so they go out as a fatal ``ErrorFrame`` and mark the session closed, which
+        stops ``_do_reconnect`` retrying against a permanent error.
         """
         self._closed = True
         await self.push_error(error_msg=error_msg, exception=exception, fatal=True)
 
-    def _schedule_reconnect(self) -> None:
-        """Start the background reconnect loop, unless one is already running or the
-        session has been torn down."""
-        if self._closed or self._reconnect_task is not None:
-            return
-        self._reconnect_task = self.create_task(self._reconnect_loop())
+    async def _do_reconnect(self) -> None:
+        """Re-establish the session, retrying with exponential backoff.
 
-    async def _reconnect_loop(self) -> None:
-        """Retry the connection with exponential backoff until it comes back.
-
-        Runs for the life of the session: a transient drop is retried indefinitely (with
-        a capped, doubling delay) so audio is never permanently dropped in silence. The
-        loop exits on the first successful reconnect or once the session is closed. The
-        initial failure was already surfaced via ``push_error``; retries only log.
+        Called by ``STTService._reconnect()`` inside the reconnecting guard, which holds
+        for the whole call — so audio arriving during the retries is buffered and replayed
+        rather than dropped. Raising on exhaustion hands the failure to that guard.
         """
-        delay = self.RECONNECT_INITIAL_DELAY
-        try:
-            while not self._closed and self._client is None:
-                logger.warning(f"{self} reconnecting to Speechmatics STT in {delay:.0f}s")
-                await asyncio.sleep(delay)
-                if self._closed:
-                    return
-                if await self._open_connection(report_error=False):
-                    logger.debug(f"{self} reconnected to Speechmatics STT")
-                    return
-                delay = min(delay * 2, self.RECONNECT_MAX_DELAY)
-        finally:
-            self._reconnect_task = None
+        await self._disconnect()
+        for attempt in range(1, self.RECONNECT_MAX_ATTEMPTS + 1):
+            if await self._open_connection(report_error=False):
+                logger.debug(f"{self} reconnected to Speechmatics STT")
+                return
+            # A rejected session marks the service closed; retrying cannot clear it.
+            if self._closed:
+                return
+            await asyncio.sleep(exponential_backoff_time(attempt))
+        raise ConnectionError(f"failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts")
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
 
-        - Cancel any in-flight reconnect attempt
         - Cancel message processing task
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
-        # Cancel a pending reconnect so it doesn't race this teardown.
-        if self._reconnect_task:
-            await self.cancel_task(self._reconnect_task)
-            self._reconnect_task = None
-
         # Cancel the message processing task
         if self._stt_msg_task:
             await self.cancel_task(self._stt_msg_task)
@@ -771,11 +754,6 @@ class SpeechmaticsSTTService(STTService):
         finally:
             self._client = None
             await self._call_event_handler("on_disconnected")
-
-    async def _restart_after_drop(self) -> None:
-        """Tear down a dropped session and reconnect."""
-        await self._disconnect()
-        self._schedule_reconnect()
 
     async def _process_stt_messages(self) -> None:
         """Process messages from the STT client.
@@ -1087,12 +1065,12 @@ class SpeechmaticsSTTService(STTService):
                 # with no session_error is a broken stream; when the service ended the
                 # session itself, _handle_error has already failed it fatally.
                 if not self._client.is_ready_for_audio and self._client.session_error is None:
-                    yield ErrorFrame("Speechmatics error: audio stream closed")
-                    await self._restart_after_drop()
+                    logger.warning(f"{self} audio stream closed, reconnecting")
+                    await self._request_reconnect()
             yield None
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
-            await self._restart_after_drop()
+            await self._request_reconnect()
 
     # ============================================================================
     # HELPERS

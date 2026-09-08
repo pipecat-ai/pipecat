@@ -347,58 +347,69 @@ def test_locale_none_without_regional_variant():
 
 
 # ---------------------------------------------------------------------------
-# Reconnect loop — the self-healing added for connect/send failures
+# Reconnect — the self-healing for connect/send failures. It runs inside
+# STTService._reconnect(), which buffers and replays audio for the whole call.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_reconnect_loop_retries_until_success():
-    """A transient drop must be retried until the connection returns — the core
-    guarantee that one failure does not permanently deafen the session."""
-    service = _service()
-    service.RECONNECT_INITIAL_DELAY = 0.0
-    service.RECONNECT_MAX_DELAY = 0.0
-    service._client = None
-
+def _stub_reconnect_attempts(service, monkeypatch, outcomes: list[bool]) -> dict:
+    """Drive `_do_reconnect` through `outcomes`, one per attempt, without sleeping."""
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    service._disconnect = AsyncMock()
     attempts = {"n": 0}
 
     async def fake_open(report_error=True):
         attempts["n"] += 1
-        if attempts["n"] < 3:
-            return False
-        service._client = object()  # simulate a live connection
-        return True
+        return outcomes[attempts["n"] - 1]
 
     service._open_connection = fake_open
+    return attempts
 
-    await service._reconnect_loop()
+
+@pytest.mark.asyncio
+async def test_do_reconnect_retries_until_success(monkeypatch):
+    """A transient drop must be retried — the core guarantee that one failure does not
+    permanently deafen the session."""
+    service = _service()
+    attempts = _stub_reconnect_attempts(service, monkeypatch, [False, False, True])
+
+    await service._do_reconnect()
 
     assert attempts["n"] == 3
-    assert service._client is not None
-    assert service._reconnect_task is None  # loop clears its own handle on exit
 
 
-def test_schedule_reconnect_noop_when_closed():
-    """After teardown (`_closed`), no reconnect may be scheduled — otherwise a retry
-    could fire against a session that is shutting down."""
+@pytest.mark.asyncio
+async def test_do_reconnect_raises_once_attempts_are_exhausted(monkeypatch):
+    """Retries are bounded, and exhausting them must raise so STTService._reconnect
+    reports the failure instead of leaving the session silently dead."""
     service = _service()
-    service._closed = True
+    attempts = _stub_reconnect_attempts(
+        service, monkeypatch, [False] * service.RECONNECT_MAX_ATTEMPTS
+    )
 
-    service._schedule_reconnect()
+    with pytest.raises(ConnectionError):
+        await service._do_reconnect()
 
-    assert service._reconnect_task is None
+    assert attempts["n"] == service.RECONNECT_MAX_ATTEMPTS
 
 
-def test_schedule_reconnect_noop_when_already_running():
-    """A reconnect already in flight must not be duplicated; a second scheduling call
-    has to leave the existing attempt untouched."""
+@pytest.mark.asyncio
+async def test_do_reconnect_stops_when_session_is_rejected(monkeypatch):
+    """A rejected session (`_closed`) will not clear on retry, so the loop must stop at
+    once rather than spinning against a permanent error."""
     service = _service()
-    sentinel = object()
-    service._reconnect_task = sentinel
+    attempts = _stub_reconnect_attempts(service, monkeypatch, [False, True])
+    open_connection = service._open_connection
 
-    service._schedule_reconnect()
+    async def reject(report_error=True):
+        service._closed = True  # what _fail_fatally does
+        return await open_connection(report_error=report_error)
 
-    assert service._reconnect_task is sentinel
+    service._open_connection = reject
+
+    await service._do_reconnect()
+
+    assert attempts["n"] == 1
 
 
 @pytest.mark.asyncio
@@ -566,7 +577,7 @@ def _stub_reconnect(service) -> None:
     """Neutralize the connection side effects so _update_settings exercises only
     the settings/config logic (no socket, no pipeline)."""
     service._disconnect = AsyncMock()
-    service._connect = AsyncMock()
+    service._request_reconnect = AsyncMock()
     service.set_usable = AsyncMock()
 
 
@@ -583,7 +594,7 @@ async def test_update_settings_operating_point_reresolves_into_model():
 
     assert service._settings.model == "linden-2"
     assert service._config.model == "linden-2"  # config was rebuilt with the new model
-    service._connect.assert_awaited_once()  # a reconnect actually happened
+    service._request_reconnect.assert_awaited_once()  # a reconnect actually happened
 
 
 @pytest.mark.asyncio
