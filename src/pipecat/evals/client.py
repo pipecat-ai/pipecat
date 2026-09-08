@@ -108,8 +108,8 @@ class _BotFrameSink(FrameProcessor):
     """Where what arrives from the bot stops, as events, and the user's turns start.
 
     For every frame it calls the stream's
-    :meth:`~pipecat.evals.events.EvalEventStream.frames_to_events` and appends
-    the results with :meth:`~pipecat.evals.events.EvalEventStream.append`. The
+    :meth:`~pipecat.evals.events.EvalEventStream.frame_to_event` and appends
+    the result with :meth:`~pipecat.evals.events.EvalEventStream.append`. The
     bot's own frames (its text, spoken text, speaking reports, function calls,
     and the messages it reports about the harness) stop here; what passes is
     the pipeline's lifecycle and the aggregator's context frame.
@@ -180,18 +180,18 @@ class _BotFrameSink(FrameProcessor):
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return
-        events = self._stream.frames_to_events(frame)
-        for event in events:
+        event = self._stream.frame_to_event(frame)
+        if event is not None:
             await self._stream.append(event)
-        if self._feed and not self._hung_up:
-            await self._feed_persona(events)
+            if self._feed and not self._hung_up:
+                await self._feed_persona(event)
         if isinstance(frame, _BOT_FRAMES):
             return
         # The computed interruption stops here for a scripted turn (see the
         # class docstring); a persona reacts to it like a caller.
-        if isinstance(frame, InterruptionFrame) and self._persona is None:
+        elif isinstance(frame, InterruptionFrame) and self._persona is None:
             return
-        if isinstance(frame, LLMContextFrame):
+        elif isinstance(frame, LLMContextFrame):
             # The aggregator asking the persona to answer (audio mode).
             await self._run_persona(frame)
             return
@@ -203,24 +203,23 @@ class _BotFrameSink(FrameProcessor):
             return
         await self.push_frame(frame)
 
-    async def _feed_persona(self, events: list[dict]) -> None:
+    async def _feed_persona(self, event: dict) -> None:
         """Hand a finished bot response to the persona, once its function calls are done."""
         assert self._persona is not None
-        for event in events:
-            match event["type"]:
-                case "function_call":
-                    self._calls_in_progress += 1
-                case "function_call_stopped":
-                    self._calls_in_progress = max(0, self._calls_in_progress - 1)
-                case "llm_response":
-                    if event["text"]:
-                        self._held_response.append(event["text"])
-                    if self._calls_in_progress or not self._held_response:
-                        continue
-                    text = " ".join(self._held_response)
-                    self._held_response = []
-                    self._persona.add_message({"role": "user", "content": text})
-                    await self._run_persona(LLMContextFrame(self._persona))
+        match event["type"]:
+            case "function_call":
+                self._calls_in_progress += 1
+            case "function_call_stopped":
+                self._calls_in_progress = max(0, self._calls_in_progress - 1)
+            case "llm_response":
+                if event["text"]:
+                    self._held_response.append(event["text"])
+                if self._calls_in_progress or not self._held_response:
+                    return
+                text = " ".join(self._held_response)
+                self._held_response = []
+                self._persona.add_message({"role": "user", "content": text})
+                await self._run_persona(LLMContextFrame(self._persona))
 
 
 # The event the relay appends for each response the persona completes, and the

@@ -52,15 +52,23 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 
+# The bot's reports that end its current turn: what it produced so far is not
+# its reply to what comes next.
+_INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
+
 
 class EvalEventStream:
-    """Translates the bot's frames into scenario events and queues them.
+    """The bot's output as events: a queue the drivers read, fed by the pipeline.
 
-    The pipeline's bot-frame sink feeds every frame the transport produces
-    through :meth:`frames_to_events` and appends the results with
-    :meth:`append`; the matcher consumes them with :meth:`next_event` and
-    :meth:`next_any`. The audio-mode ``response`` is appended by the user
-    aggregator when the bot's spoken turn ends.
+    Three things happen here. The queue: :meth:`append` stamps and records an
+    event and the drivers pop them with :meth:`next_event` and
+    :meth:`next_any`. The translation: the sink feeds every frame the
+    transport produces through :meth:`frame_to_event`, which maps it to an
+    event or to nothing. And the reply rule: what the bot produced before the
+    user's latest send is not its reply to it, so an LLM response still
+    streaming at the send, or restarted by an interruption, is dropped until
+    the bot's next ``llm-started``, and a spoken turn that began before the
+    send is dropped when it ends (:meth:`input_sent`, :meth:`bot_turn_stopped`).
     """
 
     def __init__(self, *, bot_audio: bool, trace: EvalTrace):
@@ -85,59 +93,18 @@ class EvalEventStream:
         # arrival of its first token (``started_at``), for the timing measures.
         self._t0 = time.monotonic()
         self._llm_text_at: float | None = None
-        # Set on an interruption (and by the driver after a send), cleared at the
-        # bot's next llm-started. While set, llm_response segments are dropped:
-        # the interrupted response can still flush a trailing token *after* the
-        # interruption event (it was generated before the interrupt propagated),
-        # and that straggler must not be attributed to the new turn. The genuinely
-        # new response begins at the next llm-started.
-        self.awaiting_llm_restart: bool = False
+        # The reply rule's flag: set by a send or an interruption, cleared at the
+        # bot's next llm-started. While set, LLM text is dropped: an interrupted
+        # response can still flush a trailing token after the interruption (it
+        # was generated before the interrupt propagated), and that straggler
+        # must not be attributed to the new turn.
+        self._awaiting_reply: bool = False
         # When the driver last sent user input, and when the bot's spoken turn
         # in progress began (audio mode). A spoken turn that began before the
         # input is the bot's earlier output, not its reply, however late the
         # harness's turn analyzer finalizes it.
         self._input_sent_at: float = 0.0
         self._bot_turn_started_at: float | None = None
-
-    def elapsed(self) -> float:
-        """Seconds since the stream began, the clock the events' ``at`` is on."""
-        return round(time.monotonic() - self._t0, 3)
-
-    def input_sent(self) -> None:
-        """Mark the user's input as sent: the bot's reply is what it says from now on.
-
-        Output the bot produced before this point can't be the reply, so an LLM
-        response still streaming is dropped until the bot's next llm-started,
-        and a spoken turn that began before now is dropped when it ends.
-        """
-        self.awaiting_llm_restart = True
-        self._input_sent_at = time.monotonic()
-
-    def bot_turn_started(self) -> None:
-        """Note that the bot began a spoken turn (the user aggregator's turn start)."""
-        self._bot_turn_started_at = time.monotonic()
-
-    async def bot_turn_stopped(self, text: str) -> None:
-        """Append the bot's finished spoken turn as a ``response``, unless it is stale.
-
-        The turn is stale when it began before the user's latest input, or when
-        the bot's LLM hasn't restarted since that input. An interrupted turn
-        finalizes only after the interruption, once the harness's turn analyzer
-        stops waiting for its continuation, which can be after the bot has
-        already begun its real reply; matched then, it would be judged as that
-        reply.
-
-        Args:
-            text: The turn's transcription; nothing is appended when empty.
-        """
-        started = self._bot_turn_started_at
-        self._bot_turn_started_at = None
-        if not text:
-            return
-        if self.awaiting_llm_restart or (started is not None and started < self._input_sent_at):
-            self._trace.log(f"discard: bot turn from before the send {text!r}")
-            return
-        await self.append({"type": "response", "text": text})
 
     async def append(self, event: dict) -> None:
         """Append an event for the matcher.
@@ -155,110 +122,6 @@ class EvalEventStream:
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
-
-    def frames_to_events(self, frame: Frame) -> list[dict]:
-        """Translate one incoming pipeline frame into zero or more friendly events.
-
-        The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-        deserializes the bot's RTVI server messages into frames; this maps those
-        frames to the events the matcher consumes, applying the modality/aggregation
-        rules (buffer the LLM text, suppress an interrupted response's straggler,
-        emit ``tts_response`` only in audio mode, etc.).
-
-        The bot *reports* events about the harness as ``InputTransportMessageFrame``
-        (see :data:`~pipecat.evals.serializer.EvalClientSerializer`), which this
-        maps to scenario events. What the harness *computes* from the bot's audio
-        is handled elsewhere: the ``response`` comes from the user aggregator's
-        ``on_user_turn_stopped`` (it consumes the STT's ``TranscriptionFrame``s, so
-        they never reach here), and the aggregator's own VAD/speaking frames are
-        internal plumbing, ignored here.
-
-        Args:
-            frame: A frame the bot-facing transport produced.
-
-        Returns:
-            The events the frame maps to, in order (often none).
-        """
-        if isinstance(frame, InputTransportMessageFrame):
-            return self._message_to_events(frame.message)
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            self.awaiting_llm_restart = False
-            self._text_buffer = []
-            self._llm_text_at = None
-            return [{"type": "llm_started"}]
-        elif isinstance(frame, LLMTextFrame):
-            if self.awaiting_llm_restart:
-                return []
-            if not self._text_buffer:
-                self._llm_text_at = self.elapsed()
-            self._text_buffer.append(frame.text)
-            return []
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            if self.awaiting_llm_restart:
-                self._text_buffer = []
-                return []
-            event = self._segment_event("llm_response", "".join(self._text_buffer))
-            if self._llm_text_at is not None:
-                event["started_at"] = self._llm_text_at
-            return [event]
-        elif isinstance(frame, TTSTextFrame):
-            if self._bot_audio:
-                return [self._segment_event("tts_response", frame.text)]
-            return []
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            return [
-                {
-                    "type": "function_call",
-                    "name": frame.function_name or None,
-                    "args": dict(frame.arguments or {}),
-                }
-            ]
-        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
-            # How the call ended is the assertable part, so `cancelled` sits in
-            # `args` alongside the id: a scenario matches both through the same
-            # `calls:`/`args:` check a function_call uses.
-            return [
-                {
-                    "type": "function_call_stopped",
-                    "name": frame.function_name or None,
-                    "args": {
-                        "tool_call_id": frame.tool_call_id,
-                        "cancelled": isinstance(frame, FunctionCallCancelFrame),
-                    },
-                }
-            ]
-        return []
-
-    def drop_pending_bot_output(self, why: str) -> None:
-        """Drop the bot's un-matched output, so a later turn can't match it.
-
-        Clears the response buffer and drains the bot's pending output from the
-        queue, so a greeting (or any prior bot output) can't be matched against
-        the next turn. ``user_transcription`` is preserved: a DTMF keypress emits
-        its transcription immediately before the turn-start interruption, and
-        that transcription is the turn's *input*, not the stale bot output this
-        drop is meant to clear. Diagnostics (:attr:`events_seen`,
-        :attr:`latest_event_times`) are left intact for ``send_after`` lookups.
-
-        Args:
-            why: What prompted the drop, for the trace.
-        """
-        self._text_buffer = []
-        preserved: list[dict] = []
-        dropped = 0
-        while not self._queue.empty():
-            try:
-                event = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if event.get("type") == "user_transcription":
-                preserved.append(event)
-            else:
-                dropped += 1
-        for event in preserved:
-            self._queue.put_nowait(event)
-        if dropped:
-            self._trace.log(f"discard: dropped {dropped} queued event(s) {why}")
 
     async def next_any(self, deadline: float) -> dict:
         """Pop the next queued event, whatever its type.
@@ -300,39 +163,186 @@ class EvalEventStream:
             if event.get("type") == event_type:
                 return event
 
-    def _message_to_events(self, message) -> list[dict]:
-        """Map one of the bot's reported RTVI messages to scenario events.
+    def drop_pending_bot_output(self, why: str) -> None:
+        """Drop the bot's un-matched output, so a later turn can't match it.
+
+        Clears the response buffer and drains the bot's pending output from the
+        queue, so a greeting (or any prior bot output) can't be matched against
+        the next turn. ``user_transcription`` is preserved: a DTMF keypress emits
+        its transcription immediately before the turn-start interruption, and
+        that transcription is the turn's *input*, not the stale bot output this
+        drop is meant to clear. Diagnostics (:attr:`events_seen`,
+        :attr:`latest_event_times`) are left intact for ``send_after`` lookups.
+
+        Args:
+            why: What prompted the drop, for the trace.
+        """
+        self._text_buffer = []
+        preserved: list[dict] = []
+        dropped = 0
+        while not self._queue.empty():
+            try:
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if event.get("type") == "user_transcription":
+                preserved.append(event)
+            else:
+                dropped += 1
+        for event in preserved:
+            self._queue.put_nowait(event)
+        if dropped:
+            self._trace.log(f"discard: dropped {dropped} queued event(s) {why}")
+
+    def elapsed(self) -> float:
+        """Seconds since the stream began, the clock the events' ``at`` is on."""
+        return round(time.monotonic() - self._t0, 3)
+
+    def frame_to_event(self, frame: Frame) -> dict | None:
+        """Translate one incoming pipeline frame into the event it maps to, if any.
+
+        The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
+        deserializes the bot's RTVI server messages into frames; this maps those
+        frames to the events the matcher consumes, applying the modality/aggregation
+        rules (buffer the LLM text, suppress an interrupted response's straggler,
+        emit ``tts_response`` only in audio mode, etc.).
+
+        The bot *reports* events about the harness as ``InputTransportMessageFrame``
+        (see :data:`~pipecat.evals.serializer.EvalClientSerializer`), which this
+        maps to scenario events. What the harness *computes* from the bot's audio
+        is handled elsewhere: the ``response`` comes from the user aggregator's
+        ``on_user_turn_stopped`` (it consumes the STT's ``TranscriptionFrame``s, so
+        they never reach here), and the aggregator's own VAD/speaking frames are
+        internal plumbing, ignored here.
+
+        Args:
+            frame: A frame the bot-facing transport produced.
+
+        Returns:
+            The event the frame maps to, or ``None``; most frames map to none.
+        """
+        if isinstance(frame, InputTransportMessageFrame):
+            event = self._message_to_event(frame.message)
+            if event is not None and event["type"] in _INTERRUPTION_EVENTS:
+                self._interrupted()
+            return event
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            self._awaiting_reply = False
+            self._text_buffer = []
+            self._llm_text_at = None
+            return {"type": "llm_started"}
+        elif isinstance(frame, LLMTextFrame):
+            if self._awaiting_reply:
+                return None
+            if not self._text_buffer:
+                self._llm_text_at = self.elapsed()
+            self._text_buffer.append(frame.text)
+            return None
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._awaiting_reply:
+                self._text_buffer = []
+                return None
+            event = self._segment_event("llm_response", "".join(self._text_buffer))
+            if self._llm_text_at is not None:
+                event["started_at"] = self._llm_text_at
+            return event
+        elif isinstance(frame, TTSTextFrame):
+            if self._bot_audio:
+                return self._segment_event("tts_response", frame.text)
+            return None
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            return {
+                "type": "function_call",
+                "name": frame.function_name or None,
+                "args": dict(frame.arguments or {}),
+            }
+        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+            # How the call ended is the assertable part, so `cancelled` sits in
+            # `args` alongside the id: a scenario matches both through the same
+            # `calls:`/`args:` check a function_call uses.
+            return {
+                "type": "function_call_stopped",
+                "name": frame.function_name or None,
+                "args": {
+                    "tool_call_id": frame.tool_call_id,
+                    "cancelled": isinstance(frame, FunctionCallCancelFrame),
+                },
+            }
+        return None
+
+    def bot_turn_started(self) -> None:
+        """Note that the bot began a spoken turn (the user aggregator's turn start)."""
+        self._bot_turn_started_at = time.monotonic()
+
+    async def bot_turn_stopped(self, text: str) -> None:
+        """Append the bot's finished spoken turn as a ``response``, unless it is stale.
+
+        The turn is stale when it began before the user's latest input, or when
+        the bot's LLM hasn't restarted since that input. An interrupted turn
+        finalizes only after the interruption, once the harness's turn analyzer
+        stops waiting for its continuation, which can be after the bot has
+        already begun its real reply; matched then, it would be judged as that
+        reply.
+
+        Args:
+            text: The turn's transcription; nothing is appended when empty.
+        """
+        started = self._bot_turn_started_at
+        self._bot_turn_started_at = None
+        if not text:
+            return
+        if self._awaiting_reply or (started is not None and started < self._input_sent_at):
+            self._trace.log(f"discard: bot turn from before the send {text!r}")
+            return
+        await self.append({"type": "response", "text": text})
+
+    def input_sent(self) -> None:
+        """Mark the user's input as sent: the bot's reply is what it says from now on.
+
+        Output the bot produced before this point can't be the reply, so an LLM
+        response still streaming is dropped until the bot's next llm-started,
+        and a spoken turn that began before now is dropped when it ends.
+        """
+        self._awaiting_reply = True
+        self._input_sent_at = time.monotonic()
+
+    def _interrupted(self) -> None:
+        """The bot reported an interruption: its output so far is not the reply to what follows.
+
+        Leftover output is dropped so it cannot be aggregated into the next
+        turn, and the reply rule waits for the bot's next ``llm-started``.
+        """
+        self.drop_pending_bot_output("on interruption")
+        self._awaiting_reply = True
+
+    def _message_to_event(self, message) -> dict | None:
+        """Map one of the bot's reported RTVI messages to a scenario event, if any.
 
         These are the bot's reports *about the harness* (its raw VAD, turn-level
         speaking, and the transcription of what it heard), kept as raw messages by
         the harness serializer so they don't collide with the VAD/transcription
-        frames the harness computes from the bot's audio.
+        frames the harness computes from the bot's audio. A pure mapping: what
+        an interruption report does to the stream is :meth:`_interrupted`.
         """
         if not isinstance(message, dict):
-            return []
+            return None
         msg_type = message.get("type")
         data = message.get("data") or {}
         if msg_type == "user-started-speaking":
-            # A new user turn: drop any leftover bot output from a prior turn so it
-            # isn't aggregated into this one.
-            self.drop_pending_bot_output("on interruption")
-            self.awaiting_llm_restart = True
-            return [{"type": "user_started_speaking"}]
+            return {"type": "user_started_speaking"}
         elif msg_type == "bot-interrupted":
-            self.drop_pending_bot_output("on interruption")
-            self.awaiting_llm_restart = True
-            return [{"type": "bot_interrupted"}]
+            return {"type": "bot_interrupted"}
         elif msg_type == "user-stopped-speaking":
-            return [{"type": "user_stopped_speaking"}]
+            return {"type": "user_stopped_speaking"}
         elif msg_type == "vad-user-started-speaking":
-            return [{"type": "vad_user_started_speaking"}]
+            return {"type": "vad_user_started_speaking"}
         elif msg_type == "vad-user-stopped-speaking":
-            return [{"type": "vad_user_stopped_speaking"}]
+            return {"type": "vad_user_stopped_speaking"}
         elif msg_type == "user-transcription":
             if data.get("final", True):
-                return [{"type": "user_transcription", "transcript": data.get("text", "")}]
-            return []
-        return []
+                return {"type": "user_transcription", "transcript": data.get("text", "")}
+            return None
+        return None
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """Build one response segment of ``event_type``.
