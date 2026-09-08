@@ -300,6 +300,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
+            tool_call_text_policy=None,
             session_properties=events.SessionProperties(),
         )
 
