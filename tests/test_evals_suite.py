@@ -228,7 +228,7 @@ runs: {runs}
 class TestManifestSimulations(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.base = Path(self._tmp.name)
+        self.base = Path(self._tmp.name).resolve()
         (self.base / "scenarios").mkdir()
         (self.base / "scenarios" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
         (self.base / "scenarios" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
