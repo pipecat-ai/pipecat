@@ -166,7 +166,7 @@ class EvalEventStream:
         emit ``tts_response`` only in audio mode, etc.).
 
         The bot *reports* events about the harness as ``InputTransportMessageFrame``
-        (see :data:`~pipecat.evals.serializer.RTVIHarnessSerializer`), which this
+        (see :data:`~pipecat.evals.serializer.EvalClientSerializer`), which this
         maps to scenario events. What the harness *computes* from the bot's audio
         is handled elsewhere: the ``response`` comes from the user aggregator's
         ``on_user_turn_stopped`` (it consumes the STT's ``TranscriptionFrame``s, so

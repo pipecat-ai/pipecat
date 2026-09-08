@@ -15,9 +15,9 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals import client_transport
 from pipecat.evals.client_transport import (
     FRAME_S,
-    EvalHarnessInputTransport,
-    EvalHarnessOutputTransport,
-    EvalHarnessRecorder,
+    EvalClientInputTransport,
+    EvalClientOutputTransport,
+    EvalClientRecorder,
     _RecorderTrack,
 )
 from pipecat.frames.frames import (
@@ -52,7 +52,7 @@ class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
                 pass
 
     async def test_paces_queued_audio_then_silence(self):
-        out = EvalHarnessOutputTransport(
+        out = EvalClientOutputTransport(
             None, _fake_session(), WebsocketClientParams(audio_out_enabled=True)
         )
         out._sample_rate = self.SR  # set by start(); skip the transport lifecycle
@@ -81,8 +81,8 @@ class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(sent), int(0.25 / FRAME_S) + 5)
 
     async def test_interruption_drops_the_unsent_audio(self):
-        recorder = EvalHarnessRecorder(self.SR)
-        out = EvalHarnessOutputTransport(
+        recorder = EvalClientRecorder(self.SR)
+        out = EvalClientOutputTransport(
             None, _fake_session(), WebsocketClientParams(audio_out_enabled=True), recorder=recorder
         )
         audio = b"\x01\x00" * (self.SR // 10)  # 100ms
@@ -165,8 +165,8 @@ class TestEvalHarnessInput(unittest.IsolatedAsyncioTestCase):
     SR = 16000
 
     async def test_bot_interrupted_drops_the_unplayed_audio(self):
-        recorder = EvalHarnessRecorder(self.SR)
-        inp = EvalHarnessInputTransport(
+        recorder = EvalClientRecorder(self.SR)
+        inp = EvalClientInputTransport(
             None,
             _fake_session(),
             WebsocketClientParams(audio_in_enabled=True),

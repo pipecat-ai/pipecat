@@ -24,7 +24,7 @@ sets:
 
 The input side needs no special handling: the harness streams the user audio over
 the wire as a continuous real-time stream (paced, with silence when idle — see
-:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`), so the bot's
+:class:`~pipecat.evals.client_transport.EvalClientOutputTransport`), so the bot's
 stock input transport consumes it directly. This input transport only adds image
 serving (a function-calling-video bot has no camera under eval).
 
@@ -102,7 +102,7 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
     live video frame.
 
     The harness streams the user audio over the wire as a continuous real-time
-    stream (see :class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`),
+    stream (see :class:`~pipecat.evals.client_transport.EvalClientOutputTransport`),
     so this side needs no special handling: the bot's stock input handles the
     incoming audio.
     """

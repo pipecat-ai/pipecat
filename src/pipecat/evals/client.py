@@ -8,7 +8,7 @@
 
 :class:`EvalClient` is the runtime every driver shares. It waits for the bot to
 listen, runs the eval pipeline whose bot-facing edge is
-:class:`~pipecat.evals.client_transport.EvalHarnessTransport`, completes the RTVI
+:class:`~pipecat.evals.client_transport.EvalClientTransport`, completes the RTVI
 handshake, sends the user's turns (text, synthesized speech, a recording, DTMF
 keys, an image), records the conversation, and tears everything down. The bot's
 output reaches the rest of the harness through the
@@ -29,7 +29,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client_transport import EvalHarnessRecorder, EvalHarnessTransport
+from pipecat.evals.client_transport import EvalClientRecorder, EvalClientTransport
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.script import EvalScriptScenario
@@ -38,8 +38,8 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    HARNESS_STT_SAMPLE_RATE,
-    RTVIHarnessSerializer,
+    EVAL_STT_SAMPLE_RATE,
+    EvalClientSerializer,
 )
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
@@ -396,7 +396,7 @@ class EvalClient:
         self._run_task: asyncio.Task | None = None
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
-        self._recorder: EvalHarnessRecorder | None = None
+        self._recorder: EvalClientRecorder | None = None
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
@@ -500,9 +500,9 @@ class EvalClient:
         params = WebsocketClientParams(
             audio_in_enabled=self._bot_audio,
             audio_out_enabled=self.sends_user_audio,
-            audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE if self._bot_audio else 0,
+            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._bot_audio else 0,
             audio_out_sample_rate=user_audio_rate,
-            serializer=RTVIHarnessSerializer(),
+            serializer=EvalClientSerializer(),
         )
         # Record the conversation from the *raw* audio the transport sees on each
         # edge (the user TTS as produced, the bot's chunks as received), not the
@@ -510,12 +510,12 @@ class EvalClient:
         # precisely, and recording the paced streams stutters. The recorder
         # reconstructs gapless turns and pads only the real between-turn pauses.
         if self._record_path and self._bot_audio:
-            self._recorder = EvalHarnessRecorder(user_audio_rate or HARNESS_STT_SAMPLE_RATE)
-        # EvalHarnessTransport reshapes both audio edges into the continuous
+            self._recorder = EvalClientRecorder(user_audio_rate or EVAL_STT_SAMPLE_RATE)
+        # EvalClientTransport reshapes both audio edges into the continuous
         # real-time stream VAD/STT expect: its output paces the user TTS to the bot
         # and its input fills gaps in the bot's audio (both audio-mode only). When a
         # recorder is set, both edges also feed it the raw audio for the recording.
-        transport = EvalHarnessTransport(self._connect_url(), params, recorder=self._recorder)
+        transport = EvalClientTransport(self._connect_url(), params, recorder=self._recorder)
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
@@ -539,8 +539,8 @@ class EvalClient:
         worker = PipelineWorker(
             pipeline,
             params=PipelineParams(
-                audio_in_sample_rate=HARNESS_STT_SAMPLE_RATE,
-                audio_out_sample_rate=user_audio_rate or HARNESS_STT_SAMPLE_RATE,
+                audio_in_sample_rate=EVAL_STT_SAMPLE_RATE,
+                audio_out_sample_rate=user_audio_rate or EVAL_STT_SAMPLE_RATE,
             ),
             enable_rtvi=False,
             cancel_on_idle_timeout=False,
@@ -731,7 +731,7 @@ class EvalClient:
         :class:`_BotFrameSink`). The user TTS
         (:class:`~pipecat.evals.tts.CachingTTSService`) renders it to audio
         (cached), which the output transport
-        (:class:`~pipecat.evals.client_transport.EvalHarnessOutputTransport`) paces
+        (:class:`~pipecat.evals.client_transport.EvalClientOutputTransport`) paces
         to the bot as a continuous real-time stream.
 
         Args:
@@ -761,7 +761,7 @@ class EvalClient:
         ):
             await self._sink.inject(frame)
 
-    def _processors(self, transport: EvalHarnessTransport) -> list:
+    def _processors(self, transport: EvalClientTransport) -> list:
         """The eval pipeline's processors, in order (see the class docstring)."""
         processors: list = [transport.input()]
         # The context both aggregators keep: the persona's in a simulation, else a

@@ -179,6 +179,17 @@
       "location": "pipecat/evals/script_session.py"
     },
     {
+      "subject": "RTVIEvalSerializer",
+      "module": "pipecat.evals.serializer",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalSerializer",
+      "message": "`RTVIEvalSerializer` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalSerializer` instead.",
+      "location": "pipecat/evals/serializer.py"
+    },
+    {
       "subject": "EvalSuite.run.on_update",
       "module": "pipecat.evals.suite",
       "kind": "parameter",

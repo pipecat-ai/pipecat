@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for :class:`pipecat.evals.serializer.RTVIEvalSerializer`."""
+"""Tests for :class:`pipecat.evals.serializer.EvalSerializer`."""
 
 import base64
 import json
@@ -16,8 +16,8 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
-    RTVIEvalSerializer,
-    RTVIHarnessSerializer,
+    EvalClientSerializer,
+    EvalSerializer,
 )
 from pipecat.frames.frames import (
     InputAudioRawFrame,
@@ -32,9 +32,9 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 
 
-class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
+class TestEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.serializer = RTVIEvalSerializer()
+        self.serializer = EvalSerializer()
 
     async def test_send_text_wraps_as_transport_message(self):
         msg = {
@@ -156,9 +156,9 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize("not json"))
 
 
-class TestRTVIEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
+class TestEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.serializer = RTVIEvalSerializer()
+        self.serializer = EvalSerializer()
 
     async def test_rtvi_server_message_serialized_to_json(self):
         message = RTVI.BotLLMStartedMessage().model_dump()
@@ -175,11 +175,11 @@ class TestRTVIEvalSerializerSerialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.serialize(frame))
 
 
-class TestRTVIHarnessSerializer(unittest.IsolatedAsyncioTestCase):
+class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
     """The client-side serializer the harness pipeline uses to talk to the bot."""
 
     def setUp(self):
-        self.serializer = RTVIHarnessSerializer()
+        self.serializer = EvalClientSerializer()
 
     def _server(self, msg_type: str, data: dict | None = None) -> str:
         return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
