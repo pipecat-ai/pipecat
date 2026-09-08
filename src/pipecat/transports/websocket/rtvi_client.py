@@ -57,6 +57,9 @@ class RTVIClientTransport(WebsocketClientTransport):
         """
         params = params or WebsocketClientParams()
         params.serializer = params.serializer or RTVIClientSerializer()
+        # An RTVI raw-audio message carries bare PCM with its own sample rate and
+        # channel count, so a WAV header is never valid on this wire.
+        params.add_wav_header = False
         super().__init__(uri, params)
 
         self._bot_ready = False

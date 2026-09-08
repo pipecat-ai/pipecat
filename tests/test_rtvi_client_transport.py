@@ -13,9 +13,11 @@ in a real pipeline against a tiny RTVI WebSocket server and asserts the bot's
 server messages arrive as the right frames.
 """
 
+import base64
 import json
 import socket
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import websockets
@@ -25,6 +27,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    OutputAudioRawFrame,
     TranscriptionFrame,
 )
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
@@ -48,6 +51,25 @@ class TestRTVIClientTransportHandshake(unittest.IsolatedAsyncioTestCase):
 
     def test_defaults_to_rtvi_client_serializer(self):
         self.assertIsInstance(self.transport._params.serializer, RTVIClientSerializer)
+
+    async def test_raw_audio_carries_bare_pcm(self):
+        """The audio write path sends the PCM as given: no WAV header on the wire."""
+        pcm = bytes(range(256)) * 4
+        output = self.transport.output()
+        output._session = SimpleNamespace(is_closing=False, is_connected=True, send=AsyncMock())
+        output._sample_rate = 16000
+
+        self.assertTrue(
+            await output.write_audio_frame(
+                OutputAudioRawFrame(audio=pcm, sample_rate=16000, num_channels=1)
+            )
+        )
+
+        sent = json.loads(output._session.send.call_args.args[0])
+        self.assertEqual(sent["type"], "raw-audio")
+        self.assertEqual(base64.b64decode(sent["data"]["base64Audio"]), pcm)
+        self.assertEqual(sent["data"]["sampleRate"], 16000)
+        self.assertEqual(sent["data"]["numChannels"], 1)
 
     async def test_send_client_ready_message(self):
         self.transport._session.send = AsyncMock()
