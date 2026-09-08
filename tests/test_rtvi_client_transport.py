@@ -161,6 +161,7 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
             down, _ = await run_test(
                 transport.input(),
                 frames_to_send=[SleepFrame(sleep=0.5)],  # let connect/handshake/replies flow
+                start_timeout=5.0,  # the input transport connects before the pipeline starts
             )
 
         # The bot's server messages arrived as the expected pipeline frames, in order.
