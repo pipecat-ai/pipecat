@@ -181,19 +181,19 @@ class EvalEventStream:
         """
         if isinstance(frame, InputTransportMessageFrame):
             return self._message_to_events(frame.message)
-        if isinstance(frame, LLMFullResponseStartFrame):
+        elif isinstance(frame, LLMFullResponseStartFrame):
             self.awaiting_llm_restart = False
             self._text_buffer = []
             self._llm_text_at = None
             return [{"type": "llm_started"}]
-        if isinstance(frame, LLMTextFrame):
+        elif isinstance(frame, LLMTextFrame):
             if self.awaiting_llm_restart:
                 return []
             if not self._text_buffer:
                 self._llm_text_at = self.elapsed()
             self._text_buffer.append(frame.text)
             return []
-        if isinstance(frame, LLMFullResponseEndFrame):
+        elif isinstance(frame, LLMFullResponseEndFrame):
             if self.awaiting_llm_restart:
                 self._text_buffer = []
                 return []
@@ -201,11 +201,11 @@ class EvalEventStream:
             if self._llm_text_at is not None:
                 event["started_at"] = self._llm_text_at
             return [event]
-        if isinstance(frame, TTSTextFrame):
+        elif isinstance(frame, TTSTextFrame):
             if self._bot_audio:
                 return [self._segment_event("tts_response", frame.text)]
             return []
-        if isinstance(frame, FunctionCallInProgressFrame):
+        elif isinstance(frame, FunctionCallInProgressFrame):
             return [
                 {
                     "type": "function_call",
@@ -213,7 +213,7 @@ class EvalEventStream:
                     "args": dict(frame.arguments or {}),
                 }
             ]
-        if isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
             # How the call ended is the assertable part, so `cancelled` sits in
             # `args` alongside the id: a scenario matches both through the same
             # `calls:`/`args:` check a function_call uses.
@@ -318,17 +318,17 @@ class EvalEventStream:
             self.drop_pending_bot_output("on interruption")
             self.awaiting_llm_restart = True
             return [{"type": "user_started_speaking"}]
-        if msg_type == "bot-interrupted":
+        elif msg_type == "bot-interrupted":
             self.drop_pending_bot_output("on interruption")
             self.awaiting_llm_restart = True
             return [{"type": "bot_interrupted"}]
-        if msg_type == "user-stopped-speaking":
+        elif msg_type == "user-stopped-speaking":
             return [{"type": "user_stopped_speaking"}]
-        if msg_type == "vad-user-started-speaking":
+        elif msg_type == "vad-user-started-speaking":
             return [{"type": "vad_user_started_speaking"}]
-        if msg_type == "vad-user-stopped-speaking":
+        elif msg_type == "vad-user-stopped-speaking":
             return [{"type": "vad_user_stopped_speaking"}]
-        if msg_type == "user-transcription":
+        elif msg_type == "user-transcription":
             if data.get("final", True):
                 return [{"type": "user_transcription", "transcript": data.get("text", "")}]
             return []

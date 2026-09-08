@@ -132,21 +132,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         while self._ended_by is None:
             try:
                 event = await self._stream.next_any(deadline)
+
+                self._observe_new_events()
+                if event["type"] == END_CALL_EVENT:
+                    self._ended_by = "end_call"
+                elif event["type"] == BOT_ENDED_EVENT:
+                    self._ended_by = "bot"
+                elif event["type"] == PERSONA_TURN_EVENT:
+                    self._turns += 1
+                    await self._report("user", event.get("text", ""))
+                    if self._turns >= simulation.max_turns:
+                        self._ended_by = "max_turns"
+                elif event["type"] == self._bot_said and event.get("text"):
+                    await self._report("bot", event["text"])
             except TimeoutError:
                 self._ended_by = "max_duration"
                 break
-            self._observe_new_events()
-            if event["type"] == END_CALL_EVENT:
-                self._ended_by = "end_call"
-            elif event["type"] == BOT_ENDED_EVENT:
-                self._ended_by = "bot"
-            elif event["type"] == PERSONA_TURN_EVENT:
-                self._turns += 1
-                await self._report("user", event.get("text", ""))
-                if self._turns >= simulation.max_turns:
-                    self._ended_by = "max_turns"
-            elif event["type"] == self._bot_said and event.get("text"):
-                await self._report("bot", event["text"])
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()
