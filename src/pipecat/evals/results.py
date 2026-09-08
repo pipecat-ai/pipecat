@@ -263,7 +263,7 @@ class EvalSimulationResult:
             if metric.passed:
                 continue
             if metric.min_quality is None:
-                return f"{metric.name} out of range: {metric.reason}"
+                return f"{metric.name}: {metric.reason}"
             score = "unscored" if metric.score is None else f"{metric.score:.2f}"
             return f"{metric.name} {score} below {metric.min_quality:.2f}: {metric.reason}"
         return None

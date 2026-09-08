@@ -31,6 +31,7 @@ from pipecat.evals.results import (
     EvalSimulationTurnVerdict,
     EvalTrace,
 )
+from pipecat.evals.script import EvalFunctionCall
 from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -38,6 +39,18 @@ from pipecat.services.llm_service import FunctionCallParams, LLMService
 
 # The event the driver appends when the persona calls end_call.
 END_CALL_EVENT = "end_call"
+
+
+def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
+    """Whether a call the bot made is the one a ``calls:`` entry describes.
+
+    Names must be equal; the entry's ``args``, when given, must all be present
+    in the call's arguments with the same values, extra arguments ignored.
+    """
+    if spec.name != call.name:
+        return False
+    actual = call.args or {}
+    return all(actual.get(key) == value for key, value in (spec.args or {}).items())
 
 
 class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
@@ -298,28 +311,62 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         )
 
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
-        """A measured metric's outcome: its value against its range."""
-        value, described = self._measurement(metric.measure or "")
-        low, high = metric.min_value, metric.max_value
-        if low is not None and high is not None:
-            bound = f"between {low:g} and {high:g}"
-        elif high is not None:
-            bound = f"at most {high:g}"
+        """A measured metric's outcome: its value against its range, or the bot's calls against the list."""
+        score: float | None
+        if metric.measure == "function_calls":
+            value, passed, reason = self._calls_outcome(metric)
+            score = 1.0 if passed else 0.0
         else:
-            bound = f"at least {low:g}"
-        reason = f"{described}, {bound}"
-        if value is None:
-            score, passed = None, True
-        else:
-            inside = (low is None or value >= low) and (high is None or value <= high)
-            score, passed = (1.0 if inside else 0.0), inside
+            value, described = self._measurement(metric.measure or "")
+            low, high = metric.min_value, metric.max_value
+            if low is not None and high is not None:
+                bound = f"between {low:g} and {high:g}"
+            elif high is not None:
+                bound = f"at most {high:g}"
+            else:
+                bound = f"at least {low:g}"
+            reason = f"{described}, {bound}"
+            if value is None:
+                score, passed = None, True
+            else:
+                inside = (low is None or value >= low) and (high is None or value <= high)
+                score, passed = (1.0 if inside else 0.0), inside
         self._trace.log(
             f"measure: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
-            f"{'' if passed else ' (out of range)'}: {reason}"
+            f"{'' if passed else ' (failed)'}: {reason}"
         )
         return EvalSimulationMetricScore(
             name=metric.name, score=score, passed=passed, reason=reason, value=value
         )
+
+    def _calls_outcome(self, metric: EvalSimulationMetric) -> tuple[float, bool, str]:
+        """The ``function_calls`` measure: the count, whether the set matches, and the reason.
+
+        The reason reads the calls made against the list, so a failing run says
+        which call was missing or unlisted.
+        """
+        made = self._calls_made()
+        expected = metric.calls or []
+        missing = [spec for spec in expected if not any(_call_matches(spec, c) for c in made)]
+        unlisted = [c for c in made if not any(_call_matches(spec, c) for spec in expected)]
+        described = ", ".join(c.signature for c in made) or "no calls"
+        wanted = ", ".join(spec.signature for spec in expected) or "none"
+        return float(len(made)), not missing and not unlisted, f"{described}, expected {wanted}"
+
+    def _calls_made(self) -> list[EvalFunctionCall]:
+        """The bot's function calls in order, less the ones it cancelled."""
+        made: list[EvalFunctionCall] = []
+        for event in self._stream.events_seen:
+            if event["type"] == "function_call":
+                made.append(EvalFunctionCall(name=event.get("name"), args=event.get("args") or {}))
+            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
+                "cancelled"
+            ):
+                for index in range(len(made) - 1, -1, -1):
+                    if made[index].name == event.get("name"):
+                        del made[index]
+                        break
+        return made
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
         """A measure's value for this run, and the phrase that reports it."""

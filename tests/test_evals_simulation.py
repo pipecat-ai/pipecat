@@ -18,6 +18,7 @@ from pipecat.evals.scenario import (
     describe_simulation,
     load_scenario_file,
 )
+from pipecat.evals.script import EvalFunctionCall
 
 MINIMAL = """
 name: capital_curious
@@ -150,6 +151,45 @@ judge:
             with self.assertRaises(ValueError, msg=missing) as cm:
                 EvalSimulationScenario.load(_write(text))
             self.assertIn(missing, str(cm.exception))
+
+    def test_a_function_calls_measure_takes_the_calls_the_bot_should_make(self):
+        s = EvalSimulationScenario.load(
+            _write(
+                MINIMAL
+                + """
+metrics:
+  - measure: function_calls
+    calls:
+      - book_table
+      - name: send_confirmation
+        args: { channel: sms }
+  - name: hands_off
+    measure: function_calls
+    calls: []
+"""
+            )
+        )
+        booked, hands_off = s.metrics
+        self.assertEqual(booked.name, "function_calls")
+        self.assertEqual(
+            [(c.name, c.args) for c in booked.calls or []],
+            [("book_table", None), ("send_confirmation", {"channel": "sms"})],
+        )
+        self.assertEqual((hands_off.measure, hands_off.calls), ("function_calls", []))
+        for bad, message in (
+            ("  - measure: function_calls\n", "needs a 'calls:' list"),
+            (
+                "  - measure: function_calls\n    calls: [book_table]\n    max_value: 1\n",
+                "not a range",
+            ),
+            (
+                "  - measure: function_calls\n    calls: [{args: {a: 1}}]\n",
+                "entry #0 must be a name",
+            ),
+            ("  - measure: turns\n    max_value: 3\n    calls: []\n", "'calls:' belongs to"),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                EvalSimulationScenario.load(_write(MINIMAL + "metrics:\n" + bad))
 
     def test_metric_needs_a_criterion(self):
         with self.assertRaises(ValueError) as cm:
@@ -503,7 +543,96 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(by_name["duration"].passed)
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
-        self.assertEqual(result.failure, "latency out of range: slowest reply 1.40 s, at most 1")
+        self.assertEqual(result.failure, "latency: slowest reply 1.40 s, at most 1")
+
+    async def test_function_calls_are_checked_against_the_list_the_bot_should_make(self):
+        metrics = [
+            EvalSimulationMetric(
+                "booking",
+                measure="function_calls",
+                calls=[EvalFunctionCall(name="book_table", args={"party_size": 2})],
+            ),
+            EvalSimulationMetric("hands_off", measure="function_calls", calls=[]),
+            EvalSimulationMetric(
+                "lookup",
+                measure="function_calls",
+                calls=[
+                    EvalFunctionCall(name="check_availability"),
+                    EvalFunctionCall(name="book_table"),
+                ],
+            ),
+        ]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Hello!"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "A table for two at six."})
+            await stream.append(
+                {"type": "function_call", "name": "check_availability", "args": {"time": "6"}}
+            )
+            # A cancelled call did not happen.
+            await stream.append({"type": "function_call", "name": "send_confirmation", "args": {}})
+            await stream.append(
+                {
+                    "type": "function_call_stopped",
+                    "name": "send_confirmation",
+                    "args": {"tool_call_id": "1", "cancelled": True},
+                }
+            )
+            await stream.append(
+                {
+                    "type": "function_call",
+                    "name": "book_table",
+                    "args": {"party_size": 2, "time": "6"},
+                }
+            )
+            await stream.append({"type": "llm_response", "text": "Booked."})
+            await _end_call(llm, success=True, reason="booked")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        by_name = {m.name: m for m in result.metrics}
+        made = "check_availability(time='6'), book_table(party_size=2, time='6')"
+        # The list is the whole set: the lookup is not on the booking list, so it fails.
+        self.assertEqual((by_name["booking"].value, by_name["booking"].passed), (2.0, False))
+        self.assertEqual(by_name["booking"].reason, f"{made}, expected book_table(party_size=2)")
+        self.assertFalse(by_name["hands_off"].passed)
+        self.assertEqual(by_name["hands_off"].reason, f"{made}, expected none")
+        # Names alone match, in any order, and the cancelled call is not counted.
+        self.assertTrue(by_name["lookup"].passed)
+        self.assertEqual(
+            by_name["lookup"].reason, f"{made}, expected check_availability, book_table"
+        )
+        self.assertEqual(result.failure, f"booking: {made}, expected book_table(party_size=2)")
+
+    async def test_a_bot_that_should_call_nothing_passes_when_it_calls_nothing(self):
+        metrics = [EvalSimulationMetric("hands_off", measure="function_calls", calls=[])]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "I can't do that for you."})
+            await _end_call(llm, success=True, reason="turned down")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        (hands_off,) = result.metrics
+        self.assertEqual(
+            (hands_off.value, hands_off.passed, hands_off.reason),
+            (0.0, True, "no calls, expected none"),
+        )
+        self.assertTrue(result.passed)
 
     async def test_a_bot_turn_is_what_it_said_between_persona_turns_with_the_calls_by_then(self):
         judge = _FakeConversationJudge(["yes"])

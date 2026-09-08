@@ -289,8 +289,13 @@ Each simulation file names how many times it runs (`runs`), and every run must
 pass; a persona does not say the same thing twice, so a single run is an
 anecdote and the release set runs each three times. A run passes when the judge
 says the bot did its job (`success`), no judged metric with a `min_quality`
-scored below it, and no measured one fell outside its range; a run that fails
-says which of those gave way.
+scored below it, and no measured one failed its range or its call list; a run
+that fails says which of those gave way. The judge sees the bot's tool calls
+(name and arguments), not their results. Whether the bot made a call at all is
+a `function_calls` measure, no judge needed; if a reply must match backend
+data, write the expected value into `success` or the criterion ("the reply
+says the appointment is on Tuesday September fifteenth") and keep the mocks
+deterministic so it stays true across runs.
 
 A judged metric's `criterion` says what every reply of the bot should be, and
 the judge decides it for each bot turn in one call over the whole transcript,
@@ -302,7 +307,11 @@ judge reads a "never" as an "always". Something the bot must do once belongs
 in `success`. A measured metric (`measure: turns`, `duration`, `words`, or
 `latency`, with `min_value` and/or `max_value`) is computed from the run: the
 per-reply ones bound every reply, so `latency` is the slowest reply and
-`words` the longest. `results.jsonl` carries each metric's score, value, and
+`words` the longest. `measure: function_calls` takes a `calls:` list instead
+of a range: the calls the bot should make, by name (with `args` as a subset
+match), and fails on a missing or an unlisted call; `calls: []` says the bot
+must call nothing, the check for a caller who should be turned down.
+`results.jsonl` carries each metric's score, value, and
 the verdict on every turn. The suite prints a
 per-simulation pass rate and a ✓ or ✗ for whether every run passed, and exits
 non-zero when one did not. `--repeat` turns the whole thing

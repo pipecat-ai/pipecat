@@ -54,7 +54,12 @@ Fields:
     conversation; prose, as long as it needs to be. It is the bot's side of the
     ``goal``: usually that the caller got what they asked for, but where the
     right outcome is to refuse, to qualify, or to escalate, it says so. The run
-    succeeded if the judge says yes.
+    succeeded if the judge says yes. The judge sees the bot's tool calls (name
+    and arguments), not their results. Whether the bot made a call at all is a
+    ``function_calls`` metric, no judge needed; if a reply must match backend
+    data, write the expected value into the criterion ("the reply says the
+    appointment is on Tuesday September fifteenth") and keep the mocks
+    deterministic so it stays true across runs.
 
 ``metrics``
     judged quality criteria, each with ``name``, ``criterion``, and an optional
@@ -63,9 +68,8 @@ Fields:
     before it and the tool calls the bot had made by then, and the metric's
     score is the share of turns that passed: 0.80 is four replies in five. A
     metric with a ``min_quality`` fails the run when its score is below it; one
-    without is reported and never fails anything. The run's ``quality`` is the
-    plain mean of the scores. Something the bot must do once, read the order
-    back, belongs in ``success``, not here.
+    without is reported and never fails anything. Something the bot must do
+    once, read the order back, belongs in ``success``, not here.
 
     A metric can measure instead of judge: ``measure`` names one of
     ``SIMULATION_MEASURES`` and ``min_value`` / ``max_value`` (at least one)
@@ -77,6 +81,12 @@ Fields:
     reply in seconds: from the persona's send to the reply's first token in
     text mode, from the bot noticing the persona stop to its first spoken
     sentence in audio mode. The per-reply measures bound every reply.
+    ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
+    bot should make, each a name or a ``name`` with ``args`` (a subset of the
+    call's arguments), in any order. Every listed call must have happened and
+    any call not listed fails it, so ``calls: []`` says the bot must call
+    nothing, the check for a caller who should be turned down. A call the bot
+    cancelled did not happen.
 
 ``max_turns``, ``max_duration_s``
     backstops on the persona's turns (default 20) and on the run's wall clock
@@ -104,17 +114,18 @@ from pipecat.evals.scenario_config import (
     _user_segments,
 )
 from pipecat.evals.scenario_loader import _load_mapping
+from pipecat.evals.script import EvalFunctionCall
 
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
 
 # What a measured metric can measure, computed by the harness from the run.
-SIMULATION_MEASURES = ("turns", "duration", "words", "latency")
+SIMULATION_MEASURES = ("turns", "duration", "words", "latency", "function_calls")
 
 
 @dataclass
 class EvalSimulationMetric:
-    """A quality metric: a judged criterion, or a measure with a range.
+    """A quality metric: a judged criterion, or a measure with a range or a call list.
 
     Parameters:
         name: The metric's name in the results.
@@ -125,6 +136,9 @@ class EvalSimulationMetric:
         measure: One of ``SIMULATION_MEASURES``; ``None`` for a judged metric.
         min_value: The measured value's lower bound, inclusive, or ``None``.
         max_value: The measured value's upper bound, inclusive, or ``None``.
+        calls: For ``function_calls``, the calls the bot should make: each a
+            name, or a name with ``args`` as a subset of the call's arguments;
+            an empty list means none. ``None`` for every other metric.
     """
 
     name: str
@@ -133,6 +147,7 @@ class EvalSimulationMetric:
     measure: str | None = None
     min_value: float | None = None
     max_value: float | None = None
+    calls: list[EvalFunctionCall] | None = None
 
 
 @dataclass
@@ -290,6 +305,12 @@ def _parse_measure(item: dict, name: str, measure: Any, path: Path) -> EvalSimul
         raise ValueError(
             f"{path}: metric {name!r} is measured; it takes a range, not 'min_quality:'"
         )
+    if measure == "function_calls":
+        return _parse_calls_measure(item, name, path)
+    if "calls" in item:
+        raise ValueError(
+            f"{path}: metric {name!r} takes a range; 'calls:' belongs to 'measure: function_calls'"
+        )
     bounds = {}
     for key in ("min_value", "max_value"):
         value = item.get(key)
@@ -299,6 +320,37 @@ def _parse_measure(item: dict, name: str, measure: Any, path: Path) -> EvalSimul
     if bounds["min_value"] is None and bounds["max_value"] is None:
         raise ValueError(f"{path}: metric {name!r} needs a 'min_value:' or a 'max_value:'")
     return EvalSimulationMetric(name=name, measure=measure, **bounds)
+
+
+def _parse_calls_measure(item: dict, name: str, path: Path) -> EvalSimulationMetric:
+    """Parse a ``function_calls`` metric: the list of calls the bot should make."""
+    if "min_value" in item or "max_value" in item:
+        raise ValueError(
+            f"{path}: metric {name!r} compares the bot's calls with 'calls:', not a range"
+        )
+    raw = item.get("calls")
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{path}: metric {name!r} needs a 'calls:' list, the calls the bot should make "
+            "([] for none)"
+        )
+    calls: list[EvalFunctionCall] = []
+    for idx, entry in enumerate(raw):
+        if isinstance(entry, str) and entry:
+            calls.append(EvalFunctionCall(name=entry))
+            continue
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str) and entry["name"]:
+            args = entry.get("args")
+            if args is not None and not isinstance(args, dict):
+                raise ValueError(
+                    f"{path}: metric {name!r} 'calls:' entry #{idx} 'args:' must be a mapping"
+                )
+            calls.append(EvalFunctionCall(name=entry["name"], args=args))
+            continue
+        raise ValueError(
+            f"{path}: metric {name!r} 'calls:' entry #{idx} must be a name or a mapping with 'name:'"
+        )
+    return EvalSimulationMetric(name=name, measure="function_calls", calls=calls)
 
 
 def _positive_int(data: dict, key: str, default: int, path: Path) -> int:
