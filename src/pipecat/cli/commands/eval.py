@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console, Group
 from rich.live import Live
@@ -101,12 +102,18 @@ eval_app = typer.Typer(
 
 @eval_app.callback()
 def _eval_callback() -> None:
-    """Anchor for the subcommand structure.
+    """Load the nearest ``.env`` before any eval subcommand runs.
 
-    Required so typer treats ``run`` (and future verbs like ``list``) as
-    explicit subcommands rather than collapsing the single-command case
-    into a flat app.
+    The harness's own services (a simulation's persona LLM, a hosted judge)
+    read their credentials from the environment, so the ``.env`` the bots load
+    for themselves is loaded here too: the first one found walking up from the
+    working directory. Variables already set in the shell win.
+
+    Also anchors the subcommand structure: typer treats ``run`` and ``suite``
+    as explicit subcommands rather than collapsing a single command into a
+    flat app.
     """
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 def _supports_color() -> bool:

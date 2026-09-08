@@ -5329,6 +5329,7 @@ dependencies = [
     { name = "protobuf" },
     { name = "pydantic", version = "2.11.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*' and sys_platform == 'linux'" },
     { name = "pydantic", version = "2.13.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.13.*' or sys_platform != 'linux'" },
+    { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "resampy" },
     { name = "soundfile" },
@@ -5490,7 +5491,6 @@ rnnoise = [
 runner = [
     { name = "fastapi" },
     { name = "pipecat-ai-prebuilt" },
-    { name = "python-dotenv" },
     { name = "uvicorn" },
 ]
 sagemaker = [
@@ -5548,7 +5548,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-aiohttp" },
     { name = "pytest-asyncio" },
-    { name = "python-dotenv" },
     { name = "ruff" },
     { name = "setuptools" },
     { name = "setuptools-scm" },
@@ -5642,7 +5641,7 @@ requires-dist = [
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.3" },
-    { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "questionary", marker = "extra == 'cli'", specifier = ">=2.0.0,<3" },
@@ -5685,7 +5684,6 @@ dev = [
     { name = "pytest", specifier = ">=9.0.0,<10" },
     { name = "pytest-aiohttp", specifier = ">=1.0.0,<2" },
     { name = "pytest-asyncio", specifier = ">=1.0.0,<2" },
-    { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "ruff", specifier = ">=0.12.11,<1" },
     { name = "setuptools", specifier = "~=83.0.0" },
     { name = "setuptools-scm", specifier = "~=8.3.1" },
