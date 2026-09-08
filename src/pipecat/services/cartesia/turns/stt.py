@@ -19,8 +19,6 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
     EndFrame,
     ErrorFrame,
     Frame,
