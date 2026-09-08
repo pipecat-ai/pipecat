@@ -1,0 +1,200 @@
+[
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374781a2f1203656e671a046c756e61220648656c6c6f2e2a140a09617564696f2f70636d10c0bb011d0000a03f300242024000",
+    "json": {
+      "contextId": "ctx",
+      "start": {
+        "language": "eng",
+        "speaker": "luna",
+        "text": "Hello.",
+        "audioParameters": {
+          "audioFormat": "audio/pcm",
+          "samplingRate": 24000,
+          "timeScaleFactor": 1.25
+        },
+        "splitStrategy": "SPLIT_STRATEGY_NONE",
+        "codaParameters": {
+          "textLookaheadTokens": 0
+        }
+      }
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374781a2c12001a002a120a09617564696f2f70636d10001d0000000030004a10080010011a080000003f0000803f2000",
+    "json": {
+      "contextId": "ctx",
+      "start": {
+        "language": "",
+        "speaker": "",
+        "audioParameters": {
+          "audioFormat": "audio/pcm",
+          "samplingRate": 0,
+          "timeScaleFactor": 0.0
+        },
+        "splitStrategy": "SPLIT_STRATEGY_UNSPECIFIED",
+        "mistParameters": {
+          "pauseBetweenBrackets": false,
+          "phonemizeBetweenBrackets": true,
+          "inlineTimeScaleFactors": [
+            0.5,
+            1.0
+          ],
+          "saveOovs": false
+        }
+      }
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374781a00",
+    "json": {
+      "contextId": "ctx",
+      "start": {}
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "12190a0c4170692d4b6579207465737412027b7d1a051203656e67",
+    "json": {
+      "config": {
+        "authorization": "Api-Key test",
+        "license": "{}",
+        "defaults": {
+          "language": "eng"
+        }
+      }
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a03637478220648656c6c6f2e",
+    "json": {
+      "contextId": "ctx",
+      "text": "Hello."
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374782200",
+    "json": {
+      "contextId": "ctx",
+      "text": ""
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374782a00",
+    "json": {
+      "contextId": "ctx",
+      "end": {}
+    }
+  },
+  {
+    "message": "WebSocketRequest",
+    "binary": "0a036374783200",
+    "json": {
+      "contextId": "ctx",
+      "cancel": {}
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "121108011203656e6712037370611a03656e67",
+    "json": {
+      "ready": {
+        "protocol": 1,
+        "languages": [
+          "eng",
+          "spa"
+        ],
+        "defaultLanguage": "eng"
+      }
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "120408011a00",
+    "json": {
+      "ready": {
+        "protocol": 1,
+        "defaultLanguage": ""
+      }
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "12020801",
+    "json": {
+      "ready": {
+        "protocol": 1
+      }
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374781a050a03726571",
+    "json": {
+      "contextId": "ctx",
+      "started": {
+        "requestId": "req"
+      }
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a0363747822040001feff",
+    "json": {
+      "contextId": "ctx",
+      "audio": "AAH+/w=="
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374782200",
+    "json": {
+      "contextId": "ctx",
+      "audio": ""
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374782a00",
+    "json": {
+      "contextId": "ctx",
+      "done": {}
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374783200",
+    "json": {
+      "contextId": "ctx",
+      "cancelled": {}
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374783a200a0d696e76616c69645f696e707574120a74657374206572726f721a03726571",
+    "json": {
+      "contextId": "ctx",
+      "error": {
+        "kind": "invalid_input",
+        "message": "test error",
+        "requestId": "req"
+      }
+    }
+  },
+  {
+    "message": "WebSocketResponse",
+    "binary": "0a036374783a0c0a08696e7465726e616c1a00",
+    "json": {
+      "contextId": "ctx",
+      "error": {
+        "kind": "internal",
+        "requestId": ""
+      }
+    }
+  }
+]
