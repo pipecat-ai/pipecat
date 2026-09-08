@@ -62,7 +62,7 @@ class Model(StrEnum):
         MEDIUM: Medium-sized multilingual model, better quality.
         LARGE: Best quality multilingual model, slower inference.
         LARGE_V3_TURBO: Fast multilingual model, slightly lower quality than LARGE.
-        DISTIL_LARGE_V2: Fast multilingual distilled model.
+        DISTIL_LARGE_V2: Fast English-only distilled model.
         DISTIL_MEDIUM_EN: Fast English-only distilled model.
     """
 
@@ -73,9 +73,11 @@ class Model(StrEnum):
     MEDIUM = "medium"
     LARGE = "large-v3"
     LARGE_V3_TURBO = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
 
-    # English-only models
+    # English-only models. The distilled models keep the multilingual tokenizer
+    # of their teacher, so the loaded model reports itself as multilingual and
+    # the language check can't reject a non-English language for them.
+    DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
 
@@ -90,8 +92,8 @@ class MLXModel(StrEnum):
         MEDIUM: Medium-sized multilingual model for MLX.
         LARGE_V3: Best quality multilingual model for MLX.
         LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster with slightly lower quality.
-        DISTIL_LARGE_V3: Fast multilingual distilled model for MLX.
         LARGE_V3_TURBO_Q4: LARGE_V3_TURBO quantized to Q4 for reduced memory usage.
+        DISTIL_LARGE_V3: Fast English-only distilled model for MLX.
     """
 
     # Multilingual models
@@ -99,8 +101,10 @@ class MLXModel(StrEnum):
     MEDIUM = "mlx-community/whisper-medium-mlx"
     LARGE_V3 = "mlx-community/whisper-large-v3-mlx"
     LARGE_V3_TURBO = "mlx-community/whisper-large-v3-turbo"
-    DISTIL_LARGE_V3 = "mlx-community/distil-whisper-large-v3"
     LARGE_V3_TURBO_Q4 = "mlx-community/whisper-large-v3-turbo-q4"
+
+    # English-only models
+    DISTIL_LARGE_V3 = "mlx-community/distil-whisper-large-v3"
 
 
 def language_to_whisper_language(language: Language) -> str:
