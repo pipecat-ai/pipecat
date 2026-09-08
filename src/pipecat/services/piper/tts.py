@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import require_given
 
 try:
     from piper import PiperVoice
@@ -110,9 +110,7 @@ class PiperTTSService(TTSService):
 
         download_dir = download_dir or Path.cwd()
 
-        _voice = assert_given(self._settings.voice)
-        if _voice is None:
-            raise ValueError("Piper TTS voice must be specified")
+        _voice = require_given(self._settings.voice, "Piper TTS voice")
         model_file = f"{_voice}.onnx"
         model_path_resolved = Path(download_dir) / model_file
 

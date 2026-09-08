@@ -145,3 +145,14 @@ async def test_pocket_tts_voice_update():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("voice", [None, ""], ids=["none", "blank"])
+def test_missing_or_blank_voice_is_rejected_before_the_model_loads(voice):
+    with patch("pipecat.services.pocket_tts.tts.TTSModel") as mock_model_cls:
+        from pipecat.services.pocket_tts.tts import PocketTTSService
+
+        with pytest.raises(ValueError, match="Pocket TTS voice must be specified"):
+            PocketTTSService(settings=PocketTTSService.Settings(voice=voice))
+
+        mock_model_cls.load_model.assert_not_called()

@@ -163,3 +163,12 @@ async def test_run_piper_tts_error(aiohttp_client):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("voice", [None, ""], ids=["none", "blank"])
+def test_local_piper_rejects_a_missing_or_blank_voice_before_downloading(voice):
+    pytest.importorskip("piper")
+    from pipecat.services.piper.tts import PiperTTSService
+
+    with pytest.raises(ValueError, match="Piper TTS voice must be specified"):
+        PiperTTSService(settings=PiperTTSService.Settings(voice=voice))

@@ -18,7 +18,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import require_given
 
 try:
     import torch
@@ -123,9 +123,8 @@ class PocketTTSService(TTSService):
 
         # The base __init__ has already converted a Language enum to the
         # pocket-tts language name via language_to_service_language().
-        language = assert_given(self._settings.language)
-        if language is None:
-            raise ValueError("Pocket TTS language must be specified")
+        language = require_given(self._settings.language, "Pocket TTS language")
+        voice = require_given(self._settings.voice, "Pocket TTS voice")
 
         load_kwargs: dict[str, Any] = {"language": language, "quantize": quantize}
         if temp is not None:
@@ -134,10 +133,6 @@ class PocketTTSService(TTSService):
         logger.debug(f"Loading Pocket TTS '{language}' model")
         self._model = TTSModel.load_model(**load_kwargs)
         logger.debug(f"Loaded Pocket TTS '{language}' model")
-
-        voice = assert_given(self._settings.voice)
-        if voice is None:
-            raise ValueError("Pocket TTS voice must be specified")
 
         # Voice state derived from the voice prompt, cached across utterances.
         # generate_audio_stream() is called with copy_state=True so this cache
@@ -179,9 +174,7 @@ class PocketTTSService(TTSService):
     async def _get_voice_state(self) -> Any:
         """Return the cached voice state, deriving it if invalidated."""
         if self._voice_state is None:
-            voice = assert_given(self._settings.voice)
-            if voice is None:
-                raise ValueError("Pocket TTS voice must be specified")
+            voice = require_given(self._settings.voice, "Pocket TTS voice")
             logger.debug(f"{self}: deriving voice state for [{voice}]")
             self._voice_state = await asyncio.to_thread(
                 self._model.get_state_for_audio_prompt, voice
