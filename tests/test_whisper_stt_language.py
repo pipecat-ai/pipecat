@@ -52,3 +52,17 @@ def test_english_only_model_without_a_language_is_fine():
 def test_model_that_does_not_publish_languages_is_not_second_guessed():
     service = _build(None, model="custom", language=Language.ES)
     assert service._settings.language == "es"
+
+
+@pytest.mark.parametrize("model", [None, ""], ids=["none", "blank"])
+def test_missing_or_blank_model_is_rejected_before_loading(model):
+    with pytest.raises(ValueError, match="Whisper model must be specified"):
+        _build(["en"], model=model)
+
+
+@pytest.mark.parametrize("model", [None, ""], ids=["none", "blank"])
+def test_mlx_missing_or_blank_model_is_rejected_at_construction(model):
+    from pipecat.services.whisper.stt import WhisperSTTServiceMLX
+
+    with pytest.raises(ValueError, match="Whisper model must be specified"):
+        WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))

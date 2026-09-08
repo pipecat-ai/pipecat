@@ -27,7 +27,7 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import assert_given, require_given
 
 try:
     from moonshine_voice import (
@@ -211,7 +211,7 @@ class MoonshineSTTService(SegmentedSTTService):
             ValueError: If no language is set, or Moonshine publishes no model for it.
         """
         logger.debug("Loading Moonshine model...")
-        model = assert_given(self._settings.model)
+        model = require_given(self._settings.model, "Moonshine model")
         model_str = model.value if isinstance(model, Model) else str(model)
 
         language = assert_given(self._settings.language)
