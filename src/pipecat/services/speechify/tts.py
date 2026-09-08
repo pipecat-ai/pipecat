@@ -34,9 +34,13 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
-# Identifies the integration to Speechify's platform attribution.
+# Identifies the integration to Speechify's platform attribution. Speechify-Caller
+# and its companion Speechify-Caller-Version are the standard attribution pair
+# Speechify reads uniformly across every integration; X-Pipecat-Version is Pipecat's
+# own convention.
 CALLER_HEADERS = {
     "Speechify-Caller": "pipecat",
+    "Speechify-Caller-Version": pipecat_version(),
     "X-Pipecat-Version": pipecat_version(),
 }
 
