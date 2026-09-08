@@ -21,7 +21,7 @@ from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT, EvalClient
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
+from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import (
     EvalAssertionFailure,
     EvalProgress,
@@ -34,8 +34,7 @@ from pipecat.evals.results import (
 from pipecat.evals.script import EvalFunctionCall
 from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
 from pipecat.frames.frames import FunctionCallResultProperties
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import FunctionCallParams
 
 # The event the driver appends when the persona calls end_call.
 END_CALL_EVENT = "end_call"
@@ -69,8 +68,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         *,
         simulation: EvalSimulationScenario,
         persona: EvalPersona,
-        persona_llm: LLMService,
-        persona_context: LLMContext,
         client: EvalClient,
         stream: EvalEventStream,
         judge: EvalJudge | None,
@@ -81,11 +78,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
         Args:
             simulation: The simulation being run.
-            persona: The simulated caller; its instruction goes to the persona LLM.
-            persona_llm: The persona LLM service in the pipeline; ``end_call``
-                is registered on it.
-            persona_context: The persona's context, kept up to date with both
-                sides of the conversation by the pipeline's aggregators.
+            persona: The simulated caller: its instruction, its LLM in the
+                pipeline, and its context.
             client: The connection to the bot.
             stream: The bot's output as events.
             judge: The judge for the goal and the quality criteria.
@@ -96,8 +90,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         super().__init__(client=client, stream=stream, judge=judge, trace=trace, progress=progress)
         self._simulation = simulation
         self._persona = persona
-        self._persona_llm = persona_llm
-        self._context = persona_context
         self._turns = 0
         self._ended_by: str | None = None
         self._duration_s = 0.0
@@ -118,7 +110,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
-        self._persona_llm.register_function(END_CALL_FUNCTION, self._on_end_call)
+        self._persona.on_end_call(self._on_end_call)
         await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription

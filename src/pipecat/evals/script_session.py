@@ -34,7 +34,7 @@ from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.base_session import BaseEvalSession
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
@@ -73,12 +73,9 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         scenario: EvalScriptScenario,
         bot_url: str,
         *,
-        connect_timeout_s: float = 5.0,
+        params: EvalClientParams | None = None,
         default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
-        record_path: str | None = None,
-        stop_bot: bool = False,
-        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
@@ -93,8 +90,8 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         Args:
             scenario: The parsed scenario to run.
             bot_url: WebSocket URL of the bot's eval transport.
-            connect_timeout_s: How long to wait for the bot to accept the WS
-                connection before giving up.
+            params: How the run talks to the bot (timeouts, recording,
+                teardown), an :class:`~pipecat.evals.client.EvalClientParams`.
             default_timeout_ms: Per-expectation latency budget for expectations
                 without their own ``within_ms`` (the turn's expectations share one
                 deadline anchored at the send). Defaults to 60s.
@@ -105,16 +102,6 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
                     Use the ``on_progress`` event handler instead.
                     Will be removed in 2.0.0.
 
-            record_path: When set (and the scenario is audio mode), the
-                conversation audio (both sides) is recorded to this path.
-            stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
-                teardown via ``eval-cancel``. The suite enables it to clean up
-                each spawned bot.
-            trigger_disconnect: When True (or when the scenario sets
-                ``trigger_disconnect``), ask the eval transport to fire the bot's
-                ``on_client_disconnected`` handler when this connection ends.
-                Bots often cancel their pipeline there, so it is off by default
-                to avoid that between scenarios.
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
@@ -134,10 +121,7 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             bot_url=bot_url,
             stream=self._stream,
             trace=self._trace,
-            connect_timeout_s=connect_timeout_s,
-            record_path=record_path,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
+            params=params,
             user_tts=user_tts,
             bot_stt=bot_stt,
         )
@@ -231,15 +215,18 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             with logger.contextualize(eval_pipeline="transcription"):
                 bot_stt = stt_service_from_config(scenario.transcriber)
 
-        return cls(
-            scenario,
-            bot_url,
+        params = EvalClientParams(
             connect_timeout_s=connect_timeout_s,
-            default_timeout_ms=default_timeout_ms,
-            on_progress=on_progress,
             record_path=record_path,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
+        )
+        return cls(
+            scenario,
+            bot_url,
+            params=params,
+            default_timeout_ms=default_timeout_ms,
+            on_progress=on_progress,
             judge=judge,
             user_tts=user_tts,
             bot_stt=bot_stt,

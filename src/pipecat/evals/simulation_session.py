@@ -25,7 +25,7 @@ from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.base_session import BaseEvalSession
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
@@ -58,12 +58,9 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         scenario: EvalSimulationScenario,
         bot_url: str,
         *,
+        params: EvalClientParams | None = None,
         persona_llm: LLMService,
         judge: EvalJudge | None,
-        connect_timeout_s: float = 5.0,
-        record_path: str | None = None,
-        stop_bot: bool = False,
-        trigger_disconnect: bool = False,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ):
@@ -72,18 +69,11 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         Args:
             scenario: The parsed simulation to run.
             bot_url: WebSocket URL of the bot's eval transport.
+            params: How the run talks to the bot (timeouts, recording,
+                teardown), an :class:`~pipecat.evals.client.EvalClientParams`.
             persona_llm: The persona LLM service, run inside the eval pipeline.
             judge: The judge for the goal and the quality criteria, or ``None``
                 (the run then reports no verdict).
-            connect_timeout_s: How long to wait for the bot to accept the WS
-                connection before giving up.
-            record_path: When set (and the simulation is audio mode), the
-                conversation audio (both sides) is recorded to this path.
-            stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
-                teardown via ``eval-cancel``.
-            trigger_disconnect: When True (or when the simulation sets it), ask
-                the eval transport to fire the bot's ``on_client_disconnected``
-                handler when this connection ends.
             user_tts: The TTS that speaks the persona's turns in audio mode, or
                 ``None`` for text mode.
             bot_stt: The STT that transcribes the bot's audio for the persona in
@@ -91,28 +81,21 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         """
         super().__init__(kind=EvalKind.SIMULATION, name=scenario.name, bot_url=bot_url)
         self._scenario = scenario
-        persona = EvalPersona(scenario.persona, scenario.goal)
-        persona_context = persona.context()
+        persona = EvalPersona(scenario.persona, scenario.goal, persona_llm)
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
         self._client = EvalClient.for_simulation(
             scenario,
             bot_url=bot_url,
             stream=self._stream,
             trace=self._trace,
-            connect_timeout_s=connect_timeout_s,
-            record_path=record_path,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
+            params=params,
             user_tts=user_tts,
             bot_stt=bot_stt,
-            persona_llm=persona_llm,
-            persona_context=persona_context,
+            persona=persona,
         )
         self._driver: BaseEvalDriver[EvalSimulationResult] = EvalSimulationDriver(
             simulation=scenario,
             persona=persona,
-            persona_llm=persona_llm,
-            persona_context=persona_context,
             client=self._client,
             stream=self._stream,
             judge=judge,
@@ -178,15 +161,18 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         if bot_stt is None and scenario.bot_audio:
             with logger.contextualize(eval_pipeline="transcription"):
                 bot_stt = stt_service_from_config(scenario.transcriber)
-        return cls(
-            scenario,
-            bot_url,
-            persona_llm=persona_llm,
-            judge=judge,
+        params = EvalClientParams(
             connect_timeout_s=connect_timeout_s,
             record_path=record_path,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
+        )
+        return cls(
+            scenario,
+            bot_url,
+            params=params,
+            persona_llm=persona_llm,
+            judge=judge,
             user_tts=user_tts,
             bot_stt=bot_stt,
         )

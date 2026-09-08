@@ -234,22 +234,18 @@ class TestLoadScenarioFile(unittest.TestCase):
 
 
 class TestPersona(unittest.TestCase):
-    def test_instruction_and_context(self):
-        persona = EvalPersona("A curious traveler.", "Learn the capital of Germany.")
+    def test_instruction_llm_and_context(self):
+        llm = _FakePersonaLLM()
+        persona = EvalPersona("A curious traveler.", "Learn the capital of Germany.", llm)  # type: ignore[arg-type]
         self.assertIn("A curious traveler.", persona.instruction)
         self.assertIn("Learn the capital of Germany.", persona.instruction)
         self.assertIn(END_CALL_FUNCTION, persona.instruction)
-        context = persona.context()
+        self.assertIs(persona.llm, llm)
+        context = persona.context
         self.assertEqual(context.get_messages(), [])
         tools = context.tools
         assert not isinstance(tools, type(None))
         self.assertEqual([t.name for t in tools.standard_tools], [END_CALL_FUNCTION])  # type: ignore[union-attr]
-
-    def test_each_context_is_fresh(self):
-        persona = EvalPersona("x", "y")
-        a, b = persona.context(), persona.context()
-        a.add_message({"role": "user", "content": "hi"})
-        self.assertEqual(b.get_messages(), [])
 
 
 class TestSimulationRunResult(unittest.TestCase):
@@ -350,7 +346,6 @@ def _simulation(**overrides) -> EvalSimulationScenario:
 def _driver(
     simulation: EvalSimulationScenario,
     judge,
-    context: LLMContext | None = None,
     progress_records: list | None = None,
 ):
     trace = EvalTrace()
@@ -364,9 +359,7 @@ def _driver(
 
     driver = EvalSimulationDriver(
         simulation=simulation,
-        persona=EvalPersona(simulation.persona, simulation.goal),
-        persona_llm=llm,  # type: ignore[arg-type]
-        persona_context=context or LLMContext(),
+        persona=EvalPersona(simulation.persona, simulation.goal, llm),  # type: ignore[arg-type]
         client=client,  # type: ignore[arg-type]
         stream=stream,
         judge=judge,
@@ -398,22 +391,13 @@ async def _end_call(llm: _FakePersonaLLM, **arguments):
 
 class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
     async def test_end_call_ends_the_run_and_the_judge_sees_the_swapped_conversation(self):
-        # The persona's context: the bot is its "user", the persona the "assistant".
-        context = LLMContext(
-            messages=[
-                {"role": "system", "content": "instructions"},
-                {"role": "user", "content": "Hi! How can I help?"},
-                {"role": "assistant", "content": "What is the capital of Germany?"},
-                {"role": "user", "content": "Berlin."},
-            ]
-        )
         # The second bot turn is short but the judge finds it curt.
         judge = _FakeConversationJudge(["yes"], [{}, {"brevity": "no"}])
         metrics = [
             EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0),
             EvalSimulationMetric("brevity", "kept it short"),
         ]
-        driver, stream, llm, client = _driver(_simulation(metrics=metrics), judge, context)
+        driver, stream, llm, client = _driver(_simulation(metrics=metrics), judge)
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
@@ -471,7 +455,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         judge = _FakeConversationJudge(["yes"], [{"politeness": "no"}])
         metrics = [EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0)]
         records: list = []
-        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge, None, records)
+        driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge, records)
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "What do you want."})
@@ -679,9 +663,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []
-        driver, stream, llm, _ = _driver(
-            _simulation(), _FakeConversationJudge(["yes"]), None, records
-        )
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]), records)
 
         async def conversation():
             await stream.append({"type": "llm_response", "text": "Hi! How can I help?"})
