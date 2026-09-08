@@ -171,7 +171,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         additional_vocab: List of additional vocabulary entries.
         model: Resolved transcription model (operating point). See ``_resolve_model``.
         operating_point: Deprecated alias for ``model``.
-        include_partials: Include partial segment fragments.
+        enable_partials: Include partial segment fragments.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
@@ -186,7 +186,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -294,7 +294,7 @@ class SpeechmaticsSTTService(STTService):
             operating_point: Deprecated alias for `model`. If both are given they must name the
                 same value, otherwise a `ValueError` is raised. Optional.
 
-            include_partials: Include partial segment fragments (words) in the output of
+            enable_partials: Include partial segment fragments (words) in the output of
                 AddPartialSegment messages. Partial fragments from the STT will always be used for
                 speaker activity detection. This setting is used only for the formatted text output
                 of individual segments.
@@ -341,7 +341,7 @@ class SpeechmaticsSTTService(STTService):
         # Features
         model: Model | str | None = None
         operating_point: Model | str | None = None
-        include_partials: bool | None = None
+        enable_partials: bool | None = None
 
         # Diarization
         enable_diarization: bool | None = None
@@ -412,7 +412,7 @@ class SpeechmaticsSTTService(STTService):
             known_speakers=[],
             additional_vocab=[],
             operating_point=None,
-            include_partials=None,
+            enable_partials=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
@@ -462,9 +462,9 @@ class SpeechmaticsSTTService(STTService):
         # or rejected outright.
         self._closed: bool = False
 
-        # Event handlers
-        if default_settings.enable_diarization:
-            self._register_event_handler("on_speakers_result")
+        # Registered unconditionally: diarization can be turned on at runtime, and a
+        # handler added while it was off would otherwise be dropped.
+        self._register_event_handler("on_speakers_result")
 
     @staticmethod
     def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding | None:
@@ -791,7 +791,7 @@ class SpeechmaticsSTTService(STTService):
             additional_vocab=s.additional_vocab or None,
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
-            enable_partials=s.include_partials,
+            enable_partials=s.enable_partials,
         )
 
     # ============================================================================
@@ -1222,7 +1222,7 @@ class SpeechmaticsSTTService(STTService):
             ("domain", "domain"),
             ("output_locale", None),
             ("output_locale_code", None),
-            ("enable_partials", None),
+            ("include_partials", "enable_partials"),
             ("max_delay", None),
             ("chunk_size", None),
             ("audio_encoding", "audio_encoding"),
