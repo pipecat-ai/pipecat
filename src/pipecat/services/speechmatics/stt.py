@@ -369,7 +369,7 @@ class SpeechmaticsSTTService(STTService):
             api_key: Speechmatics API key for authentication. Uses environment variable
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
-                or defaults to `wss://global.rt.speechmatics.com/v2/agent`.
+                or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
             sample_rate: Optional audio sample rate in Hz.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
@@ -388,7 +388,7 @@ class SpeechmaticsSTTService(STTService):
         # Service parameters
         self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
         self._base_url: str = (
-            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://global.rt.speechmatics.com/v2/agent"
+            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2/agent"
         )
 
         # Check we have required attributes
@@ -772,6 +772,11 @@ class SpeechmaticsSTTService(STTService):
             self._client = None
             await self._call_event_handler("on_disconnected")
 
+    async def _restart_after_drop(self) -> None:
+        """Tear down a dropped session and reconnect."""
+        await self._disconnect()
+        self._schedule_reconnect()
+
     async def _process_stt_messages(self) -> None:
         """Process messages from the STT client.
 
@@ -1077,13 +1082,17 @@ class SpeechmaticsSTTService(STTService):
         try:
             if self._client:
                 await self._client.send_audio(audio)
+                # send_audio swallows transport errors and shuts its own audio gate, so a
+                # dropped socket is only visible as the gate being closed. A gate closed
+                # with no session_error is a broken stream; when the service ended the
+                # session itself, _handle_error has already failed it fatally.
+                if not self._client.is_ready_for_audio and self._client.session_error is None:
+                    yield ErrorFrame("Speechmatics error: audio stream closed")
+                    await self._restart_after_drop()
             yield None
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
-            # The stream is broken; tear down and retry rather than silently dropping
-            # all further audio for the rest of the session.
-            await self._disconnect()
-            self._schedule_reconnect()
+            await self._restart_after_drop()
 
     # ============================================================================
     # HELPERS
