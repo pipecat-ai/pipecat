@@ -92,7 +92,7 @@ def _client(
 ) -> EvalClient:
     scenario = scenario or EvalScriptScenario(name="t", turns=[], bot_audio=bot_audio)
     return EvalClient.for_scenario(
-        scenario, bot_url=bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
+        scenario, bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
     )
 
 

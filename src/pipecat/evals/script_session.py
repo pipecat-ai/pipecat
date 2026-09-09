@@ -77,21 +77,20 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
         judge: EvalJudge | None = None,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
     ):
         """Initialize the eval session.
 
-        The ``judge``, ``user_tts``, and ``bot_stt`` are injected pre-built:
-        :meth:`from_scenario` constructs the defaults from the scenario's config
-        and passes them in. Construct and pass your own to override them (e.g. a
-        custom judge LLM, TTS, or STT service).
+        The services are injected pre-built: :meth:`from_scenario` constructs
+        the defaults from the scenario's config and passes them in, the judge
+        here and the user TTS and bot STT in ``params``. Construct and pass your
+        own to override them.
 
         Args:
             scenario: The parsed scenario to run.
             bot_url: WebSocket URL of the bot's eval transport.
-            params: How the run talks to the bot (timeouts, recording,
-                teardown), an :class:`~pipecat.evals.client.EvalClientParams`.
+            params: How the run talks to the bot (timeouts, recording, teardown)
+                and the services in its pipeline, an
+                :class:`~pipecat.evals.client.EvalClientParams`.
             default_timeout_ms: Per-expectation latency budget for expectations
                 without their own ``within_ms`` (the turn's expectations share one
                 deadline anchored at the send). Defaults to 60s.
@@ -104,12 +103,6 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
 
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
-            user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
-                synthesizes user audio (added to the eval pipeline in audio mode),
-                or ``None`` for text-mode scenarios.
-            bot_stt: The ``STTService`` that transcribes the bot's audio into the
-                ``response`` event (added to the eval pipeline in audio mode), or
-                ``None`` when unused.
         """
         super().__init__(kind=EvalKind.SCRIPT, name=scenario.name, bot_url=bot_url)
         self._scenario = scenario
@@ -118,12 +111,10 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         # The connection to the bot: the eval pipeline and the user's sends.
         self._client = EvalClient.for_scenario(
             scenario,
-            bot_url=bot_url,
+            bot_url,
+            params=params,
             stream=self._stream,
             trace=self._trace,
-            params=params,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
         )
         # What the user says next and how the outcome is scored: a scenario is
         # played by the eval driver.
@@ -220,6 +211,8 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             record_path=record_path,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
         )
         return cls(
             scenario,
@@ -228,8 +221,6 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             default_timeout_ms=default_timeout_ms,
             on_progress=on_progress,
             judge=judge,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
         )
 
     def _describe(self) -> str:

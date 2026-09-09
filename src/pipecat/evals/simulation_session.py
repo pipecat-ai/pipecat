@@ -61,37 +61,31 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         params: EvalClientParams | None = None,
         persona_llm: LLMService,
         judge: EvalJudge | None,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
     ):
         """Initialize the simulation session.
 
         Args:
             scenario: The parsed simulation to run.
             bot_url: WebSocket URL of the bot's eval transport.
-            params: How the run talks to the bot (timeouts, recording,
-                teardown), an :class:`~pipecat.evals.client.EvalClientParams`.
+            params: How the run talks to the bot (timeouts, recording, teardown)
+                and, in audio mode, the user TTS and bot STT in its pipeline, an
+                :class:`~pipecat.evals.client.EvalClientParams`. The persona is
+                built here from ``persona_llm``.
             persona_llm: The persona LLM service, run inside the eval pipeline.
             judge: The judge for the goal and the quality criteria, or ``None``
                 (the run then reports no verdict).
-            user_tts: The TTS that speaks the persona's turns in audio mode, or
-                ``None`` for text mode.
-            bot_stt: The STT that transcribes the bot's audio for the persona in
-                audio mode, or ``None`` for text mode.
         """
         super().__init__(kind=EvalKind.SIMULATION, name=scenario.name, bot_url=bot_url)
         self._scenario = scenario
         persona = EvalPersona(scenario.persona, scenario.goal, persona_llm)
+        params = (params or EvalClientParams()).model_copy(update={"persona": persona})
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
         self._client = EvalClient.for_simulation(
             scenario,
-            bot_url=bot_url,
+            bot_url,
+            params=params,
             stream=self._stream,
             trace=self._trace,
-            params=params,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
-            persona=persona,
         )
         self._driver: BaseEvalDriver[EvalSimulationResult] = EvalSimulationDriver(
             simulation=scenario,
@@ -166,6 +160,8 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
             record_path=record_path,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
         )
         return cls(
             scenario,
@@ -173,8 +169,6 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
             params=params,
             persona_llm=persona_llm,
             judge=judge,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
         )
 
     def _describe(self) -> str:

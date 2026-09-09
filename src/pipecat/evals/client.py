@@ -25,7 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -290,9 +290,21 @@ class _PersonaTurnRelay(FrameProcessor):
 
 
 class EvalClientParams(BaseModel):
-    """How a run talks to the bot, beyond what the scenario says.
+    """How the client talks to the bot: what the scenario asks of it, the run's knobs, and the services in its pipeline.
 
     Parameters:
+        bot_audio: Whether the bot speaks; in text mode it is asked to skip TTS
+            at connect.
+        user_audio: Whether the user's turns reach the bot as audio.
+        user_speech: TTS config the user's turns are synthesized with, or
+            ``None``; sets the user audio rate.
+        capture_bot_audio: Whether the bot forwards its synthesized audio, for
+            the ``response`` transcription or a persona that listens.
+        report_level: Function-call report level to ask of the bot, or ``None``
+            for its default.
+        vad_events: Whether to ask the bot for its raw VAD events.
+        context: Messages the bot's context starts from, sent right after the
+            handshake; empty sends nothing.
         connect_timeout_s: How long :meth:`EvalClient.wait_for_bot` waits for
             the bot to accept connections.
         record_path: Where to save the conversation audio, or ``None``. Only an
@@ -303,12 +315,37 @@ class EvalClientParams(BaseModel):
             ``on_client_disconnected`` handler when this connection ends. Bots
             often cancel their pipeline there, so it is off by default to avoid
             that between scenarios.
+        user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
+            synthesizes spoken user turns, or ``None`` for text mode.
+        bot_stt: The ``STTService`` that transcribes the bot's audio into the
+            ``response`` event, or ``None`` when unused.
+        persona: A simulation's :class:`~pipecat.evals.persona.EvalPersona`,
+            whose LLM rides in the pipeline and whose context the aggregators
+            keep up to date with both sides of the conversation; ``None`` for a
+            scripted scenario.
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # What the scenario asks of the bot.
+    bot_audio: bool = False
+    user_audio: bool = False
+    user_speech: dict | None = None
+    capture_bot_audio: bool = False
+    report_level: str | None = None
+    vad_events: bool = False
+    context: list[dict] = Field(default_factory=list)
+
+    # The run's knobs.
     connect_timeout_s: float = 5.0
     record_path: str | None = None
     stop_bot: bool = False
     trigger_disconnect: bool = False
+
+    # The services in the client's pipeline.
+    user_tts: CachingTTSService | None = None
+    bot_stt: STTService | None = None
+    persona: EvalPersona | None = None
 
 
 class EvalClient:
@@ -337,64 +374,26 @@ class EvalClient:
 
     def __init__(
         self,
-        *,
         bot_url: str,
+        *,
+        params: EvalClientParams,
         stream: EvalEventStream,
         trace: EvalTrace,
-        bot_audio: bool,
-        user_audio: bool,
-        user_speech: dict | None = None,
-        capture_bot_audio: bool = False,
-        report_level: str | None = None,
-        vad_events: bool = False,
-        context: list[dict] | None = None,
-        params: EvalClientParams | None = None,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
-        persona: EvalPersona | None = None,
     ):
         """Initialize the client.
 
         Args:
             bot_url: WebSocket URL of the bot's eval transport.
+            params: What the scenario asks of the bot, the run's knobs, and the
+                services in the pipeline; :meth:`for_scenario` and
+                :meth:`for_simulation` fill in the scenario's part.
             stream: Where the bot's output is appended as events.
             trace: The run's trace.
-            bot_audio: Whether the bot speaks; in text mode it is asked to skip
-                TTS at connect.
-            user_audio: Whether the user's turns reach the bot as audio.
-            user_speech: TTS config the user's turns are synthesized with, or
-                ``None``; sets the user audio rate.
-            capture_bot_audio: Whether the bot forwards its synthesized audio,
-                for the ``response`` transcription or a persona that listens.
-            report_level: Function-call report level to ask of the bot, or
-                ``None`` for its default.
-            vad_events: Whether to ask the bot for its raw VAD events.
-            context: Messages the bot's context starts from, sent right after
-                the handshake; ``None`` or empty sends nothing.
-            params: The run's :class:`EvalClientParams`; the defaults when ``None``.
-            user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
-                synthesizes spoken user turns, or ``None`` for text mode.
-            bot_stt: The ``STTService`` that transcribes the bot's audio into the
-                ``response`` event, or ``None`` when unused.
-            persona: A simulation's :class:`~pipecat.evals.persona.EvalPersona`,
-                whose LLM rides in the pipeline and whose context the aggregators
-                keep up to date with both sides of the conversation; ``None`` for
-                a scripted scenario.
         """
         self._bot_url = bot_url
         self._stream = stream
         self._trace = trace
-        self._bot_audio = bot_audio
-        self._user_audio = user_audio
-        self._user_speech = user_speech
-        self._capture_bot_audio = capture_bot_audio
-        self._report_level = report_level
-        self._vad_events = vad_events
-        self._context = list(context or [])
-        self._params = params or EvalClientParams()
-        self._user_tts = user_tts
-        self._bot_stt = bot_stt
-        self._persona = persona
+        self._params = params
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
@@ -413,70 +412,85 @@ class EvalClient:
 
     @classmethod
     def for_scenario(
-        cls, scenario: EvalScriptScenario, *, params: EvalClientParams | None = None, **kwargs
+        cls,
+        scenario: EvalScriptScenario,
+        bot_url: str,
+        *,
+        params: EvalClientParams | None = None,
+        stream: EvalEventStream,
+        trace: EvalTrace,
     ) -> "EvalClient":
         """A client for a scripted scenario, asking the bot for what its assertions need.
 
         Args:
             scenario: The scenario being run.
-            params: The run's params; the scenario's own ``trigger_disconnect``
-                also opts in.
-            **kwargs: The remaining :class:`EvalClient` arguments.
+            bot_url: WebSocket URL of the bot's eval transport.
+            params: The run's knobs and the services; the scenario's part is
+                filled in, and its own ``trigger_disconnect`` also opts in.
+            stream: Where the bot's output is appended as events.
+            trace: The run's trace.
         """
         params = params or EvalClientParams()
-        params.trigger_disconnect = params.trigger_disconnect or scenario.trigger_disconnect
-        return cls(
-            bot_audio=scenario.bot_audio,
-            user_audio=scenario.user_audio,
-            user_speech=scenario.user_speech,
-            capture_bot_audio=scenario.wants_response(),
-            report_level=scenario.required_report_level(),
-            vad_events=scenario.needs_vad_events(),
-            context=scenario.context,
-            params=params,
-            **kwargs,
+        params = params.model_copy(
+            update={
+                "bot_audio": scenario.bot_audio,
+                "user_audio": scenario.user_audio,
+                "user_speech": scenario.user_speech,
+                "capture_bot_audio": scenario.wants_response(),
+                "report_level": scenario.required_report_level(),
+                "vad_events": scenario.needs_vad_events(),
+                "context": list(scenario.context or []),
+                "trigger_disconnect": params.trigger_disconnect or scenario.trigger_disconnect,
+            }
         )
+        return cls(bot_url, params=params, stream=stream, trace=trace)
 
     @classmethod
     def for_simulation(
         cls,
         simulation: EvalSimulationScenario,
+        bot_url: str,
         *,
-        params: EvalClientParams | None = None,
-        **kwargs,
+        params: EvalClientParams,
+        stream: EvalEventStream,
+        trace: EvalTrace,
     ) -> "EvalClient":
         """A client for a simulation: the persona hears the bot, and the judge sees its tool calls.
 
         Args:
             simulation: The simulation being run.
-            params: The run's params; the simulation's own ``trigger_disconnect``
-                also opts in.
-            **kwargs: The remaining :class:`EvalClient` arguments, including the
-                persona.
+            bot_url: WebSocket URL of the bot's eval transport.
+            params: The run's knobs and the services, the persona among them;
+                the simulation's part is filled in, and its own
+                ``trigger_disconnect`` also opts in.
+            stream: Where the bot's output is appended as events.
+            trace: The run's trace.
         """
-        params = params or EvalClientParams()
-        params.trigger_disconnect = params.trigger_disconnect or simulation.trigger_disconnect
-        return cls(
-            bot_audio=simulation.bot_audio,
-            user_audio=simulation.user_audio,
-            user_speech=simulation.user_speech,
-            capture_bot_audio=simulation.bot_audio,
-            # The bot's function calls, with their arguments, are the judge's
-            # evidence of what the bot actually did.
-            report_level="full",
-            params=params,
-            **kwargs,
+        if params.persona is None:
+            raise ValueError("a simulation's client needs its persona in params")
+        params = params.model_copy(
+            update={
+                "bot_audio": simulation.bot_audio,
+                "user_audio": simulation.user_audio,
+                "user_speech": simulation.user_speech,
+                "capture_bot_audio": simulation.bot_audio,
+                # The bot's function calls, with their arguments, are the judge's
+                # evidence of what the bot actually did.
+                "report_level": "full",
+                "trigger_disconnect": params.trigger_disconnect or simulation.trigger_disconnect,
+            }
         )
+        return cls(bot_url, params=params, stream=stream, trace=trace)
 
     @property
     def has_user_tts(self) -> bool:
         """Whether text user turns are spoken to the bot rather than sent as text."""
-        return self._user_tts is not None
+        return self._params.user_tts is not None
 
     @property
     def sends_user_audio(self) -> bool:
         """Whether the user's side streams audio to the bot (the output is enabled)."""
-        return self._user_tts is not None or self._user_audio
+        return self._params.user_tts is not None or self._params.user_audio
 
     async def wait_for_bot(self) -> None:
         """Wait until the bot's server accepts connections.
@@ -515,11 +529,13 @@ class EvalClient:
 
     async def start(self) -> None:
         """Build the eval pipeline and start running it, which connects to the bot."""
-        user_audio_rate = tts_sample_rate(self._user_speech) if self._user_speech else 0
+        user_audio_rate = (
+            tts_sample_rate(self._params.user_speech) if self._params.user_speech else 0
+        )
         params = WebsocketClientParams(
-            audio_in_enabled=self._bot_audio,
+            audio_in_enabled=self._params.bot_audio,
             audio_out_enabled=self.sends_user_audio,
-            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._bot_audio else 0,
+            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._params.bot_audio else 0,
             audio_out_sample_rate=user_audio_rate,
             serializer=EvalClientSerializer(),
         )
@@ -528,7 +544,7 @@ class EvalClient:
         # paced/filled pipeline frames: Python can't hold the 40ms pacing tick
         # precisely, and recording the paced streams stutters. The recorder
         # reconstructs gapless turns and pads only the real between-turn pauses.
-        if self._params.record_path and self._bot_audio:
+        if self._params.record_path and self._params.bot_audio:
             self._recorder = EvalClientRecorder(user_audio_rate or EVAL_STT_SAMPLE_RATE)
         # EvalClientTransport reshapes both audio edges into the continuous
         # real-time stream VAD/STT expect: its output paces the user TTS to the bot
@@ -596,9 +612,9 @@ class EvalClient:
         # asserts on call name/args, and enable raw VAD speaking events if it uses
         # them.
         config: dict = {}
-        if self._report_level is not None:
-            config["function_call_report_level"] = {"*": self._report_level}
-        if self._vad_events:
+        if self._params.report_level is not None:
+            config["function_call_report_level"] = {"*": self._params.report_level}
+        if self._params.vad_events:
             config["vad_user_speaking"] = True
         if config:
             await self._send_eval(EVAL_CONFIGURE_MESSAGE_TYPE, config)
@@ -607,8 +623,8 @@ class EvalClient:
         # An implicit empty one would race with bot startup flows (e.g. a greeting
         # added in on_client_connected), wiping the bot's context right after it
         # set it up.
-        if self._context:
-            await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._context})
+        if self._params.context:
+            await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
 
     async def stop(self) -> None:
         """Save the recording, optionally cancel the bot, and end the pipeline."""
@@ -736,7 +752,7 @@ class EvalClient:
         await self._sink.inject(
             LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=instruction))
         )
-        await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._user_audio))
+        await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
 
     async def hang_up(self) -> None:
         """End the persona's part of the conversation: it answers nothing more."""
@@ -757,11 +773,11 @@ class EvalClient:
         default, since bots often cancel there).
         """
         flags = []
-        if not self._bot_audio:
+        if not self._params.bot_audio:
             flags.append("skip_tts=true")
         # Forward the bot's audio when something listens to it (the response
         # transcription, a persona) or when recording an audio run.
-        if self._capture_bot_audio or (self._params.record_path and self._bot_audio):
+        if self._params.capture_bot_audio or (self._params.record_path and self._params.bot_audio):
             flags.append("capture_bot_audio=true")
         if self._params.trigger_disconnect:
             flags.append("trigger_disconnect=true")
@@ -783,26 +799,31 @@ class EvalClient:
         """
         # The context the aggregators keep: the persona's in a simulation, else a
         # throwaway that only gives the user aggregator somewhere to put turns.
-        context = self._persona.context if self._persona is not None else LLMContext()
+        persona, user_tts, bot_stt = (
+            self._params.persona,
+            self._params.user_tts,
+            self._params.bot_stt,
+        )
+        context = persona.context if persona is not None else LLMContext()
         # With no STT there is no aggregator to hand the bot's turns to the
         # persona; the sink does it from the bot's text.
         self._sink = _BotFrameSink(
             self._stream,
-            persona=self._persona.context if self._persona is not None else None,
-            feed=self._bot_stt is None,
+            persona=persona.context if persona is not None else None,
+            feed=bot_stt is None,
         )
 
         inbound: list = [transport.input()]
-        if self._bot_stt is not None:
-            inbound += [self._bot_stt, self._bot_turn_aggregator(context)]
+        if bot_stt is not None:
+            inbound += [bot_stt, self._bot_turn_aggregator(context)]
 
-        speech = [self._user_tts] if self._user_tts is not None else []
-        if self._persona is None:
+        speech = [user_tts] if user_tts is not None else []
+        if persona is None:
             outbound: list = [*speech, transport.output()]
         else:
             relay = _PersonaTurnRelay(self._text_turn_message, self._trace, self._stream)
             outbound = [
-                self._persona.llm,
+                persona.llm,
                 *speech,
                 relay,
                 transport.output(),
@@ -856,7 +877,9 @@ class EvalClient:
         """
         data = RTVI.SendTextData(
             content=text,
-            options=RTVI.SendTextOptions(run_immediately=True, audio_response=self._bot_audio),
+            options=RTVI.SendTextOptions(
+                run_immediately=True, audio_response=self._params.bot_audio
+            ),
         )
         return self._message("send-text", data.model_dump()).model_dump()
 
