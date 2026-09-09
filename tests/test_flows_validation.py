@@ -145,7 +145,10 @@ class TestLoading(unittest.TestCase):
 
     def test_to_dict(self):
         d = validate_flow(GOOD).to_dict()
-        self.assertEqual(set(d), {"ok", "issues", "tools", "variables", "decided_in_python"})
+        self.assertEqual(
+            set(d),
+            {"ok", "issues", "tools", "variables", "decided_in_python", "custom_action_types"},
+        )
         self.assertTrue(d["ok"])
 
 
@@ -212,6 +215,18 @@ class TestGraphWarnings(unittest.TestCase):
             "  b: {task_messages: [{role: developer, content: b}], post_actions: [{type: end_conversation}]}\n"
         )
         self.assertEqual(report.issues, [])
+
+    def test_custom_action_types_without_handlers_are_listed(self):
+        report = validate_flow(
+            "initial_node: a\nnodes:\n"
+            "  a:\n    task_messages: [{role: developer, content: a}]\n"
+            "    pre_actions: [{type: audit}, {type: notify, handler: check_kitchen}, {type: tts_say, text: hi}]\n"
+            "    post_actions: [{type: end_conversation}]\n",
+            tools=TOOLS,
+        )
+        self.assertTrue(report.ok)
+        self.assertEqual(report.custom_action_types, ["audit"])
+        self.assertIn("check_kitchen", report.tools)
 
     def test_python_decided_function_has_unknown_edges(self):
         report = validate_flow(

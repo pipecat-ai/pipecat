@@ -92,6 +92,11 @@ def validate(
         typer.echo(
             f"  decided in Python (edges not checked): {', '.join(report.decided_in_python)}"
         )
+    if report.custom_action_types:
+        typer.echo(
+            "  custom action types (registered in code, not checked): "
+            + ", ".join(report.custom_action_types)
+        )
 
     raise typer.Exit(1 if failed else 0)
 

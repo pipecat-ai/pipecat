@@ -170,6 +170,19 @@ def test_python_decided_functions_are_listed(project: Path):
     assert "orphan" not in result.output
 
 
+def test_custom_action_types_are_listed(project: Path):
+    (project / "flow.yaml").write_text(
+        FLOW.replace(
+            "    post_actions:\n      - type: end_conversation\n  orphan:",
+            "    post_actions:\n      - type: audit\n      - type: end_conversation\n  orphan:",
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["flows", "validate", str(project / "flow.yaml")])
+    assert result.exit_code == 0, result.output
+    assert "custom action types (registered in code, not checked): audit" in result.output
+
+
 def test_flows_help_lists_validate():
     result = runner.invoke(app, ["flows", "--help"])
     assert result.exit_code == 0

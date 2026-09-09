@@ -64,6 +64,8 @@ class FlowReport:
         variables: Names of every ``{{ variable }}`` the config uses.
         decided_in_python: Names of the functions marked
             ``TRANSITION_IN_PYTHON``, whose edges the config does not know.
+        custom_action_types: Custom action types used without a ``handler``,
+            which must be registered in code and cannot be checked here.
         config: The parsed config, or ``None`` when it failed to load.
     """
 
@@ -71,6 +73,7 @@ class FlowReport:
     tools: list[str] = field(default_factory=list)
     variables: list[str] = field(default_factory=list)
     decided_in_python: list[str] = field(default_factory=list)
+    custom_action_types: list[str] = field(default_factory=list)
     config: FlowConfig | None = None
 
     @property
@@ -96,6 +99,7 @@ class FlowReport:
             "tools": list(self.tools),
             "variables": list(self.variables),
             "decided_in_python": list(self.decided_in_python),
+            "custom_action_types": list(self.custom_action_types),
         }
 
 
@@ -136,6 +140,14 @@ def validate_flow(
     report.config = config
     report.tools = _referenced_tools(config)
     report.variables = _used_variables(config)
+    report.custom_action_types = sorted(
+        {
+            a.type
+            for n in config.nodes.values()
+            for a in n.pre_actions + n.post_actions
+            if a.registered_in_code
+        }
+    )
     report.decided_in_python = sorted(
         {f.name for n in config.nodes.values() for f in n.functions if f.decided_in_python}
         | {f.name for f in config.global_functions if f.decided_in_python}
