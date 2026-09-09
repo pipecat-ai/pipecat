@@ -7,7 +7,8 @@
 """Eval session, at its former module path.
 
 .. deprecated:: 1.9.0
-    Moved to :mod:`pipecat.evals.script_session`.
+    Moved to :mod:`pipecat.evals.session` (the session and its default
+    timeout) and :mod:`pipecat.evals.script_session` (the rest).
     Will be removed in 2.0.0.
 """
 
@@ -33,7 +34,8 @@ with warnings.catch_warnings():
     warnings.simplefilter("always")
     warnings.warn(
         "`pipecat.evals.harness` is deprecated since 1.9.0 and will be removed in 2.0.0. "
-        "Use `pipecat.evals.script_session` instead.",
+        "Use `pipecat.evals.session` for `EvalSession` and `DEFAULT_EVENT_TIMEOUT_MS`, and "
+        "`pipecat.evals.script_session` for the rest.",
         DeprecationWarning,
         stacklevel=2,
     )

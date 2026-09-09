@@ -25,7 +25,7 @@ import time
 import traceback
 import warnings
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel
@@ -161,6 +161,68 @@ class EvalSession(BaseObject, Generic[R]):
         self._client: EvalClient
         self._driver: BaseEvalDriver[R]
         self._register_event_handler("on_progress")
+
+    @overload
+    @classmethod
+    def from_scenario(
+        cls,
+        scenario: EvalScriptScenario,
+        bot_url: str,
+        *,
+        params: EvalSessionParams | None = None,
+        judge: "EvalJudge | None" = None,
+        user_tts: "CachingTTSService | None" = None,
+        bot_stt: "STTService | None" = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
+    ) -> "EvalScriptSession": ...
+
+    @overload
+    @classmethod
+    def from_scenario(
+        cls,
+        scenario: EvalSimulationScenario,
+        bot_url: str,
+        *,
+        params: EvalSessionParams | None = None,
+        persona_llm: "LLMService | None" = None,
+        judge: "EvalJudge | None" = None,
+        user_tts: "CachingTTSService | None" = None,
+        bot_stt: "STTService | None" = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
+    ) -> "EvalSimulationSession": ...
+
+    @overload
+    @classmethod
+    def from_scenario(
+        cls,
+        scenario: EvalScriptScenario | EvalSimulationScenario,
+        bot_url: str,
+        *,
+        params: EvalSessionParams | None = None,
+        persona_llm: "LLMService | None" = None,
+        judge: "EvalJudge | None" = None,
+        user_tts: "CachingTTSService | None" = None,
+        bot_stt: "STTService | None" = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
+    ) -> "EvalScriptSession | EvalSimulationSession": ...
 
     @classmethod
     def from_scenario(
