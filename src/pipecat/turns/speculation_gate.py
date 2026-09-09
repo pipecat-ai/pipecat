@@ -83,12 +83,13 @@ class SpeculationGate(BaseObject):
 
     A hold bounds itself. A service that stops sending turn signals
     mid-speculation would otherwise leave the bot silent for the rest of the
-    session, so a hold that outlasts ``max_hold_duration`` is discarded and
-    whatever it was holding back goes to ``on_expired``.
+    session, so a hold that outlasts ``max_hold_duration`` is discarded. That
+    is the one point where frames leave with no caller to hand them to, so
+    they go to ``push_expired`` instead of being returned.
 
     Example::
 
-        gate = SpeculationGate(on_expired=self._push_expired)
+        gate = SpeculationGate(push_expired=self._push_past_gate)
         await gate.setup(task_manager)
 
         for frame, direction in gate.process(frame, direction):
@@ -98,23 +99,25 @@ class SpeculationGate(BaseObject):
     def __init__(
         self,
         *,
-        on_expired: Callable[[list[GatedFrame]], Awaitable[None]],
+        push_expired: Callable[[list[GatedFrame]], Awaitable[None]],
         max_hold_duration: float = 5.0,
         **kwargs,
     ):
         """Initialize the speculation gate.
 
         Args:
-            on_expired: Awaited with the frames a hold left behind when it
+            push_expired: Pushes the frames a hold leaves behind when it
                 outlasts ``max_hold_duration``: whatever the discarded response
-                was holding back that has to be delivered anyway. Runs on the
-                gate's own task, so it may push frames.
+                was holding back that has to be delivered anyway. These are
+                handed over rather than returned because the hold runs out on
+                the gate's own task, with no :meth:`process` caller waiting to
+                push them.
             max_hold_duration: Seconds a response may be held before the gate
                 gives up on it.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
-        self._on_expired = on_expired
+        self._push_expired = push_expired
         self._max_hold_duration = max_hold_duration
         # A hold is bounded by a task waiting for it to end. Waiting rather than
         # being cancelled at the end: holds start and end inside `process`,
@@ -237,7 +240,7 @@ class SpeculationGate(BaseObject):
             f"{self}: speculative response unresolved after {self._max_hold_duration}s, "
             "discarding it"
         )
-        await self._on_expired(self._discard(None))
+        await self._push_expired(self._discard(None))
 
     def _resolved(self, frame: Frame, direction: FrameDirection) -> GatedFrame:
         """Prepare a frame the gate has resolved.

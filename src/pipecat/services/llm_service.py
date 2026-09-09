@@ -373,7 +373,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(
             name=f"{self}::SpeculationGate",
-            on_expired=self._push_expired_speculation,
+            push_expired=self._push_past_gate,
             max_hold_duration=self.SPECULATION_HOLD_TIMEOUT,
         )
         self._warn_turn_completion_settings_are_strategy_owned()
@@ -823,10 +823,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._start_interruption()
         await self.stop_all_metrics()
 
-    async def _push_expired_speculation(self, frames: list[GatedFrame]):
-        """Deliver what a discarded speculative response was holding back.
+    async def _push_past_gate(self, frames: list[GatedFrame]):
+        """Push frames the gate has already resolved.
 
-        Pushed past the gate, which has already resolved these.
+        Routing them back through :meth:`push_frame` would re-gate them.
         """
         for frame, direction in frames:
             await super().push_frame(frame, direction)
