@@ -454,36 +454,6 @@ class EvalScriptScenario:
     stop_on_failure: bool = True
     source_path: Path | None = None
 
-    def wants_response(self) -> bool:
-        """Whether any expectation asserts on the transcription of the bot's audio."""
-        return any(exp.event == "response" for turn in self.turns for exp in turn.expect)
-
-    def required_report_level(self) -> str | None:
-        """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``."""
-        needs_name = False
-        for turn in self.turns:
-            for exp in turn.expect:
-                if exp.event not in FUNCTION_CALL_EVENTS:
-                    continue
-                # name/args live in exp.calls (the parser normalizes the single
-                # name:/args: shorthand into it too).
-                for call in exp.calls or []:
-                    if call.args is not None:
-                        return "full"
-                    if call.name is not None:
-                        needs_name = True
-        return "name" if needs_name else None
-
-    def needs_vad_events(self) -> bool:
-        """Whether the scenario uses the raw VAD speaking events, which the bot emits only on request."""
-        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
-        for turn in self.turns:
-            if turn.send_after is not None and turn.send_after.event in vad_events:
-                return True
-            if any(exp.event in vad_events for exp in turn.expect):
-                return True
-        return False
-
     @classmethod
     def load(cls, path: str | Path) -> "EvalScriptScenario":
         """Parse a scenario YAML file into an :class:`EvalScriptScenario`.
@@ -547,6 +517,36 @@ class EvalScriptScenario:
             stop_on_failure=bool(data.get("stop_on_failure", True)),
             source_path=path,
         )
+
+    def wants_response(self) -> bool:
+        """Whether any expectation asserts on the transcription of the bot's audio."""
+        return any(exp.event == "response" for turn in self.turns for exp in turn.expect)
+
+    def required_report_level(self) -> str | None:
+        """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``."""
+        needs_name = False
+        for turn in self.turns:
+            for exp in turn.expect:
+                if exp.event not in FUNCTION_CALL_EVENTS:
+                    continue
+                # name/args live in exp.calls (the parser normalizes the single
+                # name:/args: shorthand into it too).
+                for call in exp.calls or []:
+                    if call.args is not None:
+                        return "full"
+                    if call.name is not None:
+                        needs_name = True
+        return "name" if needs_name else None
+
+    def needs_vad_events(self) -> bool:
+        """Whether the scenario uses the raw VAD speaking events, which the bot emits only on request."""
+        vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
+        for turn in self.turns:
+            if turn.send_after is not None and turn.send_after.event in vad_events:
+                return True
+            if any(exp.event in vad_events for exp in turn.expect):
+                return True
+        return False
 
 
 @deprecated(

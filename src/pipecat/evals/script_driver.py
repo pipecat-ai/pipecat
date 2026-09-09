@@ -76,6 +76,32 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         # the result always says which turns were actually scored.
         self.turns = [EvalScriptTurnResult(turn_index=i) for i in range(len(scenario.turns))]
 
+    async def run(self) -> list[EvalAssertionFailure]:
+        """Drive the scenario's turns in order, filling in their records."""
+        failures: list[EvalAssertionFailure] = []
+        for turn_idx, turn in enumerate(self._scenario.turns):
+            self._trace.turn = turn_idx
+            self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
+            turn_started = time.monotonic()
+            turn_failures = await self._run_turn(turn, turn_idx)
+            record = self.turns[turn_idx]
+            record.status = "failed" if turn_failures else "passed"
+            record.failures = turn_failures
+            record.duration_ms = int((time.monotonic() - turn_started) * 1000)
+            failures.extend(turn_failures)
+            if turn_failures:
+                # By default a failed turn ends the scenario: it leaves the
+                # conversation in an unknown state, so running the rest just
+                # burns another timeout per turn (e.g. a broken greeting turn
+                # shouldn't cost the full budget here and again on the
+                # question). A scenario whose turns are scored independently
+                # sets stop_on_failure: false and drives all of them.
+                if self._scenario.stop_on_failure:
+                    self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
+                    break
+                self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
+        return failures
+
     def result(
         self,
         *,
@@ -107,32 +133,6 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             record = self.turns[failure.turn_index]
             record.status = "failed"
             record.failures.append(failure)
-
-    async def run(self) -> list[EvalAssertionFailure]:
-        """Drive the scenario's turns in order, filling in their records."""
-        failures: list[EvalAssertionFailure] = []
-        for turn_idx, turn in enumerate(self._scenario.turns):
-            self._trace.turn = turn_idx
-            self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
-            turn_started = time.monotonic()
-            turn_failures = await self._run_turn(turn, turn_idx)
-            record = self.turns[turn_idx]
-            record.status = "failed" if turn_failures else "passed"
-            record.failures = turn_failures
-            record.duration_ms = int((time.monotonic() - turn_started) * 1000)
-            failures.extend(turn_failures)
-            if turn_failures:
-                # By default a failed turn ends the scenario: it leaves the
-                # conversation in an unknown state, so running the rest just
-                # burns another timeout per turn (e.g. a broken greeting turn
-                # shouldn't cost the full budget here and again on the
-                # question). A scenario whose turns are scored independently
-                # sets stop_on_failure: false and drives all of them.
-                if self._scenario.stop_on_failure:
-                    self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
-                    break
-                self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
-        return failures
 
     async def _run_turn(self, turn: EvalScriptTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: honor ``send_after``, send the input, match the expectations."""

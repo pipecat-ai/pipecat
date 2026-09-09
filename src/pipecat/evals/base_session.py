@@ -67,14 +67,6 @@ class BaseEvalSession(BaseObject, Generic[R]):
         self._driver: BaseEvalDriver[R]
         self._register_event_handler("on_progress")
 
-    @abstractmethod
-    def _describe(self) -> str:
-        """The run's config summary, one line per section, for the trace."""
-
-    def _skip_reason(self) -> str | None:
-        """Why the run can't be driven at all, or ``None`` to run it."""
-        return None
-
     async def run(self) -> R:
         """Connect, drive the conversation, and return the result."""
         started = time.monotonic()
@@ -100,18 +92,6 @@ class BaseEvalSession(BaseObject, Generic[R]):
         failures = await self._drive()
         self._trace.log(f"done: {'PASS' if not failures else 'FAIL'} ({len(failures)} failure(s))")
         return self._result(started, failures)
-
-    def _result(
-        self, started: float, failures: list[EvalAssertionFailure], skipped: str | None = None
-    ) -> R:
-        """Have the driver assemble the run's result."""
-        return self._driver.result(
-            failures=failures,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            events_seen=self._stream.events_seen,
-            debug_log=self._trace.lines,
-            skipped=skipped,
-        )
 
     async def _drive(self) -> list[EvalAssertionFailure]:
         """Start the client, converse, and tear down.
@@ -141,14 +121,25 @@ class BaseEvalSession(BaseObject, Generic[R]):
         self._trace.log("handshake: ok (bot-ready)")
         return await self._driver.run()
 
-    def _error_failure(self, e: Exception) -> EvalAssertionFailure:
-        """Trace an unexpected error with its traceback and let the driver score it."""
-        self._trace.log(f"error: {type(e).__name__}: {e}")
-        for line in traceback.format_exc().rstrip().splitlines():
-            self._trace.log(line)
-        failure = self._failure("<error>", f"{type(e).__name__}: {e}", "error")
-        self._driver.record_failure(failure)
-        return failure
+    def _result(
+        self, started: float, failures: list[EvalAssertionFailure], skipped: str | None = None
+    ) -> R:
+        """Have the driver assemble the run's result."""
+        return self._driver.result(
+            failures=failures,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            events_seen=self._stream.events_seen,
+            debug_log=self._trace.lines,
+            skipped=skipped,
+        )
+
+    @abstractmethod
+    def _describe(self) -> str:
+        """The run's config summary, one line per section, for the trace."""
+
+    def _skip_reason(self) -> str | None:
+        """Why the run can't be driven at all, or ``None`` to run it."""
+        return None
 
     def _failure(self, event_name: str, reason: str, kind: str) -> EvalAssertionFailure:
         """A failure of the run itself rather than of an expectation, scored against the trace's current turn (-1 before any)."""
@@ -159,6 +150,15 @@ class BaseEvalSession(BaseObject, Generic[R]):
             reason=reason,
             kind=kind,
         )
+
+    def _error_failure(self, e: Exception) -> EvalAssertionFailure:
+        """Trace an unexpected error with its traceback and let the driver score it."""
+        self._trace.log(f"error: {type(e).__name__}: {e}")
+        for line in traceback.format_exc().rstrip().splitlines():
+            self._trace.log(line)
+        failure = self._failure("<error>", f"{type(e).__name__}: {e}", "error")
+        self._driver.record_failure(failure)
+        return failure
 
     async def _progress(self, record: EvalProgress) -> None:
         """Emit a progress record to the ``on_progress`` handlers."""

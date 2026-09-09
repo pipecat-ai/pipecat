@@ -144,6 +144,65 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await self._judge_conversation()
         return []
 
+    def result(
+        self,
+        *,
+        failures: list[EvalAssertionFailure],
+        duration_ms: int,
+        events_seen: list[dict],
+        debug_log: list[str],
+        skipped: str | None = None,
+    ) -> EvalSimulationResult:
+        """The run's result; a run-level failure makes it an error, not a goal failure."""
+        error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
+        return EvalSimulationResult(
+            simulation_name=self._simulation.name,
+            succeeded=self._succeeded and error is None,
+            reason=error or self._reason,
+            error=error,
+            metrics=self._metrics,
+            messages=self.conversation(),
+            turns=self._turns,
+            ended_by=self._ended_by or "error",
+            end_call=self._end_call,
+            duration_ms=duration_ms,
+            events_seen=events_seen,
+            debug_log=debug_log,
+        )
+
+    def timeline(self) -> list[dict]:
+        """The conversation as the events told it, each line with the tool calls made by then.
+
+        A bot turn is everything the bot said between two persona turns, however
+        turn detection or a function call split it; a turn in which the bot said
+        nothing is not a turn. Built as the events arrive.
+        """
+        return list(self._lines)
+
+    def transcript(self) -> list[dict]:
+        """The conversation for the judge: the lines, each tool call in place before the line it preceded."""
+        entries: list[dict] = []
+        placed = 0
+        for line in self._lines:
+            for call in line["evidence"][placed:]:
+                entries.append({"role": "tool", "content": call})
+            placed = len(line["evidence"])
+            entries.append({"role": line["role"], "content": line["content"]})
+        for call in self._evidence[placed:]:
+            entries.append({"role": "tool", "content": call})
+        return entries
+
+    def conversation(self) -> list[dict]:
+        """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
+        return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
+
+    def tool_calls(self) -> list[str]:
+        """The bot's function calls in order, one line each; a cancelled call is listed as cancelled."""
+        lines = []
+        for event in self._stream.events_seen:
+            lines.extend(self._evidence_line(event))
+        return lines
+
     async def _report(self, status: str, text: str) -> None:
         """Emit one line of the conversation, or its end, as progress."""
         await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
@@ -162,15 +221,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await self._stream.append(
             {"type": END_CALL_EVENT, "text": self._end_call["reason"], **self._end_call}
         )
-
-    def timeline(self) -> list[dict]:
-        """The conversation as the events told it, each line with the tool calls made by then.
-
-        A bot turn is everything the bot said between two persona turns, however
-        turn detection or a function call split it; a turn in which the bot said
-        nothing is not a turn. Built as the events arrive.
-        """
-        return list(self._lines)
 
     def _observe_new_events(self) -> None:
         """Read the stream's events not yet read into the timeline."""
@@ -199,30 +249,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     def _add_line(self, role: str, content: str) -> None:
         """Append a line to the timeline."""
         self._lines.append({"role": role, "content": content, "evidence": list(self._evidence)})
-
-    def transcript(self) -> list[dict]:
-        """The conversation for the judge: the lines, each tool call in place before the line it preceded."""
-        entries: list[dict] = []
-        placed = 0
-        for line in self._lines:
-            for call in line["evidence"][placed:]:
-                entries.append({"role": "tool", "content": call})
-            placed = len(line["evidence"])
-            entries.append({"role": line["role"], "content": line["content"]})
-        for call in self._evidence[placed:]:
-            entries.append({"role": "tool", "content": call})
-        return entries
-
-    def conversation(self) -> list[dict]:
-        """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
-        return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
-
-    def tool_calls(self) -> list[str]:
-        """The bot's function calls in order, one line each; a cancelled call is listed as cancelled."""
-        lines = []
-        for event in self._stream.events_seen:
-            lines.extend(self._evidence_line(event))
-        return lines
 
     def _evidence_line(self, event: dict) -> list[str]:
         """The evidence line a function-call event contributes, if any."""
@@ -273,6 +299,34 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {self._reason}"
         )
 
+    def _score(
+        self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]
+    ) -> EvalSimulationMetricScore:
+        """A metric's score over its turn verdicts: the share of turns that passed."""
+        if not verdicts:
+            score, reason, passed = None, "no bot turn to judge", True
+        else:
+            score = sum(1 for v in verdicts if v.passed) / len(verdicts)
+            failed = [v for v in verdicts if not v.passed]
+            reason = (
+                f"all {len(verdicts)} turn(s)"
+                if not failed
+                else "; ".join(f"turn {v.turn}: {v.reason}" for v in failed)
+            )
+            passed = metric.min_quality is None or score >= metric.min_quality
+        self._trace.log(
+            f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
+            f"{'' if passed else f' (below {metric.min_quality:.2f})'}: {reason}"
+        )
+        return EvalSimulationMetricScore(
+            name=metric.name,
+            score=score,
+            passed=passed,
+            reason=reason,
+            min_quality=metric.min_quality,
+            verdicts=verdicts,
+        )
+
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
         """A measured metric's outcome: its value against its range, or the bot's calls against the list."""
         score: float | None
@@ -301,31 +355,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         return EvalSimulationMetricScore(
             name=metric.name, score=score, passed=passed, reason=reason, value=value
         )
-
-    def _calls_outcome(self, metric: EvalSimulationMetric) -> tuple[float, bool, str]:
-        """The ``function_calls`` measure: the count, whether the set matches, and a reason naming the calls made against the list."""
-        made = self._calls_made()
-        expected = metric.calls or []
-        missing = [spec for spec in expected if not any(_call_matches(spec, c) for c in made)]
-        unlisted = [c for c in made if not any(_call_matches(spec, c) for spec in expected)]
-        described = ", ".join(c.signature for c in made) or "no calls"
-        wanted = ", ".join(spec.signature for spec in expected) or "none"
-        return float(len(made)), not missing and not unlisted, f"{described}, expected {wanted}"
-
-    def _calls_made(self) -> list[EvalFunctionCall]:
-        """The bot's function calls in order, less the ones it cancelled."""
-        made: list[EvalFunctionCall] = []
-        for event in self._stream.events_seen:
-            if event["type"] == "function_call":
-                made.append(EvalFunctionCall(name=event.get("name"), args=event.get("args") or {}))
-            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
-                "cancelled"
-            ):
-                for index in range(len(made) - 1, -1, -1):
-                    if made[index].name == event.get("name"):
-                        del made[index]
-                        break
-        return made
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
         """A measure's value for this run, and the phrase that reports it."""
@@ -374,56 +403,27 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 sent_at = None
         return latencies
 
-    def _score(
-        self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]
-    ) -> EvalSimulationMetricScore:
-        """A metric's score over its turn verdicts: the share of turns that passed."""
-        if not verdicts:
-            score, reason, passed = None, "no bot turn to judge", True
-        else:
-            score = sum(1 for v in verdicts if v.passed) / len(verdicts)
-            failed = [v for v in verdicts if not v.passed]
-            reason = (
-                f"all {len(verdicts)} turn(s)"
-                if not failed
-                else "; ".join(f"turn {v.turn}: {v.reason}" for v in failed)
-            )
-            passed = metric.min_quality is None or score >= metric.min_quality
-        self._trace.log(
-            f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
-            f"{'' if passed else f' (below {metric.min_quality:.2f})'}: {reason}"
-        )
-        return EvalSimulationMetricScore(
-            name=metric.name,
-            score=score,
-            passed=passed,
-            reason=reason,
-            min_quality=metric.min_quality,
-            verdicts=verdicts,
-        )
+    def _calls_outcome(self, metric: EvalSimulationMetric) -> tuple[float, bool, str]:
+        """The ``function_calls`` measure: the count, whether the set matches, and a reason naming the calls made against the list."""
+        made = self._calls_made()
+        expected = metric.calls or []
+        missing = [spec for spec in expected if not any(_call_matches(spec, c) for c in made)]
+        unlisted = [c for c in made if not any(_call_matches(spec, c) for spec in expected)]
+        described = ", ".join(c.signature for c in made) or "no calls"
+        wanted = ", ".join(spec.signature for spec in expected) or "none"
+        return float(len(made)), not missing and not unlisted, f"{described}, expected {wanted}"
 
-    def result(
-        self,
-        *,
-        failures: list[EvalAssertionFailure],
-        duration_ms: int,
-        events_seen: list[dict],
-        debug_log: list[str],
-        skipped: str | None = None,
-    ) -> EvalSimulationResult:
-        """The run's result; a run-level failure makes it an error, not a goal failure."""
-        error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
-        return EvalSimulationResult(
-            simulation_name=self._simulation.name,
-            succeeded=self._succeeded and error is None,
-            reason=error or self._reason,
-            error=error,
-            metrics=self._metrics,
-            messages=self.conversation(),
-            turns=self._turns,
-            ended_by=self._ended_by or "error",
-            end_call=self._end_call,
-            duration_ms=duration_ms,
-            events_seen=events_seen,
-            debug_log=debug_log,
-        )
+    def _calls_made(self) -> list[EvalFunctionCall]:
+        """The bot's function calls in order, less the ones it cancelled."""
+        made: list[EvalFunctionCall] = []
+        for event in self._stream.events_seen:
+            if event["type"] == "function_call":
+                made.append(EvalFunctionCall(name=event.get("name"), args=event.get("args") or {}))
+            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
+                "cancelled"
+            ):
+                for index in range(len(made) - 1, -1, -1):
+                    if made[index].name == event.get("name"):
+                        del made[index]
+                        break
+        return made
