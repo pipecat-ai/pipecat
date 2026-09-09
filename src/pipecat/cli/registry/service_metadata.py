@@ -355,7 +355,7 @@ class ServiceRegistry:
             package="pipecat-ai[google]",
             class_name=["GoogleSTTService"],
             env_prefix="GOOGLE",
-            include_params=["credentials", "location"],
+            include_params=["credentials"],
         ),
         ServiceDefinition(
             value="gradium_stt",
@@ -420,7 +420,6 @@ class ServiceRegistry:
             class_name=["SarvamSTTService"],
             env_prefix="SARVAM",
             include_params=["api_key"],
-            settings_params=["model"],
         ),
         ServiceDefinition(
             value="soniox_stt",
@@ -443,15 +442,18 @@ class ServiceRegistry:
             label="Moonshine",
             package="pipecat-ai[moonshine]",
             class_name=["MoonshineSTTService"],
+            env_prefix="MOONSHINE",
             settings_params=["model"],
+            param_defaults={"model": "small-streaming"},
         ),
         ServiceDefinition(
             value="whisper_stt",
             label="Whisper (Local)",
             package="pipecat-ai[whisper]",
             class_name=["WhisperSTTService"],
-            env_prefix="OPENAI",
+            env_prefix="WHISPER",
             settings_params=["model"],
+            param_defaults={"model": "Systran/faster-distil-whisper-medium.en"},
         ),
         ServiceDefinition(
             value="xai_stt",
@@ -982,7 +984,7 @@ class ServiceRegistry:
             class_name=["SarvamTTSService"],
             env_prefix="SARVAM",
             include_params=["api_key"],
-            settings_params=["model", "voice"],
+            settings_params=["voice"],
         ),
         ServiceDefinition(
             value="smallest_tts",

@@ -365,3 +365,40 @@ class TestTransportImportBranching:
     def test_llm_run_frame_import_branch(self, transport, expects_llm_run_frame):
         imports = self._imports(transport)
         assert ("LLMRunFrame" in imports) is expects_llm_run_frame
+
+
+class TestEnvExampleCoverage:
+    """Every env var a generated service config reads must appear in .env.example."""
+
+    _SLOTS = [
+        ("stt_service", ServiceRegistry.STT_SERVICES),
+        ("llm_service", ServiceRegistry.LLM_SERVICES),
+        ("tts_service", ServiceRegistry.TTS_SERVICES),
+        ("realtime_service", ServiceRegistry.REALTIME_SERVICES),
+        ("video_service", ServiceRegistry.VIDEO_SERVICES),
+    ]
+
+    @pytest.mark.parametrize(
+        "slot,service",
+        [(slot, service) for slot, services in _SLOTS for service in services],
+        ids=lambda x: x if isinstance(x, str) else x.value,
+    )
+    def test_config_env_vars_are_in_env_example(self, slot, service, tmp_path):
+        import re
+
+        from pipecat.cli.generators.project import ProjectGenerator
+        from pipecat.cli.prompts.questions import ProjectConfig
+
+        config_code = ServiceLoader.get_service_config(service.value)
+        env_vars = set(re.findall(r'os\.getenv\("([A-Z0-9_]+)"', config_code))
+
+        config = ProjectConfig(project_name="test", bot_type="web", **{slot: service.value})
+        ProjectGenerator(config)._generate_env_example(tmp_path)
+        env_example = (tmp_path / ".env.example").read_text()
+
+        # A variable counts as present whether it is written as a line to fill in
+        # or as a commented-out optional line.
+        present = set(re.findall(r"^#?\s*([A-Z0-9_]+)=", env_example, re.MULTILINE))
+
+        missing = env_vars - present
+        assert not missing, f"{service.value} reads {sorted(missing)} but .env.example lacks them"
