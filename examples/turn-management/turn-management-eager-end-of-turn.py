@@ -12,14 +12,12 @@ waiting for one.
 
 Deepgram Flux predicts an end of turn (EagerEndOfTurn) ahead of committing to
 one (EndOfTurn), and withdraws the prediction (TurnResumed) if the user turns
-out to be mid-sentence. `EagerUserTurnStrategies` answers the prediction; the
-`UserTurnSpeculationGate` holds that response until the turn is confirmed, and
-discards it if the user resumes speaking or the committed transcript differs
-from the predicted one. Nothing unconfirmed is spoken or written to the context.
+out to be mid-sentence. `enable_eager_end_of_turn` answers the prediction and
+holds the response in the LLM service until the turn is confirmed, discarding it
+if the user resumes speaking or the committed transcript differs from the
+predicted one. Nothing unconfirmed is spoken or written to the context.
 
-The gate sits after the TTS service here, so a confirmed response is already
-synthesized and starts playing immediately. Move it before the TTS service to
-avoid paying for synthesis that may be discarded.
+The pipeline is an ordinary one: the flag is the whole configuration.
 """
 
 import os
@@ -35,10 +33,8 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.filters.user_turn_speculation_gate import UserTurnSpeculationGate
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -47,7 +43,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -80,9 +75,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramFluxSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
+        enable_eager_end_of_turn=True,
         settings=DeepgramFluxSTTService.Settings(
-            # EagerEndOfTurn is off by default. Lower values predict earlier,
-            # which buys more latency but misses more often.
+            # Optional: how confident Flux has to be to predict an end of turn.
+            # Lower values predict earlier, which buys more latency but misses
+            # more often. Defaults to 0.5 when eager end of turn is on.
             eager_eot_threshold=0.5,
         ),
     )
@@ -105,13 +102,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    # The STT service recommends the turn strategies that answer its
+    # predictions, so nothing here has to name them.
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=EagerUserTurnStrategies(),
-        ),
-    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -120,9 +114,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_aggregator,
             llm,
             tts,
-            # Anywhere before transport.output(): nothing past this point can be
-            # unspoken again.
-            UserTurnSpeculationGate(),
             transport.output(),
             assistant_aggregator,
         ]

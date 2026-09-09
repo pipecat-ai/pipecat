@@ -32,11 +32,11 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     - the committed transcript differs from the eager one, per ``match_policy``
 
     Nothing the speculation produces reaches the user or the context. The
-    inference runs against a provisional context, and its response is held by a
-    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`,
-    which must be in the pipeline before the output transport. The turn ends
-    normally: the user message written to the context is always the committed
-    transcript, never the eager one.
+    inference runs against a provisional context, and its response is held by
+    the LLM service's
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` until the turn is
+    confirmed. The turn ends normally: the user message written to the context
+    is always the committed transcript, never the eager one.
 
     Install it with :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies`
     rather than directly — the service owns turn detection here, so it replaces

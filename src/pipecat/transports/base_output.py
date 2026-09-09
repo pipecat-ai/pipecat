@@ -378,18 +378,18 @@ class BaseOutputTransport(FrameProcessor):
         """Report a speculative response that reached the output unheld.
 
         It answers a turn the user may not have finished, so speaking it is the
-        outcome speculation exists to avoid. Reaching here means no
-        :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
-        sits between the LLM and this transport. Warned once: the alternative is
-        a line per turn for a problem that is fixed in one place.
+        outcome speculation exists to avoid. The LLM service holds one until its
+        turn is confirmed and clears the id on the way out, so a response
+        arriving here still marked was never gated. Warned once: the
+        alternative is a line per turn for a problem that is fixed in one place.
         """
         if self._warned_unheld_speculation:
             return
         self._warned_unheld_speculation = True
         logger.error(
             f"{self}: a speculative response reached the output transport, so it will be "
-            "spoken before the user turn it answers is confirmed. Add a "
-            "`UserTurnSpeculationGate()` to the pipeline before this transport."
+            "spoken before the user turn it answers is confirmed. Nothing between the LLM "
+            "and this transport is holding it back."
         )
 
     async def _handle_frame(self, frame: Frame):

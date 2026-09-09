@@ -12,6 +12,9 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     InterruptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -412,3 +415,111 @@ class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):
         cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
         assert [c.speculation_id for c in cancels] == ["abc"]
         assert context.messages == [{"role": "user", "content": "Book a flight to Tokyo."}]
+
+
+class SpeculativeLLM(LLMService):
+    """LLM service that answers every context frame with one text response."""
+
+    def __init__(self, **kwargs):
+        super().__init__(settings=LLMSettings(model="test-model"), **kwargs)
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMTextFrame("Booking your flight."))
+        await self.push_frame(LLMFullResponseEndFrame())
+
+
+class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
+    """The LLM service holds a speculative response until its turn is confirmed."""
+
+    @staticmethod
+    def response_frames(frames):
+        """The response frames among everything the service pushed."""
+        return [
+            f
+            for f in frames
+            if isinstance(f, (LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame))
+        ]
+
+    @staticmethod
+    def context_frame(speculation_id=None):
+        context = LLMContext(messages=[{"role": "user", "content": "book a flight"}])
+        return LLMContextFrame(context=context, speculation_id=speculation_id)
+
+    async def test_a_speculative_response_leaves_the_service_only_once_confirmed(self):
+        down, _ = await run_test(
+            SpeculativeLLM(),
+            frames_to_send=[
+                self.context_frame("abc"),
+                SleepFrame(),
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+                SleepFrame(),
+            ],
+        )
+
+        # The whole response, and only after the frame that confirmed it.
+        assert [type(f) for f in self.response_frames(down)] == [
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+        confirmed_at = next(
+            i for i, f in enumerate(down) if isinstance(f, UserStoppedSpeakingFrame)
+        )
+        response_at = next(
+            i for i, f in enumerate(down) if isinstance(f, LLMFullResponseStartFrame)
+        )
+        assert response_at > confirmed_at
+        # Confirmed on the way out, so nothing downstream sees it as speculative.
+        assert all(
+            f.speculation_id is None
+            for f in down
+            if isinstance(f, (LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+        )
+
+    async def test_a_withdrawn_speculative_response_never_leaves_the_service(self):
+        down, _ = await run_test(
+            SpeculativeLLM(),
+            frames_to_send=[
+                self.context_frame("abc"),
+                SleepFrame(),
+                EagerEndOfTurnCancelFrame(speculation_id="abc"),
+                SleepFrame(),
+            ],
+        )
+
+        assert self.response_frames(down) == []
+
+    async def test_an_ordinary_response_is_not_held(self):
+        down, _ = await run_test(
+            SpeculativeLLM(),
+            frames_to_send=[self.context_frame(), SleepFrame()],
+        )
+
+        assert [type(f) for f in self.response_frames(down)] == [
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+
+    async def test_a_speculation_nothing_resolves_is_dropped_after_the_hold_timeout(self):
+        llm = SpeculativeLLM()
+        llm.SPECULATION_HOLD_TIMEOUT = 0.2
+
+        down, _ = await run_test(
+            llm,
+            frames_to_send=[
+                self.context_frame("abc"),
+                SleepFrame(sleep=0.5),
+                # Confirmation arriving after the service gave up on it.
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+                SleepFrame(),
+            ],
+        )
+
+        assert self.response_frames(down) == []

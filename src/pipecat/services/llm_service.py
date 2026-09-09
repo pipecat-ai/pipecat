@@ -65,6 +65,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
+from pipecat.turns.speculation_gate import SpeculationGate
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
     ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
@@ -300,6 +301,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE = (
         "The function `{function_name}` failed and returned no result."
     )
+    # How long a speculative response is held before the gate gives up on it.
+    # Without this bound, a service that stops sending turn signals mid-
+    # speculation would leave the bot silent for the rest of the session.
+    SPECULATION_HOLD_TIMEOUT = 5.0
 
     def __init__(
         self,
@@ -362,8 +367,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._filter_incomplete_user_turns: bool = False
         # Set for the duration of a speculative inference, from the
         # LLMContextFrame that started it. Stamped onto the response frames so
-        # downstream processors can tell which frames the speculation owns.
+        # whatever gates the speculation can tell which frames it owns.
         self._speculation_id: str | None = None
+        # Holds a speculative response until its turn is confirmed. Frames are
+        # routed through it on the way out, in `push_frame`.
+        self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
+        self._speculation_timeout_task: asyncio.Task | None = None
+        # The speculation the hold timer is running for, so it is re-armed when
+        # the gate moves on to another one.
+        self._speculation_timeout_id: str | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -560,6 +572,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
+        await self._cancel_speculation_timeout()
         await self._run_tool_cleanups()
 
     def _warn_turn_completion_settings_are_strategy_owned(self):
@@ -751,7 +764,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 # later response isn't mistaken for part of it.
                 self._speculation_id = None
 
-        await super().push_frame(frame, direction)
+        # The gate decides synchronously, so its verdict can't be torn by
+        # another task pushing at the same time. Everything it hands back is
+        # pushed past it — routing that back through here would re-gate it.
+        emitted = self._speculation_gate.process(frame, direction)
+        await self._sync_speculation_timeout()
+        for gated_frame, gated_direction in emitted:
+            await super().push_frame(gated_frame, gated_direction)
 
     async def _push_llm_text(self, text: str):
         """Push LLM text, using turn completion detection if enabled.
@@ -793,6 +812,38 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._speculation_id = None
         await self._start_interruption()
         await self.stop_all_metrics()
+
+    async def _sync_speculation_timeout(self):
+        """Arm the hold timer for whatever the gate is holding now.
+
+        The gate decides synchronously and owns no tasks, so the bound on how
+        long it may hold lives here. Keyed on the speculation being held, so a
+        response that supersedes another starts the clock over rather than
+        inheriting its remainder.
+        """
+        speculation_id = self._speculation_gate.speculation_id
+        if speculation_id == self._speculation_timeout_id:
+            return
+
+        await self._cancel_speculation_timeout()
+        self._speculation_timeout_id = speculation_id
+        if speculation_id:
+            self._speculation_timeout_task = self.create_task(
+                self._speculation_timeout_handler(), "_speculation_timeout"
+            )
+
+    async def _cancel_speculation_timeout(self):
+        self._speculation_timeout_id = None
+        if self._speculation_timeout_task:
+            task, self._speculation_timeout_task = self._speculation_timeout_task, None
+            await self.cancel_task(task)
+
+    async def _speculation_timeout_handler(self):
+        await asyncio.sleep(self.SPECULATION_HOLD_TIMEOUT)
+        self._speculation_timeout_task = None
+        self._speculation_timeout_id = None
+        for frame, direction in self._speculation_gate.expire():
+            await super().push_frame(frame, direction)
 
     async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
         """Handle context summarization request from aggregator.

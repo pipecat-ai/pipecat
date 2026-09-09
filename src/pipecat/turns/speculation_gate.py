@@ -4,9 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Gate that holds a speculative bot response until the turn it answers is confirmed."""
+"""Decision engine holding a speculative bot response until its turn is confirmed."""
 
-import asyncio
 from enum import Enum
 
 from loguru import logger
@@ -22,14 +21,16 @@ from pipecat.frames.frames import (
     UninterruptibleFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.frame_queue import FrameQueue
+from pipecat.processors.frame_processor import FrameDirection
+
+# A frame paired with the direction it travels in.
+GatedFrame = tuple[Frame, FrameDirection]
 
 
 class SpeculationState(Enum):
     """What the gate is doing with the frames passing through it.
 
-    - ``OPEN``: forwarding everything.
+    - ``OPEN``: emitting everything.
     - ``HOLDING``: holding a speculative response until it is confirmed.
     - ``DROPPING``: discarding the rest of a withdrawn speculative response.
     """
@@ -39,23 +40,14 @@ class SpeculationState(Enum):
     DROPPING = "dropping"
 
 
-class UserTurnSpeculationGate(FrameProcessor):
-    """Holds a speculative bot response until the user turn it answers is confirmed.
+class SpeculationGate:
+    """Decides which frames of a speculative bot response may be emitted, and when.
 
     A speculative response is generated from an eager end of turn — a
     provisional guess that the user has finished talking — so it may answer a
-    transcript the user never actually completed. This gate holds everything
-    such a response produces until the turn is confirmed, then releases it, or
-    discards it if the guess is withdrawn.
-
-    Place it anywhere before the output transport, which is the point where
-    unconfirmed speech would reach the user::
-
-        [llm, tts, gate, transport.output(), assistant_aggregator]  # flush is instant
-        [llm, gate, tts, transport.output(), assistant_aggregator]  # discard is cheaper
-
-    Both positions keep discarded responses out of the LLM context, since the
-    assistant aggregator sits at the end of the pipeline.
+    transcript the user never actually completed. This holds everything such a
+    response produces until the turn is confirmed, then releases it, or discards
+    it if the guess is withdrawn.
 
     The response is bounded by
     :class:`~pipecat.frames.frames.LLMFullResponseStartFrame` and
@@ -75,96 +67,129 @@ class UserTurnSpeculationGate(FrameProcessor):
     which are out-of-band throughout Pipecat — and which carry the verdicts the
     gate is waiting for, so holding them would deadlock it. That includes
     :class:`~pipecat.frames.frames.UninterruptibleFrame` ones, which are ordered
-    like any other frame; discarding a speculation keeps them and delivers them
-    on, since they can belong to work started before it.
+    like any other frame; discarding a speculation keeps them and emits them on,
+    since they can belong to work started before it.
+
+    This is a plain decision engine rather than a frame processor: :meth:`process`
+    is synchronous and returns the frames its caller should push, in order. A
+    host can therefore push from several tasks at once — every state transition
+    completes without an await for another task to interleave with.
+    :class:`~pipecat.services.llm_service.LLMService` hosts one, gating every
+    response it produces.
+
+    Holding is unbounded on its own: a service that stops sending turn signals
+    mid-speculation would leave the bot silent for the rest of the session, so
+    the host bounds it by calling :meth:`expire` on a timer, armed and cancelled
+    as :attr:`speculation_id` changes.
+
+    Example::
+
+        for frame, direction in gate.process(frame, direction):
+            await self.push_frame(frame, direction)
     """
 
-    def __init__(self, *, max_buffer_duration: float = 5.0, **kwargs):
-        """Initialize the speculative response gate.
+    def __init__(self, *, name: str = "SpeculationGate"):
+        """Initialize the speculation gate.
 
         Args:
-            max_buffer_duration: Seconds to hold a speculative response before
-                giving up on it and discarding it. Without this bound, a service
-                that stops sending turn signals mid-speculation would leave the
-                bot silent for the rest of the session.
-            **kwargs: Additional arguments passed to the parent class.
+            name: Label used in log messages, typically the owning service's.
         """
-        super().__init__(**kwargs)
-        self._max_buffer_duration = max_buffer_duration
+        self._name = name
         self._state = SpeculationState.OPEN
         self._speculation_id: str | None = None
-        self._buffer: FrameQueue = FrameQueue(frame_getter=lambda item: item[0])
+        self._buffer: list[GatedFrame] = []
         # A speculation confirmed before its response arrived. The confirmation
         # travels as a system frame, so it can pass the queued frames it
         # confirms, and nothing follows it to correct a response held by
         # mistake — the turn is over, so no further response is coming.
         # One slot is enough: only one speculation is ever in flight.
         self._confirmed_id: str | None = None
-        self._timeout_task: asyncio.Task | None = None
+
+    def __str__(self):
+        return self._name
 
     @property
     def state(self) -> SpeculationState:
         """What the gate is currently doing with frames passing through it."""
         return self._state
 
-    async def cleanup(self):
-        """Clean up the gate."""
-        await super().cleanup()
-        await self._cancel_timeout()
+    @property
+    def speculation_id(self) -> str | None:
+        """The speculation being held, or None when nothing is held.
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Hold, release or discard a speculative response.
+        Changes exactly when the hold the host bounds with :meth:`expire`
+        changes, so a host can arm and cancel its timer by watching this.
+        """
+        return self._speculation_id if self._state == SpeculationState.HOLDING else None
+
+    def process(self, frame: Frame, direction: FrameDirection) -> list[GatedFrame]:
+        """Decide what a frame passing through the gate releases.
 
         Args:
             frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
+            direction: The direction the frame travels in.
 
+        Returns:
+            The frames to push, in order. Empty while a frame is held or
+            dropped; longer than one frame when a verdict releases what was
+            held behind it.
+        """
         if direction != FrameDirection.DOWNSTREAM:
-            await self.push_frame(frame, direction)
-            return
+            return [(frame, direction)]
 
         if isinstance(frame, SystemFrame):
-            # Forwarded before the verdict is applied, so a released response
+            # Emitted before the verdict is applied, so a released response
             # still follows the frame that ended the turn it answers.
-            await self.push_frame(frame, direction)
+            emitted = [(frame, direction)]
             if isinstance(frame, EagerEndOfTurnCancelFrame):
-                await self._discard(frame.speculation_id)
+                emitted += self._discard(frame.speculation_id)
             elif isinstance(frame, UserStoppedSpeakingFrame):
-                await self._release(frame.speculation_id)
+                emitted += self._release(frame.speculation_id)
             elif isinstance(frame, InterruptionFrame):
-                await self._discard(None)
-            return
+                emitted += self._discard(None)
+            return emitted
 
         if isinstance(frame, EndFrame):
             # Uninterruptible, and the runner awaits it: holding it hangs
             # shutdown. Discarding first delivers whatever is held that has to
             # outlive the speculation, ahead of it.
-            await self._discard(None)
-            await self.push_frame(frame, direction)
-            return
+            return self._discard(None) + [(frame, direction)]
 
+        emitted: list[GatedFrame] = []
         if isinstance(frame, LLMFullResponseStartFrame):
-            await self._begin(frame.speculation_id)
+            emitted += self._begin(frame.speculation_id)
 
         if self._state == SpeculationState.HOLDING:
             # Held in arrival order, uninterruptible frames included: they are
             # ordered like any other, and the buffer preserves them when the
             # speculation around them is discarded.
-            self._buffer.put_nowait((frame, direction))
+            self._buffer.append((frame, direction))
         elif self._state == SpeculationState.DROPPING:
             if isinstance(frame, UninterruptibleFrame):
                 # Not part of the response being dropped, and nothing is being
-                # held back, so passing it on keeps it in order.
-                await self.push_frame(frame, direction)
+                # held back, so emitting it keeps it in order.
+                emitted.append((frame, direction))
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._state = SpeculationState.OPEN
         else:
-            await self._forward(frame, direction)
+            emitted.append(self._resolved(frame, direction))
 
-    async def _forward(self, frame: Frame, direction: FrameDirection):
-        """Push a frame the gate has resolved.
+        return emitted
+
+    def expire(self) -> list[GatedFrame]:
+        """Give up on a speculation nothing resolved.
+
+        Called by the host once its hold timer fires.
+
+        Returns:
+            The frames to push, which is whatever the discarded response was
+            holding back that has to be delivered anyway.
+        """
+        logger.warning(f"{self}: speculative response unresolved, discarding it")
+        return self._discard(None)
+
+    def _resolved(self, frame: Frame, direction: FrameDirection) -> GatedFrame:
+        """Prepare a frame the gate has resolved.
 
         A response that gets past the gate has been confirmed, or never belonged
         to a speculation, so it carries no speculation id onward. That keeps the
@@ -173,70 +198,78 @@ class UserTurnSpeculationGate(FrameProcessor):
         """
         if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             frame.speculation_id = None
-        await self.push_frame(frame, direction)
+        return (frame, direction)
 
-    async def _begin(self, speculation_id: str | None):
+    def _begin(self, speculation_id: str | None) -> list[GatedFrame]:
         """Decide what to do with the response this id opens."""
+        emitted: list[GatedFrame] = []
+
         if self._state != SpeculationState.OPEN:
             # A new response supersedes the one we were holding or dropping. A
             # withdrawn response may never send its end frame, since its
             # generation was cancelled mid-flight, and an unconfirmed one is
             # void once something else starts answering. Nothing of it can still
             # be queued behind this frame, so there is no tail left to drop.
-            await self._drop_held("superseded by a new response", keep_dropping=False)
+            emitted += self._drop_held("superseded by a new response", keep_dropping=False)
 
         if not speculation_id:
-            return
+            return emitted
 
         if speculation_id == self._confirmed_id:
             # Confirmed before it reached us; nothing left to hold back.
             self._confirmed_id = None
-            return
+            return emitted
 
         self._state = SpeculationState.HOLDING
         self._speculation_id = speculation_id
-        await self._start_timeout()
+        return emitted
 
-    async def _release(self, speculation_id: str | None):
+    def _release(self, speculation_id: str | None) -> list[GatedFrame]:
         """Release the response the turn end confirms.
 
         Args:
             speculation_id: The speculation the turn confirms. A turn that ends
                 without naming one confirms nothing, and releases nothing.
+
+        Returns:
+            The frames the confirmation releases, in arrival order.
         """
         if not speculation_id:
-            return
+            return []
 
         if self._state != SpeculationState.HOLDING or speculation_id != self._speculation_id:
             # Confirmed before its response reached us. Remember it, or the
             # response would be held on arrival and never released: the turn is
             # over, so nothing follows to supersede it.
             self._confirmed_id = speculation_id
-            return
+            return []
 
-        await self._cancel_timeout()
-        logger.debug(f"{self}: releasing speculative response ({self._buffer.qsize()} frames)")
+        logger.debug(f"{self}: releasing speculative response ({len(self._buffer)} frames)")
         self._state = SpeculationState.OPEN
         self._speculation_id = None
-        await self._flush()
+        return self._flush()
 
-    async def _discard(self, speculation_id: str | None):
+    def _discard(self, speculation_id: str | None) -> list[GatedFrame]:
         """Discard the response a withdrawal or an interruption voids.
 
         A withdrawal that arrives before the response it voids needs no memory:
         the response is held on arrival, and whatever answers the turn instead
-        supersedes it — or the buffer times out if nothing does.
+        supersedes it — or the host's timer expires if nothing does.
 
         Args:
             speculation_id: The speculation being withdrawn, or None to discard
                 whatever is held, which is what an interruption and shutdown do.
+
+        Returns:
+            Whatever the discarded response was holding back that has to be
+            delivered anyway.
         """
         if speculation_id and speculation_id != self._speculation_id:
-            return
+            return []
 
-        await self._drop_held("withdrawn", keep_dropping=True)
+        return self._drop_held("withdrawn", keep_dropping=True)
 
-    async def _drop_held(self, reason: str, *, keep_dropping: bool):
+    def _drop_held(self, reason: str, *, keep_dropping: bool) -> list[GatedFrame]:
         """Drop the held response.
 
         Args:
@@ -244,48 +277,30 @@ class UserTurnSpeculationGate(FrameProcessor):
             keep_dropping: Whether the rest of the response may still be queued
                 behind us and has to be dropped as it arrives. False when
                 something already past it proves there is no tail left.
+
+        Returns:
+            The held frames that must be delivered anyway, in arrival order.
         """
         if self._state != SpeculationState.HOLDING:
             self._state = SpeculationState.OPEN
             self._speculation_id = None
-            return
+            return []
 
-        await self._cancel_timeout()
         logger.debug(
-            f"{self}: discarding speculative response ({self._buffer.qsize()} frames, {reason})"
+            f"{self}: discarding speculative response ({len(self._buffer)} frames, {reason})"
         )
         # A response that already ended has no tail left to drop.
-        complete = self._buffer.has_frame(LLMFullResponseEndFrame)
+        complete = any(isinstance(f, LLMFullResponseEndFrame) for f, _ in self._buffer)
         # Drops the speculative response and keeps anything that must always be
-        # delivered, which is then pushed on rather than discarded with it.
-        self._buffer.reset()
+        # delivered, which is then emitted rather than discarded with it.
+        self._buffer = [item for item in self._buffer if isinstance(item[0], UninterruptibleFrame)]
         self._speculation_id = None
         self._state = (
             SpeculationState.DROPPING if keep_dropping and not complete else SpeculationState.OPEN
         )
-        await self._flush()
+        return self._flush()
 
-    async def _flush(self):
-        """Push everything the buffer still holds, in the order it arrived."""
-        while not self._buffer.empty():
-            frame, direction = self._buffer.get_nowait()
-            self._buffer.task_done()
-            await self._forward(frame, direction)
-
-    async def _start_timeout(self):
-        await self._cancel_timeout()
-        self._timeout_task = self.create_task(self._timeout_handler(), "_speculation_timeout")
-
-    async def _cancel_timeout(self):
-        if self._timeout_task:
-            task, self._timeout_task = self._timeout_task, None
-            await self.cancel_task(task)
-
-    async def _timeout_handler(self):
-        await asyncio.sleep(self._max_buffer_duration)
-        logger.warning(
-            f"{self}: speculative response unresolved after {self._max_buffer_duration}s, "
-            "discarding it"
-        )
-        self._timeout_task = None
-        await self._discard(None)
+    def _flush(self) -> list[GatedFrame]:
+        """Take everything the buffer still holds, in the order it arrived."""
+        buffered, self._buffer = self._buffer, []
+        return [self._resolved(frame, direction) for frame, direction in buffered]

@@ -175,10 +175,8 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
     transcript differs from the eager one. See
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
-    Requires a
-    :class:`~pipecat.processors.filters.user_turn_speculation_gate.UserTurnSpeculationGate`
-    in the pipeline, before the output transport — without it, an unconfirmed
-    response is spoken as it is generated.
+    The response is held by the LLM service until the turn is confirmed, so no
+    extra processor is needed in the pipeline.
 
     The service owns turn detection here, so this replaces the detector chain
     rather than extending it: a local detector running alongside would trigger a
