@@ -12,10 +12,10 @@ speech-to-speech model delegating on its own, or a pipeline calling a tool.
 A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work: over the worker job API it
 streams back everything it produces and returns its final answer.
-:func:`delegate_to_backend` is the caller side of that contract.
+:func:`_delegate_to_backend` is the caller side of that contract.
 
 A request is text, so how a frontend words one is its own business.
-:func:`render_transcript_request` renders the conversation as a labelled
+:func:`_render_transcript_request` renders the conversation as a labelled
 transcript, which is what a frontend hands over when its model signals a
 handoff without wording a request; a frontend whose model does word one sends
 that instead.
@@ -111,7 +111,7 @@ BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
 BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
 
 
-def message_text(message: LLMStandardMessage) -> str:
+def _message_text(message: LLMStandardMessage) -> str:
     """Return a context message's text, joining the text parts of list content.
 
     Text is all the transcript carries today, so non-text parts are left out.
@@ -134,14 +134,14 @@ def message_text(message: LLMStandardMessage) -> str:
     return ""
 
 
-#: What :func:`render_transcript_request` tells the backend to do with a transcript.
-DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
+#: What :func:`_render_transcript_request` tells the backend to do with a transcript.
+_DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
 
 
-def render_transcript_request(
+def _render_transcript_request(
     conversation: Sequence[LLMContextMessage],
     *,
-    instruction: str = DEFAULT_TRANSCRIPT_INSTRUCTION,
+    instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION,
     first: bool = True,
 ) -> str:
     """Render a conversation as a labelled transcript for the backend to act on.
@@ -181,7 +181,7 @@ def render_transcript_request(
                 logger.debug(f"Skipping delegated message in {message.llm} format")
                 continue
             role = message.get("role")
-            text = message_text(message)
+            text = _message_text(message)
             if role in ("user", "assistant") and text:
                 lines.append(f"{str(role).upper()}: {text}")
             else:
@@ -215,7 +215,7 @@ class BackendLLMWorker(LLMContextWorker):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
       composed by the frontend. What that text says is the application's
-      business: :func:`render_transcript_request` renders the conversation as
+      business: :func:`_render_transcript_request` renders the conversation as
       a transcript, which is what a frontend whose model hands off without
       wording a request needs, but a frontend that has a worded request can
       simply send it.
@@ -230,7 +230,7 @@ class BackendLLMWorker(LLMContextWorker):
     reads the updates, while one that needs a return value (a tool handler,
     say) reads the response and skips updates marked ``is_final``.
 
-    :func:`delegate_to_backend` wraps the caller side.
+    :func:`_delegate_to_backend` wraps the caller side.
 
     Example::
 
@@ -365,7 +365,7 @@ class BackendLLMWorker(LLMContextWorker):
             await self.send_job_update(run.job_id, output.to_payload())
 
 
-async def delegate_to_backend(
+async def _delegate_to_backend(
     worker: BaseWorker,
     backend_name: str,
     *,
@@ -380,12 +380,12 @@ async def delegate_to_backend(
             ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
-            :func:`render_transcript_request` composes one from a
+            :func:`_render_transcript_request` composes one from a
             conversation, which is what a frontend hands over when its model
             signals a handoff without wording a request. A frontend whose
             model does word one can send it as it stands::
 
-                await delegate_to_backend(worker, "backend", request=task)
+                await _delegate_to_backend(worker, "backend", request=task)
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling

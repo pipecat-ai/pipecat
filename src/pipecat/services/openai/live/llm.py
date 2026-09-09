@@ -62,8 +62,8 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     BackendOutput,
-    delegate_to_backend,
-    render_transcript_request,
+    _delegate_to_backend,
+    _render_transcript_request,
 )
 
 from . import events
@@ -925,7 +925,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         assert isinstance(config, ClientDelegation)
         # The backend is handed the conversation since the last delegation
         # and works out the request from it.
-        request = render_transcript_request(
+        request = _render_transcript_request(
             self._take_transcript(), first=not self._delegated_before
         )
         self._delegated_before = True
@@ -936,7 +936,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         try:
             # Every output, the final answer included, arrives through
             # on_update, so the job's return value is not needed here.
-            await delegate_to_backend(
+            await _delegate_to_backend(
                 self.pipeline_worker,
                 config.backend.name,
                 request=request,

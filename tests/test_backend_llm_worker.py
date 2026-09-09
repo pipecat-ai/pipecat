@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for BackendLLMWorker and delegate_to_backend.
+"""Unit tests for BackendLLMWorker and _delegate_to_backend.
 
 A scripted LLM service stands in for the backend model: each LLMContextFrame
 plays the next scripted response (text and/or function calls), so the tests
@@ -33,8 +33,12 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.llm import BackendLLMWorker, delegate_to_backend
-from pipecat.workers.llm.backend_llm_worker import BackendOutput, render_transcript_request
+from pipecat.workers.llm import BackendLLMWorker
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendOutput,
+    _delegate_to_backend,
+    _render_transcript_request,
+)
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -156,7 +160,7 @@ async def _run_backend(
 
     async def body():
         try:
-            result["text"] = await delegate_to_backend(
+            result["text"] = await _delegate_to_backend(
                 requester, "backend", request=request, on_update=on_update, timeout_secs=10
             )
         finally:
@@ -177,7 +181,7 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
 
     text, updates, backend = await _run_backend(
         llm,
-        request=render_transcript_request(
+        request=_render_transcript_request(
             [
                 {"role": "user", "content": "what's the weather in seattle"},
                 {"role": "assistant", "content": "Let me find out."},
@@ -303,15 +307,17 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
 
     async def body():
         try:
-            await delegate_to_backend(
+            await _delegate_to_backend(
                 requester,
                 "backend",
-                request=render_transcript_request([{"role": "user", "content": "one"}], first=True),
+                request=_render_transcript_request(
+                    [{"role": "user", "content": "one"}], first=True
+                ),
             )
-            await delegate_to_backend(
+            await _delegate_to_backend(
                 requester,
                 "backend",
-                request=render_transcript_request(
+                request=_render_transcript_request(
                     [{"role": "user", "content": "two"}], first=False
                 ),
             )
@@ -326,11 +332,11 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
 
 
 def test_render_transcript_request_is_the_instruction_alone_when_nothing_was_said():
-    assert render_transcript_request([], instruction="Do it") == "Do it"
+    assert _render_transcript_request([], instruction="Do it") == "Do it"
 
 
 def test_render_transcript_request_points_the_backend_at_the_conversation():
-    rendered = render_transcript_request([{"role": "user", "content": "what's the weather"}])
+    rendered = _render_transcript_request([{"role": "user", "content": "what's the weather"}])
     assert rendered == (
         "Voice conversation so far:\n"
         "USER: what's the weather\n"
@@ -345,7 +351,7 @@ async def test_a_task_less_job_runs_from_the_conversation_alone():
 
     text, _, _ = await _run_backend(
         llm,
-        request=render_transcript_request([{"role": "user", "content": "what's the weather"}]),
+        request=_render_transcript_request([{"role": "user", "content": "what's the weather"}]),
     )
 
     assert text == "It's raining."
@@ -382,7 +388,7 @@ async def test_transform_output_can_rewrite_text_and_speakability():
 
 def test_render_transcript_request_flattens_what_a_transcript_can_hold():
     """A frontend can pass its context slice as-is; only spoken text survives."""
-    rendered = render_transcript_request(
+    rendered = _render_transcript_request(
         [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": [{"type": "text", "text": "what is this"}]},
