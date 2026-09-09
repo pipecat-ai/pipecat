@@ -6,15 +6,11 @@
 
 """Multi-bot eval suite runner.
 
-An :class:`EvalManifest` lists bots to spawn and the scenarios to run against
-each, scripted scenarios and simulations alike; an :class:`EvalSuite` spawns each
-bot with its eval transport on its own port and drives it with the harness,
-running several concurrently. Each harness
-runs in its own subprocess (:mod:`pipecat.evals._session_subprocess`) so its
-STT/VAD/turn models load on their own GIL -- in one shared process those loads
-would stall the event loop that paces every other concurrent run's real-time
-audio. ``pipecat eval suite`` is the CLI in front of it; the release evals are
-just a manifest plus that command.
+An :class:`EvalManifest` lists bots to spawn and the scenarios to run
+against each, scripted and simulated alike. An :class:`EvalSuite` spawns
+each bot with its eval transport on its own port and drives it with the
+harness in a subprocess, several at a time. ``pipecat eval suite`` is the
+CLI in front of it; the release evals are a manifest plus that command.
 
 Manifest format (YAML)::
 
@@ -128,15 +124,11 @@ PIPELINE_LOG_CATEGORIES = tuple(PIPELINE_LOG_LABELS)
 def capture_pipeline_logs(
     logs_dir: Path, prefix: str, *, name: str, enabled: bool
 ) -> Iterator[None]:
-    """Capture the harness's logs for one run and write a single ``<prefix>.debug.log``.
+    """Capture the harness's logs for one run into a single ``<prefix>.debug.log``.
 
-    Rather than one file per sub-pipeline, the harness's logs are buffered in
-    memory (bounded: one scenario's worth) and written on exit as one file with a
-    ``===== <label>: <name> =====`` section per pipeline (see ``PIPELINE_LOG_LABELS``).
-    The run is tagged with ``prefix`` as its ``eval_run`` id and the sink filters on
-    it, so the suite's concurrent runs never mix into each other's file. A no-op
-    (and writes nothing) when ``enabled`` is False, so the debug log only appears
-    under ``--debug``.
+    The logs are buffered in memory and written on exit, one section per
+    pipeline. The run is tagged with ``prefix`` and the sink filters on it,
+    so concurrent runs never mix. Writes nothing unless ``enabled``.
 
     Args:
         logs_dir: Directory the ``<prefix>.debug.log`` is written to.
@@ -179,17 +171,11 @@ def _append_result(
     logs_dir: Path,
     record_dir: Path | None,
 ) -> None:
-    """Append one JSON line describing a finished run, flushed immediately.
+    """Append one JSON line describing a finished run, flushed at once.
 
-    The line is the machine-readable counterpart to the printed tally: enough to
-    compute pass rates and group failures by :attr:`EvalAssertionFailure.kind`
-    without parsing logs, plus paths to the artifacts for anything deeper.
-    ``turns`` carries each turn's status, so a scenario scored a turn at a time
-    (``stop_on_failure: false``) yields a per-turn rate here too; the failures
-    themselves stay in the flat ``failures`` list, keyed back by ``turn_index``.
-    ``events_seen`` is carried only for runs that did not pass — it is the record
-    of what the bot actually did, which is what a failure gets diagnosed from, and
-    attaching it to passes would dwarf the file for no benefit.
+    The record carries enough to compute pass rates and group failures by
+    kind, plus paths to the artifacts. ``events_seen`` is included only for
+    runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
     for suffix, key in ((".eval.log", "eval_log"), (".debug.log", "debug_log")):
@@ -242,12 +228,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
-    """The results.jsonl record of a simulation run.
-
-    Enough to compute a pass rate and to see how each run ended, what the judge
-    said, and how each metric scored; the conversation and, for a run that did
-    not pass, the events the bot emitted are attached for diagnosis.
-    """
+    """The results.jsonl record of a simulation run: how it ended, what the judge said, each metric's score, the conversation, and for a failed run the bot's events."""
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
@@ -309,12 +290,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
 
 
 def _result_from_dict(data: dict) -> EvalScriptResult:
-    """Rebuild an :class:`EvalScriptResult` from the JSON a harness worker writes back.
-
-    The inverse of ``dataclasses.asdict(result)`` in
-    :mod:`pipecat.evals._session_subprocess`; only ``failures`` and ``turns`` need
-    rehydrating into their dataclasses, the rest are plain JSON values.
-    """
+    """Rebuild an :class:`EvalScriptResult` from the JSON a harness worker writes back."""
     return EvalScriptResult(
         scenario_name=data["scenario_name"],
         passed=data["passed"],
@@ -338,10 +314,9 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
 def _resolve_scenario(name: str, base: Path, default_dir: Path) -> tuple[str, Path]:
     """A manifest entry's display name and file.
 
-    A name ending in a YAML suffix is a path relative to the manifest. Anything
-    else names a file under ``default_dir`` with ``.yaml`` added, and may carry
-    a folder (``scripted/greeting``); the display name is the bare stem either
-    way.
+    A name with a YAML suffix is a path relative to the manifest; any other
+    names a file under ``default_dir``, folder allowed (``scripted/greeting``).
+    The display name is the bare stem either way.
     """
     if name.endswith(SCENARIO_SUFFIXES):
         return Path(name).stem, (base / name).resolve()
@@ -441,13 +416,11 @@ class EvalManifest:
         record: bool | None = None,
         cache_dir: str | None = None,
     ) -> "EvalManifest":
-        """Parse a manifest YAML into an :class:`EvalManifest`, with optional overrides.
+        """Parse a manifest YAML into an :class:`EvalManifest`.
 
-        Any keyword that is not ``None`` overrides the corresponding manifest value
-        (so the CLI wins), which means a manifest can be just a ``suite:`` list with
-        everything else supplied on the command line. Manifest-relative paths resolve
-        against the manifest's directory; path overrides resolve against the current
-        working directory.
+        A keyword that is not ``None`` overrides the manifest's value, so the
+        CLI wins. Manifest paths resolve against the manifest's directory,
+        overrides against the working directory.
 
         Args:
             path: Path to the manifest YAML.
@@ -574,10 +547,10 @@ class EvalManifest:
 class EvalSuite(BaseObject):
     """Runs the (bot, scenario) runs of an :class:`EvalManifest`, spawning each bot.
 
-    Spawns each bot with its eval transport on its own port, drives it with the
-    harness in a per-run subprocess (:mod:`pipecat.evals._session_subprocess`), and
-    runs several concurrently (up to the manifest's ``concurrency``). The runs are
-    mutated in place as they execute so a live display can read their progress.
+    Each bot gets its eval transport on its own port and is driven by the
+    harness in a subprocess, several at a time up to the manifest's
+    ``concurrency``. The runs are updated in place as they go, so a live
+    display can read their progress.
 
     Event handlers available:
 
@@ -623,10 +596,7 @@ class EvalSuite(BaseObject):
         scenario: str | None = None,
         kind: EvalKind | None = None,
     ) -> list[EvalRun]:
-        """Subset the suite's runs by bot-name substring, scenario name, and/or kind.
-
-        Narrows :attr:`runs` in place (and returns it) so only matching runs are
-        executed and displayed.
+        """Keep only the runs matching a bot-name substring, a scenario name, and/or a kind.
 
         Args:
             pattern: Keep only runs whose bot name contains this substring.
@@ -657,11 +627,11 @@ class EvalSuite(BaseObject):
         use_cache: bool = True,
         default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
     ) -> None:
-        """Run all of the suite's runs with the manifest's concurrency, in place.
+        """Run all of the suite's runs, in place, with the manifest's concurrency.
 
-        Each run is spawned on its own port (``base_port + index``). Runs execute
-        from one queue bounded by the manifest's concurrency, with no barrier
-        between attempts, so a slow bot never holds up the rest of the sweep.
+        Each run gets its own port (``base_port + index``). Runs come off one
+        queue with no barrier between attempts, so a slow bot never holds up the
+        rest.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -913,12 +883,7 @@ class EvalSuite(BaseObject):
     def _spawn_argv(
         self, bot_path: Path, port: int, runner_body_path: Path | None = None
     ) -> list[str]:
-        """Build the spawn argv, substituting {python}/{bot}/{port} per token.
-
-        Substituting per token (rather than into the whole string) keeps a path with
-        spaces in one argv entry. If the run has a body file, ``--runner-body <path>``
-        is appended so the bot's runner picks it up.
-        """
+        """The spawn argv, with ``{python}``, ``{bot}``, and ``{port}`` substituted per token so a path with spaces stays one entry."""
         subs = {"python": self.manifest.python, "bot": str(bot_path), "port": str(port)}
         argv = [tok.format(**subs) for tok in shlex.split(self.manifest.spawn)]
         if runner_body_path is not None:
@@ -927,11 +892,7 @@ class EvalSuite(BaseObject):
 
     @staticmethod
     async def _stop_bot(proc: asyncio.subprocess.Process) -> None:
-        """Wait for the bot to exit, escalating to terminate/kill if it lingers.
-
-        The harness sends ``eval-cancel`` on teardown, so the bot should already be
-        cancelling its pipeline and exiting; wait for that graceful exit first.
-        """
+        """Wait for the bot to exit, then terminate and kill if it lingers."""
         if proc.returncode is not None:
             return
         try:

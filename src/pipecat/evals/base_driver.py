@@ -4,14 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The base driver: what the user says next, and how the outcome is judged.
+"""The base driver: what the user says next, and how the run is scored.
 
-A :class:`BaseEvalDriver` runs the conversation with the bot over the session's
-runtime (the client's pipeline, the event stream, the trace) and assembles the
-run's result. :class:`~pipecat.evals.script_driver.EvalScriptDriver` plays a scenario's
-``turns:`` and matches each turn's expectations;
-:class:`~pipecat.evals.simulation_driver.EvalSimulationDriver` lets the persona LLM
-in the pipeline hold the conversation and judges the whole of it.
+A driver runs the conversation over the session's client and event stream
+and assembles the result. The scripted driver plays a file's turns and
+matches their expectations; the simulation driver lets the persona LLM
+hold the conversation and judges the whole of it.
 """
 
 from abc import ABC, abstractmethod
@@ -27,13 +25,10 @@ R = TypeVar("R")
 
 
 class BaseEvalDriver(ABC, Generic[R]):
-    """Base class for the drivers: drives the conversation and scores it.
+    """Base class for the drivers: what the user says next, and how the run is scored.
 
-    The runtime is shared, the client sends and the stream receives, and a
-    driver decides what to send next and what counts as success. Subclasses
-    implement :meth:`run` and :meth:`result`. The user-turn primitives here,
-    :meth:`_say` and :meth:`_press`, keep the judge's transcript and the
-    stream's turn bookkeeping consistent whichever driver sends.
+    A driver sends through the client, reads the stream, and decides what
+    counts as success. Subclasses implement :meth:`run` and :meth:`result`.
     """
 
     def __init__(
@@ -98,12 +93,9 @@ class BaseEvalDriver(ABC, Generic[R]):
     async def _say(self, text: str, *, audio_file: str | None = None) -> None:
         """Send one user utterance to the bot.
 
-        The utterance goes out as the recording in ``audio_file`` when given,
-        spoken by the user TTS when the client has one, else as text. Bot output
-        still queued from an earlier turn is dropped first, so nothing the bot
-        said before this input can be matched as its reply. The drop has to
-        precede the send: once the input reaches the bot, its reaction to this
-        very input would be dropped along with the stale output.
+        It goes out as the recording in ``audio_file`` when given, spoken by the
+        user TTS when the client has one, else as text. Bot output still queued
+        from before is dropped first, so it cannot be matched as the reply.
 
         Args:
             text: What the user says; also recorded in the judge's conversation
@@ -127,7 +119,7 @@ class BaseEvalDriver(ABC, Generic[R]):
         self._stream.input_sent()
 
     async def _press(self, keys: str) -> None:
-        """Send DTMF keypresses as the user's turn (see :meth:`_say` for the drop).
+        """Send DTMF keypresses as the user's turn.
 
         Args:
             keys: The keys to press, in order; recorded for the judge so the

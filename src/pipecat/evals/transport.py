@@ -4,35 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""WebSocket server transport for the eval harness.
+"""The bot's eval transport: a WebSocket server speaking RTVI, plus the eval's own behavior.
 
-A subclass of :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerTransport`
-that adds eval-only behavior driven by per-connection query flags the harness
-sets:
+The harness sets per-connection query flags. ``skip_tts`` silences the
+bot's speech for the session (text mode), applied before
+``on_client_connected`` so a greeting made there is silent too.
+``capture_bot_audio`` forwards the bot's synthesized audio to the harness,
+for transcription and the recording. ``trigger_disconnect`` fires the bot's
+``on_client_disconnected`` when the connection ends; it is off by default,
+since bots often cancel their pipeline there and the server serves several
+scenarios in a row.
 
-- ``?skip_tts=true`` silences the bot's output for the session (text mode),
-  including any on-connect greeting. This is pushed as an
-  :class:`~pipecat.frames.frames.LLMConfigureOutputFrame` *before*
-  ``on_client_connected`` fires: pipecat processes frames in order, and a bot
-  that greets in ``on_client_connected`` queues its greeting there, so a config
-  sent afterwards (as a client message) would arrive too late.
-- ``?capture_bot_audio=true`` makes the serializer forward the bot's synthesized
-  audio to the harness, for transcription (``response`` / ``tts_response``) and so
-  the harness can record the bot's side. Recording lives in the harness pipeline
-  now, not here: the harness already sees both sides (the bot's audio via this
-  flag, the user's as its own TTS output), so the bot needs no recorder.
-
-The input side needs no special handling: the harness streams the user audio over
-the wire as a continuous real-time stream (paced, with silence when idle — see
-:class:`~pipecat.evals.client_transport.EvalClientOutputTransport`), so the bot's
-stock input transport consumes it directly. This input transport only adds image
-serving (a function-calling-video bot has no camera under eval).
-
-Client disconnects behave as on any transport: the bot's
-``on_client_disconnected`` handler fires normally, and whether the pipeline
-survives the disconnect is the application's choice. The server itself keeps
-running either way, so a bot that opts not to cancel can serve several
-sequential eval connections.
+The input transport also serves the harness's image to a vision bot, which
+has no camera under eval. The user's audio arrives as a continuous stream,
+so nothing else is special on the way in.
 """
 
 import asyncio
@@ -79,32 +64,16 @@ def _query_flag(websocket, name: str) -> bool:
 
 
 class EvalTransportParams(SingleClientWebsocketServerParams):
-    """Transport parameters for the eval harness.
-
-    A thin subclass of :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerParams`
-    that gives the eval transport its own parameter type. Bots configure the
-    ``"eval"`` entry of ``transport_params`` with this class so the eval setup
-    reads as eval-specific rather than leaking the underlying WebSocket server
-    transport.
-    """
+    """Parameters of the eval transport, so a bot's ``transport_params`` names it as such."""
 
     pass
 
 
 class EvalInputTransport(SingleClientWebsocketServerInputTransport):
-    """Input transport that serves the harness's images.
+    """Input transport that serves the harness's image.
 
-    A function-calling-video bot pushes a ``UserImageRequestFrame`` upstream when
-    it needs the user's camera image. There is no camera under eval, so we serve
-    the image the harness registered for the turn (an ``eval-image`` message,
-    stored on the serializer) as a ``UserImageRawFrame`` — mirroring
-    ``daily/transport.py`` but sourcing the image from the serializer instead of a
-    live video frame.
-
-    The harness streams the user audio over the wire as a continuous real-time
-    stream (see :class:`~pipecat.evals.client_transport.EvalClientOutputTransport`),
-    so this side needs no special handling: the bot's stock input handles the
-    incoming audio.
+    A vision bot asks for the user's camera image; under eval there is no
+    camera, so the image the harness registered for the turn is served instead.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -142,14 +111,7 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
 
 
 class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
-    """Output transport used by the eval harness.
-
-    The eval harness sends the bot's output over the same WebSocket connection
-    as any client, so this currently adds no behavior beyond
-    :class:`~pipecat.transports.websocket.server.SingleClientWebsocketServerOutputTransport`.
-    It exists for naming symmetry with :class:`EvalInputTransport` and as a hook
-    for any future eval-specific output behavior.
-    """
+    """Output transport of the eval transport; adds nothing to the WebSocket server output yet, and exists for symmetry with :class:`EvalInputTransport`."""
 
     pass
 
@@ -184,14 +146,9 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         await super()._on_client_connected(websocket)
 
     async def _emit_client_disconnected(self, websocket):
-        """Fire ``on_client_disconnected`` only when the harness asks for it.
+        """Fire ``on_client_disconnected`` only when the harness asked for it.
 
-        Bots often cancel their pipeline in ``on_client_disconnected``, so the
-        event is suppressed by default to avoid that between eval scenarios. The
-        harness sets ``?trigger_disconnect=true`` (via a scenario's
-        ``trigger_disconnect`` field or ``pipecat eval run --trigger-disconnect``)
-        to exercise the bot's disconnect path. Independent of ``--stop-bot``,
-        which tears the bot down reliably via ``eval-cancel``.
+        Bots often cancel their pipeline there, which would end it between scenarios.
         """
         if _query_flag(websocket, TRIGGER_DISCONNECT_QUERY_PARAM):
             await super()._emit_client_disconnected(websocket)

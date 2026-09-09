@@ -6,13 +6,11 @@
 
 """Simulated scenario file format for Pipecat behavioral evaluations.
 
-A simulation describes a *caller* rather than a script: who they are, what they
-want, and how the outcome is judged. An autonomous persona LLM holds the
-conversation with the bot, so the path through it is the bot's and the persona's
-to make, not the file's. It is the other kind of scenario file: a manifest lists
-simulations under ``scenarios:`` like scripted ones, and ``pipecat eval run``
-takes either; a file with a ``persona:`` is a simulation (see
-:func:`~pipecat.evals.scenario.load_scenario_file`). Example::
+A simulation describes a caller rather than a script: who they are, what
+they want, and how the outcome is judged. A persona LLM holds the
+conversation with the bot on its own. A file with a ``persona:`` is a
+simulation, and a manifest lists them under ``scenarios:`` like scripted
+ones. Example::
 
     name: capital_curious
     persona: |

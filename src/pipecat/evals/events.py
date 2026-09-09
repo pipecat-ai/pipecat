@@ -60,15 +60,12 @@ _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 class EvalEventStream:
     """The bot's output as events: a queue the drivers read, fed by the pipeline.
 
-    Three things happen here. The queue: :meth:`append` stamps and records an
-    event and the drivers pop them with :meth:`next_event` and
-    :meth:`next_any`. The translation: the sink feeds every frame the
-    transport produces through :meth:`frame_to_event`, which maps it to an
-    event or to nothing. And the reply rule: what the bot produced before the
-    user's latest send is not its reply to it, so an LLM response still
-    streaming at the send, or restarted by an interruption, is dropped until
-    the bot's next ``llm-started``, and a spoken turn that began before the
-    send is dropped when it ends (:meth:`input_sent`, :meth:`bot_turn_stopped`).
+    The sink turns each frame from the bot into an event and appends it; the
+    drivers pop events as they wait for them. One rule runs through it: what
+    the bot produced before the user's latest send is not the reply to it. An
+    LLM response still streaming at the send, or cut by an interruption, is
+    dropped until the bot's next ``llm-started``, and a spoken turn that began
+    before the send is dropped when it ends.
     """
 
     def __init__(self, *, bot_audio: bool, trace: EvalTrace):
@@ -107,11 +104,10 @@ class EvalEventStream:
         self._bot_turn_started_at: float | None = None
 
     async def append(self, event: dict) -> None:
-        """Append an event for the matcher.
+        """Queue an event for the drivers.
 
-        Records it in :attr:`events_seen`, stamps its arrival time in
-        :attr:`latest_event_times` and, as ``at`` (seconds since the stream
-        began), on the event itself unless it already carries one, and queues it.
+        Stamps its arrival time as ``at`` (seconds since the stream began) unless
+        it has one, records it, and logs it.
 
         Args:
             event: The event dict, with at least a ``type``.
@@ -144,9 +140,8 @@ class EvalEventStream:
     async def next_event(self, event_type: str, deadline: float) -> dict:
         """Pop events until one of ``event_type`` arrives.
 
-        Events of other types are dropped, so a scenario doesn't have to
-        enumerate every event the bot emits. They remain in :attr:`events_seen`
-        and :attr:`latest_event_times` for diagnostics and ``send_after`` lookups.
+        Events of other types are dropped from the queue, so a scenario need not
+        list every event the bot emits; they stay in :attr:`events_seen`.
 
         Args:
             event_type: The event type to wait for.
@@ -164,15 +159,12 @@ class EvalEventStream:
                 return event
 
     def drop_pending_bot_output(self, why: str) -> None:
-        """Drop the bot's un-matched output, so a later turn can't match it.
+        """Drop the bot's queued output, so a later turn cannot match it.
 
-        Clears the response buffer and drains the bot's pending output from the
-        queue, so a greeting (or any prior bot output) can't be matched against
-        the next turn. ``user_transcription`` is preserved: a DTMF keypress emits
-        its transcription immediately before the turn-start interruption, and
-        that transcription is the turn's *input*, not the stale bot output this
-        drop is meant to clear. Diagnostics (:attr:`events_seen`,
-        :attr:`latest_event_times`) are left intact for ``send_after`` lookups.
+        A queued ``user_transcription`` stays: a DTMF keypress reports its
+        transcription just before the turn starts, and that is the turn's input,
+        not stale bot output. :attr:`events_seen` and :attr:`latest_event_times`
+        are left as they are.
 
         Args:
             why: What prompted the drop, for the trace.
@@ -199,21 +191,13 @@ class EvalEventStream:
         return round(time.monotonic() - self._t0, 3)
 
     def frame_to_event(self, frame: Frame) -> dict | None:
-        """Translate one incoming pipeline frame into the event it maps to, if any.
+        """Translate one frame from the bot into the event it maps to, if any.
 
-        The :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-        deserializes the bot's RTVI server messages into frames; this maps those
-        frames to the events the matcher consumes, applying the modality/aggregation
-        rules (buffer the LLM text, suppress an interrupted response's straggler,
-        emit ``tts_response`` only in audio mode, etc.).
-
-        The bot *reports* events about the harness as ``InputTransportMessageFrame``
-        (see :data:`~pipecat.evals.serializer.EvalClientSerializer`), which this
-        maps to scenario events. What the harness *computes* from the bot's audio
-        is handled elsewhere: the ``response`` comes from the user aggregator's
-        ``on_user_turn_stopped`` (it consumes the STT's ``TranscriptionFrame``s, so
-        they never reach here), and the aggregator's own VAD/speaking frames are
-        internal plumbing, ignored here.
+        The LLM text is buffered and emitted as one ``llm_response`` when the
+        response ends; ``tts_response`` is emitted only in audio mode; the bot's
+        reports about the harness (its VAD, speaking, and transcription messages)
+        become their events. The audio-mode ``response`` is not made here: the
+        aggregator appends it when the bot's spoken turn ends.
 
         Args:
             frame: A frame the bot-facing transport produced.
@@ -271,18 +255,15 @@ class EvalEventStream:
         return None
 
     def bot_turn_started(self) -> None:
-        """Note that the bot began a spoken turn (the user aggregator's turn start)."""
+        """Note that the bot began a spoken turn."""
         self._bot_turn_started_at = time.monotonic()
 
     async def bot_turn_stopped(self, text: str) -> None:
         """Append the bot's finished spoken turn as a ``response``, unless it is stale.
 
-        The turn is stale when it began before the user's latest input, or when
-        the bot's LLM hasn't restarted since that input. An interrupted turn
-        finalizes only after the interruption, once the harness's turn analyzer
-        stops waiting for its continuation, which can be after the bot has
-        already begun its real reply; matched then, it would be judged as that
-        reply.
+        A turn is stale when it began before the user's latest send, or when the
+        bot's LLM has not restarted since. An interrupted turn can finalize after
+        the bot has begun its real reply, and must not pass for it.
 
         Args:
             text: The turn's transcription; nothing is appended when empty.
@@ -297,33 +278,17 @@ class EvalEventStream:
         await self.append({"type": "response", "text": text})
 
     def input_sent(self) -> None:
-        """Mark the user's input as sent: the bot's reply is what it says from now on.
-
-        Output the bot produced before this point can't be the reply, so an LLM
-        response still streaming is dropped until the bot's next llm-started,
-        and a spoken turn that began before now is dropped when it ends.
-        """
+        """Mark the user's input as sent: the bot's reply is what it says from now on."""
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
 
     def _interrupted(self) -> None:
-        """The bot reported an interruption: its output so far is not the reply to what follows.
-
-        Leftover output is dropped so it cannot be aggregated into the next
-        turn, and the reply rule waits for the bot's next ``llm-started``.
-        """
+        """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
         self.drop_pending_bot_output("on interruption")
         self._awaiting_reply = True
 
     def _message_to_event(self, message) -> dict | None:
-        """Map one of the bot's reported RTVI messages to a scenario event, if any.
-
-        These are the bot's reports *about the harness* (its raw VAD, turn-level
-        speaking, and the transcription of what it heard), kept as raw messages by
-        the harness serializer so they don't collide with the VAD/transcription
-        frames the harness computes from the bot's audio. A pure mapping: what
-        an interruption report does to the stream is :meth:`_interrupted`.
-        """
+        """Map one of the bot's reports about the harness to its event, if any."""
         if not isinstance(message, dict):
             return None
         msg_type = message.get("type")
@@ -345,10 +310,5 @@ class EvalEventStream:
         return None
 
     def _segment_event(self, event_type: str, text: str) -> dict:
-        """Build one response segment of ``event_type``.
-
-        Used for ``llm_response`` (the LLM text) and ``tts_response`` (the TTS's
-        spoken text). The text may be empty (e.g. an interrupted response); the
-        matcher aggregates successive segments until the content check passes.
-        """
+        """One response segment; the text may be empty, as after an interruption."""
         return {"type": event_type, "text": text}

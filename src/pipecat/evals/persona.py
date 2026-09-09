@@ -6,17 +6,12 @@
 
 """The simulated caller: who they are, what they want, and how they end the call.
 
-An :class:`EvalPersona` is the simulated caller as one object: the instruction
-the persona LLM runs under (set on the service as its system instruction), the
-LLM service itself, which rides in the eval pipeline, and the
-:class:`~pipecat.processors.aggregators.llm_context.LLMContext` it runs on. In
-that context the bot's turns are the ``user`` messages and the persona's own
-are the ``assistant`` messages: the persona LLM answers the bot the way a bot
-answers a user.
-
-The context advertises one tool, ``end_call``, which the persona calls instead
-of speaking once its goal is achieved or clearly out of reach. Its ``success``
-claim is the persona's own view; the goal judge decides the run's outcome.
+An :class:`EvalPersona` is the instruction the persona LLM runs under, the
+LLM service itself, which rides in the eval pipeline, and the context it
+runs on, where the bot's turns are the ``user`` messages and its own the
+``assistant`` ones. The context offers one tool, ``end_call``, which the
+persona calls once its goal is achieved or clearly out of reach; its
+``success`` claim is its own view, and the judge decides the outcome.
 """
 
 from collections.abc import Awaitable, Callable

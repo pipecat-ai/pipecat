@@ -21,17 +21,11 @@ import yaml
 
 
 class _ScenarioLoader(yaml.SafeLoader):
-    """SafeLoader that resolves only plain-decimal numeric scalars as ints.
+    """A SafeLoader that reads only plain decimal numbers as ints.
 
-    PyYAML's SafeLoader follows YAML 1.1, which reinterprets unquoted numeric
-    scalars as octal (``010`` -> 8), hex (``0x10`` -> 16), or binary before
-    application code sees them. For DTMF that silently rewrites the digit
-    sequence the user typed (``dtmf: 012`` would load as ``10``). Dropping those
-    resolvers and keeping only plain decimal means ``dtmf: 123`` still loads as
-    an int (so the unquoted-digits convenience works), while leading-zero, hex,
-    and binary tokens stay strings and reach DTMF validation with their digits
-    intact. No scenario field wants an octal/hex literal, so this is safe
-    document-wide.
+    YAML 1.1 would read ``010`` as octal and ``0x10`` as hex, which rewrites a
+    DTMF sequence before the scenario sees it. With those resolvers dropped,
+    ``dtmf: 123`` still loads as an int and ``dtmf: 012`` stays a string.
     """
 
 
@@ -52,11 +46,7 @@ yaml.add_implicit_resolver(
 
 
 def _load_mapping(path: Path) -> dict:
-    """Load a scenario file's top-level mapping, resolving ``!include`` tags.
-
-    Includes resolve relative to the file's directory. The constructor is
-    registered on a private loader subclass (not the global SafeLoader) so it
-    has no global side effects.
+    """Load a scenario file's top-level mapping, resolving ``!include`` tags relative to the file.
 
     Raises:
         ValueError: If the top level is not a mapping.
@@ -76,9 +66,8 @@ def _load_mapping(path: Path) -> dict:
 def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
     """Register an ``!include <relative-path>`` constructor on ``loader_class``.
 
-    Included files load with the same loader class, so nested includes work and
-    scalars get the same resolver treatment as the top-level document. Paths
-    resolve against ``base_dir`` (the scenario file's directory).
+    Included files load with the same loader, so nested includes work; paths
+    resolve against ``base_dir``.
     """
 
     def _include(loader: yaml.SafeLoader, node: yaml.Node) -> Any:

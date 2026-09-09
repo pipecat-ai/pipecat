@@ -4,15 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Simulation session: lets a persona hold a conversation with a bot and judges it.
-
-A :class:`EvalSimulationSession` runs an
-:class:`~pipecat.evals.simulation.EvalSimulationScenario` over the
-:class:`~pipecat.evals.base_session.BaseEvalSession` runtime with the
-:class:`~pipecat.evals.simulation_driver.EvalSimulationDriver`: the persona LLM rides in the
-pipeline and answers the bot on its own, the judge decides the goal and the
-quality criteria, and the result is a
-:class:`~pipecat.evals.results.EvalSimulationResult`.
+"""The simulation session: runs a simulated scenario against a bot.
 
 Example::
 
@@ -46,11 +38,10 @@ from pipecat.services.stt_service import STTService
 class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
     """Runs one :class:`~pipecat.evals.simulation.EvalSimulationScenario` against a bot.
 
-    The persona LLM rides in the client's pipeline and answers the bot on its
-    own; the session watches for the conversation's end and has the judge
-    decide the goal and the quality criteria. Build one with
-    :meth:`from_scenario` (which constructs the persona LLM, judge, user TTS,
-    and STT the simulation needs), then await :meth:`run`.
+    The persona LLM answers the bot on its own inside the client's pipeline,
+    and the judge decides the goal and the criteria at the end. Build one
+    with :meth:`from_scenario`, which constructs the persona LLM, the judge,
+    and in audio mode the user TTS and the STT, then await :meth:`run`.
     """
 
     def __init__(
@@ -114,10 +105,9 @@ class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ) -> "EvalSimulationSession":
-        """Build a ready-to-run session from a scenario, constructing what it needs.
+        """Build a ready-to-run session from a scenario, constructing the services it needs.
 
-        Builds the persona LLM, the judge, and in audio mode the user TTS and
-        the STT from the simulation's config; pass any of them to use your own.
+        Pass ``persona_llm``, ``judge``, ``user_tts``, or ``bot_stt`` to use your own.
 
         Args:
             scenario: The parsed simulation to run.

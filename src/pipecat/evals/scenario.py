@@ -81,9 +81,9 @@ class EvalKind(StrEnum):
 def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationScenario:
     """Load a scenario file as whichever kind it is.
 
-    A file with a ``persona:`` is a simulation; one with ``turns:`` is a scripted
-    scenario. This is what a manifest's ``scenarios:`` entries and ``pipecat eval
-    run`` load through, so the two kinds mix freely in one list.
+    A file with a ``persona:`` is a simulation; one with ``turns:`` is a
+    scripted scenario. Manifests and ``pipecat eval run`` load through here,
+    so the two kinds mix in one list.
 
     Args:
         path: Path to a scenario or simulation YAML file.
@@ -115,10 +115,9 @@ def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationS
 def is_scenario_file(path: str | Path) -> bool:
     """Whether a YAML file is a scenario of either kind, rather than a fragment one includes.
 
-    Every scenario has a ``name:``; a fragment shared through ``!include`` (a
-    ``judge:``, ``user:``, or ``simulator:`` block) has none. A file that does
-    not parse counts as a scenario, so that loading it reports the error rather
-    than a directory run silently leaving it out.
+    Every scenario has a ``name:``; an included fragment has none. A file that
+    does not parse counts as a scenario, so loading it reports the error
+    instead of a directory run skipping it silently.
 
     Args:
         path: Path to a YAML file.

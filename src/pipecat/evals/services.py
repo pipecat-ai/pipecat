@@ -4,14 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Service constructors for the eval harness.
+"""Service constructors for the eval harness: a Pipecat service from a scenario's config mapping.
 
-Each function builds a concrete pipecat service from a scenario's config mapping.
-:func:`stt_service_from_config` and :func:`tts_service_from_config` are the
-top-level dispatchers (alongside :meth:`pipecat.evals.judge.EvalJudge.from_config`
-for the judge); the rest are the per-provider builders they dispatch to on the
-``service:`` name. The heavy provider imports stay lazy inside each function so
-importing this module stays cheap.
+The dispatchers pick a provider by its ``service:`` name, or call a
+``factory``; the per-provider builders do the rest. Provider imports stay
+inside the functions, so importing this module is cheap.
 """
 
 import importlib
@@ -29,12 +26,7 @@ if TYPE_CHECKING:
 
 
 def _cfg_language(cfg: dict) -> Language | NotGiven:
-    """Coerce a config's optional ``language`` value to a :class:`Language`.
-
-    ``Language`` is a ``StrEnum``, so both a code string (e.g. ``"zh"``) and a
-    ``Language`` are accepted. Each concrete service maps the ``Language`` to its
-    own provider code internally (via ``resolve_language``), so the eval layer
-    only needs to hand off a ``Language``.
+    """A config's optional ``language`` as a :class:`Language`; a code string is accepted too.
 
     Args:
         cfg: A ``user.speech`` or ``judge.transcription`` config mapping.
@@ -64,15 +56,11 @@ def _cfg_language(cfg: dict) -> Language | NotGiven:
 
 
 def stt_service_from_config(config: dict | None) -> STTService:
-    """Build an STT service for transcribing the bot's audio (the ``response``).
+    """Build the STT that transcribes the bot's audio, from a ``judge.transcription:`` mapping.
 
-    Dispatches on the scenario's ``judge.transcription:`` mapping: a custom
-    ``factory`` (dotted path to a callable taking ``config`` and returning an
-    ``STTService``) takes precedence; otherwise the ``service`` name selects a
-    built-in (default ``"moonshine"``, a local model). The returned service goes
-    straight into the eval pipeline, so any pipeline STT works (segmented local
-    models or streaming providers) — the pipeline's ``StartFrame`` configures its
-    sample rate.
+    A ``factory`` (a dotted path to a callable taking the config) builds it;
+    otherwise the ``service`` name picks one, ``moonshine`` by default. Any
+    pipeline STT works; the pipeline sets its sample rate.
 
     Args:
         config: The ``transcription`` mapping, or ``None`` for the Moonshine default.
@@ -108,19 +96,12 @@ def tts_service_from_config(
     cache_dir: str | None = None,
     use_cache: bool = True,
 ) -> "CachingTTSService":
-    """Build the user-audio TTS (a caching wrapper) from a ``user_audio`` mapping.
+    """Build the user-audio TTS, wrapped in a cache, from a ``user_audio`` mapping.
 
-    Honors a custom ``factory`` (dotted path to a callable taking ``voice_cfg``
-    and returning a ``TTSService``); otherwise dispatches on the ``service`` name
-    (``kokoro`` or ``cartesia``). The provider service is wrapped in a
-    :class:`~pipecat.evals.tts.CachingTTSService` so the scripted user utterances
-    are synthesized once and reused across runs. To use a fully custom setup,
-    construct ``CachingTTSService`` directly with your own inner ``TTSService`` and
-    pass it to :meth:`pipecat.evals.script_session.EvalScriptSession.from_scenario`.
-
-    The ``user_audio`` sample rate isn't applied here: the pipeline's ``StartFrame``
-    configures the wrapper and its inner service (the harness sets it from the
-    config), so the builders don't take a rate.
+    A ``factory`` (a dotted path to a callable taking the voice config) builds
+    the inner service; otherwise the ``service`` name picks one, ``kokoro``
+    or ``cartesia``. The wrapper synthesizes each user utterance once and
+    reuses it across runs. The pipeline sets the sample rate.
 
     Args:
         voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at minimum;
@@ -168,10 +149,8 @@ def tts_service_from_config(
 def kokoro_service(voice_cfg: dict) -> TTSService:
     """Build a local Kokoro TTS service from the ``user_audio`` config.
 
-    Kokoro runs an ONNX model locally (no API key, no per-run cost), so the eval
-    suite synthesizes user audio for free. The model files are downloaded once
-    on first use and cached under ``~/.cache/pipecat/kokoro-onnx``. The pipeline's
-    ``StartFrame`` configures its sample rate.
+    No API key and no per-run cost; the model is downloaded once and cached
+    under ``~/.cache/pipecat/kokoro-onnx``.
 
     Args:
         voice_cfg: The ``user.speech`` config mapping:
@@ -194,8 +173,6 @@ def kokoro_service(voice_cfg: dict) -> TTSService:
 
 def cartesia_service(voice_cfg: dict) -> TTSService:
     """Build a Cartesia TTS service from the ``user_audio`` config.
-
-    The pipeline's ``StartFrame`` configures its sample rate.
 
     Args:
         voice_cfg: The ``user.speech`` config mapping:
@@ -232,19 +209,14 @@ def cartesia_service(voice_cfg: dict) -> TTSService:
 def whisper_service(config: dict) -> STTService:
     """Build a local Whisper STT service from the ``bot_audio`` config.
 
-    Runs on the **CPU** by default (``device: cpu``): the GPU is reserved for the
-    judge LLM and the per-run audio models, and bot-speech transcription happens
-    once per turn off the hot path, so the extra latency is fine. This frees enough
-    GPU memory to run a larger, more accurate model (e.g. ``distil-medium`` or
-    ``large-v3-turbo``) at higher concurrency. Override with ``device: cuda`` (and
-    ``compute_type``) in the ``transcription`` config if you have GPU headroom.
+    It runs on the CPU by default, leaving the GPU to the judge and the audio
+    models; transcription is off the hot path, so the latency is fine. Set
+    ``device: cuda`` (and ``compute_type``) in the ``transcription`` config
+    for GPU.
 
-    The eval only feeds this STT the bot's own audio (segmented by the harness's
-    VAD), so Whisper's non-speech filter is counterproductive here: the default
-    ``no_speech_prob=0.4`` drops correct transcriptions of synthetic/TTS speech,
-    whose ``no_speech_prob`` jitters across ~0.4-0.6 run to run (a dropped segment
-    yields no ``TranscriptionFrame``, so the harness then waits out the whole
-    transcription timeout). Disable the filter with a permissive threshold.
+    Whisper's non-speech filter is disabled: it only ever hears the bot's own
+    speech, and the default threshold drops correct transcriptions of TTS
+    speech run to run.
 
     Args:
         config: The ``judge.transcription`` config mapping:
@@ -284,9 +256,8 @@ def whisper_service(config: dict) -> STTService:
 def moonshine_service(config: dict) -> STTService:
     """Build a local Moonshine STT service from the ``bot_audio`` config.
 
-    Moonshine runs on the CPU via ONNX Runtime (no GPU, no API key) and is small
-    and fast. On the short, isolated bot-answer segments the harness transcribes,
-    it tends to keep the answer where Whisper sometimes drops it.
+    Small and fast on the CPU, and steadier than Whisper on the short
+    bot-answer segments the harness transcribes.
 
     Args:
         config: The ``judge.transcription`` config mapping:
@@ -324,11 +295,10 @@ DEFAULT_OLLAMA_JUDGE_EXTRA = {"reasoning_effort": "none"}
 
 
 def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[Any]:
-    """Build an LLM service from a ``service:`` config block (the judge's, a persona's).
+    """Build an LLM service from a ``service:`` block, the judge's or a persona's.
 
-    Honors a custom ``factory`` (dotted path to a callable taking ``(config)`` and
-    returning a pipecat LLM service); otherwise dispatches on the ``service``
-    name (default ``"ollama"``).
+    A ``factory`` (a dotted path to a callable taking the config) builds it;
+    otherwise the ``service`` name picks a provider, ``ollama`` by default.
 
     Args:
         config: Mapping with keys ``service`` (default ``"ollama"``), ``model``,
@@ -365,13 +335,10 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
 def ollama_service(config: dict) -> LLMService[Any]:
     """Build a local Ollama LLM service from the ``judge:`` config.
 
-    An ``extra:`` mapping is forwarded verbatim as top-level request parameters,
-    which is how provider-specific options reach the model — notably
-    ``reasoning_effort: none`` for a thinking-capable judge.
-
-    A caller who names no model gets the default judge together with the extras
-    it needs; a caller who names one gets only the extras they asked for, since
-    those options are model-specific.
+    An ``extra:`` mapping goes to the model as request parameters, which is
+    how ``reasoning_effort: none`` reaches a thinking model. The default
+    model comes with the extras it needs; a named model gets only the extras
+    asked for.
     """
     from pipecat.services.ollama.llm import OLLamaLLMService
 

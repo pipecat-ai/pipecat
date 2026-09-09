@@ -4,18 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The runtime a session's driver runs on: one conversation with a bot.
+"""The base session: one conversation with a bot, driven to a result.
 
-A :class:`BaseEvalSession` connects to a running bot's eval transport as an RTVI
-client and runs a driver over the shared runtime: the
-:class:`~pipecat.evals.client.EvalClient`, a Pipecat pipeline acting as an RTVI
-client that carries the user's side, and the
-:class:`~pipecat.evals.events.EvalEventStream`, the bot's output as events. It
-connects, runs the handshake, lets the driver converse, tears down, and has the
-driver turn what happened (including a failed connect or a harness error) into
-its result. :class:`~pipecat.evals.script_session.EvalScriptSession` and
-:class:`~pipecat.evals.simulation_session.EvalSimulationSession` build the client and
-the driver for their kind of eval.
+A session connects to a running bot's eval transport as an RTVI client,
+runs the handshake, lets its driver converse, tears down, and returns the
+driver's result, a failed connect or a harness error included. The two
+session kinds build the client and the driver for their kind of scenario.
 """
 
 import time
@@ -36,12 +30,12 @@ R = TypeVar("R")
 
 
 class BaseEvalSession(BaseObject, Generic[R]):
-    """One conversation with a bot over a single WebSocket session, driven to a result.
+    """One conversation with a bot, driven to a result.
 
-    The runtime the drivers share: connect, run the handshake, let the driver
-    converse, tear down, and turn what happened (including a failed connect or
-    a harness error) into the driver's result. Subclasses build the client and
-    the driver for their kind of eval.
+    Connect, run the handshake, let the driver converse, tear down, and turn
+    what happened, a failed connect or a harness error included, into the
+    driver's result. Subclasses build the client and the driver for their
+    kind of eval.
 
     Event handlers available:
 
@@ -122,10 +116,8 @@ class BaseEvalSession(BaseObject, Generic[R]):
     async def _drive(self) -> list[EvalAssertionFailure]:
         """Start the client, converse, and tear down.
 
-        An unexpected harness-side error (a sub-pipeline failing to start under
-        load, a judge or transcriber raising mid-turn) is reported as a failure
-        with its traceback in the trace, so the run still yields a structured
-        result rather than a bare error at the suite.
+        An error in the harness itself is recorded as a failure with its
+        traceback, so the run still yields a result.
         """
         await self._client.start()
         try:
@@ -159,11 +151,7 @@ class BaseEvalSession(BaseObject, Generic[R]):
         return failure
 
     def _failure(self, event_name: str, reason: str, kind: str) -> EvalAssertionFailure:
-        """A failure of the run itself rather than of an expectation.
-
-        It is scored against the trace's current turn: -1 before the driver has
-        started any (connecting, the handshake), else the turn under way.
-        """
+        """A failure of the run itself rather than of an expectation, scored against the trace's current turn (-1 before any)."""
         return EvalAssertionFailure(
             turn_index=self._trace.turn,
             expectation_index=-1,

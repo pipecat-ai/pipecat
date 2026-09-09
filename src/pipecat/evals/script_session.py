@@ -4,13 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Eval session: runs a scripted scenario against a bot and asserts on its behavior.
-
-An :class:`EvalScriptSession` runs an :class:`~pipecat.evals.script.EvalScriptScenario`
-over the :class:`~pipecat.evals.base_session.BaseEvalSession` runtime with the
-:class:`~pipecat.evals.script_driver.EvalScriptDriver`, which plays the scenario's turns
-and matches each turn's expectations, and returns an
-:class:`~pipecat.evals.results.EvalScriptResult`.
+"""The scripted session: runs a scripted scenario against a bot.
 
 Example::
 
@@ -56,10 +50,8 @@ DEFAULT_EVENT_TIMEOUT_MS = 60000
 class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
     """Runs one :class:`~pipecat.evals.script.EvalScriptScenario` against a bot.
 
-    Connects as an RTVI client, drives each turn (sending ``send-text``,
-    ``raw-audio``, or ``dtmf``), collects the RTVI events the bot emits, and
-    asserts on them. Build one with :meth:`from_scenario` (which constructs the
-    judge, user TTS, and STT the scenario needs), then await :meth:`run`.
+    Build one with :meth:`from_scenario`, which constructs the judge, the user
+    TTS, and the STT the scenario needs, then await :meth:`run`.
 
     Example::
 
@@ -80,10 +72,9 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
     ):
         """Initialize the eval session.
 
-        The services are injected pre-built: :meth:`from_scenario` constructs
-        the defaults from the scenario's config and passes them in, the judge
-        here and the user TTS and bot STT in ``params``. Construct and pass your
-        own to override them.
+        The services come pre-built: :meth:`from_scenario` constructs the
+        defaults, the judge here and the user TTS and bot STT in ``params``. Pass
+        your own to override them.
 
         Args:
             scenario: The parsed scenario to run.
@@ -148,12 +139,10 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
     ) -> "EvalScriptSession":
-        """Build a ready-to-run session from a scenario, constructing what it needs.
+        """Build a ready-to-run session from a scenario, constructing the services it needs.
 
-        Builds the judge, user TTS, and STT the scenario calls for and injects them
-        into a new session. Pass ``judge`` /
-        ``user_tts`` / ``bot_stt`` to override any of them with your own pre-built
-        instance. Then await :meth:`run`::
+        Pass ``judge``, ``user_tts``, or ``bot_stt`` to use your own. Then await
+        :meth:`run`::
 
             session = EvalScriptSession.from_scenario(scenario, "ws://localhost:7860")
             result = await session.run()
@@ -238,11 +227,7 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
     def _add_legacy_progress_callback(
         self, on_progress: Callable[[EvalScriptTurnProgress], None]
     ) -> None:
-        """Register a bare ``on_progress`` callback as an ``on_progress`` handler.
-
-        The callback takes only the record, so it is wrapped to drop the session
-        that event handlers receive as their first argument.
-        """
+        """Register a bare ``on_progress`` callback as an event handler, dropping the session argument."""
         warnings.warn(
             "`on_progress` is deprecated since 1.9.0 and will be removed in 2.0.0. "
             "Use the `on_progress` event handler instead.",

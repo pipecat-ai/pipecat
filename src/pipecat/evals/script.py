@@ -17,14 +17,9 @@ events expected to flow back from the bot. Simple example::
           - event: user_transcription
             text_contains: "hello world"
 
-The runner (see :mod:`pipecat.evals.script_session`) loads the scenario, connects to
-the bot's eval transport over RTVI, drives each turn, collects the RTVI events
-the bot emits, and asserts on them in order.
-
-This is the *scripted* kind of scenario file. A file with a ``persona:`` instead
-of ``turns:`` is a simulated one, where an LLM plays the user (see
-:mod:`pipecat.evals.simulation`); :func:`~pipecat.evals.scenario.load_scenario_file`
-loads either kind.
+The harness plays each turn and checks the events the bot emits back, in
+order. A file with a ``persona:`` instead of ``turns:`` is the other kind, a
+simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
@@ -286,10 +281,8 @@ class EvalExpectation:
     def aggregates(self) -> bool:
         """Whether the check accumulates text across events rather than matching one.
 
-        A reply with a content check (``text_contains`` / ``eval``) accumulates
-        the bot's successive segments; a ``user_transcription`` with
-        ``text_contains`` accumulates an STT's pieces. Everything else matches a
-        single event.
+        A reply with a content check accumulates the bot's segments; a
+        ``user_transcription`` with ``text_contains`` accumulates an STT's pieces.
         """
         if self.event in ("response", "llm_response", "tts_response"):
             return self.text_contains is not None or self.eval is not None
@@ -466,12 +459,7 @@ class EvalScriptScenario:
         return any(exp.event == "response" for turn in self.turns for exp in turn.expect)
 
     def required_report_level(self) -> str | None:
-        """Minimal function-call report level the scenario's assertions need.
-
-        Returns ``"full"`` if any ``function_call`` expectation checks ``args``,
-        ``"name"`` if one checks ``name`` only, else ``None`` (no elevation; the
-        bot's default applies and a ``function_call`` event still arrives).
-        """
+        """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``."""
         needs_name = False
         for turn in self.turns:
             for exp in turn.expect:
@@ -487,12 +475,7 @@ class EvalScriptScenario:
         return "name" if needs_name else None
 
     def needs_vad_events(self) -> bool:
-        """Whether the scenario references the raw VAD speaking events.
-
-        ``vad_user_started_speaking`` / ``vad_user_stopped_speaking`` are off by
-        default; the harness asks the bot to emit them only when a scenario
-        asserts on or schedules from them.
-        """
+        """Whether the scenario uses the raw VAD speaking events, which the bot emits only on request."""
         vad_events = {"vad_user_started_speaking", "vad_user_stopped_speaking"}
         for turn in self.turns:
             if turn.send_after is not None and turn.send_after.event in vad_events:
@@ -602,12 +585,11 @@ def _check_user_audio(
 
 
 def _resolve_response_events(turns: list[EvalScriptTurn], bot_audio: bool, path: Path) -> None:
-    """Resolve the modality-agnostic ``response`` event and validate consistency.
+    """Resolve ``response`` for the modality and check consistency.
 
-    In audio modality ``response`` is the transcription of the bot's actual
-    audio, so it stays as ``response``. In text modality there is no audio, so it
-    falls back to ``llm_response``. ``tts_response`` (the TTS's spoken text) needs
-    the bot to speak, so asserting it in text modality is an error.
+    In audio modality ``response`` is the transcription of the bot's audio; in
+    text modality it becomes ``llm_response``. ``tts_response`` needs the bot
+    to speak, so it is an error in text modality.
     """
     for ti, turn in enumerate(turns):
         for exp in turn.expect:
@@ -779,12 +761,11 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
 def _parse_function_calls(
     e: dict, event: str, path: Path, turn_idx: int, exp_idx: int
 ) -> list[EvalFunctionCall] | None:
-    """Normalize a ``function_call`` expectation's expected calls into a list.
+    """Normalize a ``function_call`` expectation's calls into a list.
 
-    Accepts a ``calls:`` list (each entry a bare name string or a ``{name, args}``
-    mapping) for the multi-call case, or the single ``name:``/``args:`` shorthand.
-    A bare ``function_call`` (neither) becomes one ``EvalFunctionCall(name=None)``
-    that matches any single call. Returns None for non-function_call events.
+    A ``calls:`` list (names, or ``{name, args}`` mappings), the single
+    ``name:``/``args:`` shorthand, or nothing, which matches any one call.
+    ``None`` for other events.
     """
     if event not in FUNCTION_CALL_EVENTS:
         return None

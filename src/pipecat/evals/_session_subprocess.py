@@ -4,22 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Subprocess worker that runs a single scenario, scripted or a simulation, in its own process.
+"""Runs one scenario, scripted or simulated, in its own process.
 
-The suite (:mod:`pipecat.evals.suite`) spawns one of these per (bot, scenario)
-run so each harness loads its STT/VAD/turn models in its own interpreter. That
-isolation matters under concurrency: model construction (ONNX session creation)
-holds the GIL for hundreds of milliseconds, and in a single shared process those
-loads would freeze the event loop that paces every *other* concurrent run's
-real-time audio, garbling their recordings. A process per run keeps each load on
-its own GIL.
+The suite spawns one of these per run so each harness loads its audio
+models on its own GIL; in one shared process those loads would stall the
+event loop that paces every other run's audio.
 
-Invoked as ``python -m pipecat.evals._session_subprocess <config.json>``. The
-config (written by the suite) carries the scenario path, bot URL, and run
-options; the worker writes the :class:`~pipecat.evals.results.EvalScriptResult` back as
-JSON to the ``result_path`` named in the config. The worker silences the console
-and (under ``debug``) writes the harness's per-pipeline logs itself, so the suite
-only has to read back the result.
+Invoked as ``python -m pipecat.evals._session_subprocess <config.json>``.
+The config carries the scenario path, the bot URL, and the run's options;
+the result is written back as JSON to the ``result_path`` it names.
 """
 
 import asyncio

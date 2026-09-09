@@ -4,24 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""EvalJudge LLM for content assertions in behavioral evaluations.
+"""The judge: an LLM that decides whether the bot did what a scenario asks.
 
-Uses an LLM to decide whether a bot's response satisfies a natural-language
-criterion (``judge: "describes the bot's capabilities"``). The judge runs as
-a one-shot, out-of-pipeline inference via
-:meth:`pipecat.services.openai.base_llm.BaseOpenAILLMService.run_inference`,
-so it works with any pipecat LLM service backed by an OpenAI-compatible API
-(OpenAI, Ollama, Together, etc.).
+It answers a natural-language criterion, an ``eval:`` on a scripted turn or
+a simulation's ``success:`` and metrics, with a one-shot inference outside
+the pipeline, so any Pipecat LLM service with ``run_inference()`` works:
+OpenAI, Ollama, Together, and others.
 
-The judge keeps the conversation as an :class:`LLMContext`: the harness feeds it
-the user turns and the bot's reply segments, and ``evaluate`` judges the most
-recent reply against the criterion *in that context*. This lets it resolve a
-terse or ambiguous reply (e.g. "That's four", which an STT pass might render as
-"That's for") that wouldn't make sense in isolation.
-
-Verdicts are cached by ``(criterion, conversation)`` hash so that re-runs are
-stable and so that a single scenario doesn't pay multiple judge round-trips for
-the same assertion.
+The judge keeps the conversation, so a terse reply ("That's four") is judged
+in context. Verdicts are cached by criterion and conversation, so re-runs
+are stable and a scenario never pays twice for the same question.
 
 Example::
 
@@ -209,13 +201,12 @@ class EvalJudge:
 
     @classmethod
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
-        """Build an :class:`EvalJudge` from a scenario's ``judge.eval:`` config block.
+        """Build a judge from a scenario's ``judge.eval:`` block.
 
-        Honors a custom ``factory`` (dotted path to a callable taking ``(config)``
-        and returning a pipecat LLM service with ``run_inference()``); otherwise
-        dispatches on the ``service`` name (default ``"ollama"``). Add providers by
-        extending this. To use a fully custom judge, construct ``EvalJudge``
-        directly and pass it to :meth:`pipecat.evals.script_session.EvalScriptSession.from_scenario`.
+        A ``factory`` (a dotted path to a callable taking the config) builds the
+        LLM service; otherwise the ``service`` name picks a provider, ``ollama``
+        by default. For a fully custom judge, construct ``EvalJudge`` directly
+        and pass it to the session.
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
@@ -241,10 +232,7 @@ class EvalJudge:
         return cls(llm_service_from_config(judge_config, where="judge.eval"))
 
     def add_user_message(self, text: str | None) -> None:
-        """Record a user turn in the conversation the judge evaluates against.
-
-        Called by the harness when it sends a user turn, so a later reply can be
-        judged in context (e.g. a terse "That's four" after "What is two plus two?").
+        """Record a user turn, so a later reply is judged in context.
 
         Args:
             text: The user's utterance, or ``None`` for a bot-first turn (ignored).
@@ -253,11 +241,7 @@ class EvalJudge:
             self._context.add_message({"role": "user", "content": text})
 
     def add_assistant_message(self, text: str | None) -> None:
-        """Append a streamed segment of the bot's current reply to the conversation.
-
-        The bot's reply may arrive in several segments; each is added as its own
-        ``assistant`` message, so the accumulated conversation is exactly what the
-        judge sees — there is no separate "commit" step.
+        """Add a segment of the bot's current reply to the conversation the judge sees.
 
         Args:
             text: The new reply segment; empty or ``None`` is ignored.
@@ -266,11 +250,7 @@ class EvalJudge:
             self._context.add_message({"role": "assistant", "content": text})
 
     async def evaluate(self, criterion: str) -> JudgeVerdict:
-        """Judge whether the bot's most recent reply satisfies ``criterion``.
-
-        Evaluates the conversation built up via :meth:`add_user_message` and
-        :meth:`add_assistant_message`. The judge's own answer is never written
-        back into that conversation.
+        """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
 
         Args:
             criterion: Natural-language description of what the reply should express.
@@ -286,10 +266,7 @@ class EvalJudge:
     async def evaluate_conversation(
         self, criterion: str, *, evidence: Sequence[str] = ()
     ) -> JudgeVerdict:
-        """Judge whether the whole conversation satisfies ``criterion``.
-
-        For a simulation's goal and quality criteria, once the conversation is
-        over: the verdict is yes or no, never ``continue``.
+        """Judge whether the whole conversation satisfies ``criterion``; yes or no, never ``continue``.
 
         Args:
             criterion: Natural-language description of what the conversation
@@ -313,9 +290,7 @@ class EvalJudge:
     ) -> "RunVerdicts":
         """Judge a whole conversation in one call: every bot turn on every criterion, and the goal.
 
-        The transcript goes in the question itself, with the bot's turns
-        numbered and its tool calls inline where they happened, so one round
-        trip settles everything a simulation asks of the judge.
+        The transcript goes in the question, turns numbered and tool calls inline.
 
         Args:
             transcript: The conversation in order: dicts with a ``role`` of
@@ -384,11 +359,10 @@ class EvalJudge:
         *,
         max_tokens: int | None = None,
     ) -> str:
-        """The judge LLM's raw answer to ``ask`` over the conversation.
+        """The judge's raw answer to ``ask``.
 
         A failed or empty call comes back as a NUL-prefixed reason, which no
-        model answer starts with, so callers can report it as a ``no``.
-        ``max_tokens`` caps the answer, the judge's default when ``None``.
+        answer starts with, so callers can report it as a ``no``.
         """
         # Copy the conversation and append the transient ask, so neither the ask
         # nor the judge's answer ever lands in the persistent context.
@@ -423,12 +397,10 @@ class EvalJudge:
 
 
 def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
-    """Parse a run-judge response: the goal's verdict and a verdict per turn per criterion.
+    """Parse the run judge's answer into the goal's verdict and one per turn per criterion.
 
-    Criterion names match case-insensitively. A turn the judge left out, an
-    array of the wrong length past the entries it has, or an answer that is
-    not the expected JSON, is a ``no`` with the reason saying so, and the raw
-    answer is logged, so a malformed answer never passes a turn silently.
+    Anything missing or malformed is a ``no`` with a reason, and the raw
+    answer is logged, so a bad answer never passes a turn silently.
     """
     nothing = "(judge gave no verdict)"
     if response.startswith("\0"):

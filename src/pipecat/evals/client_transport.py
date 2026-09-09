@@ -4,40 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Client-side WebSocket transports for the eval harness.
+"""The harness's WebSocket transport and recorder.
 
-The harness drives the bot as an RTVI client. A real transport carries a
-continuous real-time audio stream in both directions — speech while a party talks,
-silence otherwise — and VAD, turn detection, and streaming STT all rely on that
-cadence. The eval bot's WebSocket transport instead sends and receives audio only
-while a TTS is producing, with gaps during pauses, so both edges reshape it into a
-continuous stream:
+A live transport carries continuous audio both ways, speech or silence,
+and VADs, turn detection, and streaming STT rely on that cadence. The eval
+bot sends and receives audio only while a TTS produces it, so both edges
+here reshape it: the output paces the user's audio to the bot one 40 ms
+frame per tick, silence in between, and the input re-emits the bot's audio
+at the same cadence, filling its gaps, so the harness's VAD finds the
+bot's real turn ends.
 
-- :class:`EvalClientOutputTransport` (send side): the user TTS's audio is enqueued
-  and a real-time task ships one ~40ms frame every tick (queued audio when
-  available, silence when idle), so the bot receives a continuous stream and its
-  stock input handles it directly.
-- :class:`EvalClientInputTransport` (receive side): the bot's audio arrives in
-  bursts with gaps; it is buffered and re-emitted at the same steady cadence, so
-  the harness's VAD + smart-turn see speech-then-silence and judge the bot's real
-  turn boundaries — instead of the VAD's idle timeout force-stopping a turn at a
-  pause and splitting it mid-sentence.
-
-The pacing and gap-filling exist for the bot and the VADs, where jitter is
-harmless. The *recording* must not depend on them: Python can't hold the ~40ms
-tick precisely, and a pacing underrun becomes silence wedged mid-word, so
-recording the paced/filled streams stutters. Instead :class:`EvalClientRecorder` is
-fed the *raw* audio on each edge -- the user's TTS as produced, the bot's chunks
-as received, both gapless within a turn -- and reconstructs the recording from
-those (see its docstring), padding only the real between-turn pauses.
-
-:class:`EvalClientTransport` is the RTVI client transport the harness builds; it
-differs from :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-only in returning these two stream-shaping transports and wiring the recorder.
-
-The harness's bot-audio VAD broadcasts interruptions when the bot speaks; those are
-stopped at the harness sink before they reach the output transport (see
-``_BotFrameSink``), so the paced user audio is never flushed mid-utterance.
+The recording does not use the paced streams, whose jitter would make it
+stutter: :class:`EvalClientRecorder` is fed the raw audio on both edges and
+lays each side out on its own timeline.
 """
 
 import asyncio
@@ -71,14 +50,10 @@ FRAME_S = 0.04
 
 
 async def _sleep_to_next_tick(next_send: float) -> float:
-    """Pace to the next ~``FRAME_S`` boundary, re-anchoring when behind.
+    """Sleep to the next tick and return the one after.
 
-    Returns the next target time. When the loop has fallen behind (after a hiccup
-    such as the worker's startup model load, a GC pause, or inline VAD), the target
-    is already in the past; re-anchor to ``now + FRAME_S`` rather than firing a
-    burst of catch-up frames. A catch-up burst compresses audio in time and the
-    wall-clock recorder then renders it as a stutter. This mirrors the transport's
-    own :meth:`_write_audio_sleep`.
+    When the loop has fallen behind, the next tick is measured from now rather
+    than firing a burst of catch-up frames, which would compress the audio.
     """
     sleep_s = max(0.0, next_send - time.monotonic())
     await asyncio.sleep(sleep_s)
@@ -86,21 +61,13 @@ async def _sleep_to_next_tick(next_send: float) -> float:
 
 
 class EvalClientRecorder:
-    """Builds the conversation recording from raw source audio, decoupled from pacing.
+    """Builds the conversation recording from the raw audio, not the paced streams.
 
-    The harness paces audio to the bot and fills gaps in the bot's audio for the
-    VADs, but Python can't hold a 40ms tick precisely; recording those paced/filled
-    streams stutters, because a pacing underrun becomes silence wedged mid-word.
-    This recorder is fed the *raw* audio instead -- the user's TTS as produced and
-    the bot's chunks as received (both gapless within a turn) -- and lays each side
-    out contiguously on its playout timeline, inserting silence only for a real
-    between-turn pause (see :class:`_RecorderTrack`). Pacing jitter never reaches
-    the recording, and audio the bot sent past its interruption is dropped
-    (:meth:`drop_bot_tail`) as a client's playout would drop it.
-
-    Each side is captured on its own timeline (monotonic clock); :meth:`write`
-    resamples to a common rate, aligns the two by their first-audio offset, and
-    mixes to mono.
+    Python cannot hold the 40 ms pacing tick precisely, and a recording of the
+    paced streams stutters. So each side is recorded as it was produced or
+    received, laid out on its own timeline with silence only where a real
+    pause was, and mixed to mono at :meth:`write`. Audio the bot sent past an
+    interruption is dropped, as a real client would drop it.
     """
 
     # A chunk arriving later than its side's playout position by more than this
@@ -164,14 +131,9 @@ class EvalClientRecorder:
 class _RecorderTrack:
     """One side of the recording: raw audio chunks and when each arrived.
 
-    :meth:`rendered` lays the chunks out contiguously on a playout timeline: each
-    starts where the previous one ends, and silence is inserted only for a real
-    pause -- a chunk arriving later than the playout position by more than
-    ``EvalClientRecorder.GAP_S``. Both sources run ahead of real time (the bot's
-    transport sends up to twice real time, the user TTS synthesizes faster than
-    it plays), so within a turn chunks arrive before the position and a hiccup
-    on the receiving side is absorbed by that lead; a small late arrival is
-    jitter and shifts the timeline rather than accumulating toward a pause.
+    Chunks are laid out back to back. Silence is inserted only when a chunk
+    arrives later than the playout position by more than the gap threshold,
+    since within a turn both sources run ahead of real time.
     """
 
     def __init__(self):
@@ -229,18 +191,11 @@ class _RecorderTrack:
 
 
 class EvalClientOutputTransport(WebsocketClientOutputTransport):
-    """Streams the user audio to the bot as a continuous real-time stream.
+    """Streams the user's audio to the bot as a continuous real-time stream.
 
-    The default output transport sends each audio frame as it arrives (paced to
-    real time, but with no audio in between), so the bot would see a whole utterance
-    with no trailing silence — VADs and turn detectors need that silence to end a
-    turn. This transport instead enqueues the user TTS's audio and a real-time task
-    emits one ~40ms frame every tick: the next queued chunk when there is one,
-    silence otherwise. The bot then receives a continuous stream and its stock input
-    handles it directly.
-
-    The stream runs only when audio output is enabled (audio-mode scenarios); a
-    text-mode scenario sends nothing, so no silence is ever fed to the bot's STT.
+    A real-time task sends one 40 ms frame per tick: queued TTS audio when
+    there is some, silence otherwise, so the bot's VAD and turn detection see
+    the silence they need to end a turn. Runs only when audio output is on.
     """
 
     def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
@@ -267,13 +222,7 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         await super().cancel(frame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process a frame; an interruption drops the user audio not yet sent.
-
-        An interruption reaching this transport means the user side stopped
-        talking (a persona hearing the bot speak over it), so what the TTS
-        produced but the send stream hasn't paced out yet is dropped, and the
-        recorder drops the same bytes.
-        """
+        """Pass a frame on; an interruption drops the user audio not yet sent, and the recorder drops the same bytes."""
         if isinstance(frame, InterruptionFrame) and self._pending:
             if self._recorder is not None:
                 self._recorder.drop_user_tail(len(self._pending))
@@ -281,12 +230,10 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         await super().process_frame(frame, direction)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Enqueue the user audio; the send task paces it onto the wire.
+        """Queue the user audio for the send task.
 
-        Returns False so the media sender does *not* push this (un-paced) frame
-        downstream: the media sender drains its queue in a burst, which would
-        collapse the user's turn in the harness recording. The send task pushes the
-        paced frames downstream instead (see :meth:`_send_task_handler`).
+        Returns False so the media sender does not push this un-paced frame
+        downstream; the send task pushes the paced frames instead.
         """
         if self._session.is_closing or not self._session.is_connected:
             return False
@@ -338,17 +285,12 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
 
 
 class EvalClientInputTransport(WebsocketClientInputTransport):
-    """Feeds the bot's audio to the harness's STT/VAD as a continuous stream.
+    """Feeds the bot's audio to the harness's VAD and STT as a continuous stream.
 
-    The bot transmits audio only while its TTS is producing — there are gaps during
-    natural pauses (and after a turn). The harness runs a VAD on this audio to
-    detect the bot's turn end; a gap reads as *no audio*, so the VAD's idle timeout
-    force-stops the turn and splits it mid-sentence (e.g. "The capital of Germany."
-    then "Is Berlin." as two turns). This transport buffers the bot's audio and a
-    real-time task re-emits one ~40ms frame every tick — the next queued chunk when
-    there is one, silence otherwise — so the VAD + smart-turn see speech-then-silence
-    and judge the bot's real turn boundaries. The receive-side counterpart to
-    :class:`EvalClientOutputTransport`.
+    The bot sends audio only while its TTS produces it, with gaps at its
+    pauses. A gap reads as silence to a VAD, which would end the bot's turn
+    mid-sentence, so the audio is buffered and re-emitted one 40 ms frame per
+    tick, silence filling the gaps.
     """
 
     def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
@@ -375,13 +317,7 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         await super().cancel(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame on, dropping the bot's unplayed audio when it reports an interruption.
-
-        The bot's transport sends audio up to twice real time, so at an
-        interruption the buffer here can hold seconds the bot sent but a client
-        never plays; what the harness hears must stop where the bot stopped. The
-        recorder drops the same bytes.
-        """
+        """Push a frame on; when the bot reports an interruption, the audio it sent but a client would never play is dropped, and the recorder drops the same bytes."""
         if (
             direction == FrameDirection.DOWNSTREAM
             and isinstance(frame, InputTransportMessageFrame)
@@ -394,12 +330,7 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         await super().push_frame(frame, direction)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
-        """Buffer the bot's audio; the fill task re-emits it at a steady cadence.
-
-        ``on_message`` routes the bot's incoming audio here; instead of pushing it
-        straight through (gaps and all) we buffer it, and :meth:`_fill_task_handler`
-        paces it downstream with silence filling the gaps.
-        """
+        """Buffer the bot's audio for the fill task."""
         # Record the raw bot audio here (gapless within a turn), not the gap-filled
         # frames the fill task emits: those underruns would stutter the recording.
         if self._recorder is not None:
@@ -433,14 +364,10 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
 
 
 class EvalClientTransport(RTVIClientTransport):
-    """RTVI client transport whose audio edges behave like a live transport.
+    """The harness's RTVI client transport, with audio edges that behave like a live transport.
 
-    Identical to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`
-    except that ``input()`` returns an :class:`EvalClientInputTransport` and
-    ``output()`` an :class:`EvalClientOutputTransport` — both reshaping the audio
-    into the continuous real-time stream VAD/STT expect. When a ``recorder`` is
-    given, both edges feed it the *raw* audio (before pacing/filling) so the
-    recording is gapless regardless of the pacing jitter.
+    The input fills the gaps in the bot's audio and the output paces the
+    user's; both feed the recorder the raw audio when one is given.
     """
 
     def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):

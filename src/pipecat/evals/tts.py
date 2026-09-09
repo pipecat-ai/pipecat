@@ -4,27 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""User-audio TTS for the eval harness, as an in-pipeline caching service.
+"""The user's voice: a caching TTS in the harness pipeline.
 
-When a scenario defines a ``user_audio:`` block, the harness synthesizes each user
-turn and streams it to the bot as RTVI ``raw-audio``. :class:`CachingTTSService`
-is the TTS that sits in the harness pipeline for this: the harness pushes a
-``TTSSpeakFrame``, the service emits the audio (as ``TTSAudioRawFrame``s, an
-``OutputAudioRawFrame`` subclass), and the output transport serializes it to
-``raw-audio``.
+In audio mode the harness synthesizes each user turn and streams it to the
+bot. :class:`CachingTTSService` wraps a real TTS service and caches its
+audio on disk, keyed by service, voice, model, language, and text, so a
+scripted utterance is synthesized once and reused across runs and bots.
 
-It wraps a real ``TTSService`` and caches the synthesized audio on disk, so the
-fixed scripted user utterances are synthesized once and reused across runs and
-across bots. The cache is keyed by the config's semantic identity (service, voice,
-model) plus the text, not the sample rate, so different rates reuse the same slot
-(a mismatch just regenerates). On a cache hit the inner service isn't called at
-all; on a miss the inner's audio is captured, cached, and forwarded.
-
-Only **local** (e.g. Kokoro) or **HTTP** (e.g. ``CartesiaHttpTTSService``)
-services fit: the wrapper consumes the inner's ``run_tts`` generator directly, so
-the audio must arrive there (a websocket-streaming TTS pushes audio out of band).
-For batch TTS that generator *is* the audio between ``TTSStartedFrame`` and
-``TTSStoppedFrame``, which is exactly what gets cached.
+Only local (Kokoro) and HTTP (Cartesia) services fit, since the wrapper
+reads the inner service's ``run_tts`` generator directly.
 """
 
 import hashlib
@@ -66,12 +54,7 @@ def tts_sample_rate(voice_cfg: dict) -> int:
 
 
 def tts_cache_key(voice_cfg: dict) -> str:
-    """A stable identity for a ``user_audio`` config, for caching synthesized audio.
-
-    Covers the audio's semantic identity (service, voice, model, language) but not
-    the sample rate, so different rates reuse the same slot (a mismatch just
-    triggers regeneration).
-    """
+    """A stable identity for a ``user_audio`` config: service, voice, model, and language, not the sample rate."""
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))
     model = str(voice_cfg.get("model", ""))
@@ -113,13 +96,10 @@ def _write_wav(path: Path, pcm: bytes, sample_rate: int) -> None:
 class CachingTTSService(TTSService):
     """A pipeline TTS that wraps a real service and caches its audio on disk.
 
-    Drop it into the harness pipeline as the user-audio TTS. On a ``TTSSpeakFrame``
-    it emits the utterance's audio from the WAV cache when present, otherwise it
-    drives the wrapped service, caches the captured audio, and forwards it. The
-    inner service's lifecycle (setup/start/stop/cleanup) is forwarded so its
-    ``run_tts`` works inside the pipeline.
-
-    Only local/HTTP inner services are supported (see the module docstring).
+    On a ``TTSSpeakFrame`` it emits the cached audio when present, otherwise
+    it runs the wrapped service, caches the audio, and forwards it. The
+    inner service's lifecycle is forwarded so it works inside the pipeline.
+    Only local and HTTP inner services are supported.
     """
 
     def __init__(
@@ -165,12 +145,7 @@ class CachingTTSService(TTSService):
         await self._inner.setup(setup)
 
     async def start(self, frame: StartFrame):
-        """Start this service and the inner service.
-
-        The inner runs out-of-line (it isn't linked into the pipeline; we consume
-        its ``run_tts`` generator), so start it with metrics disabled — it has no
-        downstream to receive a ``MetricsFrame``.
-        """
+        """Start this service and the inner one, the inner with metrics off since it has no downstream."""
         await super().start(frame)
         inner_start = StartFrame(audio_out_sample_rate=self.sample_rate, enable_metrics=False)
         await self._inner.start(inner_start)

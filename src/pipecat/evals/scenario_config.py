@@ -119,11 +119,10 @@ def _judge_segments(scenario: EvalConfigured) -> list[_ConfigSegment]:
 
 
 def _config_lines(lines: list[_ConfigLine], *, color: bool) -> str:
-    """Render labeled config lines, ``label -> key: value | key: value``, one per entry.
+    """Render labeled config lines, ``label -> key: value | key: value``.
 
-    A line's body is a list of segments, or plain text printed as is. With
-    ``color``, the label is bold, the separators dim, and each keyword takes its
-    segment's ANSI code.
+    With ``color``, the label is bold, the separators dim, and each keyword
+    takes its segment's ANSI code.
     """
 
     def paint(text: str, code: str) -> str:

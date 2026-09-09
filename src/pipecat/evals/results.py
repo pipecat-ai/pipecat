@@ -75,9 +75,8 @@ class EvalAssertionFailure:
 class EvalScriptTurnResult:
     """Outcome of one turn within a scenario run.
 
-    The turn is the unit a run is scored by: a turn's expectations share a single
-    deadline anchored at the send and stop at the first one to time out, so they
-    are not scored independently of each other.
+    A turn's expectations share one deadline and stop at the first to time
+    out, so the turn is the unit a run is scored by.
 
     Parameters:
         turn_index: Index of the turn in the scenario.
@@ -325,15 +324,12 @@ class EvalTurnProgress(EvalScriptTurnProgress):
 
 
 class EvalTrace:
-    """Timestamped, turn-tagged trace of the harness's own decisions.
+    """Timestamped, turn-tagged log of the harness's own decisions, kept as the result's ``debug_log``.
 
-    Every part of the harness logs here (events received, sends, matcher
-    progress, errors), and the lines become :attr:`EvalScriptResult.debug_log`. The
-    tag is the turn the harness is currently *processing* (``[--]`` before the
-    first turn). Because events are logged the moment they arrive, an event that
-    lands while a turn is still waiting on ``send_after`` is tagged with that
-    waiting turn even though it's the previous turn's output — the
-    ``send_after: waiting`` / ``send:`` lines make that boundary visible.
+    The tag is the turn the harness is processing (``[--]`` before the first).
+    An event that lands while a turn waits on ``send_after`` is tagged with
+    that turn even though it is the previous turn's output; the ``send:``
+    lines mark the boundary.
     """
 
     def __init__(self):

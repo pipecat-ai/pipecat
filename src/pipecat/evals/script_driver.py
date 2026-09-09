@@ -4,13 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Eval driver: plays a scenario's turns and matches each turn's expectations.
-
-The :class:`EvalScriptDriver` sends the scenario's ``turns:`` in order (honoring
-``send_after``), matches each turn's expectations with the
-:class:`~pipecat.evals.matcher.ExpectationMatcher`, and assembles the run's
-:class:`~pipecat.evals.results.EvalScriptResult`.
-"""
+"""The scripted driver: plays a scenario's turns and matches each turn's expectations."""
 
 import asyncio
 import time
@@ -36,12 +30,11 @@ SEND_AFTER_POLL_S = 0.01
 
 
 class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
-    """Plays a scenario's ``turns:`` in order and matches each turn's expectations.
+    """Plays a scenario's turns in order and matches each turn's expectations.
 
-    A turn with a failed assertion ends the scenario, since the conversation is
-    in an unknown state from there on. A scenario that scores each turn
-    independently sets ``stop_on_failure: false`` to have every turn driven and
-    reported.
+    A failed turn ends the scenario by default, since the conversation is in
+    an unknown state from there on; ``stop_on_failure: false`` drives every
+    turn regardless.
     """
 
     def __init__(
@@ -183,14 +176,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         return None
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
-        """Block until ``send_after.event`` has been seen + ``delay_ms`` has elapsed.
+        """Wait until ``send_after.event`` has been seen and ``delay_ms`` more have passed.
 
-        If the event was seen earlier in the run, anchor on that time (potentially
-        fire immediately). Otherwise, poll the stream's arrival times until the
-        event arrives, then anchor on that.
-
-        With no event (``send_after.event is None``), it's a pure time delay:
-        sleep ``delay_ms`` from now (i.e. from the previous turn's send).
+        With no event it is a plain delay from the previous turn's send.
 
         Raises:
             TimeoutError: If the event never arrives.
@@ -221,10 +209,10 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             await asyncio.sleep(SEND_AFTER_POLL_S)
 
     async def _send_turn(self, turn: EvalScriptTurn) -> None:
-        """Send the turn's input: its image (if any), then its utterance or keypresses.
+        """Send the turn's input: its image, if any, then its utterance or keypresses.
 
-        Turns that send nothing are observation-only and exist to match exactly
-        the bot's pending output (a bot-first greeting), so they keep it.
+        A turn that sends nothing only observes, so the bot's pending output is
+        kept for it.
         """
         # Register the turn's image before the user input, so the bot can serve
         # it when it requests a user image during the turn.
@@ -238,12 +226,10 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
     async def _match_expectations(
         self, turn: EvalScriptTurn, turn_idx: int
     ) -> list[EvalAssertionFailure]:
-        """Match the turn's expectations in order against one shared deadline.
+        """Match the turn's expectations in order, all within one deadline anchored at the send.
 
-        All of a turn's expectations share one deadline anchored at the send, so
-        a stalled turn fails within a single ``within_ms`` budget instead of
-        spending a fresh budget per expectation: a missing function call
-        followed by a missing response fails in 60s total, not 120s.
+        A stalled turn then fails within a single ``within_ms`` budget rather than
+        one budget per expectation.
         """
         failures: list[EvalAssertionFailure] = []
         anchor = time.monotonic()

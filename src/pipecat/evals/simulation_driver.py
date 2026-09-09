@@ -4,14 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Simulation driver: lets the persona hold the conversation, then judges it.
-
-The :class:`EvalSimulationDriver` registers the persona's ``end_call`` on the
-persona LLM, watches the event stream until the persona ends the call, the
-bot's turns reach the cap, or the wall clock runs out, then has the judge
-decide the goal and score each quality criterion over the whole conversation,
-assembling the run's :class:`~pipecat.evals.results.EvalSimulationResult`.
-"""
+"""The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
 import json
 import time
@@ -43,8 +36,8 @@ END_CALL_EVENT = "end_call"
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
     """Whether a call the bot made is the one a ``calls:`` entry describes.
 
-    Names must be equal; the entry's ``args``, when given, must all be present
-    in the call's arguments with the same values, extra arguments ignored.
+    Same name, and the entry's ``args``, when given, all present in the call's
+    arguments with the same values.
     """
     if spec.name != call.name:
         return False
@@ -55,12 +48,11 @@ def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
 class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     """Lets the persona LLM hold the conversation, then judges the whole of it.
 
-    The persona runs inside the client's pipeline and answers the bot on its
-    own. This driver watches the conversation, reporting each line as progress,
-    for its end: the persona's ``end_call``, after which it hangs up, the bot
-    ending the call, the cap on the persona's turns, or the wall-clock cap.
-    Then one judge call over the whole transcript, the bot's tool calls in
-    place, scores every bot turn on every criterion and decides the goal.
+    The persona answers the bot on its own inside the client's pipeline. The
+    driver reports each line as progress and watches for the end: the
+    persona's ``end_call``, the bot hanging up, the turn cap, or the time cap.
+    Then one judge call over the whole transcript scores every bot turn on
+    every criterion and decides the goal.
     """
 
     def __init__(
@@ -172,16 +164,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         )
 
     def timeline(self) -> list[dict]:
-        """The conversation as the events told it, each line with the tool calls before it.
+        """The conversation as the events told it, each line with the tool calls made by then.
 
-        A bot turn is everything the bot said between two persona turns, which
-        merges the segments audio-mode turn detection splits a reply into and
-        the responses a function call splits it into. Each entry has a ``role``
-        (``assistant`` for the bot, ``user`` for the persona), the ``content``,
-        and ``evidence``: the bot's tool calls made by then, as
-        :meth:`tool_calls` lists them. Turns in which the bot said nothing are
-        not turns. Built as the events arrive, so it is complete once the run
-        is over.
+        A bot turn is everything the bot said between two persona turns, however
+        turn detection or a function call split it; a turn in which the bot said
+        nothing is not a turn. Built as the events arrive.
         """
         return list(self._lines)
 
@@ -214,11 +201,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._lines.append({"role": role, "content": content, "evidence": list(self._evidence)})
 
     def transcript(self) -> list[dict]:
-        """The conversation for the judge: the lines, with each tool call in place.
-
-        A ``tool`` entry carries one call as :meth:`tool_calls` lists it,
-        placed before the first line it preceded.
-        """
+        """The conversation for the judge: the lines, each tool call in place before the line it preceded."""
         entries: list[dict] = []
         placed = 0
         for line in self._lines:
@@ -231,19 +214,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         return entries
 
     def conversation(self) -> list[dict]:
-        """The conversation with the persona as ``user`` and the bot as ``assistant``.
-
-        The lines of :meth:`timeline`, without the evidence: what the judge
-        reads and the result records.
-        """
+        """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
         return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
 
     def tool_calls(self) -> list[str]:
-        """The bot's function calls in order, one line each, as the judge's evidence.
-
-        A call the bot cancelled is listed as such: it is evidence that the
-        action did not happen.
-        """
+        """The bot's function calls in order, one line each; a cancelled call is listed as cancelled."""
         lines = []
         for event in self._stream.events_seen:
             lines.extend(self._evidence_line(event))
@@ -260,12 +235,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         return []
 
     async def _judge_conversation(self) -> None:
-        """Score the measured metrics, then settle the judged ones and the goal in one call.
-
-        The judge reads the whole transcript once, the bot's tool calls in place,
-        and answers for every bot turn on every criterion and for the goal.
-        Measured metrics need no judge and take the file's order with the rest.
-        """
+        """Score the measured metrics, then ask the judge once about the goal and every judged criterion."""
         measured = {
             metric.name: self._measure(metric)
             for metric in self._simulation.metrics
@@ -333,11 +303,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         )
 
     def _calls_outcome(self, metric: EvalSimulationMetric) -> tuple[float, bool, str]:
-        """The ``function_calls`` measure: the count, whether the set matches, and the reason.
-
-        The reason reads the calls made against the list, so a failing run says
-        which call was missing or unlisted.
-        """
+        """The ``function_calls`` measure: the count, whether the set matches, and a reason naming the calls made against the list."""
         made = self._calls_made()
         expected = metric.calls or []
         missing = [spec for spec in expected if not any(_call_matches(spec, c) for c in made)]
@@ -387,11 +353,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         raise ValueError(f"unknown measure {measure!r}")
 
     def _reply_latencies(self) -> list[float]:
-        """Seconds from each persona turn to the bot's first word of the reply after it.
+        """Seconds from each persona turn to the bot's first word of the reply.
 
-        In text mode the persona's turn is its send and the bot's first word the
-        first token of the LLM response that follows; in audio mode they are the
-        bot's own report of the persona stopping and its first spoken sentence.
+        In text mode, from the send to the first LLM token; in audio mode, from
+        the bot noticing the persona stop to its first spoken sentence.
         """
         if self._simulation.bot_audio:
             sent, replied = "user_stopped_speaking", "tts_response"

@@ -24,14 +24,11 @@ from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 class ExpectationMatcher:
     """Matches one expectation at a time against the event stream.
 
-    Expected events must appear in order, but unmatched events may appear
-    between them, so a scenario doesn't have to enumerate everything the bot
-    emits. Most expectations match one event. A reply with a content check
-    (``text_contains`` / ``eval:``) *aggregates* instead: it accumulates the
-    reply's segments and re-checks on each until the check passes, the judge
-    rejects, or the budget expires, so an interim "Let me check on that." is
-    rolled past rather than mistaken for the answer. A turn's function calls
-    match by name in any order.
+    Expected events must appear in order, with unmatched events allowed in
+    between. A reply with a content check aggregates its segments and
+    re-checks on each, so an interim "Let me check" is rolled past rather
+    than taken for the answer. A turn's function calls match by name in any
+    order.
     """
 
     def __init__(self, *, stream: EvalEventStream, judge: EvalJudge | None, trace: EvalTrace):
@@ -68,11 +65,8 @@ class ExpectationMatcher:
     ) -> EvalAssertionFailure | None:
         """Wait for the expected event and verify it.
 
-        Output that predates this turn (the greeting, or a turn that was
-        interrupted) isn't specially filtered: the stream drops it on the bot's
-        interruption and the driver drops it before each send, and anything that
-        slips through (e.g. a text-mode greeting) is harmless — the judge returns
-        "continue" until the turn's real answer is aggregated in.
+        Stale bot output is not filtered here: the stream drops it on an
+        interruption and the driver before each send.
 
         Args:
             expectation: The expectation to match.
@@ -196,13 +190,7 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Inverted match: pass when NO event of this type arrives before the deadline.
-
-        The budget is the whole point here — the expectation holds the turn open
-        for ``within_ms`` and succeeds only if the event type stays absent for
-        that entire window. An arriving event fails immediately with its content
-        in the reason, so a duplicate-output regression shows what the bot said.
-        """
+        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content."""
         self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
         try:
             event = await self._stream.next_event(expectation.event, deadline)
@@ -226,13 +214,7 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Match every call in a ``function_call`` expectation, in any order.
-
-        Iterates the expectation's ``calls`` (each a name + optional args), claiming
-        a matching call for each from the turn's calls (buffered + still arriving).
-        Passes only when all are claimed within the budget; otherwise returns a
-        failure naming the call that was missing or whose args didn't match.
-        """
+        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match."""
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
@@ -278,17 +260,11 @@ class ExpectationMatcher:
         args: dict | None = None,
         event_type: str = "function_call",
     ) -> dict:
-        """Return a call event of ``event_type`` matching ``name`` (``None`` = any) and ``args``.
+        """The next call event matching ``name`` (``None`` for any) and ``args``.
 
-        A turn's function calls can arrive in any order, so match against the
-        per-turn buffer of calls seen but not yet claimed, plus newly arriving
-        ones; a call that doesn't match is buffered so another expected call can
-        claim it. ``args`` is a subset check and participates in matching, so the
-        turn is satisfied by any call matching both name and arguments rather
-        than by the first to share the name — which is what lets a call the LLM
-        corrects and repeats satisfy it. Other event types are dropped, as in
-        :meth:`~pipecat.evals.events.EvalEventStream.next_event`. Raises
-        TimeoutError once ``deadline`` passes.
+        Calls seen but not yet claimed are buffered, so a turn's calls can arrive
+        in any order and a call the LLM corrects and repeats still satisfies it.
+        Raises TimeoutError at ``deadline``.
         """
 
         def matches(ev: dict) -> bool:
@@ -316,11 +292,9 @@ class ExpectationMatcher:
     async def _evaluate_aggregate(
         self, aggregate: str, expectation: EvalExpectation
     ) -> tuple[str, str]:
-        """Evaluate the accumulated response text. Returns ``(status, reason)``.
+        """Check the accumulated reply text: ``pass``, ``fail``, or ``continue`` for more text.
 
-        ``status`` is ``"pass"``, ``"fail"``, or ``"continue"``. ``text_contains``
-        is monotonic, so a missing substring is ``"continue"`` (more text may
-        arrive); only the judge can affirmatively ``"fail"``.
+        A missing substring is ``continue``; only the judge can ``fail``.
         """
         if expectation.text_contains is not None and not self._text_contains(
             aggregate, expectation.text_contains
@@ -414,11 +388,7 @@ class ExpectationMatcher:
         return EvalAssertionFailure(turn_idx, exp_idx, expectation.event, reason, kind)
 
     def _match_summary(self, event: dict) -> str:
-        """A short human label for a matched event, for verbose progress.
-
-        For ``function_call`` it's the call signature (``name(arg=value, ...)``);
-        for everything else it's the event's text content (or empty).
-        """
+        """A short label for a matched event: the call signature, or the event's text."""
         if event.get("type") == "function_call":
             args = event.get("args") or {}
             sig = ", ".join(f"{k}={v}" for k, v in args.items())
@@ -430,9 +400,5 @@ class ExpectationMatcher:
         return event.get("text") or event.get("transcript") or ""
 
     def _text_contains(self, content: str, needle: str) -> bool:
-        """Whether ``needle`` occurs in ``content``, ignoring how either is spaced.
-
-        Aggregated text joins segments with spaces and an STT's pieces may carry
-        their own, so a phrase is matched on collapsed whitespace.
-        """
+        """Whether ``needle`` occurs in ``content``, ignoring spacing."""
         return " ".join(needle.split()) in " ".join(content.split())
