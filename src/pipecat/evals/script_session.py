@@ -27,7 +27,6 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
@@ -37,9 +36,9 @@ from pipecat.evals.scenario_config import describe_config
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
+from pipecat.evals.session import EvalSession
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
-from pipecat.utils.deprecation import deprecated
 
 # Generous default so an expectation without an explicit ``within_ms`` waits
 # long enough for slow LLM/TTS responses (and function-call round-trips) rather
@@ -47,7 +46,7 @@ from pipecat.utils.deprecation import deprecated
 DEFAULT_EVENT_TIMEOUT_MS = 60000
 
 
-class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
+class EvalScriptSession(EvalSession[EvalScriptResult]):
     """Runs one :class:`~pipecat.evals.script.EvalScriptScenario` against a bot.
 
     Build one with :meth:`from_scenario`, which constructs the judge, the user
@@ -235,15 +234,3 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             stacklevel=3,
         )
         self.add_event_handler("on_progress", lambda _session, record: on_progress(record))
-
-
-@deprecated(
-    "`EvalSession` is deprecated since 1.9.0 and will be removed in 2.0.0. "
-    "Use `EvalScriptSession` instead."
-)
-class EvalSession(EvalScriptSession):
-    """Deprecated alias for :class:`EvalScriptSession`.
-
-    .. deprecated:: 1.9.0
-        Use :class:`EvalScriptSession` instead. Will be removed in 2.0.0.
-    """

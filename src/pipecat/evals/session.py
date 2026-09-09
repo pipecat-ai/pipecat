@@ -4,38 +4,56 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The base session: one conversation with a bot, driven to a result.
+"""The eval session: one conversation with a bot, driven to a result.
 
 A session connects to a running bot's eval transport as an RTVI client,
 runs the handshake, lets its driver converse, tears down, and returns the
 driver's result, a failed connect or a harness error included. The two
-session kinds build the client and the driver for their kind of scenario.
+session kinds build the client and the driver for their kind of scenario;
+:meth:`EvalSession.from_scenario` builds whichever kind a scenario is.
+
+Example::
+
+    scenario = load_scenario_file("scenarios/greeting.yaml")
+    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860").run()
+    print("PASS" if result.passed else "FAIL")
 """
 
 import time
 import traceback
 from abc import abstractmethod
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
 from pipecat.evals.events import EvalEventStream
+from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
-from pipecat.evals.scenario import EvalKind
+from pipecat.evals.scenario import EvalKind, EvalScriptScenario, EvalSimulationScenario
+from pipecat.evals.tts import CachingTTSService
+from pipecat.services.llm_service import LLMService
+from pipecat.services.stt_service import STTService
 from pipecat.utils.base_object import BaseObject
+
+if TYPE_CHECKING:
+    from pipecat.evals.script_session import EvalScriptSession
+    from pipecat.evals.simulation_session import EvalSimulationSession
 
 R = TypeVar("R")
 
 
-class BaseEvalSession(BaseObject, Generic[R]):
+class EvalSession(BaseObject, Generic[R]):
     """One conversation with a bot, driven to a result.
 
     Connect, run the handshake, let the driver converse, tear down, and turn
     what happened, a failed connect or a harness error included, into the
-    driver's result. Subclasses build the client and the driver for their
-    kind of eval.
+    driver's result. The subclasses,
+    :class:`~pipecat.evals.script_session.EvalScriptSession` and
+    :class:`~pipecat.evals.simulation_session.EvalSimulationSession`, build
+    the client and the driver for their kind of scenario; :meth:`from_scenario`
+    picks the one a scenario needs.
 
     Event handlers available:
 
@@ -46,7 +64,13 @@ class BaseEvalSession(BaseObject, Generic[R]):
       before it returns.
     """
 
-    def __init__(self, *, kind: EvalKind, name: str, bot_url: str):
+    def __init__(
+        self,
+        *,
+        kind: EvalKind,
+        name: str,
+        bot_url: str,
+    ):
         """Initialize the session's runtime.
 
         Args:
@@ -66,6 +90,109 @@ class BaseEvalSession(BaseObject, Generic[R]):
         self._client: EvalClient
         self._driver: BaseEvalDriver[R]
         self._register_event_handler("on_progress")
+
+    @classmethod
+    def from_scenario(
+        cls,
+        scenario: EvalScriptScenario | EvalSimulationScenario,
+        bot_url: str,
+        *,
+        connect_timeout_s: float = 5.0,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool = True,
+        stop_bot: bool = False,
+        trigger_disconnect: bool = False,
+        persona_llm: LLMService | None = None,
+        judge: EvalJudge | None = None,
+        user_tts: CachingTTSService | None = None,
+        bot_stt: STTService | None = None,
+    ) -> "EvalScriptSession | EvalSimulationSession":
+        """Build a ready-to-run session for a scenario of either kind.
+
+        A scripted scenario gets an
+        :class:`~pipecat.evals.script_session.EvalScriptSession`, a
+        simulation an
+        :class:`~pipecat.evals.simulation_session.EvalSimulationSession`,
+        each constructing the services it needs. Pass ``persona_llm``,
+        ``judge``, ``user_tts``, or ``bot_stt`` to use your own. Then await
+        :meth:`run`::
+
+            session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
+            result = await session.run()
+
+        Args:
+            scenario: The parsed scenario to run, scripted or a simulation.
+            bot_url: WebSocket URL of the bot's eval transport.
+            connect_timeout_s: How long to wait for the bot to accept the WS
+                connection before giving up.
+            default_timeout_ms: Scripted scenarios only: the latency budget for
+                expectations without their own ``within_ms``. Defaults to 60s.
+            record_path: Optional path to record the conversation audio (audio mode).
+            cache_dir: Optional directory for cached synthesized user audio.
+            use_cache: When False, ignore cached user audio and force fresh synthesis.
+            stop_bot: When True, ask the bot to cancel its pipeline on teardown.
+            trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
+                handler when the connection ends.
+            persona_llm: Simulations only: override the persona LLM (default:
+                built from the simulation's ``simulator``).
+            judge: Override the judge (default: built from the scenario's ``judge``
+                when the run needs one).
+            user_tts: Override the user-audio TTS (default: built from the
+                scenario's ``user_speech`` in audio mode).
+            bot_stt: Override the bot-audio STT (default: built from the
+                scenario's ``transcriber`` when the run transcribes the bot).
+
+        Returns:
+            A configured session of the scenario's kind, ready for :meth:`run`.
+
+        Raises:
+            ValueError: If ``persona_llm`` is given for a scripted scenario,
+                which has no persona.
+            TypeError: If ``scenario`` is neither kind.
+        """
+        # Imported here rather than at module level: both subclasses import this module.
+        from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS, EvalScriptSession
+        from pipecat.evals.simulation_session import EvalSimulationSession
+
+        if isinstance(scenario, EvalSimulationScenario):
+            return EvalSimulationSession.from_scenario(
+                scenario,
+                bot_url,
+                connect_timeout_s=connect_timeout_s,
+                record_path=record_path,
+                cache_dir=cache_dir,
+                use_cache=use_cache,
+                stop_bot=stop_bot,
+                trigger_disconnect=trigger_disconnect,
+                persona_llm=persona_llm,
+                judge=judge,
+                user_tts=user_tts,
+                bot_stt=bot_stt,
+            )
+        elif isinstance(scenario, EvalScriptScenario):
+            if persona_llm is not None:
+                raise ValueError(
+                    f"persona_llm applies to simulations only; {scenario.name!r} is scripted"
+                )
+            return EvalScriptSession.from_scenario(
+                scenario,
+                bot_url,
+                connect_timeout_s=connect_timeout_s,
+                default_timeout_ms=(
+                    DEFAULT_EVENT_TIMEOUT_MS if default_timeout_ms is None else default_timeout_ms
+                ),
+                record_path=record_path,
+                cache_dir=cache_dir,
+                use_cache=use_cache,
+                stop_bot=stop_bot,
+                trigger_disconnect=trigger_disconnect,
+                judge=judge,
+                user_tts=user_tts,
+                bot_stt=bot_stt,
+            )
+        raise TypeError(f"expected a scripted scenario or a simulation, got {type(scenario)!r}")
 
     async def run(self) -> R:
         """Connect, drive the conversation, and return the result."""

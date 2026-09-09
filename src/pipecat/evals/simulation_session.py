@@ -16,7 +16,6 @@ Example::
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
@@ -28,6 +27,7 @@ from pipecat.evals.services import (
     stt_service_from_config,
     tts_service_from_config,
 )
+from pipecat.evals.session import EvalSession
 from pipecat.evals.simulation import EvalSimulationScenario, describe_simulation
 from pipecat.evals.simulation_driver import EvalSimulationDriver
 from pipecat.evals.tts import CachingTTSService
@@ -35,7 +35,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 
 
-class EvalSimulationSession(BaseEvalSession[EvalSimulationResult]):
+class EvalSimulationSession(EvalSession[EvalSimulationResult]):
     """Runs one :class:`~pipecat.evals.simulation.EvalSimulationScenario` against a bot.
 
     The persona LLM answers the bot on its own inside the client's pipeline,

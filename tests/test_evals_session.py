@@ -1701,6 +1701,7 @@ if __name__ == "__main__":
 
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
+from pipecat.evals.session import EvalSession  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
@@ -1865,3 +1866,47 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.error, result.debug_log)
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(result.succeeded)
+
+
+class TestSessionFromScenario(unittest.TestCase):
+    """``EvalSession.from_scenario`` builds the session of the scenario's kind."""
+
+    def _script(self) -> EvalScriptScenario:
+        return EvalScriptScenario(
+            name="capital",
+            bot_audio=False,
+            turns=[EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_started")])],
+        )
+
+    def _simulation(self) -> EvalSimulationScenario:
+        return EvalSimulationScenario(
+            name="capital",
+            persona="A curious traveler.",
+            goal="Learn the capital of Germany.",
+            simulator={"service": "scripted"},
+            success="the bot named Berlin",
+            bot_audio=False,
+        )
+
+    def test_script_scenario_gets_a_script_session(self):
+        session = EvalSession.from_scenario(self._script(), "ws://localhost:0")
+        self.assertIsInstance(session, EvalScriptSession)
+
+    def test_simulation_gets_a_simulation_session(self):
+        session = EvalSession.from_scenario(
+            self._simulation(),
+            "ws://localhost:0",
+            persona_llm=_ScriptedPersonaLLM({}),
+            judge=_YesJudge(),
+        )
+        self.assertIsInstance(session, EvalSimulationSession)
+
+    def test_persona_llm_is_rejected_for_a_script(self):
+        with self.assertRaises(ValueError):
+            EvalSession.from_scenario(
+                self._script(), "ws://localhost:0", persona_llm=_ScriptedPersonaLLM({})
+            )
+
+    def test_other_objects_are_rejected(self):
+        with self.assertRaises(TypeError):
+            EvalSession.from_scenario({"name": "x"}, "ws://localhost:0")  # type: ignore[arg-type]

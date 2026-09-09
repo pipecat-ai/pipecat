@@ -29,7 +29,6 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.results import (
     EvalProgress,
     EvalScriptResult,
@@ -45,8 +44,7 @@ from pipecat.evals.scenario import (
     is_scenario_file,
     load_scenario_file,
 )
-from pipecat.evals.script_session import EvalScriptSession
-from pipecat.evals.simulation_session import EvalSimulationSession
+from pipecat.evals.session import EvalSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -149,7 +147,7 @@ _SPEAKER_COLOR = {"bot": "32", "user": "36"}
 _ENDING_COLOR = {"end_call": "32", "bot": "33"}
 
 
-def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
+def _print_progress(session: EvalSession, p: EvalProgress) -> None:
     """Print a progress record as it arrives (verbose mode).
 
     A scripted scenario's per-turn and per-expectation lines, or a
@@ -306,28 +304,16 @@ async def _execute_scenario(
         loaded = load_scenario_file(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            session: EvalScriptSession | EvalSimulationSession
-            if isinstance(loaded, EvalSimulationScenario):
-                session = EvalSimulationSession.from_scenario(
-                    loaded,
-                    url,
-                    record_path=record_path,
-                    cache_dir=cache_dir,
-                    use_cache=use_cache,
-                    stop_bot=stop_bot,
-                    trigger_disconnect=trigger_disconnect,
-                )
-            else:
-                session = EvalScriptSession.from_scenario(
-                    loaded,
-                    url,
-                    default_timeout_ms=default_timeout_ms,
-                    record_path=record_path,
-                    cache_dir=cache_dir,
-                    use_cache=use_cache,
-                    stop_bot=stop_bot,
-                    trigger_disconnect=trigger_disconnect,
-                )
+            session = EvalSession.from_scenario(
+                loaded,
+                url,
+                default_timeout_ms=default_timeout_ms,
+                record_path=record_path,
+                cache_dir=cache_dir,
+                use_cache=use_cache,
+                stop_bot=stop_bot,
+                trigger_disconnect=trigger_disconnect,
+            )
             if verbose:
                 session.add_event_handler("on_progress", _print_progress)
                 if isinstance(loaded, EvalSimulationScenario):

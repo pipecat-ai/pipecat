@@ -168,17 +168,6 @@
       "location": "pipecat/evals/script_session.py"
     },
     {
-      "subject": "EvalSession",
-      "module": "pipecat.evals.script_session",
-      "kind": "class",
-      "deprecated_in": "1.9.0",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "EvalScriptSession",
-      "message": "`EvalSession` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptSession` instead.",
-      "location": "pipecat/evals/script_session.py"
-    },
-    {
       "subject": "RTVIEvalSerializer",
       "module": "pipecat.evals.serializer",
       "kind": "class",
