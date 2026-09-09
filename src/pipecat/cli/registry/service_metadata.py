@@ -374,6 +374,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="meta_stt",
+            label="Meta",
+            package="pipecat-ai[meta]",
+            class_name=["MetaSTTService"],
+            env_prefix="META",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="mistral_stt",
             label="Mistral",
             package="pipecat-ai[mistral]",
