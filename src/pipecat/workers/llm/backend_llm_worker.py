@@ -4,21 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Backend LLM worker for two-tier voice agents.
+"""Backend LLM worker: the backend a conversational model delegates work to.
 
 A frontend holds the conversation and hands off requests that need tools or
-careful reasoning. What the frontend is does not matter to this contract: a
-speech-to-speech model delegating on its own, or a pipeline calling a tool.
-A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
-and multi-step tool calling, to do that work: over the worker job API it
-streams back everything it produces and returns its final answer.
-:func:`_delegate_to_backend` is the caller side of that contract.
-
-A request is text, so how a frontend words one is its own business.
-:func:`_render_transcript_request` renders the conversation as a labelled
-transcript, which is what a frontend hands over when its model signals a
-handoff without wording a request; a frontend whose model does word one sends
-that instead.
+careful reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service,
+with its own context and multi-step tool calling, to do that work: over the
+worker job API it streams back everything it produces and returns its final
+answer. ``OpenAILiveLLMService`` client delegation puts requests to one.
 """
 
 import asyncio
@@ -63,8 +55,8 @@ class BackendOutput:
         is_final: Whether this is the backend's answer to the delegation, as opposed
             to progress on the way to it.
         speakable: Whether the user may hear this. It is not a promise that
-            the frontend speaks it: a frontend decides what to do with the
-            flag, and a speech-to-speech model may paraphrase or skip it.
+            the frontend speaks it: the live model relays speakable output in
+            its own words, and may paraphrase or skip it.
     """
 
     text: str
@@ -214,11 +206,7 @@ class BackendLLMWorker(LLMContextWorker):
     Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
-      composed by the frontend. What that text says is the application's
-      business: :func:`_render_transcript_request` renders the conversation as
-      a transcript, which is what a frontend whose model hands off without
-      wording a request needs, but a frontend that has a worded request can
-      simply send it.
+      composed by the frontend.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
@@ -227,10 +215,8 @@ class BackendLLMWorker(LLMContextWorker):
 
     The final answer arrives twice, as the last update and as the response, so
     a caller uses one or the other: a frontend relaying output as it arrives
-    reads the updates, while one that needs a return value (a tool handler,
-    say) reads the response and skips updates marked ``is_final``.
-
-    :func:`_delegate_to_backend` wraps the caller side.
+    reads the updates, while one that needs a return value reads the response
+    and skips updates marked ``is_final``.
 
     Example::
 
@@ -376,16 +362,11 @@ async def _delegate_to_backend(
     """Put a request to a :class:`BackendLLMWorker` and return its final text.
 
     Args:
-        worker: The worker making the request (for a pipeline processor,
-            ``self.pipeline_worker``).
+        worker: The worker making the request.
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
             :func:`_render_transcript_request` composes one from a
-            conversation, which is what a frontend hands over when its model
-            signals a handoff without wording a request. A frontend whose
-            model does word one can send it as it stands::
-
-                await _delegate_to_backend(worker, "backend", request=task)
+            conversation.
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling
