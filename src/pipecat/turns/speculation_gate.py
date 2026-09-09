@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.frame_queue import FrameQueue
 
 # A frame paired with the direction it travels in.
 GatedFrame = tuple[Frame, FrameDirection]
@@ -122,7 +123,7 @@ class SpeculationGate(BaseObject):
         self._hold_timeout_task: asyncio.Task | None = None
         self._state = SpeculationState.OPEN
         self._speculation_id: str | None = None
-        self._buffer: list[GatedFrame] = []
+        self._buffer: FrameQueue = FrameQueue(frame_getter=lambda item: item[0])
         # A speculation confirmed before its response arrived. The confirmation
         # travels as a system frame, so it can pass the queued frames it
         # confirms, and nothing follows it to correct a response held by
@@ -144,11 +145,7 @@ class SpeculationGate(BaseObject):
 
     @property
     def speculation_id(self) -> str | None:
-        """The speculation being held, or None when nothing is held.
-
-        Changes exactly when the hold the host bounds with :meth:`expire`
-        changes, so a host can arm and cancel its timer by watching this.
-        """
+        """The speculation being held, or None when nothing is held."""
         return self._speculation_id if self._state == SpeculationState.HOLDING else None
 
     def process(self, frame: Frame, direction: FrameDirection) -> list[GatedFrame]:
@@ -192,7 +189,7 @@ class SpeculationGate(BaseObject):
             # Held in arrival order, uninterruptible frames included: they are
             # ordered like any other, and the buffer preserves them when the
             # speculation around them is discarded.
-            self._buffer.append((frame, direction))
+            self._buffer.put_nowait((frame, direction))
         elif self._state == SpeculationState.DROPPING:
             if isinstance(frame, UninterruptibleFrame):
                 # Not part of the response being dropped, and nothing is being
@@ -299,7 +296,7 @@ class SpeculationGate(BaseObject):
             self._confirmed_id = speculation_id
             return []
 
-        logger.debug(f"{self}: releasing speculative response ({len(self._buffer)} frames)")
+        logger.debug(f"{self}: releasing speculative response ({self._buffer.qsize()} frames)")
         self._end_hold(SpeculationState.OPEN)
         return self._flush()
 
@@ -308,7 +305,7 @@ class SpeculationGate(BaseObject):
 
         A withdrawal that arrives before the response it voids needs no memory:
         the response is held on arrival, and whatever answers the turn instead
-        supersedes it — or the host's timer expires if nothing does.
+        supersedes it — or the bound on the hold runs out if nothing does.
 
         Args:
             speculation_id: The speculation being withdrawn, or None to discard
@@ -341,13 +338,13 @@ class SpeculationGate(BaseObject):
             return []
 
         logger.debug(
-            f"{self}: discarding speculative response ({len(self._buffer)} frames, {reason})"
+            f"{self}: discarding speculative response ({self._buffer.qsize()} frames, {reason})"
         )
         # A response that already ended has no tail left to drop.
-        complete = any(isinstance(f, LLMFullResponseEndFrame) for f, _ in self._buffer)
+        complete = self._buffer.has_frame(LLMFullResponseEndFrame)
         # Drops the speculative response and keeps anything that must always be
         # delivered, which is then emitted rather than discarded with it.
-        self._buffer = [item for item in self._buffer if isinstance(item[0], UninterruptibleFrame)]
+        self._buffer.reset()
         self._end_hold(
             SpeculationState.DROPPING if keep_dropping and not complete else SpeculationState.OPEN
         )
@@ -355,5 +352,9 @@ class SpeculationGate(BaseObject):
 
     def _flush(self) -> list[GatedFrame]:
         """Take everything the buffer still holds, in the order it arrived."""
-        buffered, self._buffer = self._buffer, []
-        return [self._resolved(frame, direction) for frame, direction in buffered]
+        emitted = []
+        while not self._buffer.empty():
+            frame, direction = self._buffer.get_nowait()
+            self._buffer.task_done()
+            emitted.append(self._resolved(frame, direction))
+        return emitted
