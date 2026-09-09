@@ -1,0 +1,1 @@
+- A simulation's `simulator:` block is optional: without one the persona runs on the same local Ollama model as the default judge, `gemma4:12b`, so a simulation needs no API key. The release-eval simulations use it.
