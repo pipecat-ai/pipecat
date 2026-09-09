@@ -59,6 +59,12 @@ load_dotenv(override=True)
 #: Prefix the backend puts on anything it wants the user to hear.
 SPEAK_MARKER = ">>"
 
+#: What to say to set the backend's three-step job going.
+SUGGESTED_REQUEST = (
+    "My flight UA482 this morning — can you check it, and get me on something "
+    "else if it's not running?"
+)
+
 FRONTEND_INSTRUCTIONS = """## Role and speaking style
 You are a friendly, concise voice assistant. Speak naturally, in one or two
 sentences at a time, and let the user finish before responding.
@@ -237,6 +243,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
+        logger.info(f'Say something like: "{SUGGESTED_REQUEST}"')
         # Start the Live session from the context.
         await worker.queue_frames([LLMRunFrame()])
 
