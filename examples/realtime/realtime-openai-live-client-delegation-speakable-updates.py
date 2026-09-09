@@ -243,7 +243,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        logger.info(f'Say something like: "{SUGGESTED_REQUEST}"')
+        logger.opt(colors=True).info(
+            f'<yellow><bold>▶ Say something like:</bold> "{SUGGESTED_REQUEST}"</yellow>'
+        )
         # Start the Live session from the context.
         await worker.queue_frames([LLMRunFrame()])
 
