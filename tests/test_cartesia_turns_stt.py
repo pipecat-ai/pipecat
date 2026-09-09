@@ -9,7 +9,12 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from pipecat.frames.frames import EagerEndOfTurnTranscriptionFrame
 from pipecat.services.cartesia.turns.stt import CartesiaTurnsSTTService
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    ExternalUserTurnStrategies,
+)
 
 
 def _service(**kwargs) -> CartesiaTurnsSTTService:
@@ -78,3 +83,28 @@ async def test_cartesia_turns_update_model_does_not_reconnect(monkeypatch):
     await service._update_settings(CartesiaTurnsSTTService.Settings(model="ink-3"))
 
     reconnect.assert_not_awaited()
+
+
+def test_cartesia_turns_recommends_external_strategies_by_default():
+    strategies = _service().service_metadata_frame().user_turn_strategies
+
+    assert isinstance(strategies, ExternalUserTurnStrategies)
+    assert not isinstance(strategies, EagerUserTurnStrategies)
+
+
+def test_cartesia_turns_recommends_eager_strategies_when_asked():
+    strategies = _service(enable_eager_end_of_turn=True).service_metadata_frame()
+
+    assert isinstance(strategies.user_turn_strategies, EagerUserTurnStrategies)
+
+
+@pytest.mark.asyncio
+async def test_cartesia_turns_reports_an_eager_end_of_turn_only_when_enabled():
+    for enabled, expected in ((False, []), (True, [EagerEndOfTurnTranscriptionFrame])):
+        service = _service(enable_eager_end_of_turn=enabled)
+        service.push_frame = AsyncMock()
+
+        await service._handle_turn_eager_end({"transcript": "book a flight"})
+
+        pushed = [type(call.args[0]) for call in service.push_frame.await_args_list]
+        assert pushed == expected

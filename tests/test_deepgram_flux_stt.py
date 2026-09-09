@@ -17,6 +17,10 @@ from pipecat.services.deepgram.flux.stt_base import (
     FluxConnectionNotConfirmedError,
     FluxFatalError,
 )
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    ExternalUserTurnStrategies,
+)
 from pipecat.utils.errors import ErrorCategory
 
 pytest.importorskip("aws_sdk_sagemaker_runtime_http2")
@@ -388,3 +392,32 @@ async def test_connection_wait_returns_once_confirmed():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_flux_recommends_external_strategies_by_default():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    strategies = service.service_metadata_frame().user_turn_strategies
+
+    assert isinstance(strategies, ExternalUserTurnStrategies)
+    assert not isinstance(strategies, EagerUserTurnStrategies)
+    # Flux reports no prediction without a threshold, so none is asked for.
+    assert service._settings.eager_eot_threshold is None
+
+
+def test_flux_recommends_eager_strategies_and_asks_for_predictions():
+    service = DeepgramFluxSTTService(api_key="test-key", enable_eager_end_of_turn=True)
+
+    assert isinstance(
+        service.service_metadata_frame().user_turn_strategies, EagerUserTurnStrategies
+    )
+    assert service._settings.eager_eot_threshold == DeepgramFluxSTTBase._DEFAULT_EAGER_EOT_THRESHOLD
+
+
+def test_flux_keeps_a_configured_eager_threshold():
+    service = DeepgramFluxSTTService(
+        api_key="test-key",
+        enable_eager_end_of_turn=True,
+        settings=DeepgramFluxSTTService.Settings(eager_eot_threshold=0.8),
+    )
+
+    assert service._settings.eager_eot_threshold == 0.8

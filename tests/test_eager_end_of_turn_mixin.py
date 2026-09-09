@@ -13,13 +13,18 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
+from pipecat.turns.user_stop import EagerUserTurnStopStrategy, ExactMatch
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    ExternalUserTurnStrategies,
+)
 
 
 class Predictor(EagerEndOfTurnSTTServiceMixin, FrameProcessor):
     """Stands in for an STT service that predicts the end of a turn."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *, enable_eager_end_of_turn: bool = True, **kwargs):
+        super().__init__(enable_eager_end_of_turn=enable_eager_end_of_turn, **kwargs)
         self.pushed: list[Frame] = []
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM):
@@ -71,3 +76,39 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
 
         assert service.pushed == []
         assert service.eager_speculation_id is None
+
+
+class TestEagerEndOfTurnIsOptIn(unittest.IsolatedAsyncioTestCase):
+    async def test_predictions_are_not_reported_while_it_is_off(self):
+        # A service reports what its protocol gives it either way; the mixin is
+        # what decides whether the prediction goes anywhere.
+        service = Predictor(enable_eager_end_of_turn=False)
+
+        await service._push_eager_end_of_turn("book a flight", user_id="user")
+        await service._cancel_eager_end_of_turn()
+        service._clear_eager_end_of_turn()
+
+        assert service.pushed == []
+        assert service.eager_speculation_id is None
+        assert not service.eager_end_of_turn_enabled
+
+    def test_it_recommends_eager_strategies_only_when_enabled(self):
+        assert isinstance(
+            Predictor().recommended_user_turn_strategies(enable_interruptions=True),
+            EagerUserTurnStrategies,
+        )
+
+        recommended = Predictor(enable_eager_end_of_turn=False).recommended_user_turn_strategies(
+            enable_interruptions=True
+        )
+        assert isinstance(recommended, ExternalUserTurnStrategies)
+        assert not isinstance(recommended, EagerUserTurnStrategies)
+
+    def test_the_recommendation_carries_the_match_policy_and_interruptions(self):
+        service = Predictor(eager_match_policy=ExactMatch())
+
+        recommended = service.recommended_user_turn_strategies(enable_interruptions=False)
+
+        assert isinstance(recommended.stop[0], EagerUserTurnStopStrategy)
+        assert isinstance(recommended.stop[0].match_policy, ExactMatch)
+        assert recommended.enable_interruptions is False

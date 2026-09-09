@@ -30,7 +30,6 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -209,6 +208,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     _ERROR_CODE_CATEGORIES = {
         "UNPARSABLE_CLIENT_MESSAGE": ErrorCategory.INVALID_REQUEST,
     }
+    # Threshold applied when eager end of turn is enabled without one. Flux
+    # reports a prediction only above this confidence: lower is more eager
+    # (faster responses, more discarded inferences), higher more conservative.
+    _DEFAULT_EAGER_EOT_THRESHOLD = 0.5
     # How long an in-flight Configure is trusted before a new update supersedes
     # it outright. Flux caps the number of un-acked Configure messages, so at
     # most one is ever in flight; this bounds how long a missing ack can block
@@ -223,6 +226,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         tag: list | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         settings: Settings,
         **kwargs,
     ):
@@ -240,11 +244,25 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             watchdog_min_timeout: minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. Off by
+                default: it spends an inference on every prediction, including
+                the ones Flux withdraws. Turning it on sets
+                ``eager_eot_threshold`` to ``_DEFAULT_EAGER_EOT_THRESHOLD`` when the settings leave it
+                unset, since Flux reports no prediction without it.
             settings: Fully resolved settings instance (built by concrete subclass).
             **kwargs: Additional arguments passed to the parent STTService (e.g.
                 ``sample_rate``, ``reconnect_on_error``).
         """
-        super().__init__(settings=settings, **kwargs)
+        super().__init__(
+            settings=settings, enable_eager_end_of_turn=enable_eager_end_of_turn, **kwargs
+        )
+
+        # Flux reports no prediction unless a threshold asks for one, so an
+        # unconfigured threshold would leave the feature silently inert.
+        if self.eager_end_of_turn_enabled and self._settings.eager_eot_threshold is None:
+            self._settings.eager_eot_threshold = self._DEFAULT_EAGER_EOT_THRESHOLD
 
         self._encoding = encoding
         self._mip_opt_out = mip_opt_out
@@ -287,15 +305,17 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         return True
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies: Flux detects turns server-side.
+        """Recommend turn strategies that leave turn detection to Flux.
 
         Flux emits its own start-of-turn and end-of-turn events (as
         ``ProposedUserStarted/StoppedSpeakingFrame``), so the user aggregator
-        resolves those rather than running local VAD/smart-turn. Applied unless
-        the user passed their own ``user_turn_strategies``.
+        resolves those rather than running local VAD/smart-turn. With
+        ``enable_eager_end_of_turn``, the recommendation also answers Flux's
+        predicted end of turn. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
+        frame.user_turn_strategies = self.recommended_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
         )
         return frame

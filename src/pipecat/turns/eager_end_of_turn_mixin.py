@@ -17,6 +17,12 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_stop import EagerMatchPolicy
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    ExternalUserTurnStrategies,
+    UserTurnStrategies,
+)
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -41,23 +47,68 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         # the turn was committed, so the prediction is resolved
         self._clear_eager_end_of_turn()
 
-    All three are safe to call when no prediction is outstanding.
+    All three are safe to call when no prediction is outstanding, and all three
+    are inert while ``enable_eager_end_of_turn`` is off, so a service can call
+    them wherever its protocol reports a prediction without guarding each one.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        enable_eager_end_of_turn: bool = False,
+        eager_match_policy: EagerMatchPolicy | None = None,
+        **kwargs,
+    ):
         """Initialize the eager end-of-turn mixin.
 
         Args:
             *args: Positional arguments passed to the parent class.
+            enable_eager_end_of_turn: Whether to answer a predicted end of turn
+                ahead of the committed one. Off by default: it spends an
+                inference on every prediction, including the ones the service
+                withdraws.
+            eager_match_policy: Decides whether the committed transcript is close
+                enough to the predicted one to keep the speculative response.
+                Only consulted while eager end of turn is on. See
+                :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies`.
             **kwargs: Keyword arguments passed to the parent class.
         """
         super().__init__(*args, **kwargs)
+        self._enable_eager_end_of_turn = enable_eager_end_of_turn
+        self._eager_match_policy = eager_match_policy
         self._eager_speculation_id: str | None = None
+
+    @property
+    def eager_end_of_turn_enabled(self) -> bool:
+        """Whether predicted ends of turn are answered ahead of committed ones."""
+        return self._enable_eager_end_of_turn
 
     @property
     def eager_speculation_id(self) -> str | None:
         """The prediction awaiting a committed end of turn, if any."""
         return self._eager_speculation_id
+
+    def recommended_user_turn_strategies(self, *, enable_interruptions: bool) -> UserTurnStrategies:
+        """Build the turn strategies this service recommends.
+
+        Both recommendations leave turn detection to the service. The eager one
+        additionally answers a predicted end of turn, which only makes sense for
+        a service configured to report one.
+
+        Args:
+            enable_interruptions: Whether a proposal starting a turn should
+                interrupt the bot.
+
+        Returns:
+            Strategies for the caller's ``STTMetadataFrame``.
+        """
+        if not self._enable_eager_end_of_turn:
+            return ExternalUserTurnStrategies(enable_interruptions=enable_interruptions)
+
+        return EagerUserTurnStrategies(
+            match_policy=self._eager_match_policy,
+            enable_interruptions=enable_interruptions,
+        )
 
     async def _push_eager_end_of_turn(
         self,
@@ -75,6 +126,9 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
             language: Detected or specified language of the speech.
             result: Raw result from the STT service.
         """
+        if not self._enable_eager_end_of_turn:
+            return
+
         self._eager_speculation_id = str(uuid.uuid4())
         logger.trace(f"{self}: eager end of turn: [{transcript}]")
         await self.push_frame(

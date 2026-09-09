@@ -34,7 +34,6 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven
@@ -106,6 +105,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         sample_rate: int | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         extra_headers: dict[str, str] | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -125,6 +125,13 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             watchdog_min_timeout: Minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer the server's predicted
+                end of turn (``turn.eager_end``) ahead of the committed one, so
+                the gap between the two is spent generating a response rather
+                than waiting. The response is discarded if the user resumes
+                speaking or the committed transcript differs from the predicted
+                one. Off by default: it spends an inference on every prediction,
+                including the ones the server withdraws.
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
             settings: Runtime-updatable settings. The ink-2 family does not
@@ -149,6 +156,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         super().__init__(
             sample_rate=sample_rate,
             reconnect_on_error=False,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             **kwargs,
         )
@@ -191,15 +199,17 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         return False
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies: this service detects turns server-side.
+        """Recommend turn strategies that leave turn detection to the server.
 
         Cartesia's turn-detection STT defines turn boundaries on the server and
         emits ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
-        resolves those rather than running local VAD/smart-turn. Applied unless
-        the user passed their own ``user_turn_strategies``.
+        resolves those rather than running local VAD/smart-turn. With
+        ``enable_eager_end_of_turn``, the recommendation also answers the
+        server's predicted end of turn. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
+        frame.user_turn_strategies = self.recommended_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
         )
         return frame
