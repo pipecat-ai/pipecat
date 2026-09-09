@@ -36,7 +36,7 @@ from pipecat.evals.scenario_config import describe_config
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
-from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.session import EvalSession, EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
 
@@ -136,6 +136,13 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         judge: EvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
     ) -> "EvalScriptSession":
         """Build a ready-to-run session from a scenario, constructing the services it needs.
 
@@ -161,11 +168,55 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 ``scenario.user_speech`` in audio mode).
             bot_stt: Override the bot-audio STT (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
+            connect_timeout_s: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            default_timeout_ms: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            record_path: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            cache_dir: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            use_cache: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            stop_bot: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            trigger_disconnect: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
 
         Returns:
             A configured session, ready for :meth:`run`.
         """
-        params = params or EvalSessionParams()
+        params = _params_with_deprecated_knobs(
+            params,
+            "EvalScriptSession.from_scenario",
+            connect_timeout_s=connect_timeout_s,
+            default_timeout_ms=default_timeout_ms,
+            record_path=record_path,
+            cache_dir=cache_dir,
+            use_cache=use_cache,
+            stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
+        )
         turns = scenario.turns
         if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
             with logger.contextualize(eval_pipeline="judge"):

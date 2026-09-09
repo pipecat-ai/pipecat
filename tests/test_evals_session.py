@@ -1907,6 +1907,26 @@ class TestSessionFromScenario(unittest.TestCase):
         self.assertEqual(session._driver._default_timeout_ms, 1234)
         self.assertIn("trigger_disconnect=true", session._client._connect_url())
 
+    def test_deprecated_knobs_fold_into_params(self):
+        # A knob passed by its old name wins over the params field of the same
+        # name, and the others keep the params object's values.
+        for build in (EvalSession.from_scenario, EvalScriptSession.from_scenario):
+            with self.subTest(build=build.__qualname__):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    session = build(
+                        self._script(),
+                        "ws://localhost:0",
+                        params=EvalSessionParams(stop_bot=False, use_cache=False),
+                        stop_bot=True,
+                        default_timeout_ms=1234,
+                    )
+                self.assertEqual([w.category for w in caught], [DeprecationWarning])
+                self.assertIn("`default_timeout_ms`, `stop_bot` of", str(caught[0].message))
+                self.assertTrue(session._params.stop_bot)
+                self.assertEqual(session._params.default_timeout_ms, 1234)
+                self.assertFalse(session._params.use_cache)
+
     def test_persona_llm_is_rejected_for_a_script(self):
         with self.assertRaises(ValueError):
             EvalSession.from_scenario(

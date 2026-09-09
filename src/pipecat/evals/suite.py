@@ -84,7 +84,7 @@ from pipecat.evals.results import (
     EvalSimulationTurnVerdict,
 )
 from pipecat.evals.scenario import EvalKind, load_scenario_file
-from pipecat.evals.session import EvalSessionParams
+from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 
@@ -724,6 +724,8 @@ class EvalSuite(BaseObject):
         on_update: Callable[[EvalRun], None] | None = None,
         debug: bool = False,
         params: EvalSessionParams | None = None,
+        use_cache: bool | None = None,
+        default_timeout_ms: int | None = None,
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
@@ -748,7 +750,19 @@ class EvalSuite(BaseObject):
                 sets what it owns on each run's copy: the connect timeout, the
                 recording, the manifest's cache directory, and stopping the bot
                 it spawned.
+            use_cache: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            default_timeout_ms: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
         """
+        params = _params_with_deprecated_knobs(
+            params, "EvalSuite.run", use_cache=use_cache, default_timeout_ms=default_timeout_ms
+        )
         logger.remove()  # keep stdout clean for the caller's display
         logs_dir.mkdir(parents=True, exist_ok=True)
         if record_dir:
@@ -769,7 +783,7 @@ class EvalSuite(BaseObject):
                         results_path,
                         sem,
                         debug,
-                        params or EvalSessionParams(),
+                        params,
                     )
                     for i, run in enumerate(self.runs)
                 )

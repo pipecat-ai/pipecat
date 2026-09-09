@@ -23,6 +23,7 @@ Example::
 
 import time
 import traceback
+import warnings
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Generic, TypeVar
 
@@ -88,6 +89,29 @@ class EvalSessionParams(BaseModel):
     trigger_disconnect: bool = False
 
 
+def _params_with_deprecated_knobs(
+    params: EvalSessionParams | None, caller: str, **knobs: object
+) -> EvalSessionParams:
+    """The run's params with the deprecated knob keyword arguments of ``caller`` folded in.
+
+    A knob is passed by the old name, or ``None`` when the caller did not give
+    it. A knob that was given overrides the ``params`` field of the same name,
+    and warns that the keyword argument is deprecated.
+    """
+    given = {name: value for name, value in knobs.items() if value is not None}
+    params = params or EvalSessionParams()
+    if not given:
+        return params
+    names = ", ".join(f"`{name}`" for name in given)
+    warnings.warn(
+        f"{names} of `{caller}` {'is' if len(given) == 1 else 'are'} deprecated since 1.9.0 "
+        "and will be removed in 2.0.0. Use `params=EvalSessionParams(...)` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return params.model_copy(update=given)
+
+
 class EvalSession(BaseObject, Generic[R]):
     """One conversation with a bot, driven to a result.
 
@@ -149,6 +173,13 @@ class EvalSession(BaseObject, Generic[R]):
         judge: "EvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
     ) -> "EvalScriptSession | EvalSimulationSession":
         """Build a ready-to-run session for a scenario of either kind.
 
@@ -175,6 +206,40 @@ class EvalSession(BaseObject, Generic[R]):
                 scenario's ``user_speech`` in audio mode).
             bot_stt: Override the bot-audio STT (default: built from the
                 scenario's ``transcriber`` when the run transcribes the bot).
+            connect_timeout_s: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            default_timeout_ms: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            record_path: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            cache_dir: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            use_cache: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            stop_bot: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            trigger_disconnect: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
 
         Returns:
             A configured session of the scenario's kind, ready for :meth:`run`.
@@ -188,6 +253,17 @@ class EvalSession(BaseObject, Generic[R]):
         from pipecat.evals.script_session import EvalScriptSession
         from pipecat.evals.simulation_session import EvalSimulationSession
 
+        params = _params_with_deprecated_knobs(
+            params,
+            "EvalSession.from_scenario",
+            connect_timeout_s=connect_timeout_s,
+            default_timeout_ms=default_timeout_ms,
+            record_path=record_path,
+            cache_dir=cache_dir,
+            use_cache=use_cache,
+            stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
+        )
         if isinstance(scenario, EvalSimulationScenario):
             return EvalSimulationSession.from_scenario(
                 scenario,
