@@ -50,20 +50,27 @@ def _concatenate_processed_timestamps(
     return concatenate_aggregated_text(text_parts)
 
 
-def test_cartesia_chinese_word_timestamps_join_without_spaces():
+def test_cartesia_chinese_word_timestamps_keep_one_entry_per_character():
     assert _process_word_timestamps(
         words=["你", "好", "。"],
         starts=[0.0, 0.1, 0.2],
         language="zh",
-    ) == [("你好。", 0.0)]
+    ) == [("你", 0.0), ("好", 0.1), ("。", 0.2)]
 
 
-def test_cartesia_japanese_word_timestamps_join_without_spaces():
+def test_cartesia_japanese_word_timestamps_keep_one_entry_per_character():
     assert _process_word_timestamps(
         words=["こ", "ん", "に", "ち", "は", "。"],
         starts=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
         language="ja",
-    ) == [("こんにちは。", 0.0)]
+    ) == [
+        ("こ", 0.0),
+        ("ん", 0.1),
+        ("に", 0.2),
+        ("ち", 0.3),
+        ("は", 0.4),
+        ("。", 0.5),
+    ]
 
 
 def test_cartesia_korean_word_timestamps_preserve_words_and_timestamps():
