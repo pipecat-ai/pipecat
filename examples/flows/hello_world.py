@@ -74,7 +74,7 @@ def create_initial_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": "Say 'Hello world' and ask what is the user's favorite color.",
+                "content": "Say 'Hello world' and ask what is the user's favorite color. Wait for the user to answer; call record_favorite_color only with the color they tell you.",
             }
         ],
         functions=[record_favorite_color],
