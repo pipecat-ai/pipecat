@@ -7,10 +7,10 @@
 """OpenAI Live (gpt-live-1) where the backend decides which updates are spoken.
 
 ``transform_output`` sets the ``speakable`` flag on each thing the backend
-produces. Here the backend marks the lines it wants heard and the transform
-reads that convention; an app can decide any other way it likes. Marked lines
-are relayed aloud, and the rest — notes to self, reasoning summaries, the final
-wrap-up — stays silent context the live model can draw on if asked.
+produces. Here the backend marks the messages it wants heard and the transform
+reads that convention; an app can decide any other way it likes. Marked
+messages are relayed aloud, and the rest — notes to self, reasoning summaries,
+the final wrap-up — stays silent context the live model can draw on if asked.
 
 This suits a backend that works for a while and narrates its own progress.
 """
@@ -70,11 +70,12 @@ is the recent voice conversation between the user and the assistant, as a
 transcript. Work out what is being asked from it and answer that. The
 transcript may contain transcription errors; use the most likely intent.
 
-You decide what the user hears. Begin a line with {SPEAK_MARKER} and it is
-said to them; write anything else and it stays a note to yourself. Speak up
-when you have something worth hearing — the verified result, or a word about
-what is taking time — and keep those lines to one or two spoken sentences.
-Work out loud in unmarked lines as much as you like.
+You decide what the user hears. Begin a message with {SPEAK_MARKER} and the
+whole of it is said to them; write anything else and the whole message stays a
+note to yourself. Speak up when you have something worth hearing — the
+verified result, or a word about what is taking time — and keep a spoken
+message to one or two sentences. Work out loud as much as you like in the
+messages you leave unmarked.
 
 Use the available tools to answer questions about the weather and
 restaurants. Never claim an action completed without a tool result confirming
@@ -83,6 +84,8 @@ it."""
 
 async def transform_output(output: BackendOutput) -> BackendOutput:
     """Let the backend's own marker decide what reaches the user."""
+    # `speakable` is one flag on one output, and an output is a whole message
+    # the backend wrote, so the marker opens the message it applies to.
     if output.text.startswith(SPEAK_MARKER):
         return replace(output, text=output.text[len(SPEAK_MARKER) :].lstrip(), speakable=True)
     return replace(output, speakable=False)
