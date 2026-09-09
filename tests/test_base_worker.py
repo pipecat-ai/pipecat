@@ -320,8 +320,18 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
         runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
 
+        running = asyncio.Event()
+
+        @worker.event_handler("on_pipeline_started")
+        async def _on_pipeline_started(worker, frame):
+            running.set()
+
         async def drive():
-            await asyncio.sleep(0.05)
+            # Only a running pipeline is drained, so wait for the StartFrame to
+            # reach the end of it. Acting on a fixed delay instead races worker
+            # setup, and a host slow enough to lose that race sees the action
+            # arrive before there is a pipeline to drain.
+            await running.wait()
             await action()
             await worker.queue_frame(EndFrame())
 

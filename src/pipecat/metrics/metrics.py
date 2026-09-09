@@ -110,19 +110,27 @@ class LLMTokenUsage(BaseModel):
     """Token usage statistics for LLM operations.
 
     Services differ in whether their input count is reported net or gross of the
-    prompt cache. ``total_tokens`` is the gross figure either way, so it stays
-    comparable across services, and it is therefore not always ``prompt_tokens +
-    completion_tokens``. Read the cache fields for the breakdown rather than
-    subtracting.
+    prompt cache. Anthropic and Bedrock report ``prompt_tokens`` net, with the
+    cache counts alongside it; OpenAI-compatible services report it gross, with
+    the cache counts already inside it. ``total_tokens`` is the gross figure
+    either way, so it stays comparable across services, and it is therefore not
+    always ``prompt_tokens + completion_tokens``. Read the cache fields for the
+    breakdown rather than subtracting.
+
+    Per-bucket cost accounting has to account for that difference: adding the
+    cache counts to ``prompt_tokens`` double-counts them on a service that
+    reports gross.
 
     Parameters:
-        prompt_tokens: Number of tokens in the input prompt. Net of the cache on
-            services that report cache reads separately.
+        prompt_tokens: Number of tokens in the input prompt, net or gross of the
+            cache counts depending on the service.
         completion_tokens: Number of tokens in the generated completion.
         total_tokens: Total number of tokens used, including any cached input
             tokens.
         cache_read_input_tokens: Number of tokens read from cache, if applicable.
-        cache_creation_input_tokens: Number of tokens used to create cache entries, if applicable.
+            Billed below the input rate.
+        cache_creation_input_tokens: Number of tokens written to cache, if
+            applicable. Billed at or above the input rate.
         reasoning_tokens: Number of completion tokens used for reasoning, if applicable.
         input_audio_tokens: Number of prompt tokens that were audio, if applicable.
         output_audio_tokens: Number of completion tokens that were audio, if applicable.

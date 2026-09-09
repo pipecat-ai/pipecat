@@ -67,7 +67,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.base_observer import BaseObserver, FramePushed, StartupWarmup
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -1287,7 +1287,13 @@ class PipelineWorker(BaseWorker):
 
         # Services spend most of the start sequence waiting on the network, which
         # leaves room to load the imports while setup is happening.
-        lazy_imports_task = self.create_task(asyncio.to_thread(warm_deferred_imports))
+        async def warm_lazy_imports() -> tuple[int, int]:
+            """Warm the deferred imports, reporting when the work ran."""
+            started_at_ns = time.monotonic_ns()
+            await asyncio.to_thread(warm_deferred_imports)
+            return started_at_ns, time.monotonic_ns()
+
+        lazy_imports_task = self.create_task(warm_lazy_imports())
 
         # Setup processors
         setup = FrameProcessorSetup(
@@ -1311,8 +1317,13 @@ class PipelineWorker(BaseWorker):
         )
         await self.create_task(self._pipeline.setup(setup))
 
-        # Make sure lazy imports are done at this point.
-        await lazy_imports_task
+        # Make sure lazy imports are done at this point. Whatever of the load
+        # outlasts setting the processors up is startup time no processor
+        # accounts for, so observers are told when it ran.
+        warm_started_at_ns, warm_finished_at_ns = await lazy_imports_task
+        await self._observer.on_startup_warmup(
+            StartupWarmup(started_at_ns=warm_started_at_ns, finished_at_ns=warm_finished_at_ns)
+        )
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""

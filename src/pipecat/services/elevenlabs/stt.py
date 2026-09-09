@@ -178,10 +178,13 @@ class ElevenLabsSTTSettings(STTSettings):
         tag_audio_events: Whether to include audio events like (laughter),
             (coughing) in the transcription.
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript. Supported by ``scribe_v2`` only.
     """
 
     tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -192,6 +195,8 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
 
     Parameters:
         keyterms: List of key terms or phrases to bias transcription towards.
+        no_verbatim: Whether to drop filler words, false starts and non-speech
+            sounds from the transcript.
         vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
@@ -200,6 +205,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     """
 
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_silence_threshold_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -281,6 +287,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             language=Language.EN,
             tag_audio_events=None,
             keyterms=None,
+            no_verbatim=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -364,6 +371,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
         if is_given(keyterms) and keyterms is not None:
             for keyterm in keyterms:
                 data.add_field("keyterms", keyterm)
+        no_verbatim = self._settings.no_verbatim
+        if is_given(no_verbatim) and no_verbatim is not None:
+            data.add_field("no_verbatim", str(no_verbatim).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -556,6 +566,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
             keyterms=None,
+            no_verbatim=None,
             filter_background_audio=None,
         )
 
@@ -769,6 +780,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 for keyterm in keyterms:
                     params.append(urlencode({"keyterms": keyterm}))
 
+            no_verbatim = self._settings.no_verbatim
+            if is_given(no_verbatim) and no_verbatim is not None:
+                params.append(f"no_verbatim={str(no_verbatim).lower()}")
+
             # Add optional parameters
             if self._include_timestamps:
                 params.append(f"include_timestamps={str(self._include_timestamps).lower()}")
@@ -873,12 +888,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type in (
             "error",
             "auth_error",
-            "quota_exceeded_error",
+            "quota_exceeded",
             "transcriber_error",
             "input_error",
+            "invalid_request",
             "commit_throttled",
-            "transcriber_error",
-            "unaccepted_terms_error",
+            "unaccepted_terms",
             "rate_limited",
             "queue_overflow",
             "resource_exhausted",

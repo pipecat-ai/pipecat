@@ -201,6 +201,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             keyterm=[],
             min_confidence=None,
             numerals=None,
+            profanity_filter=None,
+            redact=None,
             language_hints=None,
         )
 

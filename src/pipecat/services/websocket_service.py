@@ -100,6 +100,8 @@ class WebsocketService(ABC):
     def __init__(
         self,
         *,
+        reconnect_backoff_min_wait: float = 4.0,
+        reconnect_backoff_max_wait: float = 10.0,
         reconnect_on_error: bool = True,
         ws_close_timeout: float = WS_CLOSE_TIMEOUT,
         **kwargs,
@@ -107,6 +109,10 @@ class WebsocketService(ABC):
         """Initialize the websocket service.
 
         Args:
+            reconnect_backoff_min_wait: Minimum time, in seconds, to wait between
+                reconnection attempts.
+            reconnect_backoff_max_wait: Maximum time, in seconds, to wait between
+                reconnection attempts.
             reconnect_on_error: Whether to automatically reconnect on connection errors.
             ws_close_timeout: Maximum time, in seconds, to wait for the peer to
                 acknowledge the websocket closing handshake before dropping the
@@ -116,6 +122,8 @@ class WebsocketService(ABC):
             **kwargs: Additional arguments (unused, for compatibility).
         """
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
+        self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
+        self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
         self._reconnect_on_error = reconnect_on_error
         self._ws_close_timeout = ws_close_timeout
         self._reconnect_in_progress: bool = False
@@ -227,7 +235,11 @@ class WebsocketService(ABC):
                 if not self._is_service_usable:
                     logger.error(f"{self} abandoning reconnection: the service is no longer usable")
                     return False
-                wait_time = exponential_backoff_time(attempt)
+                wait_time = exponential_backoff_time(
+                    attempt,
+                    min_wait=self._reconnect_backoff_min_wait,
+                    max_wait=self._reconnect_backoff_max_wait,
+                )
                 await asyncio.sleep(wait_time)
             msg = f"{self} failed to reconnect after {max_retries} attempts"
             if last_exception:

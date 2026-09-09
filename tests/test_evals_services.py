@@ -4,49 +4,42 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval service constructors (config -> EvalJudge/EvalSpeech/EvalTranscriber)."""
+"""Tests for the eval service constructors (config -> EvalJudge/CachingTTSService/STT)."""
 
 import unittest
 
 from pipecat.evals.judge import EvalJudge
-from pipecat.evals.services import _cfg_language, cartesia_service
-from pipecat.evals.speech import EvalSpeech, tts_cache_key, tts_sample_rate
-from pipecat.evals.transcribe import EvalTranscriber
+from pipecat.evals.services import (
+    _cfg_language,
+    cartesia_service,
+    stt_service_from_config,
+    tts_service_from_config,
+)
+from pipecat.evals.tts import CachingTTSService, tts_cache_key, tts_sample_rate
 from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN
 
 
-def _fake_stt(config, sample_rate):
-    return ("FAKE_STT", config, sample_rate)
+def _fake_stt(config):
+    return ("FAKE_STT", config)
 
 
-def _fake_tts(config, sample_rate):
-    return ("FAKE_TTS", config, sample_rate)
+def _fake_tts(config):
+    return ("FAKE_TTS", config)
 
 
 def _fake_judge_llm(config):
     return ("FAKE_JUDGE", config)
 
 
-class TestTranscriberFromConfig(unittest.TestCase):
+class TestSTTServiceFromConfig(unittest.TestCase):
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
-            EvalTranscriber.from_config({"service": "nope"})
+            stt_service_from_config({"service": "nope"})
 
     def test_factory_escape_hatch(self):
-        t = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
-        self.assertEqual(t._service[0], "FAKE_STT")
-        self.assertEqual(t._service[2], 16000)  # STT_SAMPLE_RATE
-
-    def test_padding_secs(self):
-        from pipecat.evals.transcribe import SILENCE_PAD_S
-
-        default = EvalTranscriber.from_config({"factory": "tests.test_evals_services._fake_stt"})
-        self.assertEqual(default._padding_secs, SILENCE_PAD_S)
-        override = EvalTranscriber.from_config(
-            {"factory": "tests.test_evals_services._fake_stt", "padding_secs": 0.5}
-        )
-        self.assertEqual(override._padding_secs, 0.5)
+        stt = stt_service_from_config({"factory": "tests.test_evals_services._fake_stt"})
+        self.assertEqual(stt[0], "FAKE_STT")
 
 
 class TestVoiceFromConfig(unittest.TestCase):
@@ -80,34 +73,28 @@ class TestVoiceFromConfig(unittest.TestCase):
 
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
-            EvalSpeech.from_config({"service": "nope", "voice": "v"})
+            tts_service_from_config({"service": "nope", "voice": "v"})
 
     def test_missing_service_or_voice_rejected(self):
         with self.assertRaises(ValueError):
-            EvalSpeech.from_config({})
+            tts_service_from_config({})
 
     def test_factory_escape_hatch(self):
-        v = EvalSpeech.from_config(
-            {"factory": "tests.test_evals_services._fake_tts", "sample_rate": 24000}
-        )
-        self.assertEqual(v._service[0], "FAKE_TTS")
-        self.assertEqual(v._service[2], 24000)
+        tts = tts_service_from_config({"factory": "tests.test_evals_services._fake_tts"})
+        self.assertEqual(tts._inner[0], "FAKE_TTS")
 
     def test_language_reaches_cartesia_settings(self):
         # Cartesia is the one builder a unit test can construct: Whisper, Moonshine
         # and Kokoro load their models at construction time.
         service = cartesia_service(
-            {"service": "cartesia", "voice": "v", "api_key": "test-key", "language": "zh"},
-            16000,
+            {"service": "cartesia", "voice": "v", "api_key": "test-key", "language": "zh"}
         )
         self.assertEqual(service._settings.language, Language.ZH)
 
     def test_no_language_leaves_cartesia_default(self):
         # Omitting language must not force a value; the service keeps its own
         # default, which for Cartesia is Language.EN.
-        service = cartesia_service(
-            {"service": "cartesia", "voice": "v", "api_key": "test-key"}, 16000
-        )
+        service = cartesia_service({"service": "cartesia", "voice": "v", "api_key": "test-key"})
         self.assertEqual(service._settings.language, Language.EN)
 
     def test_websocket_service_rejected(self):
@@ -126,7 +113,7 @@ class TestVoiceFromConfig(unittest.TestCase):
                 pass
 
         with self.assertRaises(ValueError):
-            EvalSpeech(_FakeWS(), sample_rate=16000, cache_key="k")
+            CachingTTSService(_FakeWS(), cache_key="k")
 
 
 class TestCfgLanguage(unittest.TestCase):
@@ -170,33 +157,44 @@ class _CountingTTS:
         yield TTSAudioRawFrame(audio=self.pcm, sample_rate=self.sample_rate, num_channels=1)
 
 
-class TestSpeechCache(unittest.IsolatedAsyncioTestCase):
+async def _run_tts_pcm(tts: CachingTTSService, text: str) -> bytes:
+    """Drive ``run_tts`` and return the concatenated audio it yields."""
+    from pipecat.frames.frames import TTSAudioRawFrame
+
+    pcm = b""
+    async for frame in tts.run_tts(text, "ctx"):
+        if isinstance(frame, TTSAudioRawFrame):
+            pcm += frame.audio
+    return pcm
+
+
+class TestCachingTTSCache(unittest.IsolatedAsyncioTestCase):
     async def test_cache_round_trip_and_sr_mismatch(self):
         import tempfile
 
         pcm = b"\x01\x02" * 1600  # 100ms of 16kHz mono
 
         with tempfile.TemporaryDirectory() as tmp:
-            tts = _CountingTTS(pcm, 16000)
-            speech = EvalSpeech(tts, sample_rate=16000, cache_key="k", cache_dir=tmp)
-            speech._started = True  # skip the FrameProcessor lifecycle
+            inner = _CountingTTS(pcm, 16000)
+            tts = CachingTTSService(inner, cache_key="k", cache_dir=tmp)
+            tts._sample_rate = 16000  # set by start(); skip the FrameProcessor lifecycle
 
-            out, sr = await speech.generate("hello")
-            self.assertEqual((out, sr), (pcm, 16000))
-            self.assertEqual(tts.calls, 1)
+            out = await _run_tts_pcm(tts, "hello")
+            self.assertEqual(out, pcm)
+            self.assertEqual(inner.calls, 1)
 
-            # Second call hits the WAV cache; the service is not called again.
-            out2, _ = await speech.generate("hello")
+            # Second call hits the WAV cache; the inner service is not called again.
+            out2 = await _run_tts_pcm(tts, "hello")
             self.assertEqual(out2, pcm)
-            self.assertEqual(tts.calls, 1)
+            self.assertEqual(inner.calls, 1)
 
             # A different requested sample rate misses the cached file's rate and
             # regenerates (the cache slot is shared across rates by design).
-            tts24 = _CountingTTS(pcm, 24000)
-            speech24 = EvalSpeech(tts24, sample_rate=24000, cache_key="k", cache_dir=tmp)
-            speech24._started = True
-            await speech24.generate("hello")
-            self.assertEqual(tts24.calls, 1)
+            inner24 = _CountingTTS(pcm, 24000)
+            tts24 = CachingTTSService(inner24, cache_key="k", cache_dir=tmp)
+            tts24._sample_rate = 24000
+            await _run_tts_pcm(tts24, "hello")
+            self.assertEqual(inner24.calls, 1)
 
 
 class TestJudgeFromConfig(unittest.TestCase):

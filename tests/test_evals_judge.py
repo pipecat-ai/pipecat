@@ -6,7 +6,42 @@
 
 import unittest
 
-from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_verdict
+from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_run_verdicts, _parse_verdict
+
+
+class TestParseRunVerdicts(unittest.TestCase):
+    def test_the_goal_and_a_verdict_per_turn_per_criterion(self):
+        out = _parse_run_verdicts(
+            '{"goal": {"verdict": "yes", "reason": "Berlin was named."}, '
+            '"turns": {"politeness": ["yes", "no"], "brevity": ["yes", "yes"]}, '
+            '"reasons": {"politeness": {"2": "curt"}}}',
+            ["politeness", "brevity"],
+            2,
+        )
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("yes", "Berlin was named."))
+        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "no"])
+        self.assertEqual(out.turns["politeness"][1].reason, "curt")
+        self.assertEqual(out.turns["politeness"][0].reason, "")
+        self.assertEqual([v.verdict for v in out.turns["brevity"]], ["yes", "yes"])
+
+    def test_a_short_array_or_a_missing_criterion_fails_the_turns_it_lacks(self):
+        out = _parse_run_verdicts(
+            '```json\n{"goal": {"verdict": "no"}, "turns": {"Politeness": ["yes"]}}\n```',
+            ["politeness", "brevity"],
+            2,
+        )
+        self.assertEqual(out.goal.reason, "(judge gave no verdict)")
+        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "no"])
+        self.assertEqual(out.turns["politeness"][1].reason, "(judge gave no verdict)")
+        self.assertEqual([v.reason for v in out.turns["brevity"]], ["(judge gave no verdict)"] * 2)
+
+    def test_a_failed_call_or_no_json_fails_everything(self):
+        out = _parse_run_verdicts("\0judge call failed: Boom", ["politeness"], 1)
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("no", "judge call failed: Boom"))
+        self.assertEqual(out.turns["politeness"][0].reason, "judge call failed: Boom")
+        out = _parse_run_verdicts("no json here", ["politeness"], 1)
+        self.assertEqual(out.goal.verdict, "no")
+        self.assertEqual(out.turns["politeness"][0].verdict, "no")
 
 
 class TestParseVerdict(unittest.TestCase):

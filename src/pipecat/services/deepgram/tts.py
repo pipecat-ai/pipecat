@@ -12,7 +12,7 @@ for generating speech from text using various voice models.
 
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -29,13 +29,20 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Settings for DeepgramTTSService and DeepgramHttpTTSService."""
+    """Settings for DeepgramTTSService and DeepgramHttpTTSService.
 
-    pass
+    Parameters:
+        speed: Speech-rate multiplier, from 0.7 to 1.5. ``None`` leaves Aura at
+            its default rate. Supported by the Aura-2 English and Spanish
+            voices; Deepgram recommends staying at or above 0.9 for Spanish.
+    """
+
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -95,6 +102,7 @@ class DeepgramTTSService(WebsocketTTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            speed=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -197,6 +205,8 @@ class DeepgramTTSService(WebsocketTTSService):
             params.append(f"model={self._settings.voice}")
             params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
+            if self._settings.speed is not None:
+                params.append(f"speed={self._settings.speed}")
             if self._mip_opt_out is not None:
                 params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
@@ -387,6 +397,7 @@ class DeepgramHttpTTSService(TTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            speed=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -445,6 +456,9 @@ class DeepgramHttpTTSService(TTSService):
             "sample_rate": self.sample_rate,
             "container": "none",
         }
+
+        if self._settings.speed is not None:
+            params["speed"] = self._settings.speed
 
         if self._mip_opt_out is not None:
             params["mip_opt_out"] = str(self._mip_opt_out).lower()

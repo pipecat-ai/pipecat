@@ -120,6 +120,48 @@ class TestInventory:
         assert {u["id"] for u in data} == {"cartesia/stt", "cartesia/tts", "cartesia/turns-stt"}
 
 
+class TestPlan:
+    """plan.py slices the inventory into matrix groups."""
+
+    def test_groups_cover_every_unit_once_in_order(self, units):
+        import plan
+
+        ids = [u.id for u in units]
+        groups = plan.plan_groups(ids, 12)
+        assert [i for g in groups for i in g["units"].split(",")] == ids
+        assert all(len(g["units"].split(",")) <= 12 for g in groups)
+
+    def test_group_names_are_unique_and_artifact_safe(self, units):
+        import re
+
+        import plan
+
+        groups = plan.plan_groups([u.id for u in units], 12)
+        names = [g["name"] for g in groups]
+        assert len(set(names)) == len(names)
+        assert all(re.fullmatch(r"[a-z0-9._-]+", n) for n in names)
+
+    def test_cli_emits_the_matrix_json(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "plan.py"),
+                "--json",
+                "--group-size",
+                "3",
+                "--only",
+                "cartesia,deepgram",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0, result.stderr
+        groups = json.loads(result.stdout)
+        assert groups and set(groups[0]) == {"name", "units"}
+        assert all(len(g["units"].split(",")) <= 3 for g in groups)
+
+
 class TestDigest:
     @pytest.fixture
     def reports_dir(self, tmp_path):
@@ -308,25 +350,33 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(self, open_prs=None, branches=None, commits=None, fragments=None):
+        def __init__(
+            self, open_prs=None, branches=None, commits=None, fragments=None, label_prs=None
+        ):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
-            self.fragments = fragments or {}  # branch -> [changelog paths added]
+            self.fragments = fragments or {}  # branch/ref -> [changelog paths added]
+            self.label_prs = label_prs or []  # rows for `gh pr list --label`
+            self.pr_files = {}  # number -> [changed paths]
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
             self.calls.append(args)
+            if args[:3] == ("gh", "pr", "list") and "--label" in args:
+                return json.dumps(self.label_prs)
             if args[:3] == ("gh", "pr", "list"):
                 head = args[args.index("--head") + 1]
                 url = self.open_prs.get(head)
                 return json.dumps([{"url": url}] if url else [])
+            if args[:3] == ("gh", "pr", "view") and "files" in args:
+                return json.dumps({"files": [{"path": p} for p in self.pr_files.get(args[3], [])]})
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
             if args[:2] == ("git", "diff") and "--name-only" in args:
-                branch = args[4].split("..")[-1]
+                branch = args[4].split("..")[-1].lstrip(".")
                 return "\n".join(self.fragments.get(branch, []))
             if args[:2] == ("git", "rev-list"):
                 branch = args[-1].split("..")[-1]
@@ -373,7 +423,7 @@ class TestPublish:
         write("ollama/llm", "provider-watch/ollama-llm-default")
         return tmp_path, publish
 
-    def test_opens_adopts_and_caps(self, reports_dir):
+    def test_opens_and_adopts(self, reports_dir):
         tmp_path, publish = reports_dir
         sh = self.FakeShell(
             open_prs={
@@ -393,11 +443,12 @@ class TestPublish:
             pipecat_repo="pipecat-ai/pipecat",
             reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
-            cap=1,
         )
-        assert outcome.opened == ["https://github.com/pipecat-ai/pipecat/pull/101"]
+        assert outcome.opened == [
+            "https://github.com/pipecat-ai/pipecat/pull/101",
+            "https://github.com/pipecat-ai/pipecat/pull/102",
+        ]
         assert outcome.adopted == ["https://github.com/pipecat-ai/pipecat/pull/7"]
-        assert outcome.capped == ["provider-watch/ollama-llm-default"]
 
         fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text()
         assert (
@@ -407,10 +458,16 @@ class TestPublish:
         assert "- https://github.com/pipecat-ai/pipecat/pull/101 — s" in fireworks
         assert "git diff" not in fireworks
         ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text()
-        assert "capped: true" in ollama and "git show provider-watch/ollama-llm-default" in ollama
+        assert (
+            "state: open" in ollama
+            and "url: https://github.com/pipecat-ai/pipecat/pull/102" in ollama
+        )
 
         pushes = [c for c in sh.calls if c[:2] == ("git", "push")]
-        assert pushes == [("git", "push", "-u", "origin", "provider-watch/fireworks-llm-default")]
+        assert pushes == [
+            ("git", "push", "-u", "origin", "provider-watch/fireworks-llm-default"),
+            ("git", "push", "-u", "origin", "provider-watch/ollama-llm-default"),
+        ]
         create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
         assert "--draft" in create and "--label" in create
         assert create[create.index("--title") + 1] == "Default FireworksLLMService to gpt-oss-120b"
@@ -444,7 +501,6 @@ class TestPublish:
             pipecat_repo="pipecat-ai/pipecat",
             reports_repo="pipecat-ai/provider-watch-reports",
             date="2026-08-20",
-            cap=8,
         )
         assert len(outcome.opened) == 1
         create = next(c for c in sh.calls if c[:3] == ("gh", "pr", "create"))
@@ -458,35 +514,24 @@ class TestPublish:
         import publish
 
         branch = "provider-watch/cartesia-tts-updates"
-        path = tmp_path / "reports/cartesia/tts/2026-08-20.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(
-            f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
-            f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-            f"- `{branch}` — review: `git show {branch}` — s\n"
-        )
+        frags = [
+            "changelog/+cartesia-normalization.added.md",
+            "changelog/+cartesia-locale.added.md",
+            "changelog/+cartesia-sonic.fixed.md",
+            "changelog/999.changed.md",
+        ]
         sh = self.FakeShell(
-            branches=[branch],
-            fragments={
-                branch: [
-                    "changelog/+cartesia-normalization.added.md",
-                    "changelog/+cartesia-locale.added.md",
-                    "changelog/+cartesia-sonic.fixed.md",
-                    "changelog/999.changed.md",
-                ]
-            },
+            label_prs=[
+                {
+                    "number": 101,
+                    "headRefName": branch,
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                }
+            ],
+            fragments={"FETCH_HEAD": frags},
         )
-        reports = publish.load_reports(tmp_path, "2026-08-20")
-        outcome = publish.publish_prs(
-            reports,
-            sh=sh,
-            repo_root=tmp_path,
-            pipecat_repo="pipecat-ai/pipecat",
-            reports_repo="pipecat-ai/provider-watch-reports",
-            date="2026-08-20",
-            cap=8,
-        )
-        assert len(outcome.opened) == 1 and not outcome.skipped
+        sh.pr_files = {"101": frags}
+        assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
         moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
         assert moves == [
             ("git", "mv", "changelog/+cartesia-locale.added.md", "changelog/101.added.md"),
@@ -495,9 +540,50 @@ class TestPublish:
             ("git", "mv", "changelog/999.changed.md", "changelog/101.changed.md"),
         ]
         assert any(c[:2] == ("git", "commit") and "#101" in c[-1] for c in sh.calls)
-        assert ("git", "push", "origin", branch) in [
+        assert ("git", "push", "origin", f"HEAD:refs/heads/{branch}") in [
             c[:4] for c in sh.calls if c[:2] == ("git", "push")
         ]
+
+    def test_sweep_leaves_correct_and_non_bot_prs_alone(self, tmp_path):
+        import publish
+
+        sh = self.FakeShell(
+            label_prs=[
+                {
+                    "number": 5528,
+                    "headRefName": "provider-watch/deepseek-thinking",
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                },
+                {
+                    "number": 5529,
+                    "headRefName": "provider-watch/anthropic-output-config",
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                },
+                {
+                    "number": 2849,
+                    "headRefName": "feature/aws-languages",
+                    "headRepositoryOwner": {"login": "someone"},
+                },
+            ],
+            fragments={"FETCH_HEAD": ["changelog/+deepseek-thinking.added.md"]},
+        )
+        sh.pr_files = {
+            "5528": ["changelog/+deepseek-thinking.added.md", "src/x.py"],
+            "5529": ["changelog/5529.added.md"],
+        }
+        skipped = publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat")
+        assert skipped == []
+        assert (
+            "git",
+            "mv",
+            "changelog/+deepseek-thinking.added.md",
+            "changelog/5528.added.md",
+        ) in sh.calls
+        assert ("git", "push", "origin", "HEAD:refs/heads/provider-watch/deepseek-thinking") in [
+            c[:4] for c in sh.calls if c[:2] == ("git", "push")
+        ]
+        # The correctly named PR and the community PR are left alone.
+        assert len([c for c in sh.calls if c[:2] == ("git", "fetch")]) == 1
 
     def test_second_pass_is_a_no_op(self, reports_dir):
         tmp_path, publish = reports_dir
@@ -514,13 +600,27 @@ class TestPublish:
             pipecat_repo="p/p",
             reports_repo="p/r",
             date="2026-08-20",
-            cap=8,
         )
         publish.publish_prs(publish.load_reports(tmp_path, "2026-08-20"), **kwargs)
         before = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
         publish.publish_prs(publish.load_reports(tmp_path, "2026-08-20"), **kwargs)
         after = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
         assert before == 3 and after == 3
+
+    def test_ensure_digest_keeps_the_rendered_digest(self, reports_dir):
+        tmp_path, publish = reports_dir
+        digest_file = tmp_path / "digests" / "2026-08-20.md"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        assert publish.ensure_digest(tmp_path, "2026-08-20", "o/r") == digest_file
+        assert "authored highlight" in digest_file.read_text()
+
+    def test_ensure_digest_renders_plain_when_missing(self, reports_dir):
+        tmp_path, publish = reports_dir
+        out = publish.ensure_digest(tmp_path, "2026-08-20", "o/r")
+        text = out.read_text()
+        assert out == tmp_path / "digests" / "2026-08-20.md"
+        assert "3 units researched" in text and "fireworks/llm" in text
 
     def test_worth_an_issue(self, reports_dir, tmp_path):
         _, publish = reports_dir
@@ -544,7 +644,6 @@ class TestPublish:
             pipecat_repo="p/p",
             reports_repo="p/r",
             date="2026-08-20",
-            cap=8,
         )
         assert len(outcome.skipped) == 3 and not outcome.opened
 

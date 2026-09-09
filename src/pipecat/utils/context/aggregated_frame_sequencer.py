@@ -450,8 +450,12 @@ class AggregatedFrameSequencer:
         - Normal words that fit entirely within the active slot.
         - Overflow words straddling two slot boundaries.
         - Force-complete when the TTS drops an event (word belongs to the next slot).
-        - Passthrough for words not recognised by any slot (buffered instead, when
-          streaming, since the slot they belong to may simply not be promoted yet).
+        - Drop for a word no slot recognises, which is not this turn's text. The
+          slot is left where it is, and the next word that does match carries the
+          text this one should have covered; only what no later word accounts for
+          waits for :meth:`force_complete` at the end of the audio context. When
+          streaming, such a word is buffered instead, since the slot it belongs to
+          may simply not be promoted yet.
         - Flushes any skipped slots unblocked by slot completion.
 
         Args:
@@ -502,18 +506,17 @@ class AggregatedFrameSequencer:
                             _BufferedWord(word, pts, context_id, includes_inter_frame_spaces)
                         )
                         return []
+                    # Nothing left in this turn's text can be what was reported.
+                    # Emitting it anyway would write words the LLM never wrote into
+                    # the conversation context. Dropping it loses nothing: the slot
+                    # keeps its place, so the next word that does match is matched
+                    # past this one and carries the text it should have covered.
+                    # Only text no later word accounts for waits for
+                    # force_complete, when the audio context ends.
                     logger.warning(
-                        f"{self._name} Word '{word}' not recognised by any slot, "
-                        "emitting as passthrough"
+                        f"{self._name} Dropping word '{word}' not recognised by any slot."
                     )
-                    return [
-                        self._build_word_frame(
-                            word,
-                            pts,
-                            context_id,
-                            includes_inter_frame_spaces=includes_inter_frame_spaces,
-                        )
-                    ]
+                    return []
 
             is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()

@@ -64,7 +64,10 @@ class SonioxContextTranslationTerm(BaseModel):
 
 
 class SonioxContextObject(BaseModel):
-    """Context object for models with context_version 2, for Soniox stt-rt-v3-preview and higher.
+    """Structured context that steers transcription and translation.
+
+    Every section is optional; supply only the ones that are relevant. Soniox
+    caps the whole object at 8k tokens.
 
     Learn more about context in the documentation:
     https://soniox.com/docs/stt/concepts/context
@@ -229,9 +232,8 @@ class SonioxSTTSettings(STTSettings):
     Parameters:
         language_hints: List of language hints to use for transcription.
         language_hints_strict: If true, strictly enforce language hints.
-        context: Customization for transcription. String for models with
-            context_version 1 and SonioxContextObject for models with
-            context_version 2.
+        context: Customization for transcription. Either a
+            :class:`SonioxContextObject` or a plain string of background text.
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).

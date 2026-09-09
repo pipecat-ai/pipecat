@@ -137,6 +137,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             min_confidence=None,
             language_hints=None,
             numerals=None,
+            profanity_filter=None,
+            redact=None,
         )
 
         # Apply settings delta

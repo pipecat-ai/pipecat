@@ -780,6 +780,9 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
         result: The result returned by the function.
         run_llm: Whether to run the LLM after this result.
         properties: Additional properties for result handling.
+        error: What went wrong, when the call ended because its handler raised.
+            The ``result`` is then a stand-in message written for the LLM to
+            read, rather than anything the handler returned.
 
     """
 
@@ -789,6 +792,7 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
     result: Any
     run_llm: bool | None = None
     properties: FunctionCallResultProperties | None = None
+    error: str | None = None
 
 
 @dataclass

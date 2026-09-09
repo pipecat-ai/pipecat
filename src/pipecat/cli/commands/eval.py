@@ -18,10 +18,10 @@ import sys
 import time
 import traceback
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console, Group
 from rich.live import Live
@@ -29,8 +29,24 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.harness import EvalSession, EvalTurnProgress
-from pipecat.evals.scenario import EvalScenario, describe_config
+from pipecat.evals.base_session import BaseEvalSession
+from pipecat.evals.results import (
+    EvalProgress,
+    EvalScriptResult,
+    EvalScriptTurnProgress,
+    EvalSimulationProgress,
+    EvalSimulationResult,
+)
+from pipecat.evals.scenario import (
+    EvalKind,
+    EvalSimulationScenario,
+    describe_config,
+    describe_simulation,
+    is_scenario_file,
+    load_scenario_file,
+)
+from pipecat.evals.script_session import EvalScriptSession
+from pipecat.evals.simulation_session import EvalSimulationSession
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -65,7 +81,7 @@ def _fit_detail(detail: str, used_cols: int) -> str:
     return one_line
 
 
-def _format_detail(p: EvalTurnProgress) -> str:
+def _format_detail(p: EvalScriptTurnProgress) -> str:
     """Detail text for a resolved expectation.
 
     Matched prose (the bot's output) is quoted to set it apart from failure
@@ -86,12 +102,18 @@ eval_app = typer.Typer(
 
 @eval_app.callback()
 def _eval_callback() -> None:
-    """Anchor for the subcommand structure.
+    """Load the nearest ``.env`` before any eval subcommand runs.
 
-    Required so typer treats ``run`` (and future verbs like ``list``) as
-    explicit subcommands rather than collapsing the single-command case
-    into a flat app.
+    The harness's own services (a simulation's persona LLM, a hosted judge)
+    read their credentials from the environment, so the ``.env`` the bots load
+    for themselves is loaded here too: the first one found walking up from the
+    working directory. Variables already set in the shell win.
+
+    Also anchors the subcommand structure: typer treats ``run`` and ``suite``
+    as explicit subcommands rather than collapsing a single command into a
+    flat app.
     """
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 def _supports_color() -> bool:
@@ -116,9 +138,31 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_progress(p: EvalTurnProgress) -> None:
-    """Print a per-turn / per-expectation line (verbose mode)."""
-    if p.status == "turn":
+def _bold(s: str) -> str:
+    return _color(s, "1")
+
+
+# The speakers in a simulation's conversation: the bot green, the persona cyan.
+_SPEAKER_COLOR = {"bot": "32", "user": "36"}
+# How a simulation ended: a party hanging up is green (the persona) or yellow
+# (the bot); a cap cutting it short is red.
+_ENDING_COLOR = {"end_call": "32", "bot": "33"}
+
+
+def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
+    """Print a progress record as it arrives (verbose mode).
+
+    A scripted scenario's per-turn and per-expectation lines, or a
+    simulation's conversation as it is spoken and how it ended.
+    """
+    if isinstance(p, EvalSimulationProgress):
+        if p.status == "ended":
+            ending = _color(p.text, _ENDING_COLOR.get(p.text, "31"))
+            print()
+            print(f"      {_dim('ended by')} {ending} {_dim(f'after {p.turn} persona turn(s)')}")
+        else:
+            print(f"      {_color(p.status + ':', _SPEAKER_COLOR[p.status])} {p.text}")
+    elif p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
         print(f"      {_dim(f'turn {p.turn_index}')} → {label}")
     else:
@@ -129,6 +173,46 @@ def _print_progress(p: EvalTurnProgress) -> None:
             used = 8 + 2 + len(p.event_name) + 3  # indent + badge + name + " — "
             line += f" {_dim(f'— {_fit_detail(detail, used)}')}"
         print(line)
+
+
+def _print_simulation_detail(result: EvalSimulationResult) -> None:
+    """Print a simulation's verdict detail (verbose mode), under the conversation.
+
+    The judge's reason, each metric's score and reason, and the persona's own
+    claim from its ``end_call``. The conversation itself was printed as it
+    happened, and the one-line verdict follows.
+    """
+    if result.error:
+        return
+    # A blank line sets each section apart, and one more before the verdict line.
+    print()
+    print(f"    {_bold('judge:')} {result.reason}")
+    if result.metrics:
+        print()
+        print(f"    {_bold('metrics:')}")
+        for metric in result.metrics:
+            score = (_green if metric.passed else _red)(
+                "unscored" if metric.score is None else f"{metric.score:.2f}"
+            )
+            bound = f" (min {metric.min_quality:.2f})" if metric.min_quality is not None else ""
+            failed = [v for v in metric.verdicts if not v.passed]
+            summary = f"{len(metric.verdicts) - len(failed)}/{len(metric.verdicts)} turns"
+            print(
+                f"      {_color(metric.name + ':', '36')} {score}{_dim(bound)}"
+                f"{_dim(' | ' + (summary if metric.verdicts else metric.reason))}"
+            )
+            bot_turns = [m["content"] for m in result.messages if m["role"] == "assistant"]
+            for verdict in failed:
+                said = bot_turns[verdict.turn - 1] if verdict.turn <= len(bot_turns) else ""
+                print(
+                    f"        {_red('✗')} {_dim(f'turn {verdict.turn}:')} "
+                    f"{_fit_detail(said, 24)} {_dim('— ' + verdict.reason)}"
+                )
+    if result.end_call is not None:
+        print()
+        claim = _green("succeeded") if result.end_call.get("success") else _red("gave up")
+        print(f"    {_bold('persona:')} {claim}: {result.end_call.get('reason', '')}")
+    print()
 
 
 def _record_path(record_dir: str | None, scenario_name: str) -> str | None:
@@ -142,7 +226,9 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
     """Expand directory arguments into sorted YAML scenario paths.
 
     Both YAML suffixes are taken, matching the scenario names a manifest
-    resolves.
+    resolves. The fragments scenarios ``!include`` (judge, user, and simulator
+    blocks, which have no ``name:``) are left out; a file given explicitly is
+    always taken.
     """
     expanded: list[Path] = []
     for path in paths:
@@ -153,7 +239,9 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
         scenario_paths = sorted(
             scenario_path
             for scenario_path in path.iterdir()
-            if scenario_path.suffix in SCENARIO_SUFFIXES and scenario_path.is_file()
+            if scenario_path.suffix in SCENARIO_SUFFIXES
+            and scenario_path.is_file()
+            and is_scenario_file(scenario_path)
         )
         if not scenario_paths:
             raise typer.BadParameter(f"No .yaml or .yml scenario files found in {path}")
@@ -162,23 +250,28 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario YAML, each run against ``bot_url`` (no spawn).
+    """Build an EvalRun per scenario file, scripted or a simulation, run against ``bot_url``.
 
-    A scenario that fails to load becomes an EvalRun already marked done with an
+    A file that fails to load becomes an EvalRun already marked done with an
     error, so it shows in the dashboard and the final tally like any other failure.
     """
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            scenario = EvalScenario.load(path)
+            loaded = load_scenario_file(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
+        kind = (
+            EvalKind.SIMULATION if isinstance(loaded, EvalSimulationScenario) else EvalKind.SCRIPT
+        )
         runs.append(
-            EvalRun(bot=bot_url, scenario=scenario.name, scenario_path=path, bot_url=bot_url)
+            EvalRun(
+                bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
+            )
         )
     return runs
 
@@ -195,9 +288,11 @@ async def _execute_scenario(
     debug: bool,
     stop_bot: bool,
     trigger_disconnect: bool,
-    on_progress,
+    verbose: bool,
 ) -> None:
-    """Run one scenario against its ``bot_url``, updating ``run`` in place.
+    """Run one scenario file, scripted or a simulation, against its ``bot_url``.
+
+    Updates ``run`` in place.
 
     The ``eval run`` counterpart to the suite's _run_one: it connects to a fixed
     URL instead of spawning, always writes the decision trace (``<scenario>.eval.log``)
@@ -208,29 +303,45 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        scenario = EvalScenario.load(run.scenario_path)
+        loaded = load_scenario_file(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            run.result = await EvalSession.from_scenario(
-                scenario,
-                url,
-                default_timeout_ms=default_timeout_ms,
-                on_progress=on_progress,
-                record_path=record_path,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                stop_bot=stop_bot,
-                trigger_disconnect=trigger_disconnect,
-            ).run()
+            session: EvalScriptSession | EvalSimulationSession
+            if isinstance(loaded, EvalSimulationScenario):
+                session = EvalSimulationSession.from_scenario(
+                    loaded,
+                    url,
+                    record_path=record_path,
+                    cache_dir=cache_dir,
+                    use_cache=use_cache,
+                    stop_bot=stop_bot,
+                    trigger_disconnect=trigger_disconnect,
+                )
+            else:
+                session = EvalScriptSession.from_scenario(
+                    loaded,
+                    url,
+                    default_timeout_ms=default_timeout_ms,
+                    record_path=record_path,
+                    cache_dir=cache_dir,
+                    use_cache=use_cache,
+                    stop_bot=stop_bot,
+                    trigger_disconnect=trigger_disconnect,
+                )
+            if verbose:
+                session.add_event_handler("on_progress", _print_progress)
+                if isinstance(loaded, EvalSimulationScenario):
+                    print(f"    {_bold('conversation:')}")
+            run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
-        # Errors raised inside EvalSession.run() are caught there and returned as
-        # a structured result; this catches the rest (scenario load, building the
-        # judge/speech/transcriber). Keep the exception type and stash the full
+        # Errors raised inside the session's run() are caught there and returned
+        # as a structured result; this catches the rest (the file's load, building
+        # the judge/persona/speech/transcriber). Keep the exception type and stash the full
         # traceback in <scenario>.eval.log, mirroring the suite's behavior.
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
@@ -259,11 +370,12 @@ async def _run_scenarios_all(
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
 
-    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines) or
-    a piped stdout fall back to streamed result lines instead.
+    A live dashboard in an interactive terminal; ``--verbose`` (per-turn lines, a
+    simulation's conversation as it happens, and its verdict detail) or a piped
+    stdout fall back to streamed result lines instead.
     """
 
-    async def go(run: EvalRun, on_progress) -> None:
+    async def go(run: EvalRun, verbose: bool) -> None:
         await _execute_scenario(
             run,
             audio=audio,
@@ -275,25 +387,30 @@ async def _run_scenarios_all(
             debug=debug,
             stop_bot=stop_bot,
             trigger_disconnect=trigger_disconnect,
-            on_progress=on_progress,
+            verbose=verbose,
         )
 
     if _console.is_terminal and not verbose:
         with Live(_EvalDashboard(runs, started), console=_console, refresh_per_second=12.5):
             for run in runs:
                 if run.status != "done":  # skip a build-time load error
-                    await go(run, None)
+                    await go(run, False)
     else:
         for run in runs:
             if run.status != "done":
-                await go(run, _print_progress if verbose else None)
+                await go(run, verbose)
+            # A simulation's detail closes the conversation above it; the verdict
+            # line comes last, as a scripted scenario's does after its turns.
+            if verbose and isinstance(run.result, EvalSimulationResult):
+                _print_simulation_detail(run.result)
             _print_eval_line(run)
 
 
 @eval_app.command("run")
 def run(
     scenarios: list[Path] = typer.Argument(
-        ..., help="One or more scenario YAML files, or directories of them."
+        ...,
+        help="One or more scenario YAML files (scripted, or simulations), or directories of them.",
     ),
     bot_url: str = typer.Option(
         "ws://localhost:7860",
@@ -304,7 +421,8 @@ def run(
         False,
         "--verbose",
         "-v",
-        help="Print a line for each turn and expectation as it resolves.",
+        help="Print a line for each turn and expectation as it resolves; for a "
+        "simulation, the conversation as it happens and the judge's reasons at the end.",
     ),
     audio: bool = typer.Option(
         False,
@@ -359,12 +477,14 @@ def run(
         "default. A scenario's 'trigger_disconnect:' field opts in on its own.",
     ),
 ) -> None:
-    """Run one or more evals against an already-running bot.
+    """Run one or more scenarios, scripted or simulations, against an already-running bot.
 
     A list of scenarios is treated as a one-bot suite: configs are printed up
     front, then a live dashboard (or streamed lines when piped / ``--verbose``)
     shows each scenario's status and timing, the running tally, and the total
-    time, sharing the display with ``pipecat eval suite``.
+    time, sharing the display with ``pipecat eval suite``. A simulation runs once
+    here: a success rate over several runs is the suite's job, since each run
+    needs a fresh bot.
     """
     # pipecat's own logs are captured to <scenario>.debug.log under --debug; either
     # way, silence the console sink so it can't corrupt the live display.
@@ -415,20 +535,27 @@ def _eval_verdict(r: EvalRun) -> str:
         return r.status  # pending | running
     if r.error or r.result is None:
         return "error"
-    if r.result.skipped:
+    if isinstance(r.result, EvalScriptResult) and r.result.skipped:
         return "skipped"
+    if isinstance(r.result, EvalSimulationResult) and r.result.error:
+        return "error"
     return "passed" if r.result.passed else "failed"
 
 
 def _turn_tally(r: EvalRun) -> str:
-    """``7/10 turns`` for a run that drove every turn and failed some, else ``""``.
+    """The run's detail beside its verdict, or ``""``.
 
+    A scenario: ``7/10 turns`` for a run that drove every turn and failed some.
     A rate needs every turn scored. A run that stopped at its first failure left
     the rest undriven, and a fraction over those would read as turns that failed
     when they were never attempted — what it stopped on is in the failure listing
     instead. A run that passed is already said by the ✓.
+
+    A simulation: how it ended, e.g. ``end_call``.
     """
     result = r.result
+    if isinstance(result, EvalSimulationResult):
+        return result.ended_by
     if result is None or not result.turns:
         return ""
     if any(t.status == "not_run" for t in result.turns):
@@ -590,12 +717,11 @@ class _EvalDashboard:
         table.add_column()  # bot
         table.add_column()  # scenario
         table.add_column(justify="right")  # pass rate
-        table.add_column(justify="right")  # remaining
-        table.add_column(justify="right")  # mean run time
+        table.add_column(justify="right")  # remaining, then the mean run time
 
         for (bot, scenario), group in _grouped_runs(self.runs).items():
             done = [r for r in group if r.status == "done"]
-            passed = sum(1 for r in group if _eval_verdict(r) == "passed")
+            passed, _, _ = _group_outcome(group)
             # Three states, and only the last is a verdict: spinning while a slot is
             # held, a still dot while waiting for one, and ✓/✗ once every attempt is
             # in. Motion is reserved for the runs actually in flight — most rows of a
@@ -608,17 +734,23 @@ class _EvalDashboard:
                 status = Spinner("dots", style="cyan")
             else:
                 status = Text("·", style="dim")
-            # The rate is over attempts that finished, so it reads as a real rate
-            # while the sweep is still going; what's left is its own column rather
-            # than a second denominator competing with it.
+            # While attempts remain the cell reads passed over the group's total,
+            # "2/3", next to what is left; the percentage and the pace appear once
+            # every attempt is in. The color follows the finished attempts, so a
+            # row with only passes so far stays green.
             remaining = len(group) - len(done)
+            if not done:
+                rate = "—"
+            elif remaining:
+                rate = f"{passed}/{len(group)}"
+            else:
+                rate = _pass_rate(passed, len(group))
             table.add_row(
                 status,
                 Text(bot),
                 Text(scenario, style="cyan"),
-                Text(_pass_rate(passed, len(done)), style=_rate_level(passed, len(done))),
-                Text(f"{remaining} left" if remaining else "", style="dim"),
-                Text(_mean_duration(done), style="dim"),
+                Text(rate, style=_rate_level(passed, len(done))),
+                Text(f"{remaining} left" if remaining else _mean_duration(done), style="dim"),
             )
 
         total = len(self.runs)
@@ -653,8 +785,8 @@ def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _print_run_settings(total: int, repeat: int, concurrency: int, record: bool) -> None:
-    """Print how the suite will execute, in the shape of the scenario configs above it.
+def _print_run_settings(runs: list[EvalRun], concurrency: int, record: bool) -> None:
+    """Print how the suite will execute, in the shape of the configs above it.
 
     Only what the terminal doesn't otherwise show while the run is going, and that
     a manifest can turn on without it appearing on the command line: the run count
@@ -663,9 +795,17 @@ def _print_run_settings(total: int, repeat: int, concurrency: int, record: bool)
     grows with the sweep. What the caller just typed stays out; it's already in
     their scrollback.
     """
+    total = len(runs)
     counts = str(total)
-    if repeat > 1:
-        counts = f"{total} ({_plural(total // repeat, 'eval')} x {_plural(repeat, 'attempt')})"
+    attempts = sorted({r.attempts for r in runs})
+    if attempts and attempts[-1] > 1:
+        evals = len(_grouped_runs(runs))
+        if len(attempts) == 1:
+            counts = f"{total} ({_plural(evals, 'eval')} x {_plural(attempts[0], 'attempt')})"
+        else:
+            counts = (
+                f"{total} ({_plural(evals, 'eval')}, {attempts[0]}-{attempts[-1]} attempts each)"
+            )
     print("Settings:")
     for label, value in (
         ("runs", counts),
@@ -677,25 +817,35 @@ def _print_run_settings(total: int, repeat: int, concurrency: int, record: bool)
 
 
 def _print_scenario_configs(runs: list[EvalRun]) -> None:
-    """Print each distinct scenario's config once, up front (shared by run + suite).
+    """Print each distinct scenario's and simulation's config once, up front.
 
     Done before the runs (not per-run) so it doesn't interleave with the live
     display, with a trailing blank line separating it from the runs.
     """
-    print("Scenarios:")
-    seen: set[str] = set()
-    for r in runs:
-        if r.scenario in seen:
-            continue
-        seen.add(r.scenario)
-        try:
-            cfg = describe_config(EvalScenario.load(r.scenario_path), color=sys.stdout.isatty())
-        except Exception as e:  # noqa: BLE001
-            cfg = f"(failed to load: {e})"
-        print(f"  {_color(r.scenario + ':', '1;36')}")
-        for line in cfg.splitlines():
-            print(f"    {line}")
-    print()
+    for kind, heading in (
+        (EvalKind.SCRIPT, "Scripted scenarios:"),
+        (EvalKind.SIMULATION, "Simulated scenarios:"),
+    ):
+        seen: set[str] = set()
+        for r in runs:
+            if r.kind != kind or r.scenario in seen:
+                continue
+            if not seen:
+                print(heading)
+            seen.add(r.scenario)
+            try:
+                loaded = load_scenario_file(r.scenario_path)
+                if isinstance(loaded, EvalSimulationScenario):
+                    cfg = describe_simulation(loaded, color=sys.stdout.isatty())
+                else:
+                    cfg = describe_config(loaded, color=sys.stdout.isatty())
+            except Exception as e:  # noqa: BLE001
+                cfg = f"(failed to load: {e})"
+            print(f"  {_color(r.scenario + ':', '1;36')}")
+            for line in cfg.splitlines():
+                print(f"    {line}")
+        if seen:
+            print()
 
 
 def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) -> None:
@@ -705,7 +855,8 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     tells a bot that misbehaved from one that never started, and only the failure's
     own ``reason`` carries that — ``kind`` says which assertion gave way, not what
     the bot did. Counting and grouping belong to the ``results.jsonl`` written
-    alongside, which is the structured record of the same failures.
+    alongside, which is the structured record of the same failures. A simulation
+    that failed carries the judge's verdict instead of assertions.
 
     Args:
         failed: The runs that failed or errored.
@@ -715,17 +866,23 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     """
     if not failed:
         return
-
     print()
     print(f"  {_color(f'Failures ({len(failed)} of {total}):', '1;31')}")
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
         header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
-        if tally:
+        if tally and isinstance(r.result, EvalScriptResult):
             header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
             print(f"{header} {_dim('— ' + r.error)}")
+        elif isinstance(r.result, EvalSimulationResult):
+            result = r.result
+            if result.error:
+                print(f"{header} {_dim('— ' + result.error)}")
+            else:
+                print(header)
+                print(f"      {_red('•')} {result.failure} {_dim(tally)}")
         elif r.result is not None:
             print(header)
             for f in r.result.failures:
@@ -735,13 +892,29 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
                 )
 
 
+def _group_outcome(group: list[EvalRun]) -> tuple[int, int, int]:
+    """A (bot, scenario) group's ``(passed, completed, errored)``.
+
+    Errored runs are left out of the completed count: a run that crashed or never
+    connected says nothing about whether the bot did its job, and folding it into
+    the rate would both drag the rate down unfairly and hide an infrastructure
+    problem behind a behavioral one.
+    """
+    verdicts = [_eval_verdict(r) for r in group]
+    passed = sum(1 for v in verdicts if v == "passed")
+    errored = sum(1 for v in verdicts if v == "error")
+    completed = sum(1 for v in verdicts if v in ("passed", "failed", "skipped"))
+    return passed, completed, errored
+
+
 def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_rates: bool) -> None:
-    """Print per-(bot, scenario) pass rates and failures grouped by kind.
+    """Print per-(bot, scenario) pass rates and every failure.
 
     A repeated sweep is measuring a rate, not a verdict, so the useful output is
-    how often each pair passed and which failure kinds account for the rest —
-    listing every failing run individually would run to hundreds of lines.
-
+    how often each pair passed and which runs account for the rest. A simulation
+    running its own ``runs`` is a requirement instead, marked ✓ or ✗ beside its
+    rate: every run had to pass. Either way how many runs errored (those are
+    outside the rate) and the mean run time follow.
     ``show_rates`` is False when the live dashboard ran: its final frame is already
     a per-(bot, scenario) rate table, so repeating it here would just duplicate it.
     """
@@ -750,14 +923,22 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
         print(f"  {_color('Pass rate:', '1')}")
         groups = _grouped_runs(runs)
         bot_w = max(len(bot) for bot, _ in groups)
+        scenario_w = max(len(scenario) for _, scenario in groups)
         for (bot, scenario), group in groups.items():
-            passed = sum(1 for r in group if _eval_verdict(r) == "passed")
-            rate_text = f"{_pass_rate(passed, len(group)):>14s}"
-            rate = _color(rate_text, _RATE_ANSI[_rate_level(passed, len(group))])
+            passed, completed, errored = _group_outcome(group)
+            rate_text = f"{_pass_rate(passed, completed):>14s}"
+            rate = _color(rate_text, _RATE_ANSI[_rate_level(passed, completed)])
+            extra = []
+            if errored:
+                extra.append(f"{errored} errored")
+            extra.append(_mean_duration(group))
+            mark = ""
+            if not group[0].sweep:
+                mark = f"  {_green('✓') if passed == len(group) else _red('✗')}"
             print(
-                f"  {bot:{bot_w}s}  {_color(scenario, '36')}  {rate}  {_dim(_mean_duration(group))}"
+                f"  {bot:{bot_w}s}  {_color(f'{scenario:{scenario_w}s}', '36')}  {rate}{mark}  "
+                f"{_dim(' · '.join(e for e in extra if e))}"
             )
-
     _print_failures(failed, len(runs), show_attempt=True)
 
 
@@ -766,14 +947,12 @@ def _finalize_evals(
     runs_dir: Path,
     elapsed_s: float,
     dashboard_shown: bool,
-    repeat: int = 1,
 ) -> int:
     """Print the failed set + final tally; return the process exit code."""
     failed = [r for r in runs if _eval_verdict(r) in ("failed", "error")]
     passed = sum(1 for r in runs if _eval_verdict(r) == "passed")
     skipped = sum(1 for r in runs if _eval_verdict(r) == "skipped")
-
-    if repeat > 1:
+    if any(r.attempts > 1 for r in runs):
         _print_repeat_summary(runs, failed, show_rates=not dashboard_shown)
         print()
         if not dashboard_shown:
@@ -783,11 +962,11 @@ def _finalize_evals(
         print(f"  results: {runs_dir / 'results.jsonl'}")
         print()
         # A repeated sweep measures a pass rate; what counts as acceptable is the
-        # caller's policy, so failures here are data rather than a build break.
-        return 0
-
+        # caller's policy, so failures there are data rather than a build break.
+        # A simulation's own runs are a requirement, and one of them failing is
+        # a break.
+        return 1 if any(not r.sweep for r in failed) else 0
     _print_failures(failed, len(runs), show_attempt=False)
-
     print()
     # When the live dashboard ran, its last frame already shows the tally and the
     # (now final) elapsed time, so reprinting it here would just duplicate that
@@ -816,9 +995,9 @@ async def _run_suite_all(
     default_timeout_ms: int,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
-    repeat = suite.manifest.repeat
+    grouped = any(r.attempts > 1 for r in suite.runs)
     if _console.is_terminal:
-        dashboard = _EvalDashboard(suite.runs, started, grouped=repeat > 1)
+        dashboard = _EvalDashboard(suite.runs, started, grouped=grouped)
         with Live(dashboard, console=_console, refresh_per_second=12.5):
             await suite.run(
                 logs_dir,
@@ -829,11 +1008,13 @@ async def _run_suite_all(
                 default_timeout_ms=default_timeout_ms,
             )
     else:
+        suite.add_event_handler(
+            "on_update", lambda _suite, run: _print_eval_line(run, show_attempt=grouped)
+        )
         await suite.run(
             logs_dir,
             record_dir=record_dir,
             results_path=results_path,
-            on_update=partial(_print_eval_line, show_attempt=repeat > 1),
             debug=debug,
             use_cache=use_cache,
             default_timeout_ms=default_timeout_ms,
@@ -842,11 +1023,14 @@ async def _run_suite_all(
 
 @eval_app.command("suite")
 def suite(
-    manifest_path: Path = typer.Argument(..., help="Manifest YAML listing bots + scenarios."),
+    manifest_path: Path = typer.Argument(
+        ..., help="Manifest YAML listing bots + their scenarios (scripted, or simulations)."
+    ),
     pattern: str = typer.Option(
         None, "-p", "--pattern", help="Only bots whose path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
+    kind: EvalKind = typer.Option(None, "-k", "--kind", help="Only scenarios of this kind."),
     name: str = typer.Option(
         None, "-n", "--name", help="Run subdir name under runs_dir (default a timestamp)."
     ),
@@ -867,8 +1051,10 @@ def suite(
         None,
         "-r",
         "--repeat",
-        help="Run each (bot, scenario) this many times, to measure flakiness. "
-        "Attempts interleave across bots and each writes its own logs.",
+        help="Run each (bot, scenario) this many times, to measure flakiness, and "
+        "each simulation this many times instead of its own runs (1 included); a "
+        "repeated sweep reports rates and exits 0. Attempts interleave across bots "
+        "and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),
@@ -897,7 +1083,10 @@ def suite(
     """Spawn the bots in a manifest and run their scenarios concurrently.
 
     Everything except the ``suite:`` list can be set in the manifest or overridden
-    here (the command line wins), so a manifest can be just a ``suite:`` list.
+    here (the command line wins), so a manifest can be just a ``suite:`` list. A
+    scenario file is scripted or a simulation, and the file says which; a
+    simulation runs as many times as its file says and passes if its success
+    rate meets its threshold.
     """
     manifest = EvalManifest.load(
         manifest_path,
@@ -914,7 +1103,7 @@ def suite(
     )
 
     suite = EvalSuite(manifest)
-    runs = suite.filter(pattern=pattern, scenario=scenario)
+    runs = suite.filter(pattern=pattern, scenario=scenario, kind=kind)
     if not runs:
         print("No runs match.")
         raise typer.Exit(code=1)
@@ -927,7 +1116,7 @@ def suite(
     record_dir = (run_dir / "recordings") if manifest.record else None
 
     _print_scenario_configs(runs)
-    _print_run_settings(len(runs), manifest.repeat, manifest.concurrency, manifest.record)
+    _print_run_settings(runs, manifest.concurrency, manifest.record)
 
     started = time.monotonic()
     asyncio.run(
@@ -943,10 +1132,6 @@ def suite(
         )
     )
     exit_code = _finalize_evals(
-        runs,
-        run_dir,
-        time.monotonic() - started,
-        dashboard_shown=_console.is_terminal,
-        repeat=manifest.repeat,
+        runs, run_dir, time.monotonic() - started, dashboard_shown=_console.is_terminal
     )
     raise typer.Exit(code=exit_code)

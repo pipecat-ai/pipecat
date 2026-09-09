@@ -34,7 +34,9 @@ dependencies = [
     "pydantic>=2.10.6,<3",
     # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
     "pydantic>=2.13; python_full_version >= '3.14'",
+    "python-dotenv>=1.0.0,<2.0.0",
     "resampy~=0.4.3",
+    "soundfile~=0.13.1",
     "soxr~=1.0.0",
     "openai>=1.74.0,<3",
     "typing_extensions>=4.9",
@@ -128,7 +130,7 @@ qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
 resembleai = []
 rime = []
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.6"]
+runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.0.6"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
@@ -137,7 +139,7 @@ silero = []
 simli = [ "simli-ai~=2.0.1"]
 smallest = []
 soniox = []
-soundfile = [ "soundfile~=0.13.1" ]
+soundfile = []
 speechify = []
 speechmatics = [ "speechmatics-voice[smart]~=0.2.8" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
@@ -177,7 +179,6 @@ dev = [
     "ruff>=0.12.11,<1",
     "setuptools~=83.0.0",
     "setuptools_scm~=8.3.1",
-    "python-dotenv>=1.0.1,<2.0.0",
     "towncrier~=25.8.0",
 ]
 

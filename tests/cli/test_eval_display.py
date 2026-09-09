@@ -6,12 +6,30 @@
 
 """Tests for how `pipecat eval` renders a run's outcome."""
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
-from pipecat.cli.commands.eval import _expand_scenario_paths, _turn_tally
-from pipecat.evals.harness import EvalResult, EvalTurnResult
+from rich.console import Console
+
+from pipecat.cli.commands.eval import (
+    _eval_verdict,
+    _EvalDashboard,
+    _expand_scenario_paths,
+    _finalize_evals,
+    _group_outcome,
+    _print_progress,
+    _turn_tally,
+)
+from pipecat.evals.results import (
+    EvalScriptResult,
+    EvalScriptTurnResult,
+    EvalSimulationProgress,
+    EvalSimulationResult,
+)
+from pipecat.evals.scenario import EvalKind
 from pipecat.evals.suite import EvalRun
 
 
@@ -19,8 +37,8 @@ def _run(statuses: list[str] | None) -> EvalRun:
     """An EvalRun whose result has turns in the given statuses (None for no result)."""
     result = None
     if statuses is not None:
-        turns = [EvalTurnResult(turn_index=i, status=s) for i, s in enumerate(statuses)]
-        result = EvalResult(
+        turns = [EvalScriptTurnResult(turn_index=i, status=s) for i, s in enumerate(statuses)]
+        result = EvalScriptResult(
             scenario_name="s",
             passed=all(t.status == "passed" for t in turns),
             turns=turns,
@@ -73,6 +91,20 @@ class TestScenarioPathExpansion(unittest.TestCase):
 
         self.assertEqual(paths, [directory / "alpha.yaml", directory / "beta.yml"])
 
+    def test_include_fragments_are_left_out(self):
+        """The judge, user, and simulator blocks a directory's scenarios include have no name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "alpha.yaml").write_text("name: alpha\nturns: []\n")
+            (directory / "judge_text.yaml").write_text("modality: text\n")
+            (directory / "simulator.yaml").write_text("service: openai\n")
+            # Not valid YAML: still taken, so the run reports it instead of hiding it.
+            (directory / "broken.yaml").write_text("name: [broken\n")
+
+            paths = _expand_scenario_paths([directory])
+
+        self.assertEqual(paths, [directory / "alpha.yaml", directory / "broken.yaml"])
+
     def test_file_arguments_are_preserved(self):
         scenario = Path("scenario.yaml")
         self.assertEqual(_expand_scenario_paths([scenario]), [scenario])
@@ -81,3 +113,124 @@ class TestScenarioPathExpansion(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(Exception, "No \.yaml or \.yml scenario files found"):
                 _expand_scenario_paths([Path(tmp)])
+
+
+def _simulation_run(
+    succeeded: bool | None,
+    *,
+    attempt: int = 1,
+    attempts: int = 3,
+    sweep: bool = False,
+) -> EvalRun:
+    """A finished simulation run; ``succeeded=None`` is one that errored out."""
+    if succeeded is None:
+        result = EvalSimulationResult(
+            simulation_name="book", succeeded=False, error="bot never answered"
+        )
+    else:
+        result = EvalSimulationResult(
+            simulation_name="book",
+            succeeded=succeeded,
+            reason="judged",
+            ended_by="end_call" if succeeded else "max_turns",
+        )
+    return EvalRun(
+        bot="bot",
+        scenario="book",
+        scenario_path=Path("book.yaml"),
+        kind=EvalKind.SIMULATION,
+        attempt=attempt,
+        attempts=attempts,
+        sweep=sweep,
+        status="done",
+        result=result,
+    )
+
+
+class TestSimulationProgress(unittest.TestCase):
+    def test_lines_print_as_spoken_and_the_end_says_how(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_progress(None, EvalSimulationProgress("bot", "Hi! How can I help?", 0))  # type: ignore[arg-type]
+            _print_progress(None, EvalSimulationProgress("user", "A table for two.", 1))  # type: ignore[arg-type]
+            _print_progress(None, EvalSimulationProgress("ended", "end_call", 1))  # type: ignore[arg-type]
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            [
+                "      bot: Hi! How can I help?",
+                "      user: A table for two.",
+                "",
+                "      ended by end_call after 1 persona turn(s)",
+            ],
+        )
+
+
+class TestSimulationVerdicts(unittest.TestCase):
+    def test_a_simulation_run_reads_its_own_outcome(self):
+        self.assertEqual(_eval_verdict(_simulation_run(True)), "passed")
+        self.assertEqual(_eval_verdict(_simulation_run(False)), "failed")
+        self.assertEqual(_eval_verdict(_simulation_run(None)), "error")
+
+    def test_detail_is_how_it_ended(self):
+        self.assertEqual(_turn_tally(_simulation_run(True)), "end_call")
+        self.assertEqual(_turn_tally(_simulation_run(False)), "max_turns")
+
+    def test_errored_runs_stay_out_of_the_rate(self):
+        # The errors are reported on their own rather than counted as the bot failing.
+        group = [_simulation_run(s, attempt=i) for i, s in enumerate((True, None, None), 1)]
+        self.assertEqual(_group_outcome(group)[:3], (1, 1, 2))
+
+    def test_every_required_run_must_pass_and_a_sweep_only_measures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                required = [
+                    _simulation_run(s, attempt=i) for i, s in enumerate((True, True, True), 1)
+                ]
+                self.assertEqual(_finalize_evals(required, Path(tmp), 1.0, False), 0)
+                one_failed = [
+                    _simulation_run(s, attempt=i) for i, s in enumerate((True, True, False), 1)
+                ]
+                self.assertEqual(_finalize_evals(one_failed, Path(tmp), 1.0, False), 1)
+                # The same runs as a --repeat sweep are data, not a break.
+                sweep = [
+                    _simulation_run(s, attempt=i, sweep=True)
+                    for i, s in enumerate((True, True, False), 1)
+                ]
+                self.assertEqual(_finalize_evals(sweep, Path(tmp), 1.0, False), 0)
+                # A single-run simulation is judged on that run alone.
+                self.assertEqual(
+                    _finalize_evals([_simulation_run(False, attempts=1)], Path(tmp), 1.0, False),
+                    1,
+                )
+            self.assertIn("goal not met", out.getvalue())
+
+
+class TestGroupedDashboard(unittest.TestCase):
+    """A repeated row reads passed over its total while attempts remain, and a rate once they are in."""
+
+    @staticmethod
+    def _render(runs: list[EvalRun]) -> str:
+        console = Console(width=120, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0, grouped=True))
+        return console.export_text()
+
+    def test_a_row_still_running_shows_passed_over_the_total(self):
+        pending = _simulation_run(True, attempt=3, attempts=3)
+        pending.status = "pending"
+        pending.result = None
+        text = self._render(
+            [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), pending]
+        )
+        self.assertIn("2/3", text)
+        self.assertIn("1 left", text)
+        self.assertNotIn("%", text)
+
+    def test_a_finished_row_shows_the_rate_and_the_pace(self):
+        runs = [_simulation_run(True, attempt=n) for n in (1, 2, 3)]
+        for run in runs:
+            run.duration_ms = 30000
+        text = self._render(runs)
+        self.assertIn("3/3 (100%)", text)
+        self.assertIn("each", text)
+        self.assertNotIn("left", text)

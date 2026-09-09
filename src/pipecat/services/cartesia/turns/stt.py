@@ -36,7 +36,16 @@ from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+
+# Connection-bound turn detection query parameters, named as Cartesia documents
+# them. A change to any of them is applied by reconnecting.
+_TURN_DETECTION_FIELDS = (
+    "turn_start_threshold",
+    "turn_eager_end_threshold",
+    "turn_end_threshold",
+    "turn_end_timeout_ms",
+)
 
 
 @dataclass
@@ -46,15 +55,32 @@ class CartesiaTurnsSTTSettings(STTSettings):
     The ink-2 model family is English-only and does not support runtime model
     or language switching.
 
+    The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
+    them to a connection, so updating any of them at runtime triggers a
+    reconnect. See https://docs.cartesia.ai/use-the-api/stt/turns for the
+    Balanced, Responsive and Patient starting profiles.
+
     Parameters:
         keyterm: Key terms or phrases to bias transcription towards, sent as
             repeated ``keyterm`` query parameters on the connection URL.
             Cartesia binds keyterms to a connection, so updating this setting
             at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
+        turn_start_threshold: Likelihood above which the server emits
+            ``turn.start``. 0.5–0.9; Cartesia defaults to 0.8.
+        turn_eager_end_threshold: Likelihood below which the server emits
+            ``turn.eager_end``. 0.3–0.6; Cartesia defaults to 0.4.
+        turn_end_threshold: Likelihood below which the server emits
+            ``turn.end``. 0.05–0.5; Cartesia defaults to 0.2.
+        turn_end_timeout_ms: Milliseconds to wait after the user stops speaking
+            before emitting ``turn.end``. 640–11200; Cartesia defaults to 5600.
     """
 
     keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_start_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_eager_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_end_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTurnsSTTService(WebsocketSTTService):
@@ -134,6 +160,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             model="ink-2",
             language=None,
             keyterm=None,
+            # Left unset so the server applies its own turn detection defaults.
+            turn_start_threshold=None,
+            turn_eager_end_threshold=None,
+            turn_end_threshold=None,
+            turn_end_timeout_ms=None,
         )
 
         if settings is not None:
@@ -234,9 +265,10 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Keyterms are bound to a connection, so a changed ``keyterm`` list is
-        applied by reconnecting. Ink-2 does not support runtime model or
-        language switching, so those changes are reported as unhandled.
+        Keyterms and the turn detection thresholds are bound to a connection,
+        so a change to any of them is applied by reconnecting. Ink-2 does not
+        support runtime model or language switching, so those changes are
+        reported as unhandled.
 
         Args:
             delta: A :class:`STTSettings` (or
@@ -247,9 +279,10 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        self._warn_unhandled_updated_settings(changed.keys() - {"keyterm"})
+        connection_bound = {"keyterm", *_TURN_DETECTION_FIELDS}
+        self._warn_unhandled_updated_settings(changed.keys() - connection_bound)
 
-        if "keyterm" in changed:
+        if changed.keys() & connection_bound:
             await self._request_reconnect()
 
         return changed
@@ -279,6 +312,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
             ("encoding", "pcm_s16le"),
             ("sample_rate", str(self.sample_rate)),
         ]
+        params.extend(
+            (name, str(value))
+            for name in _TURN_DETECTION_FIELDS
+            if is_given(value := getattr(self._settings, name)) and value is not None
+        )
         params.extend(("keyterm", term) for term in _prepare_keyterms(self._settings.keyterm))
         # Cartesia expects spaces inside a keyterm as %20, which urlencode only
         # emits with quote_via=quote.

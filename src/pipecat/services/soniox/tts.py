@@ -125,19 +125,25 @@ def language_to_soniox_tts_language(language: Language) -> str | None:
 class SonioxTTSSettings(TTSSettings):
     """Settings for SonioxTTSService.
 
-    ``voice``, ``model``, ``language``, and ``speed`` travel in the per-stream
-    config message, so changing any of them does not require reconnecting the
-    WebSocket. The current context is flushed so the next stream opens with the
-    new values.
+    ``voice``, ``model``, ``language``, ``speed``, and ``reduce_silence`` travel
+    in the per-stream config message, so changing any of them does not require
+    reconnecting the WebSocket. The current context is flushed so the next
+    stream opens with the new values.
 
     Parameters:
         voice: Voice name (e.g. ``"Adrian"``) or the UUID of a cloned voice in
             the project owning the API key.
         speed: Speech rate multiplier in the range 0.7-1.3. ``None`` leaves it
             unset and uses the Soniox server default (1.0).
+        reduce_silence: Shorten the pauses between words so the speech flows
+            more tightly, without changing how fast the words themselves are
+            spoken. Only models whose catalogue entry reports
+            ``supports_silence_reduction`` accept it. ``None`` leaves it unset
+            and uses the Soniox server default (false).
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduce_silence: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxTTSService(WebsocketTTSService):
@@ -190,6 +196,7 @@ class SonioxTTSService(WebsocketTTSService):
             voice="Bryce",
             language=Language.EN,
             speed=None,
+            reduce_silence=None,
         )
 
         # Settings delta (canonical API, always wins)
@@ -362,7 +369,7 @@ class SonioxTTSService(WebsocketTTSService):
         if not changed:
             return changed
 
-        if changed.keys() & {"voice", "model", "language", "speed"}:
+        if changed.keys() & {"voice", "model", "language", "speed", "reduce_silence"}:
             if self._turn_context_id:
                 # Finalize the old context's still-pending sentence so its
                 # already-heard prefix still emits progress frames (mirrors the
@@ -455,6 +462,8 @@ class SonioxTTSService(WebsocketTTSService):
             config["language"] = s.language
         if s.speed is not None:
             config["speed"] = s.speed
+        if s.reduce_silence is not None:
+            config["reduce_silence"] = s.reduce_silence
         # Character-level timestamps drive the word-aligned TTSTextFrames.
         config["return_timestamps"] = True
         if self._audio_format.startswith("pcm_"):

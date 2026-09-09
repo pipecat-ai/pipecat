@@ -66,7 +66,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
-            model="meta/llama-3.3-70b-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )

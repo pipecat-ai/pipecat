@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -144,6 +145,76 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
         self.assertTrue(any("not in the currently advertised tool set" in w for w in warnings))
         self.assertFalse(any("just unregistered" in w for w in warnings))
+
+    async def test_handler_that_raises_settles_the_call_with_the_failure(self):
+        """The LLM reads a stand-in message; the frame says what went wrong."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def explode(params):
+            raise RuntimeError("the API is down")
+
+        service.register_function("weather", explode)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        service.push_error = AsyncMock()
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertIsInstance(result, FunctionCallResultFrame)
+        self.assertEqual(result.error, "RuntimeError: the API is down")
+        self.assertEqual(
+            result.result,
+            LLMService.FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE.format(function_name="weather"),
+        )
+
+    async def test_a_call_that_returns_carries_no_error(self):
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+
+        async def handler(params):
+            await params.result_callback({"temperature": 12})
+
+        service.register_function("weather", handler)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="weather",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        result = recorded_frames[-1]
+        self.assertEqual(result.result, {"temperature": 12})
+        self.assertIsNone(result.error)
 
     async def test_function_unregistered_between_queue_and_execute(self):
         """Function unregistered between queuing and execution still terminates."""
@@ -922,6 +993,25 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("G1")
         service.append_system_instruction("G2")
         self.assertEqual(service._settings.system_instruction, "APP\n\nG1\n\nG2")
+
+    def test_composition_is_logged_only_when_it_changes(self):
+        service = self._service("APP")
+        logged: list[str] = []
+        handler_id = logger.add(
+            lambda message: logged.append(str(message)), level="DEBUG", format="{message}"
+        )
+        try:
+            service.append_system_instruction("GUIDE")
+            # Every tool sync recomposes; an unchanged instruction stays quiet.
+            service._compose_system_instruction()
+            service._compose_system_instruction()
+            service.append_system_instruction("MORE")
+        finally:
+            logger.remove(handler_id)
+        composed = [line for line in logged if "System instruction composed" in line]
+        self.assertEqual(len(composed), 2)
+        self.assertIn("APP\n\nGUIDE\n", composed[0])
+        self.assertIn("MORE", composed[1])
 
     async def test_appended_guide_survives_turn_completion_toggle(self):
         service = self._service("APP")

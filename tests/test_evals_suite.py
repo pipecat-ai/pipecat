@@ -4,10 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval suite's manifest parsing and per-run log capture."""
+"""Tests for the eval suite's manifest parsing, per-run log capture, and run updates."""
 
+import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -16,6 +18,8 @@ from pipecat.evals.suite import (
     DEFAULT_CONCURRENCY,
     DEFAULT_SPAWN,
     EvalManifest,
+    EvalRun,
+    EvalSuite,
     capture_pipeline_logs,
 )
 
@@ -117,5 +121,243 @@ class TestCapturePipelineLogs(unittest.TestCase):
             self.assertNotIn("theirs", content)
 
 
+class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
+    """``on_update`` handlers see each run enter ``running`` and reach ``done``."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logs_dir = Path(self._tmp.name)
+        # A bot path that doesn't exist: the run errors out before spawning
+        # anything, which is enough to drive both status changes.
+        run = EvalRun(
+            bot="missing.py",
+            scenario="none",
+            scenario_path=self.logs_dir / "none.yaml",
+            bot_path=self.logs_dir / "missing.py",
+        )
+        self.suite = EvalSuite(
+            EvalManifest(
+                runs=[run],
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=1,
+                repeat=1,
+                base_port=7900,
+                runs_dir=self.logs_dir,
+                record=False,
+                cache_dir=None,
+            )
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        # EvalSuite.run() drops every log sink to keep stdout clean for its caller;
+        # put loguru's default back so the rest of the session still logs.
+        logger.remove()
+        logger.add(sys.stderr)
+
+    async def test_event_handler_receives_runs(self):
+        seen = []
+
+        @self.suite.event_handler("on_update")
+        async def on_update(source, run):
+            seen.append((source, run.status))
+
+        await self.suite.run(self.logs_dir)
+
+        self.assertTrue(all(source is self.suite for source, _ in seen))
+        self.assertEqual([status for _, status in seen], ["running", "done"])
+
+    async def test_callback_is_deprecated_and_still_called(self):
+        seen = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.suite.run(self.logs_dir, on_update=lambda run: seen.append(run.status))
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        # The callback takes only the run, not the suite an event handler gets.
+        self.assertEqual(seen, ["running", "done"])
+
+    async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
+        """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""
+        seen = []
+        callback = lambda run: seen.append(run.status)  # noqa: E731
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"])
+
+            # Passing it again reports each change once more, not twice.
+            await self.suite.run(self.logs_dir, on_update=callback)
+            self.assertEqual(seen, ["running", "done"] * 2)
+
+        # Omitting it stops the reporting.
+        await self.suite.run(self.logs_dir)
+        self.assertEqual(seen, ["running", "done"] * 2)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Simulations in a manifest's scenarios: list, and their results.jsonl records.
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+from pipecat.evals.results import (  # noqa: E402
+    EvalSimulationMetricScore,
+    EvalSimulationResult,
+    EvalSimulationTurnVerdict,
+)
+from pipecat.evals.scenario import EvalKind  # noqa: E402
+from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
+
+SIMULATION = """
+name: {name}
+persona: "A caller."
+goal: "Get it done."
+simulator: {{service: openai}}
+success: "it got done"
+runs: {runs}
+"""
+
+
+class TestManifestSimulations(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        (self.base / "scenarios").mkdir()
+        (self.base / "scenarios" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
+        (self.base / "scenarios" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
+        (self.base / "scenarios" / "greet.yaml").write_text("name: greet\nturns: []\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _manifest(self, text: str, **overrides) -> EvalManifest:
+        path = self.base / "manifest.yaml"
+        path.write_text(text)
+        return EvalManifest.load(path, **overrides)
+
+    def test_the_file_says_which_kind_a_scenario_is_and_how_often_it_runs(self):
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book, once]\n")
+        by_name = {}
+        for run in manifest.runs:
+            by_name.setdefault(run.scenario, []).append(run)
+        self.assertEqual([r.attempt for r in by_name["book"]], [1, 2, 3])
+        self.assertEqual([r.attempt for r in by_name["once"]], [1])
+        self.assertEqual([r.attempt for r in by_name["greet"]], [1])
+        book = by_name["book"][0]
+        self.assertEqual(book.kind, "simulation")
+        self.assertEqual(book.attempts, 3)
+        self.assertFalse(book.sweep)  # its runs are a requirement
+        self.assertEqual(book.scenario_path, self.base / "scenarios" / "book.yaml")
+        greet = by_name["greet"][0]
+        self.assertEqual(greet.kind, "script")
+        self.assertEqual(greet.attempts, 1)
+        self.assertFalse(greet.sweep)
+        # Attempt-major: every scenario's first attempt precedes any second one.
+        self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
+
+    def test_repeat_overrides_a_simulations_runs(self):
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=2)
+        self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
+        self.assertEqual(manifest.runs[0].attempts, 2)
+        # A repeat makes the suite a measurement.
+        self.assertTrue(all(r.sweep for r in manifest.runs))
+
+    def test_a_repeat_of_one_is_an_override_too(self):
+        """Set on the command line or in the manifest, 1 means one run, not the file's three."""
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=1)
+        self.assertEqual([r.attempt for r in manifest.runs], [1])
+        manifest = self._manifest("repeat: 1\nsuite:\n  - bot: bot.py\n    scenarios: [book]\n")
+        self.assertEqual([r.attempt for r in manifest.runs], [1])
+
+    def test_a_folder_in_a_name_stays_under_the_scenarios_dir(self):
+        (self.base / "scenarios" / "scripted").mkdir()
+        (self.base / "scenarios" / "scripted" / "greet.yaml").write_text("name: greet\nturns: []\n")
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [scripted/greet]\n")
+        run = manifest.runs[0]
+        self.assertEqual(run.scenario, "greet")
+        self.assertEqual(run.scenario_path, self.base / "scenarios" / "scripted" / "greet.yaml")
+
+    def test_the_suite_filters_by_kind(self):
+        from pipecat.evals.suite import EvalSuite
+
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book]\n")
+        runs = EvalSuite(manifest).filter(kind=EvalKind.SIMULATION)
+        self.assertEqual({r.scenario for r in runs}, {"book"})
+        self.assertEqual(len(runs), 3)
+
+    def test_a_missing_scenario_still_gets_a_run(self):
+        """Its kind can't be read, so it runs once as a scenario and reports the error."""
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")
+        self.assertEqual(len(manifest.runs), 1)
+        self.assertEqual(manifest.runs[0].kind, "script")
+        self.assertEqual(manifest.runs[0].attempts, 1)
+
+
+class TestSimulationRecords(unittest.TestCase):
+    def test_result_roundtrips_through_the_worker_json(self):
+        result = EvalSimulationResult(
+            simulation_name="book",
+            succeeded=True,
+            reason="booked",
+            metrics=[
+                EvalSimulationMetricScore(
+                    name="politeness",
+                    score=0.5,
+                    passed=False,
+                    reason="turn 2: curt",
+                    min_quality=1.0,
+                    verdicts=[
+                        EvalSimulationTurnVerdict(1, True, "warm"),
+                        EvalSimulationTurnVerdict(2, False, "curt"),
+                    ],
+                )
+            ],
+            messages=[{"role": "user", "content": "hi"}],
+            turns=2,
+            ended_by="end_call",
+            end_call={"success": True, "reason": "done"},
+            duration_ms=1234,
+        )
+        import dataclasses
+
+        rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+
+    def test_results_jsonl_record_for_a_simulation_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                attempts=3,
+                attempt=2,
+                status="done",
+                duration_ms=1234,
+                result=EvalSimulationResult(
+                    simulation_name="book",
+                    succeeded=False,
+                    reason="no table",
+                    turns=3,
+                    ended_by="bot",
+                    events_seen=[{"type": "llm_started"}],
+                ),
+            )
+            _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertEqual(record["scenario"], "book")
+            self.assertEqual(record["kind"], "simulation")
+            self.assertEqual(record["attempt"], 2)
+            self.assertFalse(record["passed"])
+            self.assertFalse(record["succeeded"])
+            self.assertEqual(record["ended_by"], "bot")
+            self.assertEqual(record["reason"], "no table")
+            self.assertEqual(record["events_seen"], [{"type": "llm_started"}])

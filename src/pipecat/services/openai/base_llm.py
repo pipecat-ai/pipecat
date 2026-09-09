@@ -482,6 +482,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             if chunk.usage.prompt_tokens_details
                             else None
                         )
+                        # Tokens written into the prompt cache, billed above the
+                        # input rate. Providers without prompt caching omit the
+                        # field, which reads as "not reported" rather than zero.
+                        cache_write_tokens = (
+                            getattr(chunk.usage.prompt_tokens_details, "cache_write_tokens", None)
+                            if chunk.usage.prompt_tokens_details
+                            else None
+                        )
                         reasoning_tokens = (
                             chunk.usage.completion_tokens_details.reasoning_tokens
                             if chunk.usage.completion_tokens_details
@@ -492,6 +500,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             completion_tokens=chunk.usage.completion_tokens,
                             total_tokens=chunk.usage.total_tokens,
                             cache_read_input_tokens=cached_tokens,
+                            cache_creation_input_tokens=cache_write_tokens,
                             reasoning_tokens=reasoning_tokens,
                         )
 

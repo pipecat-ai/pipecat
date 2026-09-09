@@ -153,11 +153,12 @@ async def test_google_stt_rejects_invalid_runtime_adaptation_before_commit():
     assert service._settings.adaptation is None
 
 
-async def connected_recognition_config(adaptation, model="latest_long"):
+async def connected_recognition_config(adaptation, model="latest_long", denoiser_config=None):
     """Run _connect() on a bare service and return the config it built."""
     service = object.__new__(GoogleSTTService)
     service._settings = GoogleSTTService.Settings(
         model=model,
+        denoiser_config=denoiser_config,
         enable_automatic_punctuation=True,
         enable_spoken_punctuation=False,
         enable_spoken_emojis=False,
@@ -201,6 +202,22 @@ async def test_google_connect_omits_adaptation_for_the_telephony_model(model):
     config = await connected_recognition_config({"phrase_sets": [phrase_set]}, model=model)
 
     assert "adaptation" not in config
+
+
+@pytest.mark.asyncio
+async def test_google_connect_sends_denoiser_config():
+    config = await connected_recognition_config(
+        None, model="chirp_3", denoiser_config={"denoise_audio": True}
+    )
+
+    assert config.denoiser_config.denoise_audio is True
+
+
+@pytest.mark.asyncio
+async def test_google_connect_leaves_denoiser_config_unset_when_not_configured():
+    config = await connected_recognition_config(None)
+
+    assert "denoiser_config" not in config
 
 
 @pytest.mark.asyncio

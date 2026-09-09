@@ -15,7 +15,7 @@ SERVICE_CONFIGS = {
     "aws_transcribe_stt": (
         "AWSTranscribeSTTService(\n"
         '        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),\n'
-        '        aws_session_token=os.getenv("AWS_AWS_SESSION_TOKEN"),\n'
+        '        aws_session_token=os.getenv("AWS_SESSION_TOKEN"),\n'
         '        region=os.getenv("AWS_REGION")\n'
         "    )\n"
     ),
@@ -61,12 +61,7 @@ SERVICE_CONFIGS = {
         '        region=os.getenv("GLADIA_REGION")\n'
         "    )\n"
     ),
-    "google_stt": (
-        "GoogleSTTService(\n"
-        '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
-        '        location=os.getenv("GOOGLE_LOCATION")\n'
-        "    )\n"
-    ),
+    "google_stt": 'GoogleSTTService(credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))',
     "gradium_stt": 'GradiumSTTService(api_key=os.getenv("GRADIUM_API_KEY"))',
     "groq_stt": 'GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))',
     "meta_stt": 'MetaSTTService(api_key=os.getenv("META_API_KEY"))',
@@ -80,27 +75,20 @@ SERVICE_CONFIGS = {
     ),
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
-    "sarvam_stt": (
-        "SarvamSTTService(\n"
-        '        api_key=os.getenv("SARVAM_API_KEY"),\n'
-        "        settings=SarvamSTTService.Settings(\n"
-        '            model=os.getenv("SARVAM_MODEL"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
+    "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
         "MoonshineSTTService(\n"
         "        settings=MoonshineSTTService.Settings(\n"
-        '            model=os.getenv("MOONSHINE_STT_MODEL"),\n'
+        '            model=os.getenv("MOONSHINE_MODEL", "small-streaming"),\n'
         "        ),\n"
         "    )\n"
     ),
     "whisper_stt": (
         "WhisperSTTService(\n"
         "        settings=WhisperSTTService.Settings(\n"
-        '            model=os.getenv("OPENAI_MODEL"),\n'
+        '            model=os.getenv("WHISPER_MODEL", "Systran/faster-distil-whisper-medium.en"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -589,7 +577,6 @@ SERVICE_CONFIGS = {
         "SarvamTTSService(\n"
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
         "        settings=SarvamTTSService.Settings(\n"
-        '            model=os.getenv("SARVAM_MODEL"),\n'
         '            voice=os.getenv("SARVAM_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"

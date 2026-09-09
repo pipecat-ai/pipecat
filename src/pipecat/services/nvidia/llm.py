@@ -84,7 +84,7 @@ class NvidiaLLMService(OpenAILLMService):
             base_url: The base URL for NIM API. Defaults to NVIDIA's cloud endpoint.
                 For local deployments, pass the local address (e.g. ``http://localhost:8000/v1``).
             model: The model identifier to use. Defaults to
-                "nvidia/nemotron-3-nano-30b-a3b".
+                "nvidia/nemotron-3-super-120b-a12b".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=NvidiaLLMService.Settings(model=...)`` instead.
@@ -95,7 +95,7 @@ class NvidiaLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="nvidia/nemotron-3-nano-30b-a3b")
+        default_settings = self.Settings(model="nvidia/nemotron-3-super-120b-a12b")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -171,6 +171,7 @@ class NvidiaLLMService(OpenAILLMService):
                 return passthrough
 
             if self._think_tag_buffer.startswith(_THINK_OPEN):
+                await self.stop_ttfb_metrics()
                 self._think_tag_state = _ThinkTagState.IN_THOUGHT
                 await self.push_frame(LLMThoughtStartFrame())
                 self._think_tag_buffer = self._think_tag_buffer[len(_THINK_OPEN) :]
@@ -287,6 +288,7 @@ class NvidiaLLMService(OpenAILLMService):
                     )
                     if rc:
                         if not self._has_reasoning_field:
+                            await self.stop_ttfb_metrics()
                             self._has_reasoning_field = True
                             await self.push_frame(LLMThoughtStartFrame())
                         await self.push_frame(LLMThoughtTextFrame(text=rc))

@@ -80,6 +80,127 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "pipecat.evals.harness",
+      "module": "pipecat.evals.harness",
+      "kind": "module",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.evals.script_session",
+      "message": "Moved to :mod:`pipecat.evals.script_session`. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/harness.py"
+    },
+    {
+      "subject": "EvalResult",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptResult",
+      "message": "`EvalResult` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptResult` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "EvalTurnProgress",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurnProgress",
+      "message": "`EvalTurnProgress` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurnProgress` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "EvalTurnResult",
+      "module": "pipecat.evals.results",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurnResult",
+      "message": "`EvalTurnResult` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurnResult` instead.",
+      "location": "pipecat/evals/results.py"
+    },
+    {
+      "subject": "EvalScenario",
+      "module": "pipecat.evals.script",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptScenario",
+      "message": "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptScenario` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalTurn",
+      "module": "pipecat.evals.script",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptTurn",
+      "message": "`EvalTurn` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptTurn` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalScriptSession.from_scenario.on_progress",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalScriptSession.on_progress",
+      "module": "pipecat.evals.script_session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "EvalSession",
+      "module": "pipecat.evals.script_session",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScriptSession",
+      "message": "`EvalSession` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptSession` instead.",
+      "location": "pipecat/evals/script_session.py"
+    },
+    {
+      "subject": "RTVIEvalSerializer",
+      "module": "pipecat.evals.serializer",
+      "kind": "class",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalSerializer",
+      "message": "`RTVIEvalSerializer` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalSerializer` instead.",
+      "location": "pipecat/evals/serializer.py"
+    },
+    {
+      "subject": "EvalSuite.run.on_update",
+      "module": "pipecat.evals.suite",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_update",
+      "message": "Use the ``on_update`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",
@@ -3355,6 +3476,17 @@
       "relation": "use_existing",
       "replacement": "settings=SarvamHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/sarvam/tts.py"
+    },
+    {
+      "subject": "SarvamTTSModel.BULBUL_V2",
+      "module": "pipecat.services.sarvam.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SarvamTTSModel.BULBUL_V3",
+      "message": "Use :attr:`SarvamTTSModel.BULBUL_V3` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/sarvam/tts.py"
     },
     {

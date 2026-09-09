@@ -81,6 +81,10 @@ class AsyncAITTSService(WebsocketTTSService):
     """
 
     Settings = AsyncAITTSSettings
+
+    #: Settings baked into the websocket init message, and therefore only
+    #: changeable by starting a new session.
+    _SESSION_INIT_FIELDS = frozenset({"model", "voice", "language"})
     _settings: Settings
 
     @deprecated(
@@ -204,16 +208,29 @@ class AsyncAITTSService(WebsocketTTSService):
         self._keepalive_task = None
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta.
+        """Apply a settings delta, reconnecting when a session-init field changes.
 
-        Settings are stored but not applied to the active connection.
+        ``model``, ``voice`` and ``language`` are sent once in the init message at
+        connect time and are never repeated per utterance — ``_build_msg`` carries
+        only the transcript and context id — so a new websocket session is the only
+        way a change to any of them reaches Async.
+
+        Args:
+            delta: A settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        self._warn_unhandled_updated_settings(changed)
+        if self._SESSION_INIT_FIELDS & changed.keys():
+            await self._disconnect()
+            await self._connect()
+
+        self._warn_unhandled_updated_settings(changed.keys() - self._SESSION_INIT_FIELDS)
 
         return changed
 

@@ -56,12 +56,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = AssemblyAISTTService(
-        api_key=os.environ["ASSEMBLYAI_API_KEY"],
-        settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
-        ),
-    )
+    stt = AssemblyAISTTService(api_key=os.environ["ASSEMBLYAI_API_KEY"])
 
     tl = TranscriptionLogger()
 

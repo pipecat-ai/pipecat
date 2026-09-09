@@ -77,7 +77,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
-        model="gemini-2.5-flash",
         settings=GoogleLLMService.Settings(
             system_instruction="""You are a helpful assistant in a voice conversation.
 

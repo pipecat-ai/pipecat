@@ -70,7 +70,10 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import subprocess
+import sys
 import unittest
+import warnings
 from unittest.mock import patch
 
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
@@ -3062,6 +3065,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
                 "from context", "from settings", discard_context_system=True
             )
             mock_logger.warning.assert_called_once()
+            self.assertIn("is not sent to the model", mock_logger.warning.call_args[0][0])
 
         self.assertEqual(result, "from settings")
 
@@ -3200,6 +3204,101 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         for model, expected in cases.items():
             service = self._bedrock(model=model)
             self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
+
+
+class TestContextSystemMessageDeprecation(unittest.TestCase):
+    """Every adapter warns when the system prompt is carried in the context."""
+
+    def _context(self):
+        return LLMContext(
+            messages=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
+
+    def _invoke(self, adapter, system_instruction):
+        if isinstance(adapter, OpenAILLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                convert_developer_to_user=False,
+            )
+        if isinstance(adapter, AnthropicLLMAdapter):
+            return adapter.get_llm_invocation_params(
+                self._context(),
+                system_instruction=system_instruction,
+                enable_prompt_caching=False,
+            )
+        return adapter.get_llm_invocation_params(
+            self._context(), system_instruction=system_instruction
+        )
+
+    def test_every_adapter_warns_with_or_without_system_instruction(self):
+        adapters = [
+            OpenAILLMAdapter,
+            OpenAIResponsesLLMAdapter,
+            AnthropicLLMAdapter,
+            GeminiLLMAdapter,
+            GeminiLiveLLMAdapter,
+            AWSBedrockLLMAdapter,
+            AWSNovaSonicLLMAdapter,
+            OpenAIRealtimeLLMAdapter,
+            GrokRealtimeLLMAdapter,
+        ]
+        for cls in adapters:
+            for system_instruction in (None, "Be concise."):
+                with self.subTest(adapter=cls.__name__, system_instruction=system_instruction):
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        self._invoke(cls(), system_instruction)
+                    messages = [
+                        str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)
+                    ]
+                    self.assertTrue(messages, "expected a DeprecationWarning")
+                    self.assertIn("system_instruction", messages[0])
+
+    def test_warns_once_per_adapter(self):
+        adapter = OpenAILLMAdapter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._invoke(adapter, None)
+            self._invoke(adapter, None)
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(deprecations), 1)
+
+    def test_warns_through_an_ignore_filter(self):
+        """The warning reaches a bot whose interpreter ignores the category.
+
+        Every caller is inside an LLM service, so the default
+        ``ignore::DeprecationWarning`` would hide it. Run in a subprocess to get
+        an interpreter whose filters ignore the category.
+        """
+        script = (
+            "from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter\n"
+            "from pipecat.processors.aggregators.llm_context import LLMContext\n"
+            "ctx = LLMContext(messages=["
+            "{'role': 'system', 'content': 'Be helpful.'},"
+            "{'role': 'user', 'content': 'hi'}])\n"
+            "OpenAILLMAdapter().get_llm_invocation_params("
+            "ctx, system_instruction=None, convert_developer_to_user=False)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is deprecated since 1.9.0", result.stderr)
+
+    def test_no_warning_without_a_context_system_message(self):
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            OpenAILLMAdapter().get_llm_invocation_params(
+                context, system_instruction="Be concise.", convert_developer_to_user=False
+            )
+        self.assertFalse([w for w in caught if issubclass(w.category, DeprecationWarning)])
 
 
 if __name__ == "__main__":

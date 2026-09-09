@@ -48,7 +48,7 @@ def _usage_chunk(prompt_tokens: int, completion_tokens: int, reasoning_tokens: i
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
-            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            prompt_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
             completion_tokens_details=SimpleNamespace(reasoning_tokens=reasoning_tokens),
         ),
         model=None,
@@ -155,6 +155,42 @@ async def test_cached_and_reasoning_counts_reach_the_report(service_class, init_
     usage = reported.call_args.args[0]
     assert usage.cache_read_input_tokens == 15
     assert usage.reasoning_tokens == 8
+
+
+@pytest.mark.parametrize(("service_class", "init_kwargs"), SERVICES)
+@pytest.mark.asyncio
+async def test_cache_write_counts_reach_the_report(service_class, init_kwargs):
+    """Cache writes are billed above the input rate, so they have to survive the
+    report as their own count rather than disappearing into prompt_tokens."""
+    chunk = _usage_chunk(20, 30)
+    chunk.usage.prompt_tokens_details.cached_tokens = 12
+    chunk.usage.prompt_tokens_details.cache_write_tokens = 8
+    service = _service(service_class, init_kwargs, [chunk])
+
+    with patch.object(FrameProcessor, "start_llm_usage_metrics", AsyncMock()) as reported:
+        await service._process_context(_context())
+
+    usage = reported.call_args.args[0]
+    assert usage.cache_creation_input_tokens == 8
+    assert usage.cache_read_input_tokens == 12
+    # the provider's own totals stay exactly as sent
+    assert usage.prompt_tokens == 20
+    assert usage.total_tokens == 50
+
+
+@pytest.mark.parametrize(("service_class", "init_kwargs"), SERVICES)
+@pytest.mark.asyncio
+async def test_a_provider_that_sends_no_cache_write_field_still_reports(service_class, init_kwargs):
+    """Older SDKs and providers without prompt caching send no such field. That
+    must read as absent, not raise and not become a zero that looks measured."""
+    chunk = _usage_chunk(20, 30)
+    del chunk.usage.prompt_tokens_details.cache_write_tokens
+    service = _service(service_class, init_kwargs, [chunk])
+
+    with patch.object(FrameProcessor, "start_llm_usage_metrics", AsyncMock()) as reported:
+        await service._process_context(_context())
+
+    assert reported.call_args.args[0].cache_creation_input_tokens is None
 
 
 @pytest.mark.parametrize(("service_class", "init_kwargs"), SERVICES)

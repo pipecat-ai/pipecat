@@ -99,6 +99,11 @@ class Language(StrEnum):
     CEB = "ceb"
     CEB_PH = "ceb-PH"
 
+    # Central Kurdish
+    CKB = "ckb"
+    CKB_IQ = "ckb-IQ"
+    CKB_IR = "ckb-IR"
+
     # Mandarin Chinese
     CMN = "cmn"
     CMN_CN = "cmn-CN"
@@ -128,6 +133,7 @@ class Language(StrEnum):
 
     # English
     EN = "en"
+    EN_AB = "en-AB"
     EN_AU = "en-AU"
     EN_CA = "en-CA"
     EN_GB = "en-GB"
@@ -142,6 +148,7 @@ class Language(StrEnum):
     EN_SG = "en-SG"
     EN_TZ = "en-TZ"
     EN_US = "en-US"
+    EN_WL = "en-WL"
     EN_ZA = "en-ZA"
 
     # Esperanto
@@ -183,6 +190,7 @@ class Language(StrEnum):
 
     # Persian
     FA = "fa"
+    FA_AF = "fa-AF"
     FA_IR = "fa-IR"
 
     # Fulah
@@ -289,6 +297,10 @@ class Language(StrEnum):
 
     # Kabuverdianu
     KEA = "kea"
+
+    # Kabyle
+    KAB = "kab"
+    KAB_DZ = "kab-DZ"
 
     # Kazakh
     KK = "kk"
@@ -486,8 +498,11 @@ class Language(StrEnum):
 
     # Swahili
     SW = "sw"
+    SW_BI = "sw-BI"
     SW_KE = "sw-KE"
+    SW_RW = "sw-RW"
     SW_TZ = "sw-TZ"
+    SW_UG = "sw-UG"
 
     # Tamil
     TA = "ta"

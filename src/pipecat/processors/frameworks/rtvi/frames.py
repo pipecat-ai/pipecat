@@ -76,7 +76,7 @@ class RTVIConfigureObserverFrame(SystemFrame):
     leave the current observer configuration unchanged.
 
     The eval harness pushes this (via the eval-only
-    :class:`~pipecat.evals.serializer.RTVIEvalSerializer`) to raise the
+    :class:`~pipecat.evals.serializer.EvalSerializer`) to raise the
     function-call report level for the calls a scenario asserts on, so
     production agents can keep the secure default.
 

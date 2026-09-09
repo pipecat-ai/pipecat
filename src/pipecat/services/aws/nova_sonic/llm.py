@@ -309,8 +309,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             session_token: AWS session token for authentication.
             region: AWS region where the service is hosted.
                 Supported regions:
-                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "ap-northeast-1"
-                - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
+                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "eu-north-1",
+                  "ap-northeast-1"
+                - Nova Sonic (the older model): "us-east-1", "eu-north-1", "ap-northeast-1"
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
                 .. deprecated:: 0.0.105

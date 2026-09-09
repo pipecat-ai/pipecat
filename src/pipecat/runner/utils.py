@@ -717,9 +717,9 @@ async def create_transport(
         # The eval transport is a plain WebSocket server speaking RTVI. The
         # harness connects as an RTVI client; the bot pipeline must include an
         # RTVIProcessor and pass an RTVIObserver to the task. Default the
-        # serializer to RTVIEvalSerializer so examples only need to opt into
+        # serializer to EvalSerializer so examples only need to opt into
         # audio input.
-        from pipecat.evals.serializer import RTVIEvalSerializer
+        from pipecat.evals.serializer import EvalSerializer
         from pipecat.evals.transport import EvalTransport, EvalTransportParams
 
         params = _get_transport_params("eval", transport_params)
@@ -730,7 +730,7 @@ async def create_transport(
                 "EvalTransportParams(audio_in_enabled=True)."
             )
         if params.serializer is None:
-            params.serializer = RTVIEvalSerializer()
+            params.serializer = EvalSerializer()
 
         # EvalTransport handles the eval-only behavior: the virtual mic, skip-TTS
         # before an on-connect greeting, and audio capture/recording.
