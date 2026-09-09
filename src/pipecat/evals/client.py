@@ -469,60 +469,16 @@ class EvalClient:
 
     async def start(self) -> None:
         """Build the eval pipeline and start running it, which connects to the bot."""
-        user_audio_rate = (
-            tts_sample_rate(self._params.user_speech) if self._params.user_speech else 0
-        )
-        params = WebsocketClientParams(
-            audio_in_enabled=self._params.bot_audio,
-            audio_out_enabled=self.sends_user_audio,
-            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._params.bot_audio else 0,
-            audio_out_sample_rate=user_audio_rate,
-            serializer=EvalClientSerializer(),
-        )
-        # Record the conversation from the *raw* audio the transport sees on each
-        # edge (the user TTS as produced, the bot's chunks as received), not the
-        # paced/filled pipeline frames: Python can't hold the 40ms pacing tick
-        # precisely, and recording the paced streams stutters. The recorder
-        # reconstructs gapless turns and pads only the real between-turn pauses.
-        if self._params.record_path and self._params.bot_audio:
-            self._recorder = EvalClientRecorder(user_audio_rate or EVAL_STT_SAMPLE_RATE)
-        # EvalClientTransport reshapes both audio edges into the continuous
-        # real-time stream VAD/STT expect: its output paces the user TTS to the bot
-        # and its input fills gaps in the bot's audio (both audio-mode only). When a
-        # recorder is set, both edges also feed it the raw audio for the recording.
-        transport = EvalClientTransport(self._connect_url(), params, recorder=self._recorder)
-
-        @transport.event_handler("on_bot_ready")
-        async def _on_bot_ready(_transport):
-            self._bot_ready_event.set()
-
-        @transport.event_handler("on_disconnected")
-        async def _on_disconnected(_transport, _websocket):
-            # The bot ended the call (a Flows bot's end_conversation, an
-            # EndFrame) by closing the connection; our own teardown closes it
-            # too, and that is not the bot's doing.
-            if not self._stopping:
-                await self._stream.append({"type": BOT_ENDED_EVENT})
-
+        transport = self._transport()
         pipeline = Pipeline(self._processors(transport))
-        # The StartFrame's rates drive the in-pipeline services: the bot-audio STT
-        # reads `audio_in_sample_rate`, the user TTS produces `audio_out_sample_rate`.
-        # Set them from the scenario so the user TTS synthesizes at the configured
-        # user_audio rate rather than the PipelineParams `audio_out` default (a
-        # mismatch that would mislabel the cached audio). Text-mode scenarios have no
-        # audio in/out, so the STT rate is a harmless placeholder for `audio_out`.
-        worker = PipelineWorker(
+        self._worker = PipelineWorker(
             pipeline,
-            params=PipelineParams(
-                audio_in_sample_rate=EVAL_STT_SAMPLE_RATE,
-                audio_out_sample_rate=user_audio_rate or EVAL_STT_SAMPLE_RATE,
-            ),
+            params=self._pipeline_params(),
             enable_rtvi=False,
             cancel_on_idle_timeout=False,
         )
-        self._worker = worker
         runner = WorkerRunner()
-        await runner.add_workers(worker)
+        await runner.add_workers(self._worker)
         self._run_task = asyncio.create_task(runner.run())
 
     async def handshake(self) -> None:
@@ -703,6 +659,39 @@ class EvalClient:
         sep = "&" if "?" in self._bot_url else "?"
         return f"{self._bot_url}{sep}{'&'.join(flags)}"
 
+    @property
+    def _user_audio_rate(self) -> int:
+        """The rate the user's audio is synthesized at; 0 in text mode."""
+        return tts_sample_rate(self._params.user_speech) if self._params.user_speech else 0
+
+    def _transport(self) -> EvalClientTransport:
+        """The transport to the bot, with the recorder when the run records, and its two handlers."""
+        params = WebsocketClientParams(
+            audio_in_enabled=self._params.bot_audio,
+            audio_out_enabled=self.sends_user_audio,
+            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._params.bot_audio else 0,
+            audio_out_sample_rate=self._user_audio_rate,
+            serializer=EvalClientSerializer(),
+        )
+        # The recorder is fed the raw audio by both edges; the paced streams
+        # would make the recording stutter.
+        if self._params.record_path and self._params.bot_audio:
+            self._recorder = EvalClientRecorder(self._user_audio_rate or EVAL_STT_SAMPLE_RATE)
+        transport = EvalClientTransport(self._connect_url(), params, recorder=self._recorder)
+
+        @transport.event_handler("on_bot_ready")
+        async def _on_bot_ready(_transport):
+            self._bot_ready_event.set()
+
+        @transport.event_handler("on_disconnected")
+        async def _on_disconnected(_transport, _websocket):
+            # The bot ended the call by closing the connection; our own teardown
+            # closes it too, and that is not the bot's doing.
+            if not self._stopping:
+                await self._stream.append({"type": BOT_ENDED_EVENT})
+
+        return transport
+
     def _processors(self, transport: EvalClientTransport) -> list:
         """The pipeline's processors: inbound from the bot, the sink, outbound to the bot.
 
@@ -766,6 +755,17 @@ class EvalClient:
             await self._stream.bot_turn_stopped(message.content or "")
 
         return aggregator
+
+    def _pipeline_params(self) -> PipelineParams:
+        """The StartFrame's rates: the bot STT reads the input rate, the user TTS produces the output rate.
+
+        They come from the scenario so the user TTS synthesizes at the
+        configured rate; in text mode the STT rate is a placeholder.
+        """
+        return PipelineParams(
+            audio_in_sample_rate=EVAL_STT_SAMPLE_RATE,
+            audio_out_sample_rate=self._user_audio_rate or EVAL_STT_SAMPLE_RATE,
+        )
 
     def _message(self, message_type: str, data: dict) -> RTVI.Message:
         """One RTVI client message, numbered in order of creation."""
