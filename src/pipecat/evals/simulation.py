@@ -63,11 +63,13 @@ Fields:
     judged quality criteria, each with ``name``, ``criterion``, and an optional
     ``min_quality`` in 0..1. A criterion says what every reply of the bot should
     be; the judge decides it for each bot turn, in the light of the conversation
-    before it and the tool calls the bot had made by then, and the metric's
-    score is the share of turns that passed: 0.80 is four replies in five. A
-    metric with a ``min_quality`` fails the run when its score is below it; one
-    without is reported and never fails anything. Something the bot must do
-    once, read the order back, belongs in ``success``, not here.
+    before it and the tool calls the bot had made by then, with a yes or a no,
+    never a partial score. The metric's score is the share of turns that got a
+    yes: 0.80 is four replies in five. A turn the judge leaves out counts as a
+    no, and a run with no bot turn has no score and passes. A metric with a
+    ``min_quality`` fails the run when its score is below it; one without is
+    reported and never fails anything. Something the bot must do once, read
+    the order back, belongs in ``success``, not here.
 
     A metric can measure instead of judge: ``measure`` names one of
     ``SIMULATION_MEASURES`` and ``min_value`` / ``max_value`` (at least one)
@@ -129,8 +131,9 @@ class EvalSimulationMetric:
         name: The metric's name in the results.
         criterion: What the judge decides on each bot turn; ``None`` for a
             measured metric.
-        min_quality: The score, in 0..1, below which a judged metric fails the
-            run; ``None`` reports the score without gating.
+        min_quality: The share of the bot's turns the judge must answer yes
+            for, in 0..1, below which a judged metric fails the run; ``None``
+            reports the score without gating.
         measure: One of ``SIMULATION_MEASURES``; ``None`` for a judged metric.
         min_value: The measured value's lower bound, inclusive, or ``None``.
         max_value: The measured value's upper bound, inclusive, or ``None``.

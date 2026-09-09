@@ -186,8 +186,9 @@ class EvalSimulationMetricScore:
 
     Parameters:
         name: The metric's name, from the simulation file.
-        score: The share of the bot's turns that satisfied the criterion, in
-            0..1; ``None`` when there was no turn to judge.
+        score: The share of the bot's turns the judge answered yes for, in
+            0..1, each turn a yes or a no; ``None`` when there was no turn to
+            judge.
         passed: Whether the metric let the run pass: its score reached its
             ``min_quality``, or it has none.
         reason: What the score rests on: the turns that fell short and why,

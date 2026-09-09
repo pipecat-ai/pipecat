@@ -299,8 +299,9 @@ deterministic so it stays true across runs.
 
 A judged metric's `criterion` says what every reply of the bot should be, and
 the judge decides it for each bot turn in one call over the whole transcript,
-the bot's tool calls in place; the score is the share of turns that passed, so
-`min_quality: 1` means never, and `0.8` allows one slip in five. Write a rule
+the bot's tool calls in place, with a yes or a no, never a partial score. The
+score is the share of turns that got a yes, so `min_quality: 1` means never,
+and `0.8` allows one slip in five. Write a rule
 as a condition with what a reply outside it does ("when the reply turns down a
 time, it offers alternatives; a reply that turns down no time passes"), or the
 judge reads a "never" as an "always". Something the bot must do once belongs
