@@ -47,7 +47,7 @@ complete = tracker.add_word_and_check_complete("4111")
 | `add_word_and_check_complete()` | `process_word` | Advance, and learn whether the slot is now done |
 | `get_word_for_frame()` | `process_word` | The **text** of the emitted `TTSTextFrame` |
 | `get_llm_consumed()` | `process_word` | The **`raw_text`** of that frame — what the conversation context records |
-| `suppress_in_context()` | `process_word` | Sets `append_to_context=False` and skips the progress frame |
+| `suppress_in_context()` | `process_word` | Sets `append_to_context=False` and skips the progress frame — mid-rewrite, or a mark an earlier word already recorded |
 | `get_overflow_word()` | `process_word` | Re-entered as a new word against the *next* slot |
 | `get_accumulated_user_facing_text()` | `_build_progress_frame` | `accumulated_text` → the spoken part of the segment text (what a UI highlights) |
 | `get_remaining_user_facing_text(strip=False)` | `_build_progress_frame` | `remaining_text` → the unspoken part of the segment text (what a UI leaves plain) |

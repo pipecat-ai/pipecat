@@ -43,7 +43,14 @@ That is why the map tracks a *third* text. The two it compares are `tts_text` an
 | --- | --- | --- |
 | `raw_pos` | `Your card is 4111` | The TTS text — the only cursor that really moves |
 | `user_facing_pos` | `Your card is 4111` | The segment text — e.g. what the UI highlights |
-| `llm_pos` | `Your card is <card>4111</card>` | The LLM text — what the conversation context records |
+| `llm_pos` | `Your card is <card>4111</card>` | The LLM text — what has been **attributed** to a word |
+| `llm_spoken_pos` | `Your card is <card>4111</card>` | The same text — what has been **reported spoken** |
+
+The LLM side needs two because one position cannot answer both questions. A word
+takes a mark stuck to its end (`Yeah,` not `Yeah`), so the context reassembles without
+a space before it — but until the provider reports that mark, it has not been spoken,
+and a frame ending early still owes it. `llm_pos` answers the first, `llm_spoken_pos`
+the second, and the text between them is attributed but not yet spoken.
 
 All three are **zero-based character indices**, and each points *just past* what has been
 consumed: `text[:pos]` is everything spoken so far, `text[pos]` is the next character. A

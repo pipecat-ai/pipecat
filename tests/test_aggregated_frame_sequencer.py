@@ -701,6 +701,61 @@ class TestTokenizationShapeResilience(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await self._run_shape(words), self.SENTENCE.strip())
 
 
+class TestPunctuationTokensWithoutPreMerge(unittest.IsolatedAsyncioTestCase):
+    """A service forwarding raw tokens, so a mark reaches the sequencer on its own.
+
+    ``merge_punct_tokens`` folds a punctuation-only token into the word before it,
+    but only where the service asks for it (``pre_merge_tokens=True``). Without it
+    the mark arrives as its own event, after the word it trails already carried it
+    into the context.
+    """
+
+    @staticmethod
+    def _context(frames) -> str:
+        return concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text if f.raw_text else f.text,
+                    includes_inter_part_spaces=f.includes_inter_frame_spaces,
+                )
+                for f in frames
+                if isinstance(f, TTSTextFrame) and f.append_to_context
+            ]
+        )
+
+    async def _run(self, text: str, tokens: list[str]):
+        seq = _seq()
+        await seq.register_spoken(
+            _spoken_frame(text, raw_text=text), "ctx1", text, append_to_context=True
+        )
+        frames = []
+        for word in tokens:
+            frames.extend(seq.process_word(word, pts=10, context_id="ctx1"))
+        return frames
+
+    async def test_the_mark_reaches_the_context_once(self):
+        frames = await self._run("Yeah, I can help", ["Yeah", ",", "I", "can", "help"])
+        self.assertEqual(self._context(frames), "Yeah, I can help")
+
+    async def test_the_mark_is_still_emitted_on_the_word_channel(self):
+        """It is what the provider reported speaking, so a word consumer sees it."""
+        frames = await self._run("Yeah, I can help", ["Yeah", ",", "I", "can", "help"])
+        spoken = [f.text for f in frames if isinstance(f, TTSTextFrame)]
+        self.assertEqual(spoken, ["Yeah", ",", "I", "can", "help"])
+
+    async def test_a_mark_carrying_its_own_spacing(self):
+        """The token shape Inworld reports: the mark arrives with a trailing space."""
+        text = "hello world! How are you"
+        frames = await self._run(text, ["hello", " world", "! ", "How", " are", " you"])
+        self.assertEqual(self._context(frames), text)
+
+    async def test_a_symbol_the_source_spells_differently(self):
+        """ElevenLabs reports an arrow as a dash; the arrow still reaches the context."""
+        text = "Step one → step two"
+        frames = await self._run(text, ["Step", "one", "-", "step", "two"])
+        self.assertEqual(self._context(frames), text)
+
+
 class TestClear(unittest.IsolatedAsyncioTestCase):
     async def test_clears_slots(self):
         seq = _seq()

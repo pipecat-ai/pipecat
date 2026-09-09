@@ -14,6 +14,7 @@ from enum import Enum, auto
 
 from pipecat.utils.text.alnum_utils import (
     advance_by_alnums,
+    advance_by_chars,
     alnum_only,
     fold_for_matching,
     has_alnum,
@@ -172,13 +173,19 @@ class TextSegmentMap:
     and its cursor moves by that count.
 
     From then on one real cursor moves: ``raw_pos``, how far into ``tts_text`` the
-    provider has got. ``user_facing_pos`` and ``llm_pos`` follow it:
+    provider has got. ``user_facing_pos`` and the two LLM cursors follow it:
 
     - Through an **unchanged** segment they keep pace, word for word.
     - Through a **rewritten** one they wait. There is no honest position halfway
       through ``"$42.50"`` while ``"forty two dollars"`` is being spoken, so they
       hold and then jump to the end of the span in one step when the last of its
       words lands.
+
+    The LLM side carries two of them because one position cannot answer both
+    questions asked of it. ``llm_spoken_pos`` is what the provider has reported;
+    ``llm_pos`` is what has been attributed to a word, and runs ahead of it over
+    a mark stuck to a word the provider has already named. See
+    :meth:`_advance_llm_cursors`.
 
     Callers ask two things. :meth:`word_belongs_current_segment` -- does this token
     plausibly continue what is left to speak? -- and :meth:`advance_word`, which
@@ -345,6 +352,7 @@ class TextSegmentMap:
         self._seg_raw_pos: int = 0
         self._user_facing_pos: int = 0
         self._llm_pos: int = 0
+        self._llm_spoken_pos: int = 0
         self._last_completed: TextSegment | None = None
         self._last_overflow: str | None = None
         self._last_leading_duplicate: int = 0
@@ -631,9 +639,12 @@ class TextSegmentMap:
     def _keep_derived_cursors_in_pace(self, seg: TextSegment, new_pos: int) -> None:
         """Move the cursors into the other two texts by what this step just spoke.
 
-        The count of letters and digits consumed here is what they move by.
+        The user-facing cursor moves by the count of letters and digits consumed
+        here. The two LLM cursors have their own rule -- see
+        :meth:`_advance_llm_cursors`.
         """
-        n_alnum = len(alnum_only(seg.tts[self._seg_raw_pos : new_pos]))
+        crossed = seg.tts[self._seg_raw_pos : new_pos]
+        n_alnum = len(alnum_only(crossed))
         if n_alnum:
             self._user_facing_pos = advance_by_alnums(
                 self._original_text, self._user_facing_pos, n_alnum
@@ -646,7 +657,32 @@ class TextSegmentMap:
             # rather than a word later. Both sides are identical here, so that
             # offset is exact.
             self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
-        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, n_alnum)
+        self._advance_llm_cursors(crossed, n_alnum)
+
+    def _advance_llm_cursors(self, crossed: str, n_alnum: int) -> None:
+        """Move both LLM cursors for a step that just spoke *crossed*.
+
+        The two answer different questions and so stop in different places, which
+        is the whole reason there are two of them:
+
+        - :attr:`llm_spoken_pos` -- what has been **reported spoken**. It crosses
+          exactly the characters the raw cursor did, so it stops in front of a
+          mark no event has arrived for.
+        - :attr:`llm_pos` -- what has been **attributed**. It also takes a mark
+          stuck to the end of the word, since the conversation context is rebuilt
+          by joining the attributed spans and every character has to belong to
+          one of them: ``"Yeah,"`` then ``"I"`` reads back correctly where
+          ``"Yeah"`` then ``", I"`` would put a space before the comma.
+
+        Attribution never moves backwards and never trails what was spoken, so a
+        step that spends no budget on the attributed side -- an emoji, a symbol
+        the source spells differently -- is still credited to the word that
+        crossed it.
+        """
+        self._llm_spoken_pos = advance_by_chars(self._llm_text, self._llm_spoken_pos, len(crossed))
+        self._llm_pos = max(
+            advance_by_alnums(self._llm_text, self._llm_pos, n_alnum), self._llm_spoken_pos
+        )
 
     def _commit_transformed_span(self, seg: TextSegment) -> None:
         """Jump the other two cursors to the end of *seg*, now that it is done."""
@@ -654,6 +690,8 @@ class TextSegmentMap:
         # The original's count, not the TTS side's: llm_text holds "$42.50"
         # (4 alnums), never the spoken "forty two dollars".
         self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, seg.original_alnum_count)
+        # The span is spoken in full or not at all, so both cursors land together.
+        self._llm_spoken_pos = self._llm_pos
 
     def _finish_segment(self, seg: TextSegment) -> None:
         """Record *seg* as finished and move on to the next segment."""
@@ -841,8 +879,24 @@ class TextSegmentMap:
 
     @property
     def llm_pos(self) -> int:
-        """How far into the LLM's text the spoken words have reached."""
+        """How far into the LLM's text has been attributed to a word so far.
+
+        Ahead of :attr:`llm_spoken_pos` whenever a word swept up a mark that no
+        event has reported yet; the text between the two is attributed but not
+        yet spoken.
+        """
         return self._llm_pos
+
+    @property
+    def llm_spoken_pos(self) -> int:
+        """How far into the LLM's text the provider has actually reported speaking.
+
+        What a caller showing progress, or ending a frame early, should read:
+        text past this point has had no word event, so it still belongs to what
+        is left to say even when :attr:`llm_pos` has already credited it to a
+        word.
+        """
+        return self._llm_spoken_pos
 
     @property
     def raw_pos(self) -> int:

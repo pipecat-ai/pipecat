@@ -101,6 +101,7 @@ class WordCompletionTracker:
         # mirrored -- the map's raw_pos is read directly.
         self._user_facing_pos = 0
         self._llm_pos = 0
+        self._llm_spoken_pos = 0
 
         # --- Answers about the most recent word ---
         # Rewritten by every add_word_and_check_complete call and read back
@@ -155,6 +156,7 @@ class WordCompletionTracker:
             return self._force_complete(word)
 
         llm_pos_before = self._llm_pos
+        spoken_before = self._llm_spoken_pos
         raw_pos_before = self._segment_map.raw_pos
         self._segment_map.advance_word(word)
 
@@ -182,9 +184,10 @@ class WordCompletionTracker:
 
         self._user_facing_pos = self._segment_map.user_facing_pos
         self._llm_pos = self._segment_map.llm_pos
+        self._llm_spoken_pos = self._segment_map.llm_spoken_pos
 
         if self._llm_text is not None:
-            self._record_llm_span(word, llm_pos_before)
+            self._record_llm_span(word, llm_pos_before, spoken_before)
 
         complete = self.is_complete
         if complete:
@@ -213,40 +216,55 @@ class WordCompletionTracker:
         self._user_facing_pos = len(self._user_facing_text)
         if self._llm_text is not None:
             # The whole remainder is this frame's by definition, tags included.
-            self._llm_consumed = self._llm_text[self._llm_pos :]
+            self._llm_consumed = self._llm_text[self._llm_spoken_pos :]
             self._llm_pos = len(self._llm_text)
+            self._llm_spoken_pos = len(self._llm_text)
         self._force_completed = True
         self._overflow_word = word
         return True
 
-    def _record_llm_span(self, word: str, llm_pos_before: int) -> None:
+    def _record_llm_span(self, word: str, llm_pos_before: int, spoken_before: int) -> None:
         """Record which part of ``llm_text`` the word just added stands for.
 
-        Usually that is simply the span the map's cursor moved over. Two cases
-        reach further, and both leave ``_llm_pos`` ahead of the map's:
+        Usually that is simply the span the attributed cursor moved over. Two
+        cases reach further, and both leave ``_llm_pos`` ahead of the map's:
 
         - **The word finished the frame**: take everything to the end of
           ``llm_text``. The map stops at the last spoken character, so a closing
           tag -- which never arrives as its own event -- is still outstanding and
           belongs to this word.
-        - **The cursor did not move**, because the map placed the word without
-          spending any budget (an emoji or symbol): take the word's own length
-          from ``llm_text``, skipping spaces the previous word owns.
+        - **Neither cursor moved**: the map accepted the word without matching it
+          to anything, as it does for a symbol the source text spells differently
+          (a provider reporting ``->`` for ``→``). Nothing else will ever report
+          that character, so the word's own length is spent on it instead.
 
         A word inside a transformed segment records nothing, and is checked
-        before that second case: the cursor is held there on purpose, so "did not
-        move" would be misread as "spent nothing" and would walk the cursor
-        through text the transform covers. Only the word completing the segment
-        carries its original span.
+        before that second case: the cursors are held there on purpose, so "did
+        not move" would be misread as "stood for something unmatched" and would
+        walk through text the transform covers. Only the word completing the
+        segment carries its original span.
+
+        An empty span is not the same as an unmatched word -- it means an earlier
+        word already covered this one, which :meth:`suppress_in_context` reports
+        so the context does not record it twice.
         """
         assert self._llm_text is not None
 
         if self.is_complete:
             self._llm_consumed = self._llm_text[llm_pos_before:]
             self._llm_pos = len(self._llm_text)
+            self._llm_spoken_pos = len(self._llm_text)
         elif self._segment_map.in_transformed_segment:
             self._llm_consumed = None
-        elif self._llm_pos == llm_pos_before and self._segment_map.last_completed_segment is None:
+        elif (
+            self._llm_spoken_pos == spoken_before
+            and self._llm_pos == llm_pos_before
+            and self._segment_map.last_completed_segment is None
+        ):
+            # Neither cursor moved, so the map accepted the word without matching
+            # it to anything -- a symbol the source text spells differently, which
+            # no other event will report. Spend the word's own length so the
+            # character it stands for still reaches the context.
             start = self._llm_pos
             while start < len(self._llm_text) and self._llm_text[start].isspace():
                 start += 1
@@ -266,13 +284,27 @@ class WordCompletionTracker:
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:
-        """True when the last word was one step inside a rewritten span.
+        """True when the last word must not be written to the conversation context.
 
-        ``"$42.50"`` is spoken as five words, none of which the transcript should
-        contain. Callers keep every such word out of the conversation context and
-        let the word that finishes the span carry ``"$42.50"`` for all of them.
+        Two kinds of word answer to this, both of which the context already has
+        covered, or will have:
+
+        - **One step inside a rewritten span.** ``"$42.50"`` is spoken as five
+          words, none of which the transcript should contain; the word that
+          finishes the span carries ``"$42.50"`` for all of them.
+        - **A word with no span of its own.** A provider reporting ``","`` on
+          its own, after ``"Yeah"`` took the comma into its span, has nothing
+          left to record. The context falls back to the spoken text when a word
+          carries no span, which would store the mark a second time.
+
+        The word is still emitted either way: the provider spoke it, and a
+        consumer reading the word stream should see it. Without an ``llm_text``
+        there are no spans at all, so nothing is suppressed and every word is
+        recorded from its spoken text as usual.
         """
-        return self._segment_map.in_transformed_segment
+        return self._segment_map.in_transformed_segment or (
+            self._llm_text is not None and not (self._llm_consumed or "").strip()
+        )
 
     def get_word_for_frame(self) -> str | None:
         """Return this frame's share of the last word -- the text to emit for it.
@@ -345,7 +377,7 @@ class WordCompletionTracker:
         """
         if self._llm_text is None:
             return None
-        return self._llm_text[: self._llm_pos]
+        return self._llm_text[: self._llm_spoken_pos]
 
     def get_remaining_tts_text(self, strip: bool = True) -> str:
         """Return what this frame still has left to speak.
@@ -370,7 +402,7 @@ class WordCompletionTracker:
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_pos :].strip()
+        remaining = self._llm_text[self._llm_spoken_pos :].strip()
         return remaining if remaining else None
 
     @property
@@ -387,6 +419,7 @@ class WordCompletionTracker:
         """Rewind to the start of the frame, keeping the three texts."""
         self._user_facing_pos = 0
         self._llm_pos = 0
+        self._llm_spoken_pos = 0
         self._overflow_word = None
         self._llm_consumed = None
         self._frame_word = None
