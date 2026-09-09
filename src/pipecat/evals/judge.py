@@ -350,73 +350,83 @@ class EvalJudge:
         return response
 
 
+# The reason a verdict carries when the judge gave none.
+_NO_VERDICT = "(judge gave no verdict)"
+
+
 def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
     """Parse the run judge's answer into the goal's verdict and one per turn per criterion.
 
     Anything missing or malformed is a ``no`` with a reason, and the raw
     answer is logged, so a bad answer never passes a turn silently.
     """
-    nothing = "(judge gave no verdict)"
     if response.startswith("\0"):
         failed = JudgeVerdict(verdict="no", reason=response[1:], raw_response="")
         return RunVerdicts(goal=failed, turns={n: [failed] * turn_count for n in names})
+    obj = _judge_json(response)
+    goal = obj.get("goal")
+    if not isinstance(goal, dict):
+        goal = {}
+    goal_verdict = "yes" if str(goal.get("verdict", "")).strip().lower() == "yes" else "no"
+    goal_reason = str(goal.get("reason", "")).strip()
+    if goal_verdict == "no" and not goal_reason:
+        goal_reason = _NO_VERDICT
+    return RunVerdicts(
+        goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
+        turns={name: _turn_verdicts(obj, name, turn_count, response) for name in names},
+    )
+
+
+def _judge_json(response: str) -> dict:
+    """The JSON object in the judge's answer, or ``{}`` when there is none; a fenced or prefaced answer still parses."""
     cleaned = response.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-    obj: dict = {}
     start = cleaned.find("{")
     if start != -1:
         try:
             parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
             if isinstance(parsed, dict):
-                obj = parsed
+                return parsed
         except (json.JSONDecodeError, AttributeError):
             pass
-    if not obj:
-        logger.warning(f"Judge answer was not the expected JSON: {response!r}")
+    logger.warning(f"Judge answer was not the expected JSON: {response!r}")
+    return {}
 
-    goal = obj.get("goal")
-    if not isinstance(goal, dict):
-        goal = {}
-    goal_verdict = str(goal.get("verdict", "")).strip().lower()
-    goal_reason = str(goal.get("reason", "")).strip() or (nothing if goal_verdict != "yes" else "")
+
+def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list[JudgeVerdict]:
+    """One verdict per bot turn for criterion ``name``; a turn the judge left out is a ``no``.
+
+    Criterion names match case-insensitively; a ``reasons`` entry, keyed by
+    the turn number, gives a ``no`` its reason.
+    """
     turns_by_name = {
         str(k).lower(): v for k, v in (obj.get("turns") or {}).items() if isinstance(v, list)
     }
     reasons_by_name = {
         str(k).lower(): v for k, v in (obj.get("reasons") or {}).items() if isinstance(v, dict)
     }
-    turns: dict[str, list[JudgeVerdict]] = {}
-    for name in names:
-        answers = turns_by_name.get(name.lower(), [])
-        reasons = reasons_by_name.get(name.lower(), {})
-        if len(answers) != turn_count:
-            logger.warning(
-                f"Judge gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
-                f"turn(s); its answer was: {response!r}"
-            )
-        verdicts = []
-        for index in range(turn_count):
-            answer = answers[index] if index < len(answers) else None
-            if isinstance(answer, dict):
-                answer = answer.get("verdict")
-            if answer is None:
-                verdicts.append(JudgeVerdict(verdict="no", reason=nothing, raw_response=response))
-                continue
-            verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
-            reason = str(reasons.get(str(index + 1), "")).strip()
-            if verdict == "no" and not reason:
-                reason = "(no reason given)"
-            verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
-        turns[name] = verdicts
-    return RunVerdicts(
-        goal=JudgeVerdict(
-            verdict="yes" if goal_verdict == "yes" else "no",
-            reason=goal_reason,
-            raw_response=response,
-        ),
-        turns=turns,
-    )
+    answers = turns_by_name.get(name.lower(), [])
+    reasons = reasons_by_name.get(name.lower(), {})
+    if len(answers) != turn_count:
+        logger.warning(
+            f"Judge gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
+            f"turn(s); its answer was: {response!r}"
+        )
+    verdicts = []
+    for index in range(turn_count):
+        answer = answers[index] if index < len(answers) else None
+        if isinstance(answer, dict):
+            answer = answer.get("verdict")
+        if answer is None:
+            verdicts.append(JudgeVerdict(verdict="no", reason=_NO_VERDICT, raw_response=response))
+            continue
+        verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
+        reason = str(reasons.get(str(index + 1), "")).strip()
+        if verdict == "no" and not reason:
+            reason = "(no reason given)"
+        verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
+    return verdicts
 
 
 def _cache_key(criterion: str, messages: list) -> str:

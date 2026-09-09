@@ -148,18 +148,8 @@ class ExpectationMatcher:
                 event = await self._stream.next_event(expectation.event, deadline)
             except TimeoutError:
                 if not seen_any:
-                    raise  # no response at all → caller logs "no matching event arrived"
-                self._trace.log(f"eval: timeout, not satisfied: {last_reason}")
-                # Without `eval:` the only way to be unsatisfied is a missing
-                # substring: `text_contains` is monotonic, so it holds out for more
-                # text rather than failing outright.
-                return self._failure(
-                    expectation,
-                    turn_idx,
-                    exp_idx,
-                    f"not satisfied within {budget_ms}ms: {last_reason}",
-                    "judge_continue" if expectation.eval is not None else "text_mismatch",
-                )
+                    raise  # no response at all: the caller reports the missing event
+                return self._unsatisfied(expectation, turn_idx, exp_idx, budget_ms, last_reason)
 
             seen_any = True
             delta = self._event_text(event)
@@ -181,6 +171,28 @@ class ExpectationMatcher:
             # sentences don't run together (e.g. "...that. The weather...").
             aggregate += " "
             last_reason = reason
+
+    def _unsatisfied(
+        self,
+        expectation: EvalExpectation,
+        turn_idx: int,
+        exp_idx: int,
+        budget_ms: int,
+        last_reason: str,
+    ) -> EvalAssertionFailure:
+        """The failure of a reply that never satisfied its check within the budget.
+
+        With ``eval:`` the judge kept saying ``continue``; without it the only
+        way to be unsatisfied is a missing substring.
+        """
+        self._trace.log(f"eval: timeout, not satisfied: {last_reason}")
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"not satisfied within {budget_ms}ms: {last_reason}",
+            "judge_continue" if expectation.eval is not None else "text_mismatch",
+        )
 
     async def _match_absent(
         self,
