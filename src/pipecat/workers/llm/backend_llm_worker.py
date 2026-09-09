@@ -54,15 +54,17 @@ class BackendOutput:
         is_thought: Whether this is a reasoning summary rather than a response.
         is_final: Whether this is the backend's answer to the delegation, as opposed
             to progress on the way to it.
-        speakable: Whether the user may hear this. It is not a promise that
-            the frontend speaks it: the live model relays speakable output in
-            its own words, and may paraphrase or skip it.
+        prefers_spoken: Whether the backend would like the user to hear this.
+            A frontend weighs it rather than obeying it: the live model relays
+            what it takes up in its own words, and may speak something marked
+            otherwise, or skip something marked this way, as the conversation
+            calls for.
     """
 
     text: str
     is_thought: bool = False
     is_final: bool = False
-    speakable: bool = True
+    prefers_spoken: bool = True
 
     def to_payload(self) -> dict[str, Any]:
         """Render the output as a job update payload.
@@ -74,7 +76,7 @@ class BackendOutput:
             "text": self.text,
             "is_thought": self.is_thought,
             "is_final": self.is_final,
-            "speakable": self.speakable,
+            "prefers_spoken": self.prefers_spoken,
         }
 
     @classmethod
@@ -91,7 +93,7 @@ class BackendOutput:
             text=str(payload.get("text") or ""),
             is_thought=bool(payload.get("is_thought")),
             is_final=bool(payload.get("is_final")),
-            speakable=bool(payload.get("speakable")),
+            prefers_spoken=bool(payload.get("prefers_spoken")),
         )
 
 
@@ -248,9 +250,9 @@ class BackendLLMWorker(LLMContextWorker):
             name: Worker name; auto-generated when omitted.
             transform_output: Called with each :class:`BackendOutput` before it
                 is sent, to adjust its text or whether the user may hear it.
-                Without one, only the final answer is speakable: a frontend
-                filling the wait is usually mid-sentence when progress
-                arrives, and speaking it talks over them.
+                Without one, only the final answer asks to be spoken: a
+                frontend filling the wait is usually mid-sentence when
+                progress arrives, and speaking it talks over them.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -330,9 +332,11 @@ class BackendLLMWorker(LLMContextWorker):
         )
         text = (message.content or "").strip()
         if text:
-            # Default behavior: only the final answer is speakable.
+            # Default behavior: only the final answer asks to be spoken.
             # This behavior can be adjusted by a transform_output callback.
-            await self._emit(run, BackendOutput(text=text, is_final=finished, speakable=finished))
+            await self._emit(
+                run, BackendOutput(text=text, is_final=finished, prefers_spoken=finished)
+            )
         if finished:
             run.final_text = text
             run.finished.set()
@@ -341,7 +345,7 @@ class BackendLLMWorker(LLMContextWorker):
         run = self._run
         text = (message.content or "").strip()
         if run is not None and text:
-            await self._emit(run, BackendOutput(text=text, is_thought=True, speakable=False))
+            await self._emit(run, BackendOutput(text=text, is_thought=True, prefers_spoken=False))
 
     async def _emit(self, run: "_BackendRun", output: BackendOutput):
         """Send one output as a job update, after any configured transform."""

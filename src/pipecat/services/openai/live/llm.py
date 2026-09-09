@@ -156,9 +156,9 @@ class ClientDelegation:
     out the request from them.
 
     What comes back is appended to the live session according to each output's
-    ``speakable`` flag: speakable output as commentary, for the model to relay
-    in its own words, and the rest as thinking — silent context it can draw on
-    if the conversation turns that way.
+    ``prefers_spoken`` flag: what it wants heard goes as commentary, for the
+    model to relay in its own words, and the rest as thinking — silent context
+    it can draw on if the conversation turns that way.
 
     Parameters:
         backend: The worker that runs delegated tasks — normally a
@@ -514,7 +514,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         history = params["input"]
         # A trailing developer message is the app asking the bot to open the
         # conversation. The startup history is not the place for it: it is
-        # delivered as speakable context once the session starts, which is how
+        # delivered as commentary once the session starts, which is how
         # the API asks the model to speak first.
         self._opening_instruction = _trailing_developer_text(history)
         if self._opening_instruction:
@@ -719,7 +719,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             # Speakable context is how the API asks the model to open the
             # conversation; the model paraphrases rather than reads it out.
             instruction, self._opening_instruction = self._opening_instruction, None
-            await self._send_context_append(None, instruction, speakable=True)
+            await self._send_context_append(None, instruction, spoken=True)
 
     async def _handle_evt_session_closed(self, evt: events.SessionClosedEvent):
         logger.debug(f"{self}: session closed ({evt.reason})")
@@ -911,7 +911,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._send_context_append(
                 delegation.id,
                 "No backend is available to handle delegated work in this session.",
-                speakable=True,
+                spoken=True,
             )
             return
         task = self.create_task(
@@ -931,7 +931,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._delegated_before = True
 
         async def on_update(output: BackendOutput):
-            await self._send_context_append(delegation.id, output.text, speakable=output.speakable)
+            await self._send_context_append(
+                delegation.id, output.text, spoken=output.prefers_spoken
+            )
 
         try:
             # Every output, the final answer included, arrives through
@@ -948,26 +950,24 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             await self._send_context_append(
                 delegation.id,
                 f"The delegated task could not be completed: {e}",
-                speakable=True,
+                spoken=True,
             )
             await self.push_error(error_msg=f"Delegation {delegation.id} failed: {e}", exception=e)
 
-    async def _send_context_append(self, delegation_id: str | None, text: str, *, speakable: bool):
+    async def _send_context_append(self, delegation_id: str | None, text: str, *, spoken: bool):
         """Append text to the live session, for it to speak or to keep to itself.
 
         The API's two channels are named for what the live model does with the
         text: commentary is paraphrased aloud, thinking joins its private
         reasoning. That vantage is the model's own, which is why what arrives
-        from a backend is flagged ``speakable`` instead — ordinary prose can be
-        unspeakable without being anything like a thought.
+        from a backend is flagged ``prefers_spoken`` instead — ordinary prose can
+        go unspoken without being anything like a thought.
         """
-        channel = "commentary" if speakable else "thinking"
+        channel = "commentary" if spoken else "thinking"
         for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_CHARS):
             logger.debug(f"{self}: delegation {delegation_id} {channel} context: {chunk!r}")
             event_class = (
-                events.SessionCommentaryAppendEvent
-                if speakable
-                else events.SessionThinkingAppendEvent
+                events.SessionCommentaryAppendEvent if spoken else events.SessionThinkingAppendEvent
             )
             await self.send_client_event(event_class(delegation_id=delegation_id, content=chunk))
 

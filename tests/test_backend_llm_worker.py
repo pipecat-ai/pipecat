@@ -191,10 +191,10 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     )
 
     assert text == "It's 62 and raining in Seattle."
-    # Only the answer is speakable; what the backend says on the way is not.
+    # Only the answer is prefers_spoken; what the backend says on the way is not.
     assert updates == [
-        BackendOutput(text="Let me check.", is_final=False, speakable=False),
-        BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, speakable=True),
+        BackendOutput(text="Let me check.", is_final=False, prefers_spoken=False),
+        BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, prefers_spoken=True),
     ]
 
     # The backend saw the rendered request first, then the tool result.
@@ -290,7 +290,7 @@ async def test_thoughts_are_streamed_as_thought_updates():
     text, updates, _ = await _run_backend(llm)
 
     assert text == "It's raining."
-    assert [(u.text, u.is_thought, u.speakable) for u in updates] == [
+    assert [(u.text, u.is_thought, u.prefers_spoken) for u in updates] == [
         ("I should check the weather.", True, False),
         ("Rain; keep it short.", True, False),
         ("It's raining.", False, True),
@@ -375,12 +375,12 @@ async def test_transform_output_can_rewrite_text_and_speakability():
 
     async def transform_output(output: BackendOutput) -> BackendOutput:
         if output.text.startswith(">>"):
-            return replace(output, text=output.text[2:].lstrip(), speakable=True)
-        return replace(output, speakable=False)
+            return replace(output, text=output.text[2:].lstrip(), prefers_spoken=True)
+        return replace(output, prefers_spoken=False)
 
     _, updates, _ = await _run_backend(llm, transform_output=transform_output)
 
-    assert [(u.text, u.speakable) for u in updates] == [
+    assert [(u.text, u.prefers_spoken) for u in updates] == [
         ("Checking.", True),
         ("Internal note.", False),
     ]

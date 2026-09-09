@@ -20,10 +20,10 @@ number does: the tools report that one cancelled whatever you give them.
 A marked message is relayed; an unmarked one becomes thinking context, which
 the live model is not asked to say but may still work into what it says.
 
-``transform_output`` reads that marker and sets ``speakable``. A backend can
-say the same thing by calling a tool to talk to the user; a marker convention
-needs no extra plumbing, and ``speakable`` is what the live model acts on
-either way.
+``transform_output`` reads that marker and sets ``prefers_spoken``. A backend
+can say the same thing by calling a tool to talk to the user; a marker
+convention needs no extra plumbing, and ``prefers_spoken`` is what reaches the
+live model either way.
 """
 
 import asyncio
@@ -106,11 +106,11 @@ completed without a tool result confirming it."""
 
 async def transform_output(output: BackendOutput) -> BackendOutput:
     """Let the backend's own marker decide what reaches the user."""
-    # `speakable` is one flag on one output, and an output is a whole message
+    # `prefers_spoken` is one flag on one output, and an output is a whole message
     # the backend wrote, so the marker opens the message it applies to.
     if output.text.startswith(SPEAK_MARKER):
-        return replace(output, text=output.text[len(SPEAK_MARKER) :].lstrip(), speakable=True)
-    return replace(output, speakable=False)
+        return replace(output, text=output.text[len(SPEAK_MARKER) :].lstrip(), prefers_spoken=True)
+    return replace(output, prefers_spoken=False)
 
 
 # The three steps of a rebooking, each slow enough that the user notices the

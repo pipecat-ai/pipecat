@@ -940,10 +940,12 @@ async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypa
 
     async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
         calls.append((worker, backend_name, request, timeout_secs))
-        await on_update(BackendOutput(text="Checking the weather.", speakable=True))
-        await on_update(BackendOutput(text="Still looking.", is_thought=True, speakable=False))
+        await on_update(BackendOutput(text="Checking the weather.", prefers_spoken=True))
+        await on_update(BackendOutput(text="Still looking.", is_thought=True, prefers_spoken=False))
         await on_update(
-            BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, speakable=True)
+            BackendOutput(
+                text="It's 62 and raining in Seattle.", is_final=True, prefers_spoken=True
+            )
         )
         return "It's 62 and raining in Seattle."
 
@@ -1067,7 +1069,7 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
     async def _delegate_to_backend(*args, on_update, **kwargs):
         text = " ".join(f"Sentence number {i} is here." for i in range(120))
-        await on_update(BackendOutput(text=text, speakable=True))
+        await on_update(BackendOutput(text=text, prefers_spoken=True))
         return ""
 
     service, recorder = await _client_delegation_service(monkeypatch, _delegate_to_backend)
