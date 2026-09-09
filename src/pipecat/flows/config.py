@@ -62,6 +62,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pipecat.flows.types import ContextStrategy
 from pipecat.utils.yaml import include_loader
 
+BUILT_IN_ACTIONS_WITHOUT_HANDLER = frozenset({"tts_say", "end_conversation"})
+"""Built-in action types whose behavior is fixed, so a ``handler`` is not allowed."""
+
+BUILT_IN_ACTIONS = BUILT_IN_ACTIONS_WITHOUT_HANDLER | {"function"}
+"""Every action type the runtime provides without registration."""
+
 TRANSITION_IN_PYTHON = "TRANSITION_IN_PYTHON"
 """``transition_to`` value for a function whose tool decides the next node.
 
@@ -178,15 +184,20 @@ class FlowConfig(BaseModel):
     class Action(BaseModel):
         """A pre- or post-action on a node.
 
-        Built-in action types (``tts_say``, ``end_conversation``) need nothing
-        else. The ``function`` type names a handler in the tools a
-        :class:`~pipecat.flows.Flow` is constructed with. Custom
-        types registered with ``FlowManager.register_action`` are referenced by
-        type alone. Any additional keys pass through to the action handler.
+        The built-in ``tts_say`` and ``end_conversation`` types take no
+        handler. The built-in ``function`` type requires one: the handler runs
+        inline in the pipeline, queued behind the bot's turn. A custom type
+        may name a handler too, which then runs immediately when the node's
+        actions execute; a custom type without one must be registered in code
+        with ``FlowManager.register_action``. Any additional keys pass through
+        to the handler.
 
         Parameters:
             type: Action type identifier.
-            handler: For the ``function`` type, the name of the handler.
+            handler: Name of the handler in the tools a
+                :class:`~pipecat.flows.Flow` is constructed with. Required
+                for ``function``, optional for custom types, not allowed on
+                ``tts_say`` or ``end_conversation``.
         """
 
         model_config = ConfigDict(extra="allow")
@@ -198,12 +209,14 @@ class FlowConfig(BaseModel):
         def _check_handler(self) -> "FlowConfig.Action":
             if self.type == "function" and not self.handler:
                 raise ValueError("a 'function' action requires a 'handler' name")
-            if self.type != "function" and self.handler is not None:
-                raise ValueError(
-                    f"action type '{self.type}' does not take a 'handler'; "
-                    "register custom action types with FlowManager.register_action"
-                )
+            if self.type in BUILT_IN_ACTIONS_WITHOUT_HANDLER and self.handler is not None:
+                raise ValueError(f"the built-in '{self.type}' action does not take a 'handler'")
             return self
+
+        @property
+        def registered_in_code(self) -> bool:
+            """Whether this is a custom type whose handler the config does not name."""
+            return self.type not in BUILT_IN_ACTIONS and self.handler is None
 
         def extras(self) -> dict[str, Any]:
             """The pass-through keys beyond ``type`` and ``handler``."""

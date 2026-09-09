@@ -3,7 +3,7 @@
   "$defs": {
     "Action": {
       "additionalProperties": true,
-      "description": "A pre- or post-action on a node.\n\nBuilt-in action types (``tts_say``, ``end_conversation``) need nothing\nelse. The ``function`` type names a handler in the tools a\n:class:`~pipecat.flows.Flow` is constructed with. Custom\ntypes registered with ``FlowManager.register_action`` are referenced by\ntype alone. Any additional keys pass through to the action handler.\n\nParameters:\n    type: Action type identifier.\n    handler: For the ``function`` type, the name of the handler.",
+      "description": "A pre- or post-action on a node.\n\nThe built-in ``tts_say`` and ``end_conversation`` types take no\nhandler. The built-in ``function`` type requires one: the handler runs\ninline in the pipeline, queued behind the bot's turn. A custom type\nmay name a handler too, which then runs immediately when the node's\nactions execute; a custom type without one must be registered in code\nwith ``FlowManager.register_action``. Any additional keys pass through\nto the handler.\n\nParameters:\n    type: Action type identifier.\n    handler: Name of the handler in the tools a\n        :class:`~pipecat.flows.Flow` is constructed with. Required\n        for ``function``, optional for custom types, not allowed on\n        ``tts_say`` or ``end_conversation``.",
       "properties": {
         "type": {
           "title": "Type",

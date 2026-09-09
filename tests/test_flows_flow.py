@@ -368,6 +368,30 @@ class TestNodeConfigs(unittest.TestCase):
     def test_actions(self):
         pre = self.flow.node("initial")["pre_actions"]
         self.assertEqual(pre, [{"type": "function", "handler": check_kitchen_status}])
+
+    def test_custom_action_handler_resolves_by_name(self):
+        flow = make_flow(
+            single_node(
+                {"name": "choose_pizza"},
+                post_actions=[
+                    {"type": "notify", "handler": "check_kitchen_status", "channel": "#x"},
+                    {"type": "audit"},
+                ],
+            )
+        )
+        post = flow.node("a")["post_actions"]
+        self.assertEqual(
+            post[0], {"type": "notify", "handler": check_kitchen_status, "channel": "#x"}
+        )
+        self.assertEqual(post[1], {"type": "audit"})
+
+    def test_custom_action_handler_must_exist(self):
+        cfg = single_node(
+            {"name": "choose_pizza"}, post_actions=[{"type": "notify", "handler": "nope"}]
+        )
+        with self.assertRaises(FlowError) as cm:
+            make_flow(cfg)
+        self.assertIn("post_actions references action handler 'nope'", str(cm.exception))
         post = self.flow.node("pizza")["post_actions"]
         self.assertEqual(post, [{"type": "tts_say", "text": "Thanks, friend!"}])
 

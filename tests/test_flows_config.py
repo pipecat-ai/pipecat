@@ -295,10 +295,23 @@ class TestFlowConfigValidation(unittest.TestCase):
         data["nodes"]["a"]["pre_actions"] = [{"type": "function"}]
         self.assert_invalid(data, "a 'function' action requires a 'handler' name")
 
-    def test_non_function_action_rejects_handler(self):
+    def test_built_in_actions_reject_handler(self):
+        for built_in in ("tts_say", "end_conversation"):
+            data = _minimal()
+            data["nodes"]["a"]["post_actions"] = [{"type": built_in, "handler": "x"}]
+            self.assert_invalid(data, f"the built-in '{built_in}' action does not take a 'handler'")
+
+    def test_custom_action_may_name_a_handler(self):
         data = _minimal()
-        data["nodes"]["a"]["post_actions"] = [{"type": "notify", "handler": "notify_slack"}]
-        self.assert_invalid(data, "action type 'notify' does not take a 'handler'")
+        data["nodes"]["a"]["post_actions"] = [
+            {"type": "notify", "handler": "notify_slack", "channel": "#x"},
+            {"type": "audit"},
+        ]
+        actions = FlowConfig.model_validate(data).nodes["a"].post_actions
+        self.assertEqual(actions[0].handler, "notify_slack")
+        self.assertFalse(actions[0].registered_in_code)
+        self.assertTrue(actions[1].registered_in_code)
+        self.assertEqual(actions[0].extras(), {"channel": "#x"})
 
     def test_context_strategy_values(self):
         data = _minimal()
