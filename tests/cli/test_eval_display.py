@@ -12,8 +12,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rich.console import Console
+
 from pipecat.cli.commands.eval import (
     _eval_verdict,
+    _EvalDashboard,
     _expand_scenario_paths,
     _finalize_evals,
     _group_outcome,
@@ -201,3 +204,33 @@ class TestSimulationVerdicts(unittest.TestCase):
                     1,
                 )
             self.assertIn("goal not met", out.getvalue())
+
+
+class TestGroupedDashboard(unittest.TestCase):
+    """A repeated row reads passed over its total while attempts remain, and a rate once they are in."""
+
+    @staticmethod
+    def _render(runs: list[EvalRun]) -> str:
+        console = Console(width=120, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0, grouped=True))
+        return console.export_text()
+
+    def test_a_row_still_running_shows_passed_over_the_total(self):
+        pending = _simulation_run(True, attempt=3, attempts=3)
+        pending.status = "pending"
+        pending.result = None
+        text = self._render(
+            [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), pending]
+        )
+        self.assertIn("2/3", text)
+        self.assertIn("1 left", text)
+        self.assertNotIn("%", text)
+
+    def test_a_finished_row_shows_the_rate_and_the_pace(self):
+        runs = [_simulation_run(True, attempt=n) for n in (1, 2, 3)]
+        for run in runs:
+            run.duration_ms = 30000
+        text = self._render(runs)
+        self.assertIn("3/3 (100%)", text)
+        self.assertIn("each", text)
+        self.assertNotIn("left", text)
