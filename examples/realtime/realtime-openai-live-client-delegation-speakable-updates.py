@@ -6,18 +6,25 @@
 
 """OpenAI Live (gpt-live-1) where the backend decides which updates are spoken.
 
-``transform_output`` sets the ``speakable`` flag on each thing the backend
-produces. Here the backend marks the messages it wants heard and the transform
-reads that convention; an app can decide any other way it likes. Marked
-messages are relayed aloud, and the rest — notes to self, reasoning summaries,
-the final wrap-up — stays silent context the live model can draw on if asked.
+Rebooking a cancelled flight takes the backend three tool calls, seconds
+apart, each needing the last one's answer. It works through them in unmarked
+messages and marks the two the user is waiting to hear: that the flight is
+gone and it is looking for another, then the seat it found. A caller that
+spoke every update would put the backend's whole working-out through the live
+model's voice.
 
-This suits a backend that works for a while and narrates its own progress.
+A marked message is relayed; an unmarked one becomes thinking context, which
+the live model is not asked to say but may still work into what it says.
+
+``transform_output`` reads that marker and sets ``speakable``. A backend can
+say the same thing by calling a tool to talk to the user; a marker convention
+needs no extra plumbing, and ``speakable`` is what the live model acts on
+either way.
 """
 
+import asyncio
 import os
 from dataclasses import replace
-from datetime import datetime
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -53,14 +60,15 @@ You are a friendly, concise voice assistant. Speak naturally, in one or two
 sentences at a time, and let the user finish before responding.
 
 ## Delegation
-Answer simple conversational questions directly. Delegate when the user asks
-for current information, such as the weather or a restaurant recommendation,
-or asks you to look something up. The backend reads the conversation, so hand
-off as soon as you know the request is for it.
+Answer simple conversational questions directly. Delegate anything about the
+user's flights or bookings — checking one, changing one, finding another. The
+backend reads the conversation, so hand off as soon as you know the request is
+for it.
 
 The backend chooses what the user should hear and sends it to you as it
 works; relay those updates as they arrive. Everything else it does reaches
-you as context you know but need not repeat.
+you as context: keep it to yourself, and draw on it only if the user asks
+what is happening.
 
 ## Interruptions
 Stop speaking when the user interrupts and listen to the new request."""
@@ -77,9 +85,13 @@ verified result, or a word about what is taking time — and keep a spoken
 message to one or two sentences. Work out loud as much as you like in the
 messages you leave unmarked.
 
-Use the available tools to answer questions about the weather and
-restaurants. Never claim an action completed without a tool result confirming
-it."""
+Rebooking runs in steps: check the flight, find what else flies that route,
+then book a seat on the earliest one that has them. Each step needs the one
+before it, and the user has asked you to see it through, so carry on to the
+booking rather than coming back with a menu. Say something when the user
+would otherwise be waiting with no news — when you learn something that
+changes their plans, and when the job is done. Never claim an action
+completed without a tool result confirming it."""
 
 
 async def transform_output(output: BackendOutput) -> BackendOutput:
@@ -91,31 +103,57 @@ async def transform_output(output: BackendOutput) -> BackendOutput:
     return replace(output, speakable=False)
 
 
-async def get_current_weather(params: FunctionCallParams, location: str, format: str):
-    """Get the current weather.
+# The three steps of a rebooking, each slow enough that the user notices the
+# wait, and each needing what the step before it returned.
+
+
+async def check_flight_status(params: FunctionCallParams, flight_number: str):
+    """Check whether a flight is running, and what route it flies.
 
     Args:
-        location: The city and state, e.g. "San Francisco, CA".
-        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+        flight_number: The flight number, e.g. "UA482".
     """
-    temperature = 75 if format == "fahrenheit" else 24
+    await asyncio.sleep(3)
     await params.result_callback(
         {
-            "conditions": "nice",
-            "temperature": temperature,
-            "format": format,
-            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "flight": flight_number,
+            "status": "cancelled",
+            "reason": "crew shortage",
+            "origin": "SFO",
+            "destination": "JFK",
+            "scheduled_departure": "11:40",
         }
     )
 
 
-async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
-    """Get a restaurant recommendation.
+async def find_alternative_flights(params: FunctionCallParams, origin: str, destination: str):
+    """Find later flights on a route today.
 
     Args:
-        location: The city and state, e.g. "San Francisco, CA".
+        origin: Departure airport code, e.g. "SFO".
+        destination: Arrival airport code, e.g. "JFK".
     """
-    await params.result_callback({"name": "The Golden Dragon"})
+    await asyncio.sleep(4)
+    await params.result_callback(
+        {
+            "flights": [
+                {"flight": "UA716", "departs": "16:15", "seats": 2},
+                {"flight": "AA229", "departs": "19:05", "seats": 11},
+            ]
+        }
+    )
+
+
+async def rebook_flight(params: FunctionCallParams, flight_number: str):
+    """Move the booking onto another flight.
+
+    Args:
+        flight_number: The flight to move the booking to, e.g. "UA716".
+    """
+    await asyncio.sleep(3)
+    await params.result_callback(
+        {"flight": flight_number, "status": "confirmed", "seat": "14C", "confirmation": "X7K2QP"}
+    )
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -151,7 +189,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
             ),
         ),
-        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+        context=LLMContext(tools=[check_flight_status, find_alternative_flights, rebook_flight]),
         transform_output=transform_output,
     )
 
