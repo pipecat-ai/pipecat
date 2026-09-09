@@ -13,6 +13,10 @@ gone and it is looking for another, then the seat it found. A caller that
 spoke every update would put the backend's whole working-out through the live
 model's voice.
 
+To hear it, ask for something like "my flight UA482 this morning — can you
+check it, and get me on something else if it's not running?" Any flight
+number does: the tools report that one cancelled whatever you give them.
+
 A marked message is relayed; an unmarked one becomes thinking context, which
 the live model is not asked to say but may still work into what it says.
 
