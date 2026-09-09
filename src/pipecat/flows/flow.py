@@ -15,7 +15,9 @@ Constructing a flow validates the references the config could not: each tool exi
 has a valid direct-function signature, each ``function`` action names a
 callable, and each ``{{ variable }}`` has a value. Tool return values are
 checked at call time against the configured-flow contract: a tool returns
-``(result, None)`` and never chooses the next node itself.
+``(result, TRANSITION_IN_YAML)`` and the config decides the next node, unless
+the config marks the entry ``TRANSITION_IN_PYTHON``, in which case the tool
+returns ``(result, "<node name>")`` naming a node in the config.
 """
 
 import inspect
@@ -26,9 +28,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from pipecat.flows.config import TRANSITION_IN_PYTHON, case_key
 from pipecat.flows.exceptions import FlowError, FlowProblem, FlowReferenceError
 from pipecat.flows.types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategyConfig,
@@ -262,9 +266,13 @@ class Flow:
             args: FlowArgs, flow_manager: "FlowManager"
         ) -> ConsolidatedFunctionResult:
             response = await wrapper.invoke(args, flow_manager)
-            result, next_node = _check_contract(response, ref.name, where)
+            result, next_node = _check_contract(
+                response, ref.name, where, python_decides=ref.decided_in_python
+            )
             if next_node is NO_RESPONSE:
                 return result, NO_RESPONSE
+            if ref.decided_in_python:
+                return result, self._named_node(next_node, ref, where)
             return result, self._destination(ref, result, where)
 
         return handler
@@ -283,34 +291,63 @@ class Flow:
                 f"{where} tool '{ref.name}' branches on result field '{target.field}', "
                 f"but its result has no such field"
             )
-        value = result[target.field]
-        key = value if isinstance(value, str) else str(value)
-        node_name = target.cases.get(key, target.default)
+        node_name = target.cases.get(case_key(result[target.field]), target.default)
         if node_name is None:
-            logger.debug(f"{where} tool '{ref.name}': no branch case for {value!r}, staying")
+            logger.debug(f"{where} tool '{ref.name}': no branch case matched, staying")
             return None
         return self._nodes[node_name]
 
+    def _named_node(self, name: str, ref: "FlowConfig.Function", where: str) -> NodeConfig:
+        """The config node a Python-decided tool named, or an error naming the choices."""
+        node = self._nodes.get(name)
+        if node is None:
+            raise FlowError(
+                f"{where} tool '{ref.name}' returned node name '{name}', "
+                f"which is not in the flow config; the nodes are: {', '.join(self._nodes)}"
+            )
+        return node
 
-def _check_contract(response: Any, name: str, where: str) -> tuple[Any, Any]:
-    """Check a tool's return value against the configured-flow contract."""
+
+def _check_contract(
+    response: Any, name: str, where: str, *, python_decides: bool
+) -> tuple[Any, Any]:
+    """Check a tool's return value against the configured-flow contract.
+
+    A tool under a config-decided entry returns ``(result, TRANSITION_IN_YAML)``;
+    one under ``TRANSITION_IN_PYTHON`` returns ``(result, "<node name>")``.
+    ``NO_RESPONSE`` is accepted from either.
+    """
     if not isinstance(response, tuple) or len(response) != 2:
         raise FlowError(
-            f"{where} tool '{name}' must return a (result, None) tuple; "
+            f"{where} tool '{name}' must return a (result, next) tuple; "
             f"got {type(response).__name__}"
         )
     result, next_node = response
-    if next_node is None or next_node is NO_RESPONSE:
+    if next_node is NO_RESPONSE:
+        return result, next_node
+    if python_decides:
+        if isinstance(next_node, str):
+            return result, next_node
+        raise FlowError(
+            f"{where} tool '{name}' is marked TRANSITION_IN_PYTHON in the flow config, "
+            f'so it must return (result, "<node name>"); got {next_node!r}'
+        )
+    if next_node is TRANSITION_IN_YAML:
         return result, next_node
     if isinstance(next_node, str):
         raise FlowError(
-            f"{where} tool '{name}' returned node name '{next_node}'; "
-            "in a configured flow the config owns transitions, so return (result, None) "
-            "and set transition_to in the config"
+            f"{where} tool '{name}' returned node name '{next_node}', but the flow config "
+            "decides its transition; return (result, TRANSITION_IN_YAML), or set "
+            "transition_to: TRANSITION_IN_PYTHON on the entry to decide in Python"
+        )
+    if next_node is None:
+        raise FlowError(
+            f"{where} tool '{name}' returned None as the next node; in a configured flow "
+            "return (result, TRANSITION_IN_YAML) to let the config decide"
         )
     raise FlowError(
-        f"{where} tool '{name}' returned a next node; "
-        "in a configured flow the config owns transitions, so return (result, None)"
+        f"{where} tool '{name}' returned a next node; in a configured flow the config "
+        "owns transitions, so return (result, TRANSITION_IN_YAML)"
     )
 
 

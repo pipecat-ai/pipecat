@@ -45,6 +45,7 @@ from pipecat.flows.exceptions import (
 )
 from pipecat.flows.types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategy,
@@ -492,6 +493,13 @@ class FlowManager:
                 logger.debug(
                     f"{'Transition-only function called for' if is_transition_only_function else 'Function handler completed for'} {name}"
                 )
+
+                if next_node is TRANSITION_IN_YAML:
+                    raise InvalidFunctionError(
+                        f"Function {name} returned TRANSITION_IN_YAML, but this node was not "
+                        "built from a flow config, so nothing can decide the transition; "
+                        "return a NodeConfig or None"
+                    )
 
                 is_no_response = next_node is NO_RESPONSE
                 if is_no_response or not next_node:

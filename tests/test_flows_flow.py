@@ -12,6 +12,8 @@ from loguru import logger
 
 from pipecat.flows import (
     NO_RESPONSE,
+    TRANSITION_IN_PYTHON,
+    TRANSITION_IN_YAML,
     ConsolidatedFunctionResult,
     ContextStrategy,
     ContextStrategyConfig,
@@ -33,7 +35,7 @@ from tests.flows_test_helpers import get_advertised_tool_handlers, make_mock_wor
 
 async def choose_pizza(flow_manager):
     """User wants to order pizza."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 @flows_tool_options(cancel_on_interruption=True, timeout_secs=12)
@@ -45,7 +47,7 @@ async def select_pizza_order(flow_manager, size: str, pizza_type: str):
         pizza_type (str): The kind of pizza.
     """
     flow_manager.state["order"] = {"size": size, "pizza_type": pizza_type}
-    return {"size": size, "type": pizza_type, "status": "ok"}, None
+    return {"size": size, "type": pizza_type, "status": "ok"}, TRANSITION_IN_YAML
 
 
 async def report(flow_manager, status: str):
@@ -54,7 +56,7 @@ async def report(flow_manager, status: str):
     Args:
         status (str): The status to report.
     """
-    return {"status": status}, None
+    return {"status": status}, TRANSITION_IN_YAML
 
 
 async def report_flag(flow_manager, flag: bool):
@@ -63,17 +65,40 @@ async def report_flag(flow_manager, flag: bool):
     Args:
         flag (bool): The flag to report.
     """
-    return {"flag": flag}, None
+    return {"flag": flag}, TRANSITION_IN_YAML
 
 
 async def get_delivery_estimate(flow_manager):
     """Get a delivery estimate."""
-    return {"time": "30 minutes"}, None
+    return {"time": "30 minutes"}, TRANSITION_IN_YAML
 
 
 async def stay_quiet(flow_manager):
     """Do work without prompting a bot response."""
     return {"ok": True}, NO_RESPONSE
+
+
+async def returns_none(flow_manager):
+    """Break the contract with None as the next node."""
+    return {"ok": True}, None
+
+
+async def picks_next(flow_manager, where: str):
+    """Decide the next node in Python.
+
+    Args:
+        where (str): The node to go to.
+    """
+    return {"went": where}, where
+
+
+async def report_flag_int(flow_manager, code: int):
+    """Report an integer the config can branch on.
+
+    Args:
+        code (int): The code to report.
+    """
+    return {"code": code}, TRANSITION_IN_YAML
 
 
 async def returns_bare(flow_manager):
@@ -93,32 +118,32 @@ async def returns_name(flow_manager):
 
 async def returns_non_mapping(flow_manager):
     """Return a result a branch cannot read."""
-    return "sold out", None
+    return "sold out", TRANSITION_IN_YAML
 
 
 async def annotated_for_hand_built(flow_manager) -> tuple[None, NodeConfig]:
     """A tool annotated as choosing its own node."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 async def annotated_optional_node(flow_manager) -> tuple[None, NodeConfig | None]:
     """A tool whose annotation admits None as the next node."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 async def annotated_consolidated(flow_manager) -> ConsolidatedFunctionResult:
     """A tool annotated with the consolidated-result alias."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 def not_async(flow_manager):
     """Not a coroutine."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 async def wrong_first_param(fm):
     """Wrong first parameter name."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 kitchen_checks: list[dict] = []
@@ -385,11 +410,45 @@ class TestCallTimeContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"ok": True})
         self.assertIs(next_node, NO_RESPONSE)
 
+    async def test_none_next_node_is_rejected(self):
+        flow = make_flow(single_node({"name": "returns_none", "transition_to": "next"}))
+        with self.assertRaises(FlowError) as cm:
+            await self.call(flow)
+        self.assertIn("return (result, TRANSITION_IN_YAML)", str(cm.exception))
+
+    async def test_python_decided_entry_uses_the_returned_name(self):
+        flow = make_flow(single_node({"name": "picks_next", "transition_to": TRANSITION_IN_PYTHON}))
+        result, next_node = await self.call(flow, args={"where": "other"})
+        self.assertEqual(result, {"went": "other"})
+        self.assertIs(next_node, flow.node("other"))
+
+    async def test_python_decided_entry_rejects_unknown_name(self):
+        flow = make_flow(single_node({"name": "picks_next", "transition_to": TRANSITION_IN_PYTHON}))
+        with self.assertRaises(FlowError) as cm:
+            await self.call(flow, args={"where": "nowhere"})
+        self.assertIn(
+            "returned node name 'nowhere', which is not in the flow config", str(cm.exception)
+        )
+        self.assertIn("the nodes are: a, next, other", str(cm.exception))
+
+    async def test_python_decided_entry_rejects_the_yaml_sentinel(self):
+        flow = make_flow(
+            single_node({"name": "choose_pizza", "transition_to": TRANSITION_IN_PYTHON})
+        )
+        with self.assertRaises(FlowError) as cm:
+            await self.call(flow)
+        self.assertIn('must return (result, "<node name>")', str(cm.exception))
+
+    async def test_python_decided_entry_passes_no_response_through(self):
+        flow = make_flow(single_node({"name": "stay_quiet", "transition_to": TRANSITION_IN_PYTHON}))
+        result, next_node = await self.call(flow)
+        self.assertIs(next_node, NO_RESPONSE)
+
     async def test_bare_result_is_rejected(self):
         flow = make_flow(single_node({"name": "returns_bare"}))
         with self.assertRaises(FlowError) as cm:
             await self.call(flow)
-        self.assertIn("must return a (result, None) tuple", str(cm.exception))
+        self.assertIn("must return a (result, next) tuple", str(cm.exception))
 
     async def test_node_return_is_rejected(self):
         for function in (
@@ -399,13 +458,14 @@ class TestCallTimeContract(unittest.IsolatedAsyncioTestCase):
             flow = make_flow(single_node(function))
             with self.assertRaises(FlowError) as cm:
                 await self.call(flow)
-            self.assertIn("config owns transitions", str(cm.exception))
+            self.assertIn("return (result, TRANSITION_IN_YAML)", str(cm.exception))
 
     async def test_name_return_is_rejected(self):
         flow = make_flow(single_node({"name": "returns_name"}))
         with self.assertRaises(FlowError) as cm:
             await self.call(flow)
         self.assertIn("returned node name 'confirm'", str(cm.exception))
+        self.assertIn("transition_to: TRANSITION_IN_PYTHON", str(cm.exception))
 
 
 class TestBranches(unittest.IsolatedAsyncioTestCase):
@@ -434,11 +494,23 @@ class TestBranches(unittest.IsolatedAsyncioTestCase):
         _, next_node = await self.branch("report", self.BRANCH, {"status": "weird"})
         self.assertIsNone(next_node)
 
-    async def test_non_string_values_match_by_str(self):
-        flow, next_node = await self.branch(
-            "report_flag", {"field": "flag", "cases": {"True": "next"}}, {"flag": True}
+    async def test_boolean_values_match_boolean_or_string_keys(self):
+        for key in (True, "true", "True"):
+            flow, next_node = await self.branch(
+                "report_flag", {"field": "flag", "cases": {key: "next"}}, {"flag": True}
+            )
+            self.assertIs(next_node, flow.node("next"), key)
+        _, next_node = await self.branch(
+            "report_flag", {"field": "flag", "cases": {False: "next"}}, {"flag": True}
         )
-        self.assertIs(next_node, flow.node("next"))
+        self.assertIsNone(next_node)
+
+    async def test_integer_values_match_integer_or_string_keys(self):
+        for key in (7, "7"):
+            flow, next_node = await self.branch(
+                "report_flag_int", {"field": "code", "cases": {key: "next"}}, {"code": 7}
+            )
+            self.assertIs(next_node, flow.node("next"), key)
 
     async def test_missing_field_is_an_error(self):
         with self.assertRaises(FlowError) as cm:
@@ -534,10 +606,10 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
 
         result = await self.invoke("returns_bare")
         self.assertEqual(result["status"], "error")
-        self.assertIn("must return a (result, None) tuple", result["error"])
+        self.assertIn("must return a (result, next) tuple", result["error"])
         self.assertEqual(flow_manager.current_node, "a")
 
-    async def test_same_tool_works_in_a_hand_built_flow(self):
+    async def test_hand_built_flow_rejects_the_yaml_sentinel(self):
         flow_manager = FlowManager(
             worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
         )
@@ -550,7 +622,9 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         await flow_manager.set_node_from_config(node)
 
         result = await self.invoke("select_pizza_order", {"size": "large", "pizza_type": "veg"})
-        self.assertEqual(result["size"], "large")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("TRANSITION_IN_YAML", result["error"])
+        self.assertIn("not built from a flow config", result["error"])
         self.assertEqual(flow_manager.current_node, "hand_built")
 
 

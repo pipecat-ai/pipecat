@@ -384,6 +384,8 @@ suite:
   #
   - bot: flows/hello_world.py
     scenarios: [hello_world]
+  - bot: flows/hello_world_yaml.py
+    scenarios: [hello_world]
   - bot: flows/food_ordering.py
     scenarios: [food_ordering_pizza]
   - bot: flows/food_ordering_yaml.py
@@ -393,6 +395,8 @@ suite:
   - bot: flows/multi_worker_handoff.py
     scenarios: [multi_worker_handoff, multi_worker_handoff_back_and_forth]
   - bot: flows/patient_intake.py
+    scenarios: [patient_intake]
+  - bot: flows/patient_intake_yaml.py
     scenarios: [patient_intake]
   - bot: flows/restaurant_reservation.py
     scenarios: [restaurant_reservation_available, restaurant_reservation_no_availability]

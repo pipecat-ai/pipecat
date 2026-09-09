@@ -257,6 +257,23 @@ For functions that transition to another node,
 """
 
 
+class TransitionInYaml:
+    """Type of the :data:`TRANSITION_IN_YAML` sentinel, for return annotations."""
+
+    def __repr__(self) -> str:
+        return "TRANSITION_IN_YAML"
+
+
+TRANSITION_IN_YAML = TransitionInYaml()
+"""Function return value (in the "next node" slot) deferring the transition to a flow config.
+
+Return ``(result, TRANSITION_IN_YAML)`` from a tool that a
+:class:`~pipecat.flows.FlowConfig` names: the config's ``transition_to`` for
+that entry decides the next node. Only a flow built from a config accepts it;
+a node built in Python rejects it, since nothing there can decide.
+"""
+
+
 # ``ConsolidatedFunctionResult`` is the public return-type alias for "direct"
 # functions. It must be defined **after** ``NodeConfig`` and without a string
 # forward reference: ``get_type_hints()`` on a user-defined direct function

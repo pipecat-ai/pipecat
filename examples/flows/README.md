@@ -4,7 +4,7 @@
 
 ## Hello, world
 
-[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below.
+[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below. [`hello_world_yaml.py`](./hello_world_yaml.py) is the same bot with its two nodes in [`hello_world.yaml`](./hello_world.yaml) and its one tool in [`hello_world_tools.py`](./hello_world_tools.py), the shape to copy when the flow should be configuration rather than code.
 
 ## Setup
 
@@ -36,8 +36,10 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 - [`restaurant_reservation.py`](./restaurant_reservation.py) — reservation system with availability checking
 - [`restaurant_reservation_yaml.py`](./restaurant_reservation_yaml.py) — the reservation flow as [`restaurant_reservation.yaml`](./restaurant_reservation.yaml) plus [`restaurant_reservation_tools.py`](./restaurant_reservation_tools.py); the availability check routes through a branch table keyed on the tool's result
 - [`patient_intake.py`](./patient_intake.py) — medical intake system showing complex state management
+- [`patient_intake_yaml.py`](./patient_intake_yaml.py) — the intake flow as [`patient_intake.yaml`](./patient_intake.yaml) plus [`patient_intake_tools.py`](./patient_intake_tools.py), with the practice and patient names as template variables
 - [`insurance_quote.py`](./insurance_quote.py) — insurance quote system with data collection
 - [`podcast_interview.py`](./podcast_interview.py) — podcast interview flow
+- [`podcast_interview_yaml.py`](./podcast_interview_yaml.py) — the interview flow as [`podcast_interview.yaml`](./podcast_interview.yaml) plus [`podcast_interview_tools.py`](./podcast_interview_tools.py); its interview node transitions back to itself
 
 ### Advanced features
 
