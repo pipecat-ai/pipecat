@@ -1,0 +1,1 @@
+- Fixed the async-tool guidance given to LLMs (`ASYNC_TOOL_INSTRUCTIONS` and the final-result message) so a result that lands after the model has already answered the user is delivered on its own, without the model repeating its previous reply first. The guidance now distinguishes a result arriving while the user has an unanswered request from one arriving on a run of its own.
