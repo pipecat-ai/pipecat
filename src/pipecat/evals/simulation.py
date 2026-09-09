@@ -31,9 +31,9 @@ Fields:
     the persona LLM's instructions (see :mod:`pipecat.evals.persona`).
 
 ``simulator``
-    the persona LLM: ``service`` (``ollama`` or ``openai``), ``model``, and the
-    optional ``endpoint`` / ``extra`` the judge config also takes. Omitted, the
-    persona runs on the same local Ollama model as the default judge. The
+    the persona LLM: ``service`` (``ollama``) or a ``factory``, ``model``, and
+    the optional ``endpoint`` / ``extra`` the judge config also takes. Omitted,
+    the persona runs on the same local Ollama model as the default judge. The
     model must support function calling: the persona ends the call by calling
     its ``end_call`` tool.
 

@@ -6,12 +6,16 @@
 
 """Tests for the eval service constructors (config -> EvalJudge/CachingTTSService/STT)."""
 
+import os
 import unittest
+import warnings
+from unittest.mock import patch
 
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.services import (
+    _cartesia_service,
     _cfg_language,
-    cartesia_service,
+    llm_service_from_config,
     stt_service_from_config,
     tts_service_from_config,
 )
@@ -86,7 +90,7 @@ class TestVoiceFromConfig(unittest.TestCase):
     def test_language_reaches_cartesia_settings(self):
         # Cartesia is the one builder a unit test can construct: Whisper, Moonshine
         # and Kokoro load their models at construction time.
-        service = cartesia_service(
+        service = _cartesia_service(
             {"service": "cartesia", "voice": "v", "api_key": "test-key", "language": "zh"}
         )
         self.assertEqual(service._settings.language, Language.ZH)
@@ -94,7 +98,7 @@ class TestVoiceFromConfig(unittest.TestCase):
     def test_no_language_leaves_cartesia_default(self):
         # Omitting language must not force a value; the service keeps its own
         # default, which for Cartesia is Language.EN.
-        service = cartesia_service({"service": "cartesia", "voice": "v", "api_key": "test-key"})
+        service = _cartesia_service({"service": "cartesia", "voice": "v", "api_key": "test-key"})
         self.assertEqual(service._settings.language, Language.EN)
 
     def test_websocket_service_rejected(self):
@@ -210,3 +214,37 @@ class TestJudgeFromConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPaidServicesAreDeprecated(unittest.TestCase):
+    """The built-in names are the local services; a paid one still builds, with a warning."""
+
+    def test_cartesia_by_name_warns_and_builds(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            tts = tts_service_from_config(
+                {"service": "cartesia", "voice": "v", "api_key": "test-key"}, use_cache=False
+            )
+        self.assertIsInstance(tts, CachingTTSService)
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIn("`service: cartesia` in `user.speech`", str(caught[0].message))
+
+    def test_openai_by_name_warns_and_builds(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                llm_service_from_config({"service": "openai"}, where="simulator")
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIn("`service: openai` in `simulator`", str(caught[0].message))
+
+    def test_unknown_names_point_at_the_factory(self):
+        with self.assertRaises(ValueError) as cm:
+            tts_service_from_config({"service": "elevenlabs", "voice": "v"})
+        self.assertIn("Known: kokoro.", str(cm.exception))
+        self.assertIn("factory", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            llm_service_from_config({"service": "anthropic"}, where="judge.eval")
+        self.assertIn("Known: ollama.", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            stt_service_from_config({"service": "deepgram"})
+        self.assertIn("Known: moonshine, whisper.", str(cm.exception))

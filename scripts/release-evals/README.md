@@ -52,13 +52,14 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   `gemma4` is thinking-capable, and only the JSON verdict is ever read, so
   reasoning costs several times the latency per call — enough to stall a `-c 4`
   run — while eating into the token budget the verdict itself needs. Leaving it
-  on is both slower and less accurate. (A scenario's `judge:` block can point at
-  OpenAI instead — set `service: openai` and `$OPENAI_API_KEY`.)
+  on is both slower and less accurate. (A scenario's `judge.eval:` block can
+  point at any other LLM through a `factory:`, a dotted path to a callable that
+  takes the block and returns an OpenAI-compatible service.)
 - **Local audio models** (audio-mode scenarios only). By default the user's
   voice is synthesized with Kokoro TTS and the bot's speech is transcribed with
   [Moonshine](https://github.com/moonshine-ai/moonshine); a scenario's
   `user.speech:` and `judge.transcription:` blocks can name another service
-  (Whisper, Cartesia, or any Pipecat service through a `factory:`). The default
+  (Whisper, or any Pipecat service through a `factory:`). The default
   models run from local ONNX files that download once on first use into
   Pipecat's model cache (`~/.cache/pipecat/`), and the synthesized user turns
   are cached under `~/.cache/pipecat/evals/tts` so a repeated scenario does not

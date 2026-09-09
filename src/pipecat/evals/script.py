@@ -160,6 +160,8 @@ Top-level optional fields:
             voice: af_heart        # voices are language-specific
             language: en           # optional; must match the voice
             sample_rate: 16000     # optional
+            # or, for any other TTS: factory: my_evals.voice (a callable
+            # taking this mapping and returning a local or HTTP TTSService)
 
     ``audio`` streams synthesized user audio to the bot (exercising its STT for
     real); ``text`` (the default) sends RTVI ``send-text``. A scenario whose
@@ -171,10 +173,12 @@ Top-level optional fields:
         judge:
           modality: audio          # audio | text (default text)
           eval:                    # the judge LLM (default ollama)
-            service: openai
-            model: gpt-4o-mini
+            service: ollama
+            model: gemma4:12b
+            # or, for any other LLM: factory: my_evals.judge (a callable
+            # taking this mapping and returning an OpenAI-compatible service)
           transcription:           # required when modality is audio
-            service: moonshine     # STT for the bot's audio (or whisper)
+            service: moonshine     # STT for the bot's audio (or whisper, or a factory)
             model: small-streaming # optional
             language: en           # optional; the language the bot speaks
             padding_secs: 0        # optional; silence padded around the
