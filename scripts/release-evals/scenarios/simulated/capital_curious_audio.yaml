@@ -1,0 +1,35 @@
+name: capital_curious_audio
+
+# Audio modality: the same curious caller as capital_curious, but the persona's
+# turns are synthesized and streamed to the bot, and the bot's speech is
+# transcribed for the persona to hear and for the judge to read. Exercises the
+# bot's STT, TTS, and turn taking against an autonomous caller.
+
+simulator: !include ../simulator.yaml
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+persona: |
+  A friendly, curious traveler planning a trip to Europe. Polite and concise:
+  asks one question at a time, and thanks the assistant once satisfied.
+
+goal: "Find out what the capital of Germany is, then end the call."
+
+success: "the bot told the caller that the capital of Germany is Berlin"
+
+metrics:
+  - name: politeness
+    criterion: "the reply is courteous and helpful, never curt or dismissive"
+    min_quality: 1
+  - name: brevity
+    criterion: "the reply is at most three sentences, with no monologue"
+  - measure: words
+    max_value: 60
+  - measure: latency
+    max_value: 5
+
+max_turns: 6
+max_duration_s: 180
+runs: 3
