@@ -344,7 +344,7 @@ class MetaSTTService(WebsocketSTTService):
             if self.sample_rate != self._send_sample_rate:
                 logger.debug(
                     f"{self} resampling audio from {self.sample_rate} to "
-                    f"{self._send_sample_rate} for Meta STT"
+                    f"{self._send_sample_rate}: Meta accepts only 16 kHz or 24 kHz"
                 )
 
             websocket = await self._websocket_connect(
