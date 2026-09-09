@@ -6,6 +6,8 @@
 
 """Decision engine holding a speculative bot response until its turn is confirmed."""
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from enum import Enum
 
 from loguru import logger
@@ -22,6 +24,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.base_object import BaseObject
 
 # A frame paired with the direction it travels in.
 GatedFrame = tuple[Frame, FrameDirection]
@@ -40,7 +43,7 @@ class SpeculationState(Enum):
     DROPPING = "dropping"
 
 
-class SpeculationGate:
+class SpeculationGate(BaseObject):
     """Decides which frames of a speculative bot response may be emitted, and when.
 
     A speculative response is generated from an eager end of turn — a
@@ -70,31 +73,53 @@ class SpeculationGate:
     like any other frame; discarding a speculation keeps them and emits them on,
     since they can belong to work started before it.
 
-    This is a plain decision engine rather than a frame processor: :meth:`process`
-    is synchronous and returns the frames its caller should push, in order. A
-    host can therefore push from several tasks at once — every state transition
+    This decides rather than processes frames: :meth:`process` is synchronous
+    and returns the frames its caller should push, in order. A host can
+    therefore push from several tasks at once — every state transition
     completes without an await for another task to interleave with.
     :class:`~pipecat.services.llm_service.LLMService` hosts one, gating every
     response it produces.
 
-    Holding is unbounded on its own: a service that stops sending turn signals
-    mid-speculation would leave the bot silent for the rest of the session, so
-    the host bounds it by calling :meth:`expire` on a timer, armed and cancelled
-    as :attr:`speculation_id` changes.
+    A hold bounds itself. A service that stops sending turn signals
+    mid-speculation would otherwise leave the bot silent for the rest of the
+    session, so a hold that outlasts ``max_hold_duration`` is discarded and
+    whatever it was holding back goes to ``on_expired``.
 
     Example::
+
+        gate = SpeculationGate(on_expired=self._push_expired)
+        await gate.setup(task_manager)
 
         for frame, direction in gate.process(frame, direction):
             await self.push_frame(frame, direction)
     """
 
-    def __init__(self, *, name: str = "SpeculationGate"):
+    def __init__(
+        self,
+        *,
+        on_expired: Callable[[list[GatedFrame]], Awaitable[None]],
+        max_hold_duration: float = 5.0,
+        **kwargs,
+    ):
         """Initialize the speculation gate.
 
         Args:
-            name: Label used in log messages, typically the owning service's.
+            on_expired: Awaited with the frames a hold left behind when it
+                outlasts ``max_hold_duration``: whatever the discarded response
+                was holding back that has to be delivered anyway. Runs on the
+                gate's own task, so it may push frames.
+            max_hold_duration: Seconds a response may be held before the gate
+                gives up on it.
+            **kwargs: Additional arguments passed to the parent class.
         """
-        self._name = name
+        super().__init__(**kwargs)
+        self._on_expired = on_expired
+        self._max_hold_duration = max_hold_duration
+        # A hold is bounded by a task waiting for it to end. Waiting rather than
+        # being cancelled at the end: holds start and end inside `process`,
+        # which is synchronous, and cancelling a task has to be awaited.
+        self._hold_ended = asyncio.Event()
+        self._hold_timeout_task: asyncio.Task | None = None
         self._state = SpeculationState.OPEN
         self._speculation_id: str | None = None
         self._buffer: list[GatedFrame] = []
@@ -105,8 +130,12 @@ class SpeculationGate:
         # One slot is enough: only one speculation is ever in flight.
         self._confirmed_id: str | None = None
 
-    def __str__(self):
-        return self._name
+    async def cleanup(self):
+        """Stop bounding a hold that outlived the pipeline."""
+        await super().cleanup()
+        if self._hold_timeout_task:
+            task, self._hold_timeout_task = self._hold_timeout_task, None
+            await self.cancel_task(task)
 
     @property
     def state(self) -> SpeculationState:
@@ -176,17 +205,42 @@ class SpeculationGate:
 
         return emitted
 
-    def expire(self) -> list[GatedFrame]:
-        """Give up on a speculation nothing resolved.
+    def _bound_hold(self):
+        """Start the clock on the hold just taken.
 
-        Called by the host once its hold timer fires.
-
-        Returns:
-            The frames to push, which is whatever the discarded response was
-            holding back that has to be delivered anyway.
+        Starting a task needs no await, so this runs inside the state
+        transition that took the hold. A hold that supersedes another leaves
+        that one's task to notice the end and exit.
         """
-        logger.warning(f"{self}: speculative response unresolved, discarding it")
-        return self._discard(None)
+        self._hold_ended.clear()
+        self._hold_timeout_task = self.create_task(self._hold_timeout_handler(), "_hold_timeout")
+
+    def _end_hold(self, state: SpeculationState):
+        """Leave the hold, releasing the bound on it.
+
+        The single exit from ``HOLDING``, which is what lets the bound end
+        exactly once however the hold ended.
+
+        Args:
+            state: What the gate does with the frames that follow.
+        """
+        self._state = state
+        self._speculation_id = None
+        self._hold_ended.set()
+
+    async def _hold_timeout_handler(self):
+        """Discard a hold that outlasted its bound."""
+        try:
+            await asyncio.wait_for(self._hold_ended.wait(), self._max_hold_duration)
+            return
+        except TimeoutError:
+            pass
+
+        logger.warning(
+            f"{self}: speculative response unresolved after {self._max_hold_duration}s, "
+            "discarding it"
+        )
+        await self._on_expired(self._discard(None))
 
     def _resolved(self, frame: Frame, direction: FrameDirection) -> GatedFrame:
         """Prepare a frame the gate has resolved.
@@ -222,6 +276,7 @@ class SpeculationGate:
 
         self._state = SpeculationState.HOLDING
         self._speculation_id = speculation_id
+        self._bound_hold()
         return emitted
 
     def _release(self, speculation_id: str | None) -> list[GatedFrame]:
@@ -245,8 +300,7 @@ class SpeculationGate:
             return []
 
         logger.debug(f"{self}: releasing speculative response ({len(self._buffer)} frames)")
-        self._state = SpeculationState.OPEN
-        self._speculation_id = None
+        self._end_hold(SpeculationState.OPEN)
         return self._flush()
 
     def _discard(self, speculation_id: str | None) -> list[GatedFrame]:
@@ -294,8 +348,7 @@ class SpeculationGate:
         # Drops the speculative response and keeps anything that must always be
         # delivered, which is then emitted rather than discarded with it.
         self._buffer = [item for item in self._buffer if isinstance(item[0], UninterruptibleFrame)]
-        self._speculation_id = None
-        self._state = (
+        self._end_hold(
             SpeculationState.DROPPING if keep_dropping and not complete else SpeculationState.OPEN
         )
         return self._flush()

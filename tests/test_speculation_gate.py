@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -32,12 +33,15 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
-from pipecat.turns.speculation_gate import SpeculationGate, SpeculationState
+from pipecat.turns.speculation_gate import GatedFrame, SpeculationGate, SpeculationState
 from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 DOWN = FrameDirection.DOWNSTREAM
 
@@ -63,6 +67,21 @@ def tool_result(value: str = "booked") -> FunctionCallResultFrame:
     )
 
 
+async def make_gate(**kwargs) -> SpeculationGate:
+    """Build a gate wired up the way a host wires one."""
+    gate = SpeculationGate(on_expired=kwargs.pop("on_expired", None) or _ignore, **kwargs)
+    await gate.setup(TaskManager())
+    return gate
+
+
+async def _ignore(frames: list[GatedFrame]):
+    pass
+
+
+async def _collect(into: list, frames: list[GatedFrame]):
+    into.append([frame for frame, _ in frames])
+
+
 def emit(gate: SpeculationGate, *frames: Frame) -> list[Frame]:
     """Send frames through the gate, collecting everything it lets out."""
     emitted = []
@@ -75,9 +94,9 @@ def types(frames: list[Frame]) -> list[type]:
     return [type(f) for f in frames]
 
 
-class TestSpeculationGate(unittest.TestCase):
-    def test_non_speculative_response_passes_through(self):
-        gate = SpeculationGate()
+class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
+    async def test_non_speculative_response_passes_through(self):
+        gate = await make_gate()
 
         assert types(emit(gate, *response(None, "Hello."))) == [
             LLMFullResponseStartFrame,
@@ -85,8 +104,8 @@ class TestSpeculationGate(unittest.TestCase):
             LLMFullResponseEndFrame,
         ]
 
-    def test_speculative_response_is_held_until_the_turn_ends(self):
-        gate = SpeculationGate()
+    async def test_speculative_response_is_held_until_the_turn_ends(self):
+        gate = await make_gate()
 
         assert emit(gate, *response("abc", "Booking ", "your flight.")) == []
         assert gate.state == SpeculationState.HOLDING
@@ -106,8 +125,8 @@ class TestSpeculationGate(unittest.TestCase):
         ]
         assert gate.state == SpeculationState.OPEN
 
-    def test_withdrawn_speculation_is_discarded(self):
-        gate = SpeculationGate()
+    async def test_withdrawn_speculation_is_discarded(self):
+        gate = await make_gate()
 
         assert emit(gate, *response("abc", "Cancelling ", "your booking.", end=False)) == []
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
@@ -123,10 +142,10 @@ class TestSpeculationGate(unittest.TestCase):
             LLMFullResponseEndFrame,
         ]
 
-    def test_withdrawal_arriving_before_the_response_it_cancels(self):
+    async def test_withdrawal_arriving_before_the_response_it_cancels(self):
         # A cancellation is a system frame, so it can overtake the response
         # frames it withdraws.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
             EagerEndOfTurnCancelFrame
@@ -138,8 +157,8 @@ class TestSpeculationGate(unittest.TestCase):
             LLMFullResponseEndFrame,
         ]
 
-    def test_withdrawal_leaves_a_different_speculation_alone(self):
-        gate = SpeculationGate()
+    async def test_withdrawal_leaves_a_different_speculation_alone(self):
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking."))
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="other"))) == [
@@ -152,9 +171,9 @@ class TestSpeculationGate(unittest.TestCase):
             LLMFullResponseEndFrame,
         ]
 
-    def test_synthesized_audio_is_held_with_the_response(self):
+    async def test_synthesized_audio_is_held_with_the_response(self):
         # A host that gates after synthesis holds the audio too.
-        gate = SpeculationGate()
+        gate = await make_gate()
         audio = TTSAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1)
 
         assert emit(gate, *response("abc", "Hi.", end=False), audio) == []
@@ -162,14 +181,14 @@ class TestSpeculationGate(unittest.TestCase):
             EagerEndOfTurnCancelFrame
         ]
 
-    def test_interruption_discards_the_speculation(self):
-        gate = SpeculationGate()
+    async def test_interruption_discards_the_speculation(self):
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False))
         assert types(emit(gate, InterruptionFrame())) == [InterruptionFrame]
 
-    def test_upstream_frames_are_never_held(self):
-        gate = SpeculationGate()
+    async def test_upstream_frames_are_never_held(self):
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False))
         upstream = LLMTextFrame("upstream")
@@ -177,32 +196,53 @@ class TestSpeculationGate(unittest.TestCase):
             (upstream, FrameDirection.UPSTREAM)
         ]
 
-    def test_shutdown_delivers_what_has_to_outlive_the_speculation(self):
+    async def test_shutdown_delivers_what_has_to_outlive_the_speculation(self):
         # EndFrame is uninterruptible and awaited by the runner, so holding it
         # would hang shutdown.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False), tool_result())
         assert types(emit(gate, EndFrame())) == [FunctionCallResultFrame, EndFrame]
 
-    def test_expiry_discards_an_unresolved_speculation(self):
-        gate = SpeculationGate()
+    async def test_a_hold_that_outlasts_its_bound_is_discarded(self):
+        expired = []
+        gate = await make_gate(max_hold_duration=0.05, on_expired=lambda f: _collect(expired, f))
 
         emit(gate, *response("abc", "Booking."))
-        assert gate.expire() == []
-        assert gate.state == SpeculationState.OPEN
+        await asyncio.sleep(0.2)
 
+        assert gate.state == SpeculationState.OPEN
+        assert expired == [[]]
         # Confirmation arriving after the gate gave up releases nothing.
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
             UserStoppedSpeakingFrame
         ]
 
+    async def test_a_hold_resolved_in_time_never_expires(self):
+        expired = []
+        gate = await make_gate(max_hold_duration=0.05, on_expired=lambda f: _collect(expired, f))
 
-class TestSpeculationHoldSignal(unittest.TestCase):
+        emit(gate, *response("abc", "Booking."))
+        emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
+        await asyncio.sleep(0.2)
+
+        assert expired == []
+
+    async def test_an_expired_hold_still_delivers_what_must_outlive_it(self):
+        expired = []
+        gate = await make_gate(max_hold_duration=0.05, on_expired=lambda f: _collect(expired, f))
+
+        emit(gate, *response("abc", "Booking.", end=False), tool_result())
+        await asyncio.sleep(0.2)
+
+        assert [types(batch) for batch in expired] == [[FunctionCallResultFrame]]
+
+
+class TestSpeculationHoldSignal(unittest.IsolatedAsyncioTestCase):
     """`speculation_id` is what a host arms its hold timer on."""
 
-    def test_it_names_the_held_speculation_only_while_holding(self):
-        gate = SpeculationGate()
+    async def test_it_names_the_held_speculation_only_while_holding(self):
+        gate = await make_gate()
         assert gate.speculation_id is None
 
         emit(gate, *response("abc", "Booking."))
@@ -211,10 +251,10 @@ class TestSpeculationHoldSignal(unittest.TestCase):
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
         assert gate.speculation_id is None
 
-    def test_a_superseding_speculation_renames_the_hold(self):
+    async def test_a_superseding_speculation_renames_the_hold(self):
         # The timer has to start over rather than inherit the remainder of the
         # hold it supersedes.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False))
         assert gate.speculation_id == "abc"
@@ -223,8 +263,8 @@ class TestSpeculationHoldSignal(unittest.TestCase):
         assert gate.speculation_id == "def"
 
 
-class TestEagerMatchPolicies(unittest.TestCase):
-    def test_exact_match(self):
+class TestEagerMatchPolicies(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_match(self):
         from pipecat.turns.user_stop import ExactMatch
 
         policy = ExactMatch()
@@ -232,7 +272,7 @@ class TestEagerMatchPolicies(unittest.TestCase):
         assert not policy.matches("book a flight", "Book a flight.")
         assert not policy.matches("book a flight", "book a flight tomorrow")
 
-    def test_normalized_match(self):
+    async def test_normalized_match(self):
         from pipecat.turns.user_stop import NormalizedMatch
 
         policy = NormalizedMatch()
@@ -243,11 +283,11 @@ class TestEagerMatchPolicies(unittest.TestCase):
         assert not policy.matches("i want to cancel", "I want to reschedule.")
 
 
-class TestSpeculationGateOrdering(unittest.TestCase):
-    def test_turn_ending_without_confirming_the_speculation_releases_nothing(self):
+class TestSpeculationGateOrdering(unittest.IsolatedAsyncioTestCase):
+    async def test_turn_ending_without_confirming_the_speculation_releases_nothing(self):
         # The mismatch path ends the turn and withdraws the speculation, and the
         # two signals can arrive in either order.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Cancelling.", end=False))
         assert types(emit(gate, UserStoppedSpeakingFrame())) == [UserStoppedSpeakingFrame]
@@ -255,8 +295,8 @@ class TestSpeculationGateOrdering(unittest.TestCase):
             EagerEndOfTurnCancelFrame
         ]
 
-    def test_confirmation_arriving_before_the_response(self):
-        gate = SpeculationGate()
+    async def test_confirmation_arriving_before_the_response(self):
+        gate = await make_gate()
 
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
             UserStoppedSpeakingFrame
@@ -268,12 +308,12 @@ class TestSpeculationGateOrdering(unittest.TestCase):
         ]
 
 
-class TestSupersededSpeculation(unittest.TestCase):
-    def test_a_new_response_supersedes_a_held_one(self):
+class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
+    async def test_a_new_response_supersedes_a_held_one(self):
         # A withdrawal that arrives before the response it voids needs no
         # memory: the response is held on arrival, and whatever answers the
         # turn instead supersedes it.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, EagerEndOfTurnCancelFrame("abc"))
         assert emit(gate, *response("abc", "Cancelling.", end=False)) == []
@@ -284,13 +324,13 @@ class TestSupersededSpeculation(unittest.TestCase):
         ]
         assert gate.state == SpeculationState.OPEN
 
-    def test_a_held_response_does_not_swallow_the_one_that_supersedes_it(self):
+    async def test_a_held_response_does_not_swallow_the_one_that_supersedes_it(self):
         # The held response never ends: its generation was cancelled mid-flight,
         # so no end frame is coming and only a new response resolves it. Its
         # frames are dropped, but the response that supersedes it has to pass
         # through whole — nothing of the held one can still be queued behind a
         # frame that arrived after it.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False))
         emitted = emit(gate, *response(None, "Something else entirely."))
@@ -305,12 +345,12 @@ class TestSupersededSpeculation(unittest.TestCase):
         ]
 
 
-class TestUninterruptibleFrames(unittest.TestCase):
-    def test_a_tool_result_survives_a_discarded_speculation(self):
+class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
+    async def test_a_tool_result_survives_a_discarded_speculation(self):
         # An async tool started in an earlier turn can return while a
         # speculation is held. Its result belongs to that earlier work and is
         # guaranteed delivery, so discarding the speculation around it keeps it.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False), tool_result())
         emitted = emit(gate, EagerEndOfTurnCancelFrame("abc"))
@@ -318,10 +358,10 @@ class TestUninterruptibleFrames(unittest.TestCase):
         assert types(emitted) == [EagerEndOfTurnCancelFrame, FunctionCallResultFrame]
         assert [f.result for f in emitted if isinstance(f, FunctionCallResultFrame)] == ["booked"]
 
-    def test_a_tool_result_is_held_in_order_with_the_response(self):
+    async def test_a_tool_result_is_held_in_order_with_the_response(self):
         # Uninterruptible frames are ordered like any other, so one that arrives
         # mid-response is released in the position it arrived in.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False), tool_result())
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
@@ -331,10 +371,10 @@ class TestUninterruptibleFrames(unittest.TestCase):
             FunctionCallResultFrame,
         ]
 
-    def test_a_tool_result_is_not_dropped_with_a_response_being_dropped(self):
+    async def test_a_tool_result_is_not_dropped_with_a_response_being_dropped(self):
         # Nothing is held back while dropping a withdrawn response's tail, so an
         # uninterruptible frame passes on in order rather than being dropped.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking.", end=False))
         assert types(emit(gate, EagerEndOfTurnCancelFrame("abc"))) == [EagerEndOfTurnCancelFrame]
@@ -342,11 +382,11 @@ class TestUninterruptibleFrames(unittest.TestCase):
         assert types(emit(gate, LLMTextFrame(" Done."), tool_result())) == [FunctionCallResultFrame]
 
 
-class TestResolvedResponsesCarryNoSpeculationId(unittest.TestCase):
-    def test_a_released_response_is_no_longer_marked_speculative(self):
+class TestResolvedResponsesCarryNoSpeculationId(unittest.IsolatedAsyncioTestCase):
+    async def test_a_released_response_is_no_longer_marked_speculative(self):
         # Past the gate the response is confirmed, so the id is cleared: an id
         # downstream means nothing held the response back.
-        gate = SpeculationGate()
+        gate = await make_gate()
 
         emit(gate, *response("abc", "Booking."))
         emitted = emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
@@ -357,8 +397,8 @@ class TestResolvedResponsesCarryNoSpeculationId(unittest.TestCase):
             if isinstance(f, (LLMFullResponseStartFrame, LLMFullResponseEndFrame))
         ] == [None, None]
 
-    def test_a_response_confirmed_before_it_arrives_is_unmarked_too(self):
-        gate = SpeculationGate()
+    async def test_a_response_confirmed_before_it_arrives_is_unmarked_too(self):
+        gate = await make_gate()
 
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
         emitted = emit(gate, *response("abc", "Booking."))
@@ -387,6 +427,7 @@ class TestUnheldSpeculationWarning(unittest.IsolatedAsyncioTestCase):
 
         # Reported once: a line per turn would not tell anyone anything new.
         assert error.call_count == 1
+        assert "speculative response reached" in str(error.call_args[0][0])
         assert transport._handle_frame.await_count == 2
 
     async def test_an_ordinary_response_is_not_reported(self):
@@ -399,12 +440,11 @@ class TestUnheldSpeculationWarning(unittest.IsolatedAsyncioTestCase):
         assert error.call_count == 0
 
 
-class GatedLLM(FrameProcessor):
-    """Answers every context frame, stamping ids the way `LLMService` does."""
+class GatedLLM(LLMService):
+    """Answers every context frame, gating what it pushes as `LLMService` does."""
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._gate = SpeculationGate()
+        super().__init__(settings=LLMSettings(model="test-model"), **kwargs)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -412,17 +452,9 @@ class GatedLLM(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        start = LLMFullResponseStartFrame()
-        start.speculation_id = frame.speculation_id
-        await self.push_frame(start)
+        await self.push_frame(LLMFullResponseStartFrame())
         await self.push_frame(LLMTextFrame("Booking your flight."))
-        end = LLMFullResponseEndFrame()
-        end.speculation_id = frame.speculation_id
-        await self.push_frame(end)
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = DOWN):
-        for gated_frame, gated_direction in self._gate.process(frame, direction):
-            await super().push_frame(gated_frame, gated_direction)
+        await self.push_frame(LLMFullResponseEndFrame())
 
 
 class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
@@ -452,7 +484,8 @@ class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
                 ],
             )
 
-        assert error.call_count == 0
+        reported = [str(call.args[0]) for call in error.call_args_list]
+        assert not any("speculative response reached" in message for message in reported)
         assert context.messages == [{"role": "user", "content": "Book a flight."}]
 
 

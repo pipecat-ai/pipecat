@@ -508,11 +508,11 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
         ]
 
     async def test_a_speculation_nothing_resolves_is_dropped_after_the_hold_timeout(self):
-        llm = SpeculativeLLM()
-        llm.SPECULATION_HOLD_TIMEOUT = 0.2
+        class ImpatientLLM(SpeculativeLLM):
+            SPECULATION_HOLD_TIMEOUT = 0.2
 
         down, _ = await run_test(
-            llm,
+            ImpatientLLM(),
             frames_to_send=[
                 self.context_frame("abc"),
                 SleepFrame(sleep=0.5),
