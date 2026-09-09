@@ -4,13 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Backend LLM worker: the backend a conversational model delegates work to.
+"""Backend LLM worker for two-tier voice agents.
 
 A frontend holds the conversation and hands off requests that need tools or
-careful reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service,
-with its own context and multi-step tool calling, to do that work: over the
-worker job API it streams back everything it produces and returns its final
-answer. ``OpenAILiveLLMService`` client delegation puts requests to one.
+careful reasoning. What the frontend is does not matter to this contract: a
+speech-to-speech model delegating on its own, or a pipeline calling a tool.
+A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
+and multi-step tool calling, to do that work: over the worker job API it
+streams back everything it produces and returns its final answer.
+:func:`delegate_to_backend` is the caller side of that contract.
+
+A request is text, so how a frontend words one is its own business.
+:func:`render_transcript_request` renders the conversation as a labelled
+transcript, which is what a frontend hands over when its model signals a
+handoff without wording a request; a frontend whose model does word one sends
+that instead.
 """
 
 import asyncio
@@ -108,7 +116,7 @@ BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
 BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
 
 
-def _message_text(message: LLMStandardMessage) -> str:
+def message_text(message: LLMStandardMessage) -> str:
     """Return a context message's text, joining the text parts of list content.
 
     Text is all the transcript carries today, so non-text parts are left out.
@@ -131,14 +139,14 @@ def _message_text(message: LLMStandardMessage) -> str:
     return ""
 
 
-#: What :func:`_render_transcript_request` tells the backend to do with a transcript.
-_DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
+#: What :func:`render_transcript_request` tells the backend to do with a transcript.
+DEFAULT_TRANSCRIPT_INSTRUCTION = "Act on the user's most recent request in the conversation above."
 
 
-def _render_transcript_request(
+def render_transcript_request(
     conversation: Sequence[LLMContextMessage],
     *,
-    instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION,
+    instruction: str = DEFAULT_TRANSCRIPT_INSTRUCTION,
     first: bool = True,
 ) -> str:
     """Render a conversation as a labelled transcript for the backend to act on.
@@ -178,7 +186,7 @@ def _render_transcript_request(
                 logger.debug(f"Skipping delegated message in {message.llm} format")
                 continue
             role = message.get("role")
-            text = _message_text(message)
+            text = message_text(message)
             if role in ("user", "assistant") and text:
                 lines.append(f"{str(role).upper()}: {text}")
             else:
@@ -212,7 +220,11 @@ class BackendLLMWorker(LLMContextWorker):
     Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
-      composed by the frontend.
+      composed by the frontend. What that text says is the application's
+      business: :func:`render_transcript_request` renders the conversation as
+      a transcript, which is what a frontend whose model hands off without
+      wording a request needs, but a frontend that has a worded request can
+      simply send it.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
@@ -223,8 +235,10 @@ class BackendLLMWorker(LLMContextWorker):
 
     The final answer arrives twice, as the last update and as the response, so
     a caller uses one or the other: a frontend relaying output as it arrives
-    reads the updates, while one that needs a return value reads the response
-    and skips updates marked ``is_final``.
+    reads the updates, while one that needs a return value (a tool handler,
+    say) reads the response and skips updates marked ``is_final``.
+
+    :func:`delegate_to_backend` wraps the caller side.
 
     Example::
 
@@ -389,7 +403,7 @@ class BackendLLMWorker(LLMContextWorker):
         return output
 
 
-async def _delegate_to_backend(
+async def delegate_to_backend(
     worker: BaseWorker,
     backend_name: str,
     *,
@@ -400,11 +414,16 @@ async def _delegate_to_backend(
     """Put a request to a :class:`BackendLLMWorker` and return its final text.
 
     Args:
-        worker: The worker making the request.
+        worker: The worker making the request (for a pipeline processor,
+            ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
-            :func:`_render_transcript_request` composes one from a
-            conversation.
+            :func:`render_transcript_request` composes one from a
+            conversation, which is what a frontend hands over when its model
+            signals a handoff without wording a request. A frontend whose
+            model does word one can send it as it stands::
+
+                await delegate_to_backend(worker, "backend", request=task)
         on_update: Called with each :class:`BackendOutput` the backend
             produces, the final answer included. A caller using the return
             value should skip outputs marked ``is_final`` to avoid handling
