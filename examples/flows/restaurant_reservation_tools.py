@@ -16,7 +16,7 @@ config branches on.
 import asyncio
 from typing import Literal, TypedDict
 
-from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
 class MockReservationSystem:
@@ -57,9 +57,7 @@ class TimeResult(TypedDict):
     alternative_times: list[str]
 
 
-async def collect_party_size(
-    flow_manager: FlowManager, size: int
-) -> tuple[PartySizeResult, TransitionInYaml]:
+async def collect_party_size(flow_manager: FlowManager, size: int):
     """
     Record the number of people in the party.
 
@@ -70,9 +68,7 @@ async def collect_party_size(
     return PartySizeResult(size=size, status="success"), TRANSITION_IN_YAML
 
 
-async def check_availability(
-    flow_manager: FlowManager, time: str, party_size: int
-) -> tuple[TimeResult, TransitionInYaml]:
+async def check_availability(flow_manager: FlowManager, time: str, party_size: int):
     """
     Check availability for requested time.
 
@@ -89,6 +85,6 @@ async def check_availability(
     ), TRANSITION_IN_YAML
 
 
-async def end_conversation(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def end_conversation(flow_manager: FlowManager):
     """End the conversation."""
     return None, TRANSITION_IN_YAML

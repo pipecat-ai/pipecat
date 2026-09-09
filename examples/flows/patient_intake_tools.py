@@ -14,7 +14,7 @@ decides where each one leads.
 
 from typing import TypedDict
 
-from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
 class BirthdayVerificationResult(TypedDict):
@@ -37,9 +37,7 @@ class VisitReasonRecordResult(TypedDict):
     count: int
 
 
-async def verify_birthday(
-    flow_manager: FlowManager, birthday: str
-) -> tuple[BirthdayVerificationResult, TransitionInYaml]:
+async def verify_birthday(flow_manager: FlowManager, birthday: str):
     """Verify the user has provided their correct birthday. Once confirmed, the next step is to record the user's prescriptions.
 
     Args:
@@ -54,9 +52,7 @@ async def verify_birthday(
     return BirthdayVerificationResult(verified=is_valid), TRANSITION_IN_YAML
 
 
-async def record_prescriptions(
-    flow_manager: FlowManager, prescriptions: list[dict]
-) -> tuple[PrescriptionRecordResult, TransitionInYaml]:
+async def record_prescriptions(flow_manager: FlowManager, prescriptions: list[dict]):
     """Record the user's prescriptions. Once confirmed, the next step is to collect allergy information.
 
     Args:
@@ -68,9 +64,7 @@ async def record_prescriptions(
     return PrescriptionRecordResult(count=len(prescriptions)), TRANSITION_IN_YAML
 
 
-async def record_allergies(
-    flow_manager: FlowManager, allergies: list[dict]
-) -> tuple[AllergyRecordResult, TransitionInYaml]:
+async def record_allergies(flow_manager: FlowManager, allergies: list[dict]):
     """Record the user's allergies. Once confirmed, then next step is to collect medical conditions.
 
     Args:
@@ -82,9 +76,7 @@ async def record_allergies(
     return AllergyRecordResult(count=len(allergies)), TRANSITION_IN_YAML
 
 
-async def record_conditions(
-    flow_manager: FlowManager, conditions: list[dict]
-) -> tuple[ConditionRecordResult, TransitionInYaml]:
+async def record_conditions(flow_manager: FlowManager, conditions: list[dict]):
     """Record the user's medical conditions. Once confirmed, the next step is to collect visit reasons.
 
     Args:
@@ -96,9 +88,7 @@ async def record_conditions(
     return ConditionRecordResult(count=len(conditions)), TRANSITION_IN_YAML
 
 
-async def record_visit_reasons(
-    flow_manager: FlowManager, visit_reasons: list[dict]
-) -> tuple[VisitReasonRecordResult, TransitionInYaml]:
+async def record_visit_reasons(flow_manager: FlowManager, visit_reasons: list[dict]):
     """Record the reasons for their visit. Once confirmed, the next step is to verify all information.
 
     Args:
@@ -110,16 +100,16 @@ async def record_visit_reasons(
     return VisitReasonRecordResult(count=len(visit_reasons)), TRANSITION_IN_YAML
 
 
-async def revise_information(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def revise_information(flow_manager: FlowManager):
     """Return to prescriptions to revise information."""
     return None, TRANSITION_IN_YAML
 
 
-async def confirm_information(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def confirm_information(flow_manager: FlowManager):
     """Proceed with confirmed information."""
     return None, TRANSITION_IN_YAML
 
 
-async def complete_intake(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def complete_intake(flow_manager: FlowManager):
     """Complete the intake process."""
     return None, TRANSITION_IN_YAML

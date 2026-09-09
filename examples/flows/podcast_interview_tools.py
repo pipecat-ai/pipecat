@@ -14,7 +14,7 @@ leads, including the interview node's transition back to itself.
 
 from typing import TypedDict
 
-from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
 class ProceedToTopicResult(TypedDict):
@@ -29,9 +29,7 @@ class StartInterviewResult(TypedDict):
     topic: str
 
 
-async def proceed_to_topic(
-    flow_manager: FlowManager, guest_summary: str
-) -> tuple[ProceedToTopicResult, TransitionInYaml]:
+async def proceed_to_topic(flow_manager: FlowManager, guest_summary: str):
     """Use after the guest has introduced themselves.
 
     Args:
@@ -40,9 +38,7 @@ async def proceed_to_topic(
     return ProceedToTopicResult(guest_summary=guest_summary), TRANSITION_IN_YAML
 
 
-async def start_interview(
-    flow_manager: FlowManager, topic: str
-) -> tuple[StartInterviewResult, TransitionInYaml]:
+async def start_interview(flow_manager: FlowManager, topic: str):
     """Use this when the guest has shared a clear topic they want to explore.
 
     Args:
@@ -51,16 +47,16 @@ async def start_interview(
     return StartInterviewResult(topic=topic), TRANSITION_IN_YAML
 
 
-async def next_question(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def next_question(flow_manager: FlowManager):
     """Use this after you've thoroughly explored the current aspect with multiple questions and follow-ups."""
     return None, TRANSITION_IN_YAML
 
 
-async def wrap_up(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def wrap_up(flow_manager: FlowManager):
     """Use this when you've gathered substantial insights and are ready to wrap up."""
     return None, TRANSITION_IN_YAML
 
 
-async def end_interview(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def end_interview(flow_manager: FlowManager):
     """Use this after the guest has shared their final thoughts."""
     return None, TRANSITION_IN_YAML

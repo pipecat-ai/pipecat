@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from loguru import logger
 
-from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
 class PizzaOrderResult(TypedDict):
@@ -47,28 +47,28 @@ async def check_kitchen_status(action: dict, flow_manager: FlowManager) -> None:
 # Transitions with no work behind them
 
 
-async def choose_pizza(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def choose_pizza(flow_manager: FlowManager):
     """
     User wants to order pizza. Let's get that order started.
     """
     return None, TRANSITION_IN_YAML
 
 
-async def choose_sushi(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def choose_sushi(flow_manager: FlowManager):
     """
     User wants to order sushi. Let's get that order started.
     """
     return None, TRANSITION_IN_YAML
 
 
-async def complete_order(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def complete_order(flow_manager: FlowManager):
     """
     User confirms the order is correct.
     """
     return None, TRANSITION_IN_YAML
 
 
-async def revise_order(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
+async def revise_order(flow_manager: FlowManager):
     """
     User wants to make changes to their order.
     """
@@ -78,9 +78,7 @@ async def revise_order(flow_manager: FlowManager) -> tuple[None, TransitionInYam
 # Tools that do work
 
 
-async def select_pizza_order(
-    flow_manager: FlowManager, size: str, pizza_type: str
-) -> tuple[PizzaOrderResult, TransitionInYaml]:
+async def select_pizza_order(flow_manager: FlowManager, size: str, pizza_type: str):
     """
     Record the pizza order details.
 
@@ -101,9 +99,7 @@ async def select_pizza_order(
     return PizzaOrderResult(size=size, type=pizza_type, price=price), TRANSITION_IN_YAML
 
 
-async def select_sushi_order(
-    flow_manager: FlowManager, count: int, roll_type: str
-) -> tuple[SushiOrderResult, TransitionInYaml]:
+async def select_sushi_order(flow_manager: FlowManager, count: int, roll_type: str):
     """
     Record the sushi order details.
 
@@ -125,7 +121,7 @@ async def select_sushi_order(
 
 async def get_delivery_estimate(
     flow_manager: FlowManager,
-) -> tuple[DeliveryEstimateResult, TransitionInYaml]:
+):
     """Provide delivery estimate information."""
     delivery_time = datetime.now() + timedelta(minutes=30)
     return DeliveryEstimateResult(time=f"{delivery_time}"), TRANSITION_IN_YAML

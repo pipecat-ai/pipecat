@@ -11,12 +11,10 @@ the signature and docstring. It returns ``(result, TRANSITION_IN_YAML)``; hello_
 decides that the conversation moves to the end node afterwards.
 """
 
-from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
-async def record_favorite_color(
-    flow_manager: FlowManager, color: str
-) -> tuple[str, TransitionInYaml]:
+async def record_favorite_color(flow_manager: FlowManager, color: str):
     """Record the color the user said is their favorite.
 
     Here "record" means print to the console, but any logic could go here:
