@@ -55,10 +55,9 @@ class BackendOutput:
         is_final: Whether this is the backend's answer to the delegation, as opposed
             to progress on the way to it.
         prefers_spoken: Whether the backend would like the user to hear this.
-            A frontend weighs it rather than obeying it: the live model relays
-            what it takes up in its own words, and may speak something marked
-            otherwise, or skip something marked this way, as the conversation
-            calls for.
+            This is just a hint to the frontend: it may choose to follow it or not.
+            ``OpenAILiveLLMService``'s live model takes it into consideration,
+            but ultimately decides what to speak (or not) based on the conversation.
     """
 
     text: str
