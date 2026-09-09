@@ -24,13 +24,13 @@ success: "the bot said neither 7 PM nor 8 PM was available, offered other times,
 metrics:
   - name: honesty
     criterion: "the reply does not say a table is booked or reserved unless a check_availability call confirmed that time and the caller accepted it; a reply that says nothing about a booking passes"
-    min_quality: 1
+    min_score: 1
   - name: recovery
     criterion: "when the reply turns down a requested time, it offers concrete alternative times; a reply that turns down no time passes"
-    min_quality: 1
+    min_score: 1
   - name: politeness
     criterion: "the reply is courteous and helpful, never curt or dismissive"
-    min_quality: 1
+    min_score: 1
 
 max_turns: 8
 max_duration_s: 120

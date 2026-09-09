@@ -11,7 +11,12 @@ import time
 from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT, EvalClient
+from pipecat.evals.client import (
+    BOT_ENDED_EVENT,
+    HARNESS_ERROR_EVENT,
+    PERSONA_TURN_EVENT,
+    EvalClient,
+)
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
@@ -50,9 +55,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
     The persona answers the bot on its own inside the client's pipeline. The
     driver reports each line as progress and watches for the end: the
-    persona's ``end_call``, the bot hanging up, the turn cap, or the time cap.
-    Then one judge call over the whole transcript scores every bot turn on
-    every criterion and decides the goal.
+    persona's ``end_call``, the bot hanging up, the turn cap, the time cap, a
+    lull neither side breaks, or a failure of the harness's own pipeline. Then
+    one judge call over the whole transcript scores every bot turn on every
+    criterion and decides the goal.
     """
 
     def __init__(
@@ -109,29 +115,38 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # of what it said, in text mode its LLM text.
         started = time.monotonic()
         deadline = started + simulation.max_duration_s
+        # Any event at all breaks a lull: the bot starting to answer counts,
+        # so a slow reply is not silence, only nothing happening is.
+        last_event = started
+        failures: list[EvalAssertionFailure] = []
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
-            f"{simulation.max_duration_s:g}s)"
+            f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
         )
         while self._ended_by is None:
             try:
-                event = await self._stream.next_any(deadline)
-
-                self._observe_new_events()
-                if event["type"] == END_CALL_EVENT:
-                    self._ended_by = "end_call"
-                elif event["type"] == BOT_ENDED_EVENT:
-                    self._ended_by = "bot"
-                elif event["type"] == PERSONA_TURN_EVENT:
-                    self._turns += 1
-                    await self._report("user", event.get("text", ""))
-                    if self._turns >= simulation.max_turns:
-                        self._ended_by = "max_turns"
-                elif event["type"] == self._bot_said and event.get("text"):
-                    await self._report("bot", event["text"])
+                event = await self._stream.next_any(
+                    min(deadline, last_event + simulation.max_silence_s)
+                )
             except TimeoutError:
-                self._ended_by = "max_duration"
+                self._ended_by = "max_duration" if time.monotonic() >= deadline else "silence"
                 break
+            last_event = time.monotonic()
+            self._observe_new_events()
+            if event["type"] == END_CALL_EVENT:
+                self._ended_by = "end_call"
+            elif event["type"] == BOT_ENDED_EVENT:
+                self._ended_by = "bot"
+            elif event["type"] == HARNESS_ERROR_EVENT:
+                self._ended_by = "error"
+                failures.append(self._harness_failure(event.get("text", "")))
+            elif event["type"] == PERSONA_TURN_EVENT:
+                self._turns += 1
+                await self._report("user", event.get("text", ""))
+                if self._turns >= simulation.max_turns:
+                    self._ended_by = "max_turns"
+            elif event["type"] == self._bot_said and event.get("text"):
+                await self._report("bot", event["text"])
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()
@@ -141,8 +156,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._observe_new_events()
         self._close_bot_turn()
         await self._report("ended", self._ended_by)
-        await self._judge_conversation()
-        return []
+        if failures:
+            return failures
+        return await self._judge_conversation()
 
     def result(
         self,
@@ -207,6 +223,17 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         """Emit one line of the conversation, or its end, as progress."""
         await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
 
+    def _harness_failure(self, text: str) -> EvalAssertionFailure:
+        """The failure a harness pipeline error becomes: the run's error, scored against the current turn."""
+        self._trace.log(f"error: harness pipeline: {text}")
+        return EvalAssertionFailure(
+            turn_index=self._turns,
+            expectation_index=-1,
+            event_name="<harness>",
+            reason=text,
+            kind="error",
+        )
+
     async def _on_end_call(self, params: FunctionCallParams) -> None:
         """The persona's ``end_call``: note its claim and end the conversation."""
         arguments = params.arguments or {}
@@ -260,8 +287,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             return [f"{name} was cancelled"]
         return []
 
-    async def _judge_conversation(self) -> None:
-        """Score the measured metrics, then ask the judge once about the goal and every judged criterion."""
+    async def _judge_conversation(self) -> list[EvalAssertionFailure]:
+        """Score the measured metrics, then ask the judge once about the goal and every judged criterion.
+
+        A judge that answers nothing usable about the goal is the run's
+        error, not a verdict on the bot.
+        """
         measured = {
             metric.name: self._measure(metric)
             for metric in self._simulation.metrics
@@ -270,7 +301,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         if self._judge is None:
             self._metrics.extend(measured.values())
             self._reason = "no judge configured"
-            return
+            return []
         evidence = self.tool_calls()
         if evidence:
             self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
@@ -283,26 +314,45 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 continue
             verdicts = [
                 EvalSimulationTurnVerdict(
-                    turn=index, passed=verdict.verdict == "yes", reason=verdict.reason
+                    turn=index,
+                    passed=verdict.verdict == "yes",
+                    reason=verdict.reason,
+                    verdict=verdict.verdict,
                 )
                 for index, verdict in enumerate(judged.turns.get(metric.name, []), 1)
             ]
             for verdict in verdicts:
                 self._trace.log(
-                    f"judge: turn {verdict.turn} {metric.name} "
-                    f"{'yes' if verdict.passed else 'no'}: {verdict.reason}"
+                    f"judge: turn {verdict.turn} {metric.name} {verdict.verdict}: {verdict.reason}"
                 )
             self._metrics.append(self._score(metric, verdicts))
         self._succeeded = judged.goal.verdict == "yes"
         self._reason = judged.goal.reason
+        if judged.goal.verdict == "none":
+            self._trace.log(f"judge: no verdict on the goal: {self._reason}")
+            return [
+                EvalAssertionFailure(
+                    turn_index=self._turns,
+                    expectation_index=-1,
+                    event_name="<judge>",
+                    reason=self._reason,
+                    kind="judge_no_verdict",
+                )
+            ]
         self._trace.log(
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {self._reason}"
         )
+        return []
 
     def _score(
         self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]
     ) -> EvalSimulationMetricScore:
-        """A metric's score over its turn verdicts: the share of turns that passed."""
+        """A metric's score over its turn verdicts: the share of turns that passed.
+
+        A metric that fell short only on turns the judge left unanswered is
+        judge trouble, and its kind says so.
+        """
+        kind = None
         if not verdicts:
             score, reason, passed = None, "no bot turn to judge", True
         else:
@@ -313,18 +363,21 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 if not failed
                 else "; ".join(f"turn {v.turn}: {v.reason}" for v in failed)
             )
-            passed = metric.min_quality is None or score >= metric.min_quality
+            passed = metric.min_score is None or score >= metric.min_score
+            if not passed:
+                kind = "judge_no" if any(v.verdict == "no" for v in failed) else "judge_no_verdict"
         self._trace.log(
             f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
-            f"{'' if passed else f' (below {metric.min_quality:.2f})'}: {reason}"
+            f"{'' if passed else f' (below {metric.min_score:.2f})'}: {reason}"
         )
         return EvalSimulationMetricScore(
             name=metric.name,
             score=score,
             passed=passed,
             reason=reason,
-            min_quality=metric.min_quality,
+            min_score=metric.min_score,
             verdicts=verdicts,
+            kind=kind,
         )
 
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
@@ -353,7 +406,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"{'' if passed else ' (failed)'}: {reason}"
         )
         return EvalSimulationMetricScore(
-            name=metric.name, score=score, passed=passed, reason=reason, value=value
+            name=metric.name,
+            score=score,
+            passed=passed,
+            reason=reason,
+            value=value,
+            kind=None if passed else ("out_of_range" if metric.calls is None else "function_calls"),
         )
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
@@ -378,7 +436,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             slowest = max(self._reply_latencies(), default=None)
             if slowest is None:
                 return None, "no reply to time"
-            return slowest, f"slowest reply {slowest:.2f} s"
+            timed = (
+                "from the persona stopping to the first spoken sentence"
+                if self._simulation.bot_audio
+                else "to the first token"
+            )
+            return slowest, f"slowest reply {slowest:.2f} s {timed}"
         raise ValueError(f"unknown measure {measure!r}")
 
     def _reply_latencies(self) -> list[float]:

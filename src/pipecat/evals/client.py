@@ -179,6 +179,9 @@ class _BotFrameSink(FrameProcessor):
 # one the client appends when the bot ends the call by closing the connection.
 PERSONA_TURN_EVENT = "persona_turn"
 BOT_ENDED_EVENT = "bot_ended"
+# The harness's own pipeline reported an error: a service in it (the persona
+# LLM, the user TTS, the bot STT) failed, not the bot.
+HARNESS_ERROR_EVENT = "harness_error"
 
 
 class _PersonaTurnRelay(FrameProcessor):
@@ -395,6 +398,11 @@ class EvalClient:
             enable_rtvi=False,
             cancel_on_idle_timeout=False,
         )
+
+        @self._worker.event_handler("on_pipeline_error")
+        async def _on_pipeline_error(_worker, frame):
+            await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
+
         runner = WorkerRunner()
         await runner.add_workers(self._worker)
         self._run_task = asyncio.create_task(runner.run())

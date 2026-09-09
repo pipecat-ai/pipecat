@@ -192,7 +192,7 @@ def _print_simulation_detail(result: EvalSimulationResult) -> None:
             score = (_green if metric.passed else _red)(
                 "unscored" if metric.score is None else f"{metric.score:.2f}"
             )
-            bound = f" (min {metric.min_quality:.2f})" if metric.min_quality is not None else ""
+            bound = f" (min {metric.min_score:.2f})" if metric.min_score is not None else ""
             failed = [v for v in metric.verdicts if not v.passed]
             summary = f"{len(metric.verdicts) - len(failed)}/{len(metric.verdicts)} turns"
             print(

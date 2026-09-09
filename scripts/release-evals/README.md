@@ -288,7 +288,7 @@ intake, place an order, quote a policy.
 Each simulation file names how many times it runs (`runs`), and every run must
 pass; a persona does not say the same thing twice, so a single run is an
 anecdote and the release set runs each three times. A run passes when the judge
-says the bot did its job (`success`), no judged metric with a `min_quality`
+says the bot did its job (`success`), no judged metric with a `min_score`
 scored below it, and no measured one failed its range or its call list; a run
 that fails says which of those gave way. The judge sees the bot's tool calls
 (name and arguments), not their results. Whether the bot made a call at all is
@@ -300,7 +300,7 @@ deterministic so it stays true across runs.
 A judged metric's `criterion` says what every reply of the bot should be, and
 the judge decides it for each bot turn in one call over the whole transcript,
 the bot's tool calls in place, with a yes or a no, never a partial score. The
-score is the share of turns that got a yes, so `min_quality: 1` means never,
+score is the share of turns that got a yes, so `min_score: 1` means never,
 and `0.8` allows one slip in five. Write a rule
 as a condition with what a reply outside it does ("when the reply turns down a
 time, it offers alternatives; a reply that turns down no time passes"), or the
@@ -317,8 +317,10 @@ the verdict on every turn. The suite prints a
 per-simulation pass rate and a ✓ or ✗ for whether every run passed, and exits
 non-zero when one did not. `--repeat` turns the whole thing
 into a measurement: rates are reported and the exit code stays 0. A run that
-errored (the bot never came up, the persona's LLM failed) is reported but kept
-out of the rate.
+errored (the bot never came up, the persona's LLM failed, the judge gave no
+verdict on the goal) is reported but kept out of the rate, and a run in which
+neither side does anything for `max_silence_s` (30 s by default) ends as
+`silence` instead of waiting out `max_duration_s`.
 
 | Simulation                | Bot                                              | The caller                                                       |
 | ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
@@ -332,9 +334,9 @@ out of the rate.
 | `order_sushi`             | `flows/food_ordering_advanced_functionschema.py` | Orders three California rolls.                                   |
 | `get_insurance_quote`     | `flows/insurance_quote.py`                       | Gets a quote, then a second one with more coverage.              |
 
-The persona LLM is the `simulator:` block (an OpenAI model by default, so
-`OPENAI_API_KEY` must be set) and the judge is the same local Ollama judge as
-the scripted scenarios. In audio mode the persona's turns are synthesized and
+The persona LLM is the `simulator:` block, by default the same local Ollama
+model as the judge, so a simulation needs no API key; `simulator.yaml` is
+where to point every simulation at another model. In audio mode the persona's turns are synthesized and
 the bot's speech transcribed by the same services as a scripted audio scenario,
 Kokoro and Moonshine by default, so `capital_curious_audio` exercises the bot's
 STT, TTS, and turn taking against an autonomous caller. The file format is documented in the

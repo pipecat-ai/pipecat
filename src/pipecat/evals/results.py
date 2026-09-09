@@ -32,6 +32,7 @@ FAILURE_KINDS = (
     "send_after_timeout",  # a turn's `send_after` event never fired
     "connect_failed",  # never connected to the bot's eval transport
     "handshake_timeout",  # connected, but the bot never sent bot-ready
+    "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
 
@@ -159,6 +160,7 @@ SIMULATION_ENDINGS = (
     "bot",  # the bot ended the call (it closed the connection)
     "max_turns",  # the persona's turn cap was reached
     "max_duration",  # the run's wall-clock cap was reached
+    "silence",  # neither side did anything for ``max_silence_s``
     "error",  # the run did not complete (see ``error``)
 )
 
@@ -173,11 +175,14 @@ class EvalSimulationTurnVerdict:
             conversation.
         passed: Whether the turn satisfied the criterion.
         reason: The judge's one-sentence justification.
+        verdict: The judge's answer: ``yes``, ``no``, or ``none`` when it gave
+            no verdict on the turn, which counts as a no.
     """
 
     turn: int
     passed: bool
     reason: str
+    verdict: str = "no"
 
 
 @dataclass
@@ -190,24 +195,30 @@ class EvalSimulationMetricScore:
             0..1, each turn a yes or a no; ``None`` when there was no turn to
             judge.
         passed: Whether the metric let the run pass: its score reached its
-            ``min_quality``, or it has none.
+            ``min_score``, or it has none.
         reason: What the score rests on: the turns that fell short and why,
             or that every turn passed.
-        min_quality: The score the metric needed, or ``None`` when it only
+        min_score: The score the metric needed, or ``None`` when it only
             reports.
         verdicts: The judge's verdict on each bot turn, in order; empty for a
             measured metric.
         value: What a measured metric measured, in its unit; ``None`` for a
             judged one, or when there was nothing to measure.
+        kind: How the metric failed, for grouping across runs: ``judge_no``
+            when the judge rejected a turn, ``judge_no_verdict`` when it only
+            left turns unanswered, ``out_of_range`` for a measure outside its
+            bounds, ``function_calls`` for a call list that did not match;
+            ``None`` when it passed.
     """
 
     name: str
     score: float | None
     passed: bool = True
     reason: str = ""
-    min_quality: float | None = None
+    min_score: float | None = None
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
     value: float | None = None
+    kind: str | None = None
 
 
 @dataclass
@@ -262,10 +273,10 @@ class EvalSimulationResult:
         for metric in self.metrics:
             if metric.passed:
                 continue
-            if metric.min_quality is None:
+            if metric.min_score is None:
                 return f"{metric.name}: {metric.reason}"
             score = "unscored" if metric.score is None else f"{metric.score:.2f}"
-            return f"{metric.name} {score} below {metric.min_quality:.2f}: {metric.reason}"
+            return f"{metric.name} {score} below {metric.min_score:.2f}: {metric.reason}"
         return None
 
 

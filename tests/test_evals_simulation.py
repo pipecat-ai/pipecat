@@ -60,7 +60,7 @@ class TestSimulationLoader(unittest.TestCase):
 metrics:
   - name: politeness
     criterion: "stayed courteous"
-  - {name: accuracy, criterion: "no invented facts", min_quality: 0.8}
+  - {name: accuracy, criterion: "no invented facts", min_score: 0.8}
 max_turns: 5
 max_duration_s: 42
 runs: 3
@@ -68,7 +68,7 @@ runs: 3
             )
         )
         self.assertEqual([m.name for m in s.metrics], ["politeness", "accuracy"])
-        self.assertEqual([m.min_quality for m in s.metrics], [None, 0.8])
+        self.assertEqual([m.min_score for m in s.metrics], [None, 0.8])
         self.assertEqual(s.max_turns, 5)
         self.assertEqual(s.max_duration_s, 42.0)
         self.assertEqual(s.runs, 3)
@@ -97,7 +97,7 @@ metrics:
         for bad, message in (
             ("  - measure: mood\n    max_value: 1\n", "must be one of"),
             ("  - measure: turns\n", "needs a 'min_value:' or a 'max_value:'"),
-            ("  - measure: turns\n    max_value: 3\n    min_quality: 1\n", "takes a range"),
+            ("  - measure: turns\n    max_value: 3\n    min_score: 1\n", "takes a range"),
             (
                 "  - name: both\n    criterion: x\n    measure: turns\n    max_value: 3\n",
                 "one of the two",
@@ -107,10 +107,10 @@ metrics:
                 EvalSimulationScenario.load(_write(MINIMAL + "metrics:\n" + bad))
             self.assertIn(message, str(cm.exception))
 
-    def test_min_quality_is_a_share_and_names_are_unique(self):
+    def test_min_score_is_a_share_and_names_are_unique(self):
         with self.assertRaises(ValueError) as cm:
             EvalSimulationScenario.load(
-                _write(MINIMAL + "metrics:\n  - {name: a, criterion: x, min_quality: 2}\n")
+                _write(MINIMAL + "metrics:\n  - {name: a, criterion: x, min_score: 2}\n")
             )
         self.assertIn("0..1", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
@@ -146,7 +146,7 @@ judge:
         self.assertIn("user.speech", str(cm.exception))
 
     def test_required_fields(self):
-        for missing in ("persona", "goal", "success", "simulator"):
+        for missing in ("persona", "goal", "success"):
             text = "\n".join(line for line in MINIMAL.splitlines() if not line.startswith(missing))
             with self.assertRaises(ValueError, msg=missing) as cm:
                 EvalSimulationScenario.load(_write(text))
@@ -262,7 +262,11 @@ class TestSimulationRunResult(unittest.TestCase):
 import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
-from pipecat.evals.client import BOT_ENDED_EVENT, PERSONA_TURN_EVENT  # noqa: E402
+from pipecat.evals.client import (  # noqa: E402
+    BOT_ENDED_EVENT,
+    HARNESS_ERROR_EVENT,  # noqa: E402
+    PERSONA_TURN_EVENT,
+)
 from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
@@ -394,7 +398,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # The second bot turn is short but the judge finds it curt.
         judge = _FakeConversationJudge(["yes"], [{}, {"brevity": "no"}])
         metrics = [
-            EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0),
+            EvalSimulationMetric("politeness", "stayed polite", min_score=1.0),
             EvalSimulationMetric("brevity", "kept it short"),
         ]
         driver, stream, llm, client = _driver(_simulation(metrics=metrics), judge)
@@ -451,9 +455,9 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.messages, judge.transcript)
         self.assertIn(END_CALL_EVENT, [e["type"] for e in stream.events_seen])
 
-    async def test_a_metric_below_its_min_quality_fails_the_run(self):
+    async def test_a_metric_below_its_min_score_fails_the_run(self):
         judge = _FakeConversationJudge(["yes"], [{"politeness": "no"}])
-        metrics = [EvalSimulationMetric("politeness", "stayed polite", min_quality=1.0)]
+        metrics = [EvalSimulationMetric("politeness", "stayed polite", min_score=1.0)]
         records: list = []
         driver, stream, llm, _ = _driver(_simulation(metrics=metrics), judge, records)
 
@@ -521,13 +525,17 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         by_name = {m.name: m for m in result.metrics}
         # The slowest reply took 1.4 s, over the 1 s bound; the greeting had no send before it.
         self.assertEqual((by_name["latency"].value, by_name["latency"].passed), (1.4, False))
-        self.assertEqual(by_name["latency"].reason, "slowest reply 1.40 s, at most 1")
+        self.assertEqual(
+            by_name["latency"].reason, "slowest reply 1.40 s to the first token, at most 1"
+        )
         self.assertEqual((by_name["words"].value, by_name["words"].passed), (5.0, False))
         self.assertEqual((by_name["turns"].value, by_name["turns"].passed), (2.0, True))
         self.assertTrue(by_name["duration"].passed)
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
-        self.assertEqual(result.failure, "latency: slowest reply 1.40 s, at most 1")
+        self.assertEqual(
+            result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
+        )
 
     async def test_function_calls_are_checked_against_the_list_the_bot_should_make(self):
         metrics = [
@@ -791,3 +799,119 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.ended_by, "error")
         self.assertEqual(result.reason, "refused")
+
+
+class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
+    """A lull, a harness failure, or a judge with no verdict ends the run without waiting out the caps."""
+
+    async def test_a_lull_ends_the_run_as_silence(self):
+        driver, _, _, _ = _driver(
+            _simulation(max_silence_s=0.05, max_duration_s=5.0), _FakeConversationJudge(["no"])
+        )
+        await driver.run()
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "silence")
+        self.assertFalse(result.passed)
+
+    async def test_activity_keeps_a_lull_from_ending_the_run(self):
+        driver, stream, llm, _ = _driver(
+            _simulation(max_silence_s=0.2, max_duration_s=5.0), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            # Three events spaced inside the lull cap, spanning more than the cap.
+            for _ in range(3):
+                await asyncio.sleep(0.1)
+                await stream.append({"type": "llm_started"})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+
+    async def test_a_harness_pipeline_error_is_the_runs_error(self):
+        driver, stream, _, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def failing():
+            await stream.append({"type": HARNESS_ERROR_EVENT, "text": "OLLamaLLMService: 400"})
+
+        task = asyncio.create_task(failing())
+        failures = await driver.run()
+        await task
+        self.assertEqual(
+            [(f.kind, f.reason) for f in failures], [("error", "OLLamaLLMService: 400")]
+        )
+        self.assertTrue(client.hung_up)
+        result = driver.result(failures=failures, duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual((result.ended_by, result.error), ("error", "OLLamaLLMService: 400"))
+        self.assertFalse(result.passed)
+
+    async def test_a_judge_with_no_goal_verdict_is_the_runs_error(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["none"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        failures = await driver.run()
+        await task
+        self.assertEqual([f.kind for f in failures], ["judge_no_verdict"])
+        result = driver.result(failures=failures, duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertFalse(result.succeeded)
+        self.assertIn("because", result.error or "")
+
+
+class TestSimulationMetricKinds(unittest.IsolatedAsyncioTestCase):
+    """A failed metric says whether the judge rejected a turn or left it unanswered."""
+
+    async def _score(self, turn_verdicts: list[dict[str, str]]):
+        metrics = [EvalSimulationMetric("brevity", "short", min_score=1.0)]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"], turn_verdicts)
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "one"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "and?"})
+            await stream.append({"type": "llm_response", "text": "two"})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        return result.metrics[0]
+
+    async def test_a_rejected_turn_is_judge_no(self):
+        metric = await self._score([{}, {"brevity": "no"}])
+        self.assertEqual((metric.passed, metric.kind), (False, "judge_no"))
+        self.assertEqual([v.verdict for v in metric.verdicts], ["yes", "no"])
+
+    async def test_an_unanswered_turn_alone_is_judge_no_verdict(self):
+        metric = await self._score([{}, {"brevity": "none"}])
+        self.assertEqual((metric.passed, metric.kind), (False, "judge_no_verdict"))
+        self.assertEqual([v.verdict for v in metric.verdicts], ["yes", "none"])
+
+    async def test_a_passing_metric_has_no_kind(self):
+        metric = await self._score([{}, {}])
+        self.assertEqual((metric.passed, metric.kind), (True, None))
+
+
+class TestSimulatorDefault(unittest.TestCase):
+    def test_simulator_is_optional_and_describes_as_the_default_judge_model(self):
+        text = "\n".join(line for line in MINIMAL.splitlines() if not line.startswith("simulator"))
+        s = EvalSimulationScenario.load(_write(text))
+        self.assertEqual(s.simulator, {})
+        self.assertEqual(s.max_silence_s, 30.0)
+        described = describe_simulation(s)
+        self.assertIn("persona: ollama/gemma4:12b", described)
+        self.assertIn("max_silence_s: 30", described)
+
+    def test_a_partial_simulator_keeps_its_own_values(self):
+        s = EvalSimulationScenario.load(_write(MINIMAL + "max_silence_s: 7\n"))
+        self.assertEqual(s.max_silence_s, 7.0)
+        self.assertIn("persona: openai/gpt-4o-mini", describe_simulation(s))
