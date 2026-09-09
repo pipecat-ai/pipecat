@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from pipecat.flows import FlowConfig
+from pipecat.flows import TRANSITION_IN_PYTHON, TRANSITION_IN_YAML, FlowConfig
 from pipecat.flows.validation import FlowReport, validate_flow
 
 # --- Tools ---
@@ -17,7 +17,7 @@ from pipecat.flows.validation import FlowReport, validate_flow
 
 async def choose_pizza(flow_manager):
     """User wants pizza."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 async def report_status(flow_manager, status: str):
@@ -26,12 +26,12 @@ async def report_status(flow_manager, status: str):
     Args:
         status (str): The status.
     """
-    return {"status": status}, None
+    return {"status": status}, TRANSITION_IN_YAML
 
 
 async def finish(flow_manager):
     """Done."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 async def check_kitchen(action, flow_manager):
@@ -145,7 +145,7 @@ class TestLoading(unittest.TestCase):
 
     def test_to_dict(self):
         d = validate_flow(GOOD).to_dict()
-        self.assertEqual(set(d), {"ok", "issues", "tools", "variables"})
+        self.assertEqual(set(d), {"ok", "issues", "tools", "variables", "decided_in_python"})
         self.assertTrue(d["ok"])
 
 
@@ -212,6 +212,18 @@ class TestGraphWarnings(unittest.TestCase):
             "  b: {task_messages: [{role: developer, content: b}], post_actions: [{type: end_conversation}]}\n"
         )
         self.assertEqual(report.issues, [])
+
+    def test_python_decided_function_has_unknown_edges(self):
+        report = validate_flow(
+            "initial_node: a\nnodes:\n"
+            "  a: {task_messages: [{role: developer, content: a}], functions: [{name: report_status, transition_to: TRANSITION_IN_PYTHON}]}\n"
+            "  b: {task_messages: [{role: developer, content: b}], post_actions: [{type: end_conversation}]}\n"
+            "  c: {task_messages: [{role: developer, content: c}], post_actions: [{type: end_conversation}]}\n"
+        )
+        # Neither b nor c is unreachable, and a is not a dead end: the tool may go anywhere.
+        self.assertEqual(report.issues, [])
+        self.assertEqual(report.decided_in_python, ["report_status"])
+        self.assertEqual(report.to_dict()["decided_in_python"], ["report_status"])
 
     def test_warnings_do_not_affect_ok(self):
         report = validate_flow(

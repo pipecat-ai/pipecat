@@ -88,6 +88,10 @@ def validate(
 
     for issue in report.issues:
         typer.echo(f"{issue.level:<8}{issue.message}")
+    if report.decided_in_python:
+        typer.echo(
+            f"  decided in Python (edges not checked): {', '.join(report.decided_in_python)}"
+        )
 
     raise typer.Exit(1 if failed else 0)
 

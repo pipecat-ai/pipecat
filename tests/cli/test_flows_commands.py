@@ -43,12 +43,12 @@ nodes:
 """
 
 TOOLS = '''
-from pipecat.flows import FlowManager
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager
 
 
 async def choose_pizza(flow_manager: FlowManager):
     """User wants pizza."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 '''
 
 
@@ -158,6 +158,16 @@ def test_fully_checked_run(project: Path):
     )
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[0].endswith("(structure, tools, variables)")
+
+
+def test_python_decided_functions_are_listed(project: Path):
+    (project / "flow.yaml").write_text(
+        FLOW.replace("transition_to: end", "transition_to: TRANSITION_IN_PYTHON"), encoding="utf-8"
+    )
+    result = runner.invoke(app, ["flows", "validate", str(project / "flow.yaml")])
+    assert result.exit_code == 0, result.output
+    assert "decided in Python (edges not checked): choose_pizza" in result.output
+    assert "orphan" not in result.output
 
 
 def test_flows_help_lists_validate():

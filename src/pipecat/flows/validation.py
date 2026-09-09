@@ -62,12 +62,15 @@ class FlowReport:
         tools: Names of every tool the config references, including action
             handlers.
         variables: Names of every ``{{ variable }}`` the config uses.
+        decided_in_python: Names of the functions marked
+            ``TRANSITION_IN_PYTHON``, whose edges the config does not know.
         config: The parsed config, or ``None`` when it failed to load.
     """
 
     issues: list[FlowIssue] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     variables: list[str] = field(default_factory=list)
+    decided_in_python: list[str] = field(default_factory=list)
     config: FlowConfig | None = None
 
     @property
@@ -92,6 +95,7 @@ class FlowReport:
             "issues": [asdict(i) for i in self.issues],
             "tools": list(self.tools),
             "variables": list(self.variables),
+            "decided_in_python": list(self.decided_in_python),
         }
 
 
@@ -132,6 +136,10 @@ def validate_flow(
     report.config = config
     report.tools = _referenced_tools(config)
     report.variables = _used_variables(config)
+    report.decided_in_python = sorted(
+        {f.name for n in config.nodes.values() for f in n.functions if f.decided_in_python}
+        | {f.name for f in config.global_functions if f.decided_in_python}
+    )
 
     _check_graph(config, report)
 
@@ -205,11 +213,18 @@ def _used_variables(config: FlowConfig) -> list[str]:
 
 
 def _check_graph(config: FlowConfig, report: FlowReport) -> None:
+    all_nodes = set(config.nodes)
     global_targets = {t for f in config.global_functions for t in f.targets()}
+    if any(f.decided_in_python for f in config.global_functions):
+        global_targets = all_nodes
 
     # Every node a function at ``name`` can lead to, counting global functions.
+    # A function decided in Python may lead anywhere in the config, so the
+    # walk assumes it does rather than guess.
     def exits(name: str) -> set[str]:
         node = config.nodes[name]
+        if any(f.decided_in_python for f in node.functions):
+            return all_nodes
         return {t for f in node.functions for t in f.targets()} | global_targets
 
     reachable = {config.initial_node}
