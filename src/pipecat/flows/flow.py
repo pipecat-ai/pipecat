@@ -7,13 +7,14 @@
 """A flow config joined to the application's tools.
 
 A :class:`Flow` is a :class:`~pipecat.flows.FlowConfig` joined to the code it
-names: the config's nodes turned into runnable :data:`~pipecat.flows.NodeConfig` dicts, with every tool
-reference resolved to a Flows direct function, every template variable
-substituted, and every transition wired to the node the config names.
+names: the config's nodes turned into runnable
+:data:`~pipecat.flows.NodeConfig` dicts, with every tool reference resolved
+to a Flows direct function, every template variable substituted, and every
+transition wired to the node the config names.
 
-Constructing a flow validates the references the config could not: each tool exists and
-has a valid direct-function signature, each ``function`` action names a
-callable, and each ``{{ variable }}`` has a value. Tool return values are
+Constructing a flow validates the references the config could not: each
+tool exists and has a valid direct-function signature, each ``function``
+action names a callable, and each ``{{ variable }}`` has a value. Tool return values are
 checked at call time against the configured-flow contract: a tool returns
 ``(result, TRANSITION_IN_YAML)`` and the config decides the next node, unless
 the config marks the entry ``TRANSITION_IN_PYTHON``, in which case the tool
@@ -263,7 +264,7 @@ def _check_contract(
     """Check a tool's return value against the configured-flow contract.
 
     A tool under a config-decided entry returns ``(result, TRANSITION_IN_YAML)``;
-    one under ``TRANSITION_IN_PYTHON`` returns ``(result, "<node name>")``.
+    one under a ``TRANSITION_IN_PYTHON`` entry returns ``(result, "<node name>")``.
     ``NO_RESPONSE`` is accepted from either.
     """
     if not isinstance(response, tuple) or len(response) != 2:
@@ -278,7 +279,7 @@ def _check_contract(
         if isinstance(next_node, str):
             return result, next_node
         raise FlowError(
-            f"{where} tool '{name}' is marked TRANSITION_IN_PYTHON in the flow config, "
+            f"{where} tool '{name}' is marked {TRANSITION_IN_PYTHON} in the flow config, "
             f'so it must return (result, "<node name>"); got {next_node!r}'
         )
     if next_node is TRANSITION_IN_YAML:
@@ -286,17 +287,17 @@ def _check_contract(
     if isinstance(next_node, str):
         raise FlowError(
             f"{where} tool '{name}' returned node name '{next_node}', but the flow config "
-            "decides its transition; return (result, TRANSITION_IN_YAML), or set "
-            "transition_to: TRANSITION_IN_PYTHON on the entry to decide in Python"
+            f"decides its transition; return (result, {TRANSITION_IN_YAML!r}), or set "
+            f"transition_to: {TRANSITION_IN_PYTHON} on the entry to decide in Python"
         )
     if next_node is None:
         raise FlowError(
             f"{where} tool '{name}' returned None as the next node; in a configured flow "
-            "return (result, TRANSITION_IN_YAML) to let the config decide"
+            f"return (result, {TRANSITION_IN_YAML!r}) to let the config decide"
         )
     raise FlowError(
         f"{where} tool '{name}' returned a next node; in a configured flow the config "
-        "owns transitions, so return (result, TRANSITION_IN_YAML)"
+        f"owns transitions, so return (result, {TRANSITION_IN_YAML!r})"
     )
 
 
@@ -319,5 +320,5 @@ def _warn_if_annotated_with_node(function: Callable, name: str, where: str) -> N
     if picks_node:
         logger.warning(
             f"{where} tool '{name}' is annotated as returning a NodeConfig; "
-            "in a configured flow it must return (result, None)"
+            f"in a configured flow it must return (result, {TRANSITION_IN_YAML!r})"
         )
