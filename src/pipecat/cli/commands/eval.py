@@ -734,16 +734,22 @@ class _EvalDashboard:
                 status = Spinner("dots", style="cyan")
             else:
                 status = Text("·", style="dim")
-            # The rate is over attempts that finished, so it reads as a real rate
-            # while the sweep is still going; what's left is its own cell rather
-            # than a second denominator competing with it, and the pace takes that
-            # cell over once every attempt is in.
+            # While attempts remain the cell reads passed over the group's total,
+            # "2/3", next to what is left; the percentage and the pace appear once
+            # every attempt is in. The color follows the finished attempts, so a
+            # row with only passes so far stays green.
             remaining = len(group) - len(done)
+            if not done:
+                rate = "—"
+            elif remaining:
+                rate = f"{passed}/{len(group)}"
+            else:
+                rate = _pass_rate(passed, len(group))
             table.add_row(
                 status,
                 Text(bot),
                 Text(scenario, style="cyan"),
-                Text(_pass_rate(passed, len(done)), style=_rate_level(passed, len(done))),
+                Text(rate, style=_rate_level(passed, len(done))),
                 Text(f"{remaining} left" if remaining else _mean_duration(done), style="dim"),
             )
 
