@@ -368,6 +368,23 @@ class EvalRun:
     duration_ms: int | None = None
 
 
+@dataclass(frozen=True)
+class _ManifestSettings:
+    """A manifest's settings once the command line's overrides are applied."""
+
+    bots_dir: Path
+    scenarios_dir: Path
+    runs_dir: Path | None
+    spawn: str
+    python: str
+    concurrency: int
+    repeat: int
+    repeat_given: bool
+    base_port: int
+    record: bool
+    cache_dir: str | None
+
+
 @dataclass
 class EvalManifest:
     """A parsed eval-suite manifest.
@@ -443,16 +460,57 @@ class EvalManifest:
         path = Path(path).resolve()
         base = path.parent
         data = yaml.safe_load(path.read_text()) or {}
+        settings = cls._settings(
+            data,
+            base,
+            path,
+            bots_dir=bots_dir,
+            scenarios_dir=scenarios_dir,
+            runs_dir=runs_dir,
+            spawn=spawn,
+            python=python,
+            concurrency=concurrency,
+            repeat=repeat,
+            base_port=base_port,
+            record=record,
+            cache_dir=cache_dir,
+        )
+        return cls(
+            runs=cls._runs(data, base, settings),
+            spawn=settings.spawn,
+            python=settings.python,
+            concurrency=settings.concurrency,
+            repeat=settings.repeat,
+            base_port=settings.base_port,
+            runs_dir=settings.runs_dir,
+            record=settings.record,
+            cache_dir=settings.cache_dir,
+        )
+
+    @classmethod
+    def _settings(
+        cls,
+        data: dict,
+        base: Path,
+        path: Path,
+        *,
+        bots_dir: str | Path | None,
+        scenarios_dir: str | Path | None,
+        runs_dir: str | Path | None,
+        spawn: str | None,
+        python: str | None,
+        concurrency: int | None,
+        repeat: int | None,
+        base_port: int | None,
+        record: bool | None,
+        cache_dir: str | None,
+    ) -> "_ManifestSettings":
+        """The manifest's settings with the overrides applied: an override wins, and its paths resolve against the working directory rather than the manifest's."""
 
         def dir_value(override, key: str, default: str) -> Path:
-            # Override (from the CLI) resolves against cwd; the manifest value resolves
-            # against the manifest file's directory.
             if override is not None:
                 return Path(override).resolve()
             return (base / str(data.get(key, default))).resolve()
-
-        bots_dir_p = dir_value(bots_dir, "bots_dir", ".")
-        scenarios_dir_p = dir_value(scenarios_dir, "scenarios_dir", "scenarios")
 
         if runs_dir is not None:
             runs_dir_p: Path | None = Path(runs_dir).resolve()
@@ -460,14 +518,6 @@ class EvalManifest:
             runs_dir_p = (base / str(data["runs_dir"])).resolve()
         else:
             runs_dir_p = None
-
-        spawn = spawn or str(data.get("spawn", DEFAULT_SPAWN))
-        python = python or str(data.get("python") or sys.executable)
-        concurrency = (
-            concurrency
-            if concurrency is not None
-            else int(data.get("concurrency", DEFAULT_CONCURRENCY))
-        )
         # A repeat set anywhere, the command line or the manifest, decides every
         # run's attempts, a simulation's included, even when it is 1; absent, a
         # simulation runs as many times as its file says.
@@ -475,36 +525,57 @@ class EvalManifest:
         repeat = repeat if repeat is not None else int(data.get("repeat", 1))
         if repeat < 1:
             raise ValueError(f"{path}: 'repeat' must be at least 1")
-        base_port = (
-            base_port if base_port is not None else int(data.get("base_port", DEFAULT_BASE_PORT))
+        return _ManifestSettings(
+            bots_dir=dir_value(bots_dir, "bots_dir", "."),
+            scenarios_dir=dir_value(scenarios_dir, "scenarios_dir", "scenarios"),
+            runs_dir=runs_dir_p,
+            spawn=spawn or str(data.get("spawn", DEFAULT_SPAWN)),
+            python=python or str(data.get("python") or sys.executable),
+            concurrency=(
+                concurrency
+                if concurrency is not None
+                else int(data.get("concurrency", DEFAULT_CONCURRENCY))
+            ),
+            repeat=repeat,
+            repeat_given=repeat_given,
+            base_port=(
+                base_port
+                if base_port is not None
+                else int(data.get("base_port", DEFAULT_BASE_PORT))
+            ),
+            record=record if record is not None else bool(data.get("record", False)),
+            cache_dir=cache_dir if cache_dir is not None else data.get("cache_dir"),
         )
-        record = record if record is not None else bool(data.get("record", False))
-        cache_dir = cache_dir if cache_dir is not None else data.get("cache_dir")
 
+    @classmethod
+    def _runs(cls, data: dict, base: Path, settings: "_ManifestSettings") -> list[EvalRun]:
+        """The runs the ``suite:`` list describes, one per bot, scenario, and attempt.
+
+        The scenario file says which kind it is. A simulation runs as many
+        times as its file says unless a repeat makes the suite a measurement; a
+        file that fails to load still gets its run, which reports the error.
+        Attempts are attempt-major (bot A #1, bot B #1, ..., bot A #2), so a
+        sweep spreads each attempt across the bots without fast ones waiting on
+        slow ones.
+        """
         runs: list[EvalRun] = []
         for item in data.get("suite", []):
             bot = str(item["bot"])
-            bot_path = (bots_dir_p / bot).resolve()
-            # A body file (resolved relative to the manifest) is passed to the bot
-            # as --runner-body, supplying runner-args data the bot would normally
-            # get from a /start request (e.g. a vision bot's image path).
+            bot_path = (settings.bots_dir / bot).resolve()
+            # A body file is passed to the bot as --runner-body: runner-args data
+            # it would normally get from a /start request (a vision bot's image).
             runner_body = item.get("runner_body")
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
-                name, scenario_path = _resolve_scenario(str(scenario), base, scenarios_dir_p)
-                # The file says whether it is a scripted scenario or a simulation. A
-                # simulation runs as many times as its file says, every one of them
-                # to pass, unless a repeat makes the whole suite a measurement. A
-                # file that fails to load still gets its run, which reports the
-                # load error.
-                kind, attempts = EvalKind.SCRIPT, repeat
+                name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
+                kind, attempts = EvalKind.SCRIPT, settings.repeat
                 try:
                     loaded = load_scenario_file(scenario_path)
                 except (ValueError, FileNotFoundError):
                     loaded = None
                 if isinstance(loaded, EvalSimulationScenario):
                     kind = EvalKind.SIMULATION
-                    attempts = repeat if repeat_given else loaded.runs
+                    attempts = settings.repeat if settings.repeat_given else loaded.runs
                 runs.append(
                     EvalRun(
                         bot=bot,
@@ -514,14 +585,9 @@ class EvalManifest:
                         runner_body_path=runner_body_path,
                         kind=kind,
                         attempts=attempts,
-                        sweep=repeat_given,
+                        sweep=settings.repeat_given,
                     )
                 )
-
-        # Attempt-major, so the queue reads bot A #1, bot B #1, ..., bot A #2, ...
-        # EvalSuite.run pulls from it under a single semaphore with no per-attempt
-        # barrier, so this ordering spreads each attempt across the sweep without
-        # making fast bots wait on slow ones.
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -530,17 +596,50 @@ class EvalManifest:
                 for run in runs
                 if n <= run.attempts
             ]
+        return runs
 
+
+@dataclass(frozen=True)
+class _RunFiles:
+    """Where one run's artifacts go, all named by the run's prefix.
+
+    Parameters:
+        prefix: ``<bot>__<scenario>``, with the attempt number when the run repeats.
+        log: The bot's output.
+        harness_log: The harness worker's output, kept only when it crashed.
+        trace: The harness's decision trace, ``<prefix>.eval.log``.
+        config: The worker's config, the handoff in.
+        result: The worker's result, the handoff out.
+        record: The conversation recording, or ``None`` when not recording.
+    """
+
+    prefix: str
+    log: Path
+    harness_log: Path
+    trace: Path
+    config: Path
+    result: Path
+    record: Path | None
+
+    @classmethod
+    def for_run(cls, run: "EvalRun", logs_dir: Path, record_dir: Path | None) -> "_RunFiles":
+        """The files of ``run`` under ``logs_dir`` and ``record_dir``.
+
+        The bot is part of the prefix because one bot can run several scenarios
+        at once; the attempt number joins it when the suite repeats, so no
+        attempt writes over another's artifacts.
+        """
+        prefix = f"{run.bot.replace('/', '_')}__{run.scenario}"
+        if run.attempts > 1:
+            prefix += f"__{run.attempt:03d}"
         return cls(
-            runs=runs,
-            spawn=spawn,
-            python=python,
-            concurrency=concurrency,
-            repeat=repeat,
-            base_port=base_port,
-            runs_dir=runs_dir_p,
-            record=record,
-            cache_dir=cache_dir,
+            prefix=prefix,
+            log=logs_dir / f"{prefix}.log",
+            harness_log=logs_dir / f"{prefix}.harness.log",
+            trace=logs_dir / f"{prefix}.eval.log",
+            config=logs_dir / f"{prefix}.config.json",
+            result=logs_dir / f"{prefix}.result.json",
+            record=(record_dir / f"{prefix}.wav") if record_dir else None,
         )
 
 
@@ -654,44 +753,10 @@ class EvalSuite(BaseObject):
         logs_dir.mkdir(parents=True, exist_ok=True)
         if record_dir:
             record_dir.mkdir(parents=True, exist_ok=True)
-
-        # Bound per-model CPU threads so concurrent CPU transcriptions share the
-        # cores instead of each spawning ~all-cores of OpenMP threads. This bites
-        # when the transcriber is (CPU) Whisper: CTranslate2 honors OMP_NUM_THREADS
-        # and otherwise grabs every core per model, so N lockstep scenarios whose
-        # first transcriptions fire simultaneously oversubscribe the CPU N-fold
-        # (the first turn crawls, then speeds up only once the runs drift out of
-        # sync). Capping each to cores/concurrency keeps total threads ~= cores on
-        # every turn. The ONNX Runtime models (Moonshine, Kokoro) don't use OpenMP
-        # by default, so for them this is a harmless no-op. setdefault respects an
-        # explicit override. Set before any transcriber loads its model.
-        cores = os.cpu_count() or 1
-        os.environ.setdefault(
-            "OMP_NUM_THREADS", str(max(1, cores // max(1, self.manifest.concurrency)))
-        )
-
         if results_path is not None:
             results_path.parent.mkdir(parents=True, exist_ok=True)
-
-        handler = None
-        if on_update is not None:
-            warnings.warn(
-                "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
-                "Use the `on_update` event handler instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-            # Event handlers take the suite as their first argument; the callback
-            # takes only the run. It stays registered for this call alone, so the
-            # parameter keeps its per-call scope: a suite can be run again without
-            # the callback firing a second time, or firing at all.
-            def forward_update(_suite: "EvalSuite", run: EvalRun) -> None:
-                on_update(run)
-
-            handler = forward_update
-            self.add_event_handler("on_update", handler)
-
+        self._bound_cpu_threads()
+        handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
         sem = asyncio.Semaphore(self.manifest.concurrency)
         try:
             await asyncio.gather(
@@ -728,157 +793,191 @@ class EvalSuite(BaseObject):
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
         async with sem:
-            # Include the bot in the filename: one bot can run several scenarios
-            # concurrently, and they must not share a log/recording file. When the
-            # suite repeats, the attempt number joins them for the same reason —
-            # without it every attempt would write over the last one's artifacts.
-            # The suffix is omitted for a single pass so filenames stay stable.
-            safe = f"{run.bot.replace('/', '_')}__{run.scenario}"
-            if run.attempts > 1:
-                safe += f"__{run.attempt:03d}"
-            log_path = logs_dir / f"{safe}.log"
-
+            files = _RunFiles.for_run(run, logs_dir, record_dir)
             run.status = "running"
             run.started_at = time.monotonic()
             await self._call_event_handler("on_update", run)
-
-            proc: asyncio.subprocess.Process | None = None
+            bot: asyncio.subprocess.Process | None = None
             worker: asyncio.subprocess.Process | None = None
-            logf = None
-            harness_logf = None
-            config_path = logs_dir / f"{safe}.config.json"
-            result_path = logs_dir / f"{safe}.result.json"
             try:
-                bot_path = run.bot_path
-                if bot_path is None or not bot_path.exists():
-                    run.error = f"bot not found: {run.bot_path}"
+                run.error = self._missing_file(run)
+                if run.error is not None:
                     return
-                if not run.scenario_path.exists():
-                    run.error = f"{run.kind} not found: {run.scenario_path}"
-                    return
-                if run.runner_body_path is not None and not run.runner_body_path.exists():
-                    run.error = f"body not found: {run.runner_body_path}"
-                    return
-
-                # Spawn the bot with the body file's directory as cwd, so relative
-                # paths inside the body (e.g. an image) resolve next to the file.
-                cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
-
-                logf = log_path.open("wb")
-                proc = await asyncio.create_subprocess_exec(
-                    *self._spawn_argv(bot_path, port, run.runner_body_path),
-                    stdout=logf,
-                    stderr=asyncio.subprocess.STDOUT,
-                    cwd=cwd,
+                bot = await self._spawn_bot(run, port, files)
+                worker = await self._run_harness(
+                    run,
+                    port,
+                    files,
+                    debug=debug,
+                    use_cache=use_cache,
+                    default_timeout_ms=default_timeout_ms,
                 )
-
-                record_path = str(record_dir / f"{safe}.wav") if record_dir else None
-                # Run the harness in its own process (see pipecat.evals._session_subprocess):
-                # each run loads its own STT/VAD/turn models, and ONNX session
-                # construction holds the GIL long enough that loading in one shared
-                # process would freeze the real-time audio pacing of every other
-                # concurrent run. The worker writes its result (and, under --debug, its
-                # own <safe>.debug.log) so the suite just reads it back.
-                config = {
-                    "scenario_path": str(run.scenario_path),
-                    "scenario_name": run.scenario,
-                    "bot_url": f"ws://localhost:{port}",
-                    "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
-                    "default_timeout_ms": default_timeout_ms,
-                    "record_path": record_path,
-                    "cache_dir": self.manifest.cache_dir,
-                    "use_cache": use_cache,
-                    # The suite spawns a bot per run, so cancel it on teardown to
-                    # shut it down gracefully (faster than the kill fallback).
-                    "stop_bot": True,
-                    "debug": debug,
-                    "logs_dir": str(logs_dir),
-                    "prefix": safe,
-                    "result_path": str(result_path),
-                }
-                config_path.write_text(json.dumps(config))
-                with contextlib.suppress(OSError):
-                    result_path.unlink()
-
-                harness_logf = (logs_dir / f"{safe}.harness.log").open("wb")
-                worker = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    "pipecat.evals._session_subprocess",
-                    str(config_path),
-                    stdout=harness_logf,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-                try:
-                    await asyncio.wait_for(worker.wait(), timeout=WORKER_SAFETY_TIMEOUT_S)
-                except TimeoutError:
-                    worker.kill()
-                    await worker.wait()
-                    run.error = (
-                        f"error: harness worker timed out after {WORKER_SAFETY_TIMEOUT_S:.0f}s"
-                    )
-                    return
-
-                if worker.returncode != 0 or not result_path.exists():
-                    # The worker crashed before writing a result; its traceback is in
-                    # <safe>.harness.log.
-                    run.error = (
-                        f"error: harness worker exited {worker.returncode} (see {safe}.harness.log)"
-                    )
-                    return
-                data = json.loads(result_path.read_text())
-                if run.kind == EvalKind.SIMULATION:
-                    run.result = _simulation_result_from_dict(data)
-                else:
-                    run.result = _result_from_dict(data)
             except Exception as e:
-                # The worker returns assertion failures (and its own errors) as a
-                # structured result; this catches problems on the suite side (spawning
-                # the bot or worker, reading the result back). Stash the full traceback
-                # in <safe>.eval.log so the cause is recoverable instead of vanishing
-                # as a bare "error: ".
+                # The worker reports its own failures in its result; this is a
+                # problem on the suite's side (spawning, reading the result back).
                 run.error = f"error: {type(e).__name__}: {e}"
                 with contextlib.suppress(OSError):
-                    logs_dir.mkdir(parents=True, exist_ok=True)
-                    (logs_dir / f"{safe}.eval.log").write_text(traceback.format_exc())
+                    files.trace.write_text(traceback.format_exc())
             finally:
-                # Stamp the wall-clock and flip to "done" BEFORE tearing the bot
-                # down, measured the same way as a live counter (now - started_at), so
-                # the displayed time matches what was ticking and excludes shutdown.
-                if run.started_at is not None:
-                    run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
-                run.status = "done"
-                await self._call_event_handler("on_update", run)
-                # If the task was cancelled (e.g. Ctrl+C) the worker may still be
-                # running; kill it so it doesn't outlive the suite as an orphan.
-                if worker is not None and worker.returncode is None:
-                    worker.kill()
-                    with contextlib.suppress(ProcessLookupError):
-                        await worker.wait()
-                if proc is not None:
-                    await self._stop_bot(proc)
-                if logf is not None:
-                    logf.close()
-                if harness_logf is not None:
-                    harness_logf.close()
-                    # The worker silences its own logs, so on success its stdout is
-                    # just the import banner -- noise. Keep the file only when no
-                    # result came back (a crash/timeout), where it holds the traceback.
-                    if run.result is not None:
-                        with contextlib.suppress(OSError):
-                            (logs_dir / f"{safe}.harness.log").unlink()
-                # The config/result files are just the worker handoff; the result is
-                # now on `run`, so drop them to keep the run dir to real artifacts.
-                for tmp in (config_path, result_path):
-                    with contextlib.suppress(OSError):
-                        tmp.unlink()
-                # Save the harness's own decision trace next to the bot log.
-                if run.result is not None and run.result.debug_log:
-                    (logs_dir / f"{safe}.eval.log").write_text(
-                        "\n".join(run.result.debug_log) + "\n"
-                    )
-                if results_path is not None:
-                    _append_result(results_path, run, safe, logs_dir, record_dir)
+                await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+
+    def _missing_file(self, run: EvalRun) -> str | None:
+        """Why the run cannot start, when one of its files is missing."""
+        if run.bot_path is None or not run.bot_path.exists():
+            return f"bot not found: {run.bot_path}"
+        if not run.scenario_path.exists():
+            return f"{run.kind} not found: {run.scenario_path}"
+        if run.runner_body_path is not None and not run.runner_body_path.exists():
+            return f"body not found: {run.runner_body_path}"
+        return None
+
+    async def _spawn_bot(
+        self, run: EvalRun, port: int, files: "_RunFiles"
+    ) -> asyncio.subprocess.Process:
+        """Start the bot with its eval transport on ``port``, its output going to the bot log.
+
+        A body file's directory is the bot's working directory, so relative
+        paths inside the body (an image) resolve next to the file.
+        """
+        assert run.bot_path is not None
+        cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
+        with files.log.open("wb") as logf:
+            return await asyncio.create_subprocess_exec(
+                *self._spawn_argv(run.bot_path, port, run.runner_body_path),
+                stdout=logf,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+            )
+
+    async def _run_harness(
+        self,
+        run: EvalRun,
+        port: int,
+        files: "_RunFiles",
+        *,
+        debug: bool,
+        use_cache: bool,
+        default_timeout_ms: int,
+    ) -> asyncio.subprocess.Process:
+        """Run the harness worker for this run and read its result back onto ``run``.
+
+        The worker gets its config as a file and writes its result as one; a
+        worker that times out or exits without a result leaves ``run.error``.
+        """
+        config = {
+            "scenario_path": str(run.scenario_path),
+            "scenario_name": run.scenario,
+            "bot_url": f"ws://localhost:{port}",
+            "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
+            "default_timeout_ms": default_timeout_ms,
+            "record_path": str(files.record) if files.record else None,
+            "cache_dir": self.manifest.cache_dir,
+            "use_cache": use_cache,
+            # The suite spawned this bot, so it is cancelled on teardown, which is
+            # faster than the kill fallback.
+            "stop_bot": True,
+            "debug": debug,
+            "logs_dir": str(files.log.parent),
+            "prefix": files.prefix,
+            "result_path": str(files.result),
+        }
+        files.config.write_text(json.dumps(config))
+        with contextlib.suppress(OSError):
+            files.result.unlink()
+        with files.harness_log.open("wb") as logf:
+            worker = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "pipecat.evals._session_subprocess",
+                str(files.config),
+                stdout=logf,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        try:
+            await asyncio.wait_for(worker.wait(), timeout=WORKER_SAFETY_TIMEOUT_S)
+        except TimeoutError:
+            worker.kill()
+            await worker.wait()
+            run.error = f"error: harness worker timed out after {WORKER_SAFETY_TIMEOUT_S:.0f}s"
+            return worker
+        if worker.returncode != 0 or not files.result.exists():
+            # The worker crashed before writing a result; its traceback is in the harness log.
+            run.error = (
+                f"error: harness worker exited {worker.returncode} (see {files.prefix}.harness.log)"
+            )
+            return worker
+        data = json.loads(files.result.read_text())
+        if run.kind == EvalKind.SIMULATION:
+            run.result = _simulation_result_from_dict(data)
+        else:
+            run.result = _result_from_dict(data)
+        return worker
+
+    async def _finish(
+        self,
+        run: EvalRun,
+        files: "_RunFiles",
+        bot: asyncio.subprocess.Process | None,
+        worker: asyncio.subprocess.Process | None,
+        results_path: Path | None,
+        logs_dir: Path,
+        record_dir: Path | None,
+    ) -> None:
+        """Mark the run done, stop what is still running, and keep only the real artifacts."""
+        # The duration is measured the way the live counter ticks, and excludes the teardown.
+        if run.started_at is not None:
+            run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
+        run.status = "done"
+        await self._call_event_handler("on_update", run)
+        # A cancelled suite (Ctrl+C) may leave the worker running; it must not outlive the suite.
+        if worker is not None and worker.returncode is None:
+            worker.kill()
+            with contextlib.suppress(ProcessLookupError):
+                await worker.wait()
+        if bot is not None:
+            await self._stop_bot(bot)
+        # The worker's stdout is only the import banner on success; it is kept
+        # when no result came back, since it then holds the traceback.
+        if run.result is not None:
+            with contextlib.suppress(OSError):
+                files.harness_log.unlink()
+        for handoff in (files.config, files.result):
+            with contextlib.suppress(OSError):
+                handoff.unlink()
+        if run.result is not None and run.result.debug_log:
+            files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+        if results_path is not None:
+            _append_result(results_path, run, files.prefix, logs_dir, record_dir)
+
+    def _bound_cpu_threads(self) -> None:
+        """Cap each model's OpenMP threads to cores / concurrency, so concurrent transcriptions share the cores.
+
+        CTranslate2 (CPU Whisper) honors ``OMP_NUM_THREADS`` and otherwise takes
+        every core per model, which oversubscribes the CPU when several runs
+        transcribe at once. The ONNX Runtime models do not use OpenMP, so for
+        them this is a no-op. An explicit setting in the environment wins.
+        """
+        cores = os.cpu_count() or 1
+        os.environ.setdefault(
+            "OMP_NUM_THREADS", str(max(1, cores // max(1, self.manifest.concurrency)))
+        )
+
+    def _add_legacy_update_callback(self, on_update: Callable[[EvalRun], None]):
+        """Register a bare ``on_update`` callback as an event handler; returns the handler, to remove after the run."""
+        warnings.warn(
+            "`on_update` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+            "Use the `on_update` event handler instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+        # Event handlers take the suite as their first argument; the callback
+        # takes only the run.
+        def forward_update(_suite: "EvalSuite", run: EvalRun) -> None:
+            on_update(run)
+
+        self.add_event_handler("on_update", forward_update)
+        return forward_update
 
     def _spawn_argv(
         self, bot_path: Path, port: int, runner_body_path: Path | None = None
