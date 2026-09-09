@@ -33,7 +33,6 @@ from pipecat.evals.client_transport import EvalClientRecorder, EvalClientTranspo
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.serializer import (
     EVAL_CANCEL_MESSAGE_TYPE,
     EVAL_CONFIGURE_MESSAGE_TYPE,
@@ -43,7 +42,6 @@ from pipecat.evals.serializer import (
     EvalClientSerializer,
 )
 from pipecat.evals.session import EvalSessionParams
-from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -240,7 +238,7 @@ class _PersonaTurnRelay(FrameProcessor):
 
 
 class EvalClientParams(BaseModel):
-    """What the scenario asks of the bot; :meth:`EvalClient.for_scenario` and :meth:`EvalClient.for_simulation` derive it.
+    """What the scenario asks of the bot; the session derives it from its scenario.
 
     Parameters:
         bot_audio: Whether the bot speaks; in text mode it is asked to skip TTS
@@ -286,16 +284,16 @@ class EvalClient:
     the user TTS) or in a simulation (the persona LLM, its relay, the
     aggregator that records its replies). The bot's output comes in through
     the input and stops at the sink, as events; the user's turns start at the
-    sink and leave through the output. Build with :meth:`for_scenario` or
-    :meth:`for_simulation`.
+    sink and leave through the output. A session builds it, with the params
+    its scenario asks for.
     """
 
     def __init__(
         self,
         bot_url: str,
         *,
-        params: EvalClientParams,
-        session_params: EvalSessionParams,
+        params: EvalClientParams | None = None,
+        session_params: EvalSessionParams | None = None,
         stream: EvalEventStream,
         trace: EvalTrace,
         user_tts: CachingTTSService | None = None,
@@ -306,9 +304,11 @@ class EvalClient:
 
         Args:
             bot_url: WebSocket URL of the bot's eval transport.
-            params: What the scenario asks of the bot.
+            params: What the scenario asks of the bot; ``None`` asks nothing
+                beyond a text-mode conversation.
             session_params: How the run behaves: the connect timeout, the
                 recording, and the teardown are the client's part of it.
+                ``None`` for the defaults.
             stream: Where the bot's output is appended as events.
             trace: The run's trace.
             user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
@@ -323,8 +323,8 @@ class EvalClient:
         self._bot_url = bot_url
         self._stream = stream
         self._trace = trace
-        self._params = params
-        self._session_params = session_params
+        self._params = params or EvalClientParams()
+        self._session_params = session_params or EvalSessionParams()
         self._user_tts = user_tts
         self._bot_stt = bot_stt
         self._persona = persona
@@ -343,95 +343,6 @@ class EvalClient:
         # RTVI handshake; handshake() waits on it.
         self._bot_ready_event = asyncio.Event()
         self._next_id = 0
-
-    @classmethod
-    def for_scenario(
-        cls,
-        scenario: EvalScriptScenario,
-        bot_url: str,
-        *,
-        session_params: EvalSessionParams | None = None,
-        stream: EvalEventStream,
-        trace: EvalTrace,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
-    ) -> "EvalClient":
-        """A client for a scripted scenario, asking the bot for what its assertions need.
-
-        Args:
-            scenario: The scenario being run.
-            bot_url: WebSocket URL of the bot's eval transport.
-            session_params: How the run behaves; ``None`` for the defaults.
-            stream: Where the bot's output is appended as events.
-            trace: The run's trace.
-            user_tts: The user-audio TTS, or ``None`` for text mode.
-            bot_stt: The bot-audio STT, or ``None`` when unused.
-        """
-        params = EvalClientParams(
-            bot_audio=scenario.bot_audio,
-            user_audio=scenario.user_audio,
-            user_speech=scenario.user_speech,
-            capture_bot_audio=scenario.wants_response(),
-            report_level=scenario.required_report_level(),
-            vad_events=scenario.needs_vad_events(),
-            context=list(scenario.context or []),
-            trigger_disconnect=scenario.trigger_disconnect,
-        )
-        return cls(
-            bot_url,
-            params=params,
-            session_params=session_params or EvalSessionParams(),
-            stream=stream,
-            trace=trace,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
-        )
-
-    @classmethod
-    def for_simulation(
-        cls,
-        simulation: EvalSimulationScenario,
-        bot_url: str,
-        *,
-        session_params: EvalSessionParams | None = None,
-        stream: EvalEventStream,
-        trace: EvalTrace,
-        persona: EvalPersona,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
-    ) -> "EvalClient":
-        """A client for a simulation: the persona hears the bot, and the judge sees its tool calls.
-
-        Args:
-            simulation: The simulation being run.
-            bot_url: WebSocket URL of the bot's eval transport.
-            session_params: How the run behaves; ``None`` for the defaults.
-            stream: Where the bot's output is appended as events.
-            trace: The run's trace.
-            persona: The persona that answers the bot.
-            user_tts: The user-audio TTS, or ``None`` for text mode.
-            bot_stt: The bot-audio STT, or ``None`` when unused.
-        """
-        params = EvalClientParams(
-            bot_audio=simulation.bot_audio,
-            user_audio=simulation.user_audio,
-            user_speech=simulation.user_speech,
-            capture_bot_audio=simulation.bot_audio,
-            # The bot's function calls, with their arguments, are the judge's
-            # evidence of what the bot actually did.
-            report_level="full",
-            trigger_disconnect=simulation.trigger_disconnect,
-        )
-        return cls(
-            bot_url,
-            params=params,
-            session_params=session_params or EvalSessionParams(),
-            stream=stream,
-            trace=trace,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
-            persona=persona,
-        )
 
     @property
     def has_user_tts(self) -> bool:

@@ -27,7 +27,7 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalScriptResult, EvalScriptTurnProgress
@@ -91,10 +91,20 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
-        # The connection to the bot: the eval pipeline and the user's sends.
-        self._client = EvalClient.for_scenario(
-            scenario,
+        # The connection to the bot: the eval pipeline and the user's sends,
+        # asking the bot for what the scenario's assertions need.
+        self._client = EvalClient(
             bot_url,
+            params=EvalClientParams(
+                bot_audio=scenario.bot_audio,
+                user_audio=scenario.user_audio,
+                user_speech=scenario.user_speech,
+                capture_bot_audio=scenario.wants_response(),
+                report_level=scenario.required_report_level(),
+                vad_events=scenario.needs_vad_events(),
+                context=list(scenario.context or []),
+                trigger_disconnect=scenario.trigger_disconnect,
+            ),
             session_params=self._params,
             stream=self._stream,
             trace=self._trace,

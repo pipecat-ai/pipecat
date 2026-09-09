@@ -16,7 +16,7 @@ Example::
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.client import EvalClient
+from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
@@ -73,9 +73,19 @@ class EvalSimulationSession(EvalSession[EvalSimulationResult]):
         self._scenario = scenario
         persona = EvalPersona(scenario.persona, scenario.goal, persona_llm)
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
-        self._client = EvalClient.for_simulation(
-            scenario,
+        # The persona hears the bot, and the judge sees its tool calls.
+        self._client = EvalClient(
             bot_url,
+            params=EvalClientParams(
+                bot_audio=scenario.bot_audio,
+                user_audio=scenario.user_audio,
+                user_speech=scenario.user_speech,
+                capture_bot_audio=scenario.bot_audio,
+                # The bot's function calls, with their arguments, are the judge's
+                # evidence of what the bot actually did.
+                report_level="full",
+                trigger_disconnect=scenario.trigger_disconnect,
+            ),
             session_params=self._params,
             stream=self._stream,
             trace=self._trace,

@@ -93,9 +93,7 @@ def _client(
     bot_url: str = "ws://localhost:0",
 ) -> EvalClient:
     scenario = scenario or EvalScriptScenario(name="t", turns=[], bot_audio=bot_audio)
-    return EvalClient.for_scenario(
-        scenario, bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
-    )
+    return EvalScriptSession(scenario, bot_url)._client
 
 
 def _capture_injected(client: EvalClient) -> list:
