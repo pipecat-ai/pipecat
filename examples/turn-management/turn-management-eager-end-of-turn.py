@@ -74,14 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
     stt = DeepgramFluxSTTService(
-        api_key=os.environ["DEEPGRAM_API_KEY"],
-        enable_eager_end_of_turn=True,
-        settings=DeepgramFluxSTTService.Settings(
-            # Optional: how confident Flux has to be to predict an end of turn.
-            # Lower values predict earlier, which buys more latency but misses
-            # more often. Defaults to 0.5 when eager end of turn is on.
-            eager_eot_threshold=0.5,
-        ),
+        api_key=os.environ["DEEPGRAM_API_KEY"], enable_eager_end_of_turn=True
     )
 
     llm = OpenAILLMService(
