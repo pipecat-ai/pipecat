@@ -1482,7 +1482,9 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             turns=[EvalScriptTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
         )
         result = await EvalScriptSession.from_scenario(
-            scenario, f"ws://localhost:{_free_port()}", connect_timeout_s=0.5
+            scenario,
+            f"ws://localhost:{_free_port()}",
+            params=EvalSessionParams(connect_timeout_s=0.5),
         ).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
@@ -1701,7 +1703,7 @@ if __name__ == "__main__":
 
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
-from pipecat.evals.session import EvalSession  # noqa: E402
+from pipecat.evals.session import EvalSession, EvalSessionParams  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
@@ -1900,6 +1902,12 @@ class TestSessionFromScenario(unittest.TestCase):
             judge=_YesJudge(),
         )
         self.assertIsInstance(session, EvalSimulationSession)
+
+    def test_params_reach_the_driver_and_the_client(self):
+        params = EvalSessionParams(default_timeout_ms=1234, trigger_disconnect=True)
+        session = EvalSession.from_scenario(self._script(), "ws://localhost:0", params=params)
+        self.assertEqual(session._driver._default_timeout_ms, 1234)
+        self.assertIn("trigger_disconnect=true", session._client._connect_url())
 
     def test_persona_llm_is_rejected_for_a_script(self):
         with self.assertRaises(ValueError):

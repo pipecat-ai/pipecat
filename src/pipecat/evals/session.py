@@ -10,12 +10,14 @@ A session connects to a running bot's eval transport as an RTVI client,
 runs the handshake, lets its driver converse, tears down, and returns the
 driver's result, a failed connect or a harness error included. The two
 session kinds build the client and the driver for their kind of scenario;
-:meth:`EvalSession.from_scenario` builds whichever kind a scenario is.
+:meth:`EvalSession.from_scenario` builds whichever kind a scenario is, and
+:class:`EvalSessionParams` is how the run behaves, whichever kind it is.
 
 Example::
 
     scenario = load_scenario_file("scenarios/greeting.yaml")
-    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860").run()
+    params = EvalSessionParams(stop_bot=True)
+    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860", params=params).run()
     print("PASS" if result.passed else "FAIL")
 """
 
@@ -25,23 +27,65 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from loguru import logger
+from pydantic import BaseModel
 
-from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.client import EvalClient
-from pipecat.evals.events import EvalEventStream
-from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
 from pipecat.evals.scenario import EvalKind, EvalScriptScenario, EvalSimulationScenario
-from pipecat.evals.tts import CachingTTSService
-from pipecat.services.llm_service import LLMService
-from pipecat.services.stt_service import STTService
 from pipecat.utils.base_object import BaseObject
 
 if TYPE_CHECKING:
+    from pipecat.evals.base_driver import BaseEvalDriver
+    from pipecat.evals.client import EvalClient
+    from pipecat.evals.events import EvalEventStream
+    from pipecat.evals.judge import EvalJudge
     from pipecat.evals.script_session import EvalScriptSession
     from pipecat.evals.simulation_session import EvalSimulationSession
+    from pipecat.evals.tts import CachingTTSService
+    from pipecat.services.llm_service import LLMService
+    from pipecat.services.stt_service import STTService
 
 R = TypeVar("R")
+
+# Generous default so an expectation without an explicit ``within_ms`` waits
+# long enough for slow LLM/TTS responses (and function-call round-trips) rather
+# than failing on latency. Set ``within_ms`` explicitly to assert on timing.
+DEFAULT_EVENT_TIMEOUT_MS = 60000
+
+
+class EvalSessionParams(BaseModel):
+    """How a run behaves, whichever kind of scenario it is: timeouts, recording, caching, teardown.
+
+    Plain configuration, so one instance serves many runs and crosses process
+    boundaries; the services a run uses are passed to the session separately.
+
+    Parameters:
+        connect_timeout_s: How long to wait for the bot to accept the WS
+            connection before giving up.
+        default_timeout_ms: Scripted scenarios only: the latency budget for
+            expectations without their own ``within_ms`` (the turn's expectations
+            share one deadline anchored at the send). Defaults to 60s.
+        record_path: Where to save the conversation audio, or ``None``. Only an
+            audio-mode run records.
+        cache_dir: Directory for cached synthesized user audio, or ``None`` for
+            the default (``<user-cache-dir>/pipecat/evals/tts``).
+        use_cache: When False, ignore cached user audio and force fresh
+            synthesis, with no cache reads or writes.
+        stop_bot: When True, ask the bot to cancel its pipeline, and exit, on
+            teardown. Leave False to keep it running for more scenarios.
+        trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
+            handler when the connection ends. A scenario's own
+            ``trigger_disconnect`` field also opts in. Bots often cancel their
+            pipeline there, so it is off by default to avoid that between
+            scenarios.
+    """
+
+    connect_timeout_s: float = 5.0
+    default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS
+    record_path: str | None = None
+    cache_dir: str | None = None
+    use_cache: bool = True
+    stop_bot: bool = False
+    trigger_disconnect: bool = False
 
 
 class EvalSession(BaseObject, Generic[R]):
@@ -70,6 +114,7 @@ class EvalSession(BaseObject, Generic[R]):
         kind: EvalKind,
         name: str,
         bot_url: str,
+        params: EvalSessionParams | None = None,
     ):
         """Initialize the session's runtime.
 
@@ -77,11 +122,13 @@ class EvalSession(BaseObject, Generic[R]):
             kind: The scenario kind being run, for the trace.
             name: The scenario's or simulation's name.
             bot_url: WebSocket URL of the bot's eval transport.
+            params: How the run behaves; ``None`` for the defaults.
         """
         super().__init__()
         self._kind = kind
         self._name = name
         self._bot_url = bot_url
+        self._params = params or EvalSessionParams()
         # Timestamped trace of the harness's own decisions, for diagnosing flakes.
         self._trace = EvalTrace()
         # Built by the subclass: the bot's output as events, the connection to
@@ -97,17 +144,11 @@ class EvalSession(BaseObject, Generic[R]):
         scenario: EvalScriptScenario | EvalSimulationScenario,
         bot_url: str,
         *,
-        connect_timeout_s: float = 5.0,
-        default_timeout_ms: int | None = None,
-        record_path: str | None = None,
-        cache_dir: str | None = None,
-        use_cache: bool = True,
-        stop_bot: bool = False,
-        trigger_disconnect: bool = False,
-        persona_llm: LLMService | None = None,
-        judge: EvalJudge | None = None,
-        user_tts: CachingTTSService | None = None,
-        bot_stt: STTService | None = None,
+        params: EvalSessionParams | None = None,
+        persona_llm: "LLMService | None" = None,
+        judge: "EvalJudge | None" = None,
+        user_tts: "CachingTTSService | None" = None,
+        bot_stt: "STTService | None" = None,
     ) -> "EvalScriptSession | EvalSimulationSession":
         """Build a ready-to-run session for a scenario of either kind.
 
@@ -125,16 +166,7 @@ class EvalSession(BaseObject, Generic[R]):
         Args:
             scenario: The parsed scenario to run, scripted or a simulation.
             bot_url: WebSocket URL of the bot's eval transport.
-            connect_timeout_s: How long to wait for the bot to accept the WS
-                connection before giving up.
-            default_timeout_ms: Scripted scenarios only: the latency budget for
-                expectations without their own ``within_ms``. Defaults to 60s.
-            record_path: Optional path to record the conversation audio (audio mode).
-            cache_dir: Optional directory for cached synthesized user audio.
-            use_cache: When False, ignore cached user audio and force fresh synthesis.
-            stop_bot: When True, ask the bot to cancel its pipeline on teardown.
-            trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
-                handler when the connection ends.
+            params: How the run behaves; ``None`` for the defaults.
             persona_llm: Simulations only: override the persona LLM (default:
                 built from the simulation's ``simulator``).
             judge: Override the judge (default: built from the scenario's ``judge``
@@ -153,19 +185,14 @@ class EvalSession(BaseObject, Generic[R]):
             TypeError: If ``scenario`` is neither kind.
         """
         # Imported here rather than at module level: both subclasses import this module.
-        from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS, EvalScriptSession
+        from pipecat.evals.script_session import EvalScriptSession
         from pipecat.evals.simulation_session import EvalSimulationSession
 
         if isinstance(scenario, EvalSimulationScenario):
             return EvalSimulationSession.from_scenario(
                 scenario,
                 bot_url,
-                connect_timeout_s=connect_timeout_s,
-                record_path=record_path,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                stop_bot=stop_bot,
-                trigger_disconnect=trigger_disconnect,
+                params=params,
                 persona_llm=persona_llm,
                 judge=judge,
                 user_tts=user_tts,
@@ -179,15 +206,7 @@ class EvalSession(BaseObject, Generic[R]):
             return EvalScriptSession.from_scenario(
                 scenario,
                 bot_url,
-                connect_timeout_s=connect_timeout_s,
-                default_timeout_ms=(
-                    DEFAULT_EVENT_TIMEOUT_MS if default_timeout_ms is None else default_timeout_ms
-                ),
-                record_path=record_path,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                stop_bot=stop_bot,
-                trigger_disconnect=trigger_disconnect,
+                params=params,
                 judge=judge,
                 user_tts=user_tts,
                 bot_stt=bot_stt,

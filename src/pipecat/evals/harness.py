@@ -27,7 +27,7 @@ from pipecat.evals.results import (  # noqa: F401
 from pipecat.evals.script import EvalScenario, EvalTurn  # noqa: F401
 from pipecat.evals.script_driver import SEND_AFTER_MAX_WAIT_S, SEND_AFTER_POLL_S  # noqa: F401
 from pipecat.evals.script_session import *  # noqa: F401,F403
-from pipecat.evals.session import EvalSession  # noqa: F401
+from pipecat.evals.session import DEFAULT_EVENT_TIMEOUT_MS, EvalSession  # noqa: F401
 
 with warnings.catch_warnings():
     warnings.simplefilter("always")
