@@ -146,6 +146,38 @@ def has_alnum(text: str) -> bool:
     return bool(alnum_only(text))
 
 
+def advance_by_chars(text: str, start_pos: int, n: int) -> int:
+    """Return the position in *text* after advancing past *n* characters.
+
+    XML/HTML tags (``<...>``) are crossed without counting against the budget, so
+    the span returned includes any tag met on the way. Everything else counts,
+    punctuation and spaces included.
+
+    This keeps a cursor in step with one walking the same content written without
+    the tags: both move over the same characters, so neither reaches past what the
+    other has. Where the budget is a count of letters and digits instead, use
+    :func:`advance_by_alnums`.
+
+    Args:
+        text: The source text to scan.
+        start_pos: Starting position in *text*.
+        n: Number of characters to consume.
+
+    Returns:
+        New position in *text* after consuming *n* characters.
+    """
+    pos = start_pos
+    count = 0
+    while pos < len(text) and count < n:
+        if text[pos] == "<":
+            end = text.find(">", pos)
+            pos = end + 1 if end != -1 else pos + 1
+        else:
+            count += 1
+            pos += 1
+    return pos
+
+
 def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
     """Return the position in *text* after advancing past *n* alphanumeric chars.
 
@@ -167,24 +199,6 @@ def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
     Returns:
         New position in *text* after consuming *n* alnum chars and trailing punctuation.
     """
-    return advance_by_alnums_with_marks(text, start_pos, n)[0]
-
-
-def advance_by_alnums_with_marks(text: str, start_pos: int, n: int) -> tuple[int, str]:
-    """As :func:`advance_by_alnums`, plus the trailing punctuation it walked past.
-
-    A caller that needs to know what was passed over but not spoken wants the run
-    itself; reconstructing it from the returned span disagrees when the text ends
-    mid-budget, where the punctuation was skipped without the trailing walk running.
-
-    Args:
-        text: The source text to scan.
-        start_pos: Starting position in *text*.
-        n: Number of alphanumeric characters to consume.
-
-    Returns:
-        The new position, and the run of trailing punctuation walked past to reach it.
-    """
     pos = start_pos
     count = 0
     while pos < len(text) and count < n:
@@ -197,7 +211,6 @@ def advance_by_alnums_with_marks(text: str, start_pos: int, n: int) -> tuple[int
         else:
             pos += 1
 
-    marks_start = pos
     while pos < len(text):
         if text[pos] == "<":
             break
@@ -205,4 +218,4 @@ def advance_by_alnums_with_marks(text: str, start_pos: int, n: int) -> tuple[int
             break
         pos += 1
 
-    return pos, text[marks_start:pos]
+    return pos
