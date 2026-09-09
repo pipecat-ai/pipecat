@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 
@@ -74,6 +75,10 @@ class EvalPersona:
         self._goal = goal
         self._llm = llm
         self._context = LLMContext(tools=ToolsSchema(standard_tools=[END_CALL_SCHEMA]))
+        # What the persona has heard of the bot's current turn (text mode).
+        self._heard: list[str] = []
+        self._calls_in_progress = 0
+        self._hung_up = False
 
     @property
     def instruction(self) -> str:
@@ -91,6 +96,47 @@ class EvalPersona:
     def context(self) -> LLMContext:
         """The context the persona runs on, with the ``end_call`` tool; empty until the call starts."""
         return self._context
+
+    @property
+    def hung_up(self) -> bool:
+        """Whether the persona has ended its part of the call."""
+        return self._hung_up
+
+    def hang_up(self) -> None:
+        """End the persona's part of the call: it answers nothing more."""
+        self._hung_up = True
+
+    def hear(self, event: dict) -> LLMContextFrame | None:
+        """Take in one of the bot's events; the frame that has the persona answer, once the bot's turn is done.
+
+        A response the bot gives while one of its function calls is still
+        running is held and joined with the response after the call, so the
+        persona answers the bot's whole turn rather than its "let me check".
+        In audio mode the aggregator does this instead.
+
+        Args:
+            event: An event from the stream.
+
+        Returns:
+            The context frame to push to the persona LLM, or ``None``.
+        """
+        if self._hung_up:
+            return None
+        match event["type"]:
+            case "function_call":
+                self._calls_in_progress += 1
+            case "function_call_stopped":
+                self._calls_in_progress = max(0, self._calls_in_progress - 1)
+            case "llm_response":
+                if event["text"]:
+                    self._heard.append(event["text"])
+                if self._calls_in_progress or not self._heard:
+                    return None
+                text = " ".join(self._heard)
+                self._heard = []
+                self._context.add_message({"role": "user", "content": text})
+                return LLMContextFrame(self._context)
+        return None
 
     def on_end_call(self, handler: Callable[[FunctionCallParams], Awaitable[None]]) -> None:
         """Register what happens when the persona calls ``end_call``.

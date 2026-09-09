@@ -112,33 +112,30 @@ class _BotFrameSink(FrameProcessor):
     Two rules apply. The aggregator's interruption, raised when the bot
     speaks, stops here for a scripted turn (it would flush the user audio
     being sent) and passes for a persona (a caller who hears the bot keep
-    talking stops). In a text simulation the sink also hands each finished
-    bot response to the persona, holding a response that arrives while a
-    function call is still running until the call is done.
+    talking stops). And the persona answers from here: in text mode it hears
+    each finished bot response through the sink, in audio mode the aggregator
+    hands it the bot's turn; either way nothing reaches it once it hung up.
     """
 
     def __init__(
-        self, stream: EvalEventStream, *, persona: LLMContext | None = None, feed: bool = False
+        self,
+        stream: EvalEventStream,
+        *,
+        persona: EvalPersona | None = None,
+        persona_hears: bool = False,
     ):
         """Initialize the sink.
 
         Args:
             stream: Where the bot's frames go as events.
-            persona: The persona's context in a simulation, else ``None``.
-            feed: Whether the sink hands the bot's finished responses to the
-                persona itself (a text-mode simulation, with no aggregator to).
+            persona: The simulated caller, else ``None``.
+            persona_hears: Whether the persona hears the bot's responses through
+                the sink (text mode, with no aggregator to hand it the turn).
         """
         super().__init__()
         self._stream = stream
         self._persona = persona
-        self._feed = feed and persona is not None
-        self._hung_up = False
-        self._held_response: list[str] = []
-        self._calls_in_progress = 0
-
-    def hang_up(self) -> None:
-        """End the persona's part: no further bot turn reaches the persona LLM."""
-        self._hung_up = True
+        self._persona_hears = persona_hears and persona is not None
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -160,43 +157,23 @@ class _BotFrameSink(FrameProcessor):
         event = self._stream.frame_to_event(frame)
         if event is not None:
             await self._stream.append(event)
-            if self._feed and not self._hung_up:
-                await self._feed_persona(event)
+            if self._persona_hears and self._persona is not None:
+                await self._answer(self._persona.hear(event))
         if isinstance(frame, _BOT_FRAMES):
             return
-        # The computed interruption stops here for a scripted turn (see the
-        # class docstring); a persona reacts to it like a caller.
         elif isinstance(frame, InterruptionFrame) and self._persona is None:
             return
         elif isinstance(frame, LLMContextFrame):
-            # The aggregator asking the persona to answer (audio mode).
-            await self._run_persona(frame)
+            # The aggregator handing the persona the bot's turn (audio mode).
+            await self._answer(frame)
             return
         await self.push_frame(frame, direction)
 
-    async def _run_persona(self, frame: LLMContextFrame) -> None:
-        """Hand a context frame to the persona LLM, unless it hung up."""
-        if self._persona is None or self._hung_up:
+    async def _answer(self, frame: LLMContextFrame | None) -> None:
+        """Push the frame that has the persona answer, unless there is none or it hung up."""
+        if frame is None or self._persona is None or self._persona.hung_up:
             return
         await self.push_frame(frame)
-
-    async def _feed_persona(self, event: dict) -> None:
-        """Hand a finished bot response to the persona, once its function calls are done."""
-        assert self._persona is not None
-        match event["type"]:
-            case "function_call":
-                self._calls_in_progress += 1
-            case "function_call_stopped":
-                self._calls_in_progress = max(0, self._calls_in_progress - 1)
-            case "llm_response":
-                if event["text"]:
-                    self._held_response.append(event["text"])
-                if self._calls_in_progress or not self._held_response:
-                    return
-                text = " ".join(self._held_response)
-                self._held_response = []
-                self._persona.add_message({"role": "user", "content": text})
-                await self._run_persona(LLMContextFrame(self._persona))
 
 
 # The event the relay appends for each response the persona completes, and the
@@ -703,8 +680,8 @@ class EvalClient:
 
     async def hang_up(self) -> None:
         """End the persona's part of the conversation: it answers nothing more."""
-        assert self._sink is not None  # pipeline built before any send
-        self._sink.hang_up()
+        assert self._params.persona is not None
+        self._params.persona.hang_up()
 
     def _connect_url(self) -> str:
         """The bot's URL with this connection's eval flags.
@@ -740,13 +717,9 @@ class EvalClient:
             self._params.bot_stt,
         )
         context = persona.context if persona is not None else LLMContext()
-        # With no STT there is no aggregator to hand the bot's turns to the
-        # persona; the sink does it from the bot's text.
-        self._sink = _BotFrameSink(
-            self._stream,
-            persona=persona.context if persona is not None else None,
-            feed=bot_stt is None,
-        )
+        # With no STT there is no aggregator to hand the persona the bot's turns;
+        # it hears them through the sink instead.
+        self._sink = _BotFrameSink(self._stream, persona=persona, persona_hears=bot_stt is None)
 
         inbound: list = [transport.input()]
         if bot_stt is not None:

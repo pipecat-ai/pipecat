@@ -26,6 +26,7 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import websockets
 
@@ -34,6 +35,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client import EvalClient, _BotFrameSink, _PersonaTurnRelay
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
+from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.scenario import (
     EvalExpectation,
@@ -600,6 +602,11 @@ def _bot_response(*texts: str, skip_tts: bool = False) -> list:
     return frames
 
 
+def _persona() -> EvalPersona:
+    """A persona whose LLM is a stub: the sink tests only need its context and its hearing."""
+    return EvalPersona("A caller.", "A goal.", SimpleNamespace(register_function=lambda *a: None))  # type: ignore[arg-type]
+
+
 class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     """The sink is the boundary between the bot's side of the pipeline and the user's."""
 
@@ -641,24 +648,27 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(nxt.frames, [])  # no persona: nothing to interrupt or run
 
     async def test_a_persona_is_interrupted_and_runs_per_context_frame(self):
-        context = LLMContext()
-        sink, nxt = self._sink(persona=context)
+        persona = _persona()
+        context = persona.context
+        sink, nxt = self._sink(persona=persona)
         interruption = InterruptionFrame()
         run = LLMContextFrame(context)
         await self._push(sink, interruption, run)
         self.assertEqual(nxt.frames, [interruption, run])
 
     async def test_hang_up_silences_the_persona(self):
-        context = LLMContext()
-        sink, nxt = self._sink(persona=context, feed=True)
-        sink.hang_up()
+        persona = _persona()
+        context = persona.context
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        persona.hang_up()
         await self._push(sink, LLMContextFrame(context), *_bot_response("Anything else?"))
         self.assertEqual(nxt.frames, [])
         self.assertEqual(context.get_messages(), [])
 
     async def test_text_feed_hands_the_bots_response_to_the_persona(self):
-        context = LLMContext()
-        sink, nxt = self._sink(persona=context, feed=True)
+        persona = _persona()
+        context = persona.context
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response("Hello ", "there"))
         self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello there"}])
         self.assertEqual(len(nxt.frames), 1)
@@ -666,8 +676,9 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertIs(nxt.frames[0].context, context)
 
     async def test_text_feed_waits_for_the_bots_function_call(self):
-        context = LLMContext()
-        sink, nxt = self._sink(persona=context, feed=True)
+        persona = _persona()
+        context = persona.context
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
         await self._push(
             sink,
             LLMFullResponseStartFrame(),
@@ -698,8 +709,9 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sink._stream.events_seen, [])
 
     async def test_text_feed_ignores_an_empty_response(self):
-        context = LLMContext()
-        sink, nxt = self._sink(persona=context, feed=True)
+        persona = _persona()
+        context = persona.context
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response())
         self.assertEqual(context.get_messages(), [])
         self.assertEqual(nxt.frames, [])
