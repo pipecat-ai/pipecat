@@ -56,7 +56,7 @@ class CrusoeLLMService(OpenAILLMService):
         """
         # Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="zai/GLM-5.2",
+            model="openai/gpt-oss-120b",
         )
 
         # Apply settings delta (canonical API, always wins)
