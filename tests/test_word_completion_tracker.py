@@ -2939,6 +2939,42 @@ class TestWordCompletionTrackerResyncInsideTransform(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("3/15."))
 
 
+class TestWordsWithNoLlmSpanOfTheirOwn(unittest.TestCase):
+    """A word the LLM text has nothing left to attribute to.
+
+    The conversation context falls back to a word's spoken text when it carries no
+    span, so a word that stands for nothing must say so, or the fallback records
+    text the LLM never wrote -- or records it twice.
+    """
+
+    def test_a_mark_an_earlier_word_carried_is_suppressed(self):
+        text = "Yeah, I can help"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        tracker.add_word_and_check_complete("Yeah")
+        self.assertFalse(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete(",")
+        self.assertIsNone(tracker.get_llm_consumed(), "the comma went with 'Yeah'")
+        self.assertTrue(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete("I")
+        self.assertFalse(tracker.suppress_in_context())
+
+    def test_text_the_llm_never_wrote_is_suppressed(self):
+        """Spoken text absent from ``llm_text`` has no span, so it is not recorded."""
+        tracker = WordCompletionTracker("Hello 😊", llm_text="Hello", user_facing_text="Hello 😊")
+        tracker.add_word_and_check_complete("Hello")
+        self.assertFalse(tracker.suppress_in_context())
+        tracker.add_word_and_check_complete("😊")
+        self.assertIsNone(tracker.get_llm_consumed())
+        self.assertTrue(tracker.suppress_in_context())
+
+    def test_without_an_llm_text_nothing_is_suppressed(self):
+        """No spans exist at all, so every word is recorded from its spoken text."""
+        tracker = WordCompletionTracker("Hello world")
+        for word in ("Hello", "world"):
+            tracker.add_word_and_check_complete(word)
+            self.assertFalse(tracker.suppress_in_context())
+
+
 class TestPunctuationReportedOnItsOwn(unittest.TestCase):
     """A provider that reports a punctuation mark as its own word-timestamp entry.
 

@@ -284,13 +284,27 @@ class WordCompletionTracker:
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:
-        """True when the last word was one step inside a rewritten span.
+        """True when the last word must not be written to the conversation context.
 
-        ``"$42.50"`` is spoken as five words, none of which the transcript should
-        contain. Callers keep every such word out of the conversation context and
-        let the word that finishes the span carry ``"$42.50"`` for all of them.
+        Two kinds of word answer to this, both of which the context already has
+        covered, or will have:
+
+        - **One step inside a rewritten span.** ``"$42.50"`` is spoken as five
+          words, none of which the transcript should contain; the word that
+          finishes the span carries ``"$42.50"`` for all of them.
+        - **A word with no span of its own.** A provider reporting ``","`` on
+          its own, after ``"Yeah"`` took the comma into its span, has nothing
+          left to record. The context falls back to the spoken text when a word
+          carries no span, which would store the mark a second time.
+
+        The word is still emitted either way: the provider spoke it, and a
+        consumer reading the word stream should see it. Without an ``llm_text``
+        there are no spans at all, so nothing is suppressed and every word is
+        recorded from its spoken text as usual.
         """
-        return self._segment_map.in_transformed_segment
+        return self._segment_map.in_transformed_segment or (
+            self._llm_text is not None and not (self._llm_consumed or "").strip()
+        )
 
     def get_word_for_frame(self) -> str | None:
         """Return this frame's share of the last word -- the text to emit for it.
