@@ -1482,11 +1482,11 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         return config
 
     @staticmethod
-    def _resolve_language_codes(language_codes: list[Language | str]) -> list[str]:
+    def _resolve_language_codes(language_codes: list[Language]) -> list[str]:
         """Resolve declared languages to AssemblyAI codes, deduped in order.
 
-        Accepts ``Language`` enums (regional variants resolve to their base code)
-        or raw strings, dropping duplicates while preserving declaration order.
+        Regional variants resolve to their base code, and duplicates are dropped
+        while preserving declaration order.
         """
         resolved = [
             language_to_assemblyai_language(lang) if isinstance(lang, Language) else lang
