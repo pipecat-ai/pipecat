@@ -8,7 +8,7 @@
 
 Each tool is a Flows direct function: its name, description, and parameters
 come from the signature and docstring, and the body does the work. None of
-them chooses the next node. They return ``(result, None)`` and the flow config
+them chooses the next node. They return ``(result, TRANSITION_IN_YAML)`` and the flow config
 decides where each one leads. ``check_availability`` reports a ``status`` the
 config branches on.
 """
@@ -16,7 +16,7 @@ config branches on.
 import asyncio
 from typing import Literal, TypedDict
 
-from pipecat.flows import FlowManager
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
 
 
 class MockReservationSystem:
@@ -57,7 +57,9 @@ class TimeResult(TypedDict):
     alternative_times: list[str]
 
 
-async def collect_party_size(flow_manager: FlowManager, size: int) -> tuple[PartySizeResult, None]:
+async def collect_party_size(
+    flow_manager: FlowManager, size: int
+) -> tuple[PartySizeResult, TransitionInYaml]:
     """
     Record the number of people in the party.
 
@@ -65,12 +67,12 @@ async def collect_party_size(flow_manager: FlowManager, size: int) -> tuple[Part
         size (int): Number of people in the party. Must be between 1 and 12.
     """
     flow_manager.state["party_size"] = size
-    return PartySizeResult(size=size, status="success"), None
+    return PartySizeResult(size=size, status="success"), TRANSITION_IN_YAML
 
 
 async def check_availability(
     flow_manager: FlowManager, time: str, party_size: int
-) -> tuple[TimeResult, None]:
+) -> tuple[TimeResult, TransitionInYaml]:
     """
     Check availability for requested time.
 
@@ -84,9 +86,9 @@ async def check_availability(
         status="available" if is_available else "unavailable",
         time=time,
         alternative_times=alternative_times,
-    ), None
+    ), TRANSITION_IN_YAML
 
 
-async def end_conversation(flow_manager: FlowManager) -> tuple[None, None]:
+async def end_conversation(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """End the conversation."""
-    return None, None
+    return None, TRANSITION_IN_YAML

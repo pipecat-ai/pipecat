@@ -13,7 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 import pipecat.flows
-from pipecat.flows import ContextStrategy, FlowConfig
+from pipecat.flows import TRANSITION_IN_PYTHON, ContextStrategy, FlowConfig
 
 FOOD_ORDERING = """
 initial_node: initial
@@ -229,6 +229,36 @@ class TestFlowConfigValidation(unittest.TestCase):
             {"name": "go", "transition_to": {"field": "s", "cases": {"x": "a"}, "default": "zz"}}
         ]
         self.assert_invalid(data, "unknown node 'zz'")
+
+    def test_branch_keys_are_canonical_strings(self):
+        data = _minimal()
+        data["nodes"]["a"]["functions"] = [
+            {"name": "go", "transition_to": {"field": "s", "cases": {True: "a", 3: "a", "x": "a"}}}
+        ]
+        cases = FlowConfig.model_validate(data).nodes["a"].functions[0].transition_to.cases
+        self.assertEqual(cases, {"true": "a", "3": "a", "x": "a"})
+
+    def test_yaml_boolean_and_number_keys(self):
+        config = FlowConfig.from_yaml(
+            "initial_node: a\nnodes:\n  a:\n    task_messages: [{role: developer, content: a}]\n"
+            "    functions:\n      - name: go\n        transition_to:\n          field: ok\n"
+            "          cases:\n            true: a\n            0: a\n"
+        )
+        self.assertEqual(
+            config.nodes["a"].functions[0].transition_to.cases, {"true": "a", "0": "a"}
+        )
+
+    def test_transition_in_python(self):
+        data = _minimal()
+        data["nodes"]["a"]["functions"] = [{"name": "go", "transition_to": TRANSITION_IN_PYTHON}]
+        func = FlowConfig.model_validate(data).nodes["a"].functions[0]
+        self.assertTrue(func.decided_in_python)
+        self.assertEqual(func.targets(), [])
+
+    def test_sentinel_cannot_name_a_node(self):
+        data = _minimal()
+        data["nodes"][TRANSITION_IN_PYTHON] = {"task_messages": []}
+        self.assert_invalid(data, "reserved")
 
     def test_branch_requires_cases(self):
         data = _minimal()

@@ -8,7 +8,7 @@
 
 Each tool is a Flows direct function: its name, description, and parameters
 come from the signature and docstring, and the body does the work. None of
-them chooses the next node. They return ``(result, None)`` and the flow config
+them chooses the next node. They return ``(result, TRANSITION_IN_YAML)`` and the flow config
 decides where each one leads.
 """
 
@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from loguru import logger
 
-from pipecat.flows import FlowManager
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
 
 
 class PizzaOrderResult(TypedDict):
@@ -47,32 +47,32 @@ async def check_kitchen_status(action: dict, flow_manager: FlowManager) -> None:
 # Transitions with no work behind them
 
 
-async def choose_pizza(flow_manager: FlowManager) -> tuple[None, None]:
+async def choose_pizza(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """
     User wants to order pizza. Let's get that order started.
     """
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
-async def choose_sushi(flow_manager: FlowManager) -> tuple[None, None]:
+async def choose_sushi(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """
     User wants to order sushi. Let's get that order started.
     """
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
-async def complete_order(flow_manager: FlowManager) -> tuple[None, None]:
+async def complete_order(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """
     User confirms the order is correct.
     """
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
-async def revise_order(flow_manager: FlowManager) -> tuple[None, None]:
+async def revise_order(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """
     User wants to make changes to their order.
     """
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
 # Tools that do work
@@ -80,7 +80,7 @@ async def revise_order(flow_manager: FlowManager) -> tuple[None, None]:
 
 async def select_pizza_order(
     flow_manager: FlowManager, size: str, pizza_type: str
-) -> tuple[PizzaOrderResult, None]:
+) -> tuple[PizzaOrderResult, TransitionInYaml]:
     """
     Record the pizza order details.
 
@@ -98,12 +98,12 @@ async def select_pizza_order(
         "price": price,
     }
 
-    return PizzaOrderResult(size=size, type=pizza_type, price=price), None
+    return PizzaOrderResult(size=size, type=pizza_type, price=price), TRANSITION_IN_YAML
 
 
 async def select_sushi_order(
     flow_manager: FlowManager, count: int, roll_type: str
-) -> tuple[SushiOrderResult, None]:
+) -> tuple[SushiOrderResult, TransitionInYaml]:
     """
     Record the sushi order details.
 
@@ -120,10 +120,12 @@ async def select_sushi_order(
         "price": price,
     }
 
-    return SushiOrderResult(count=count, type=roll_type, price=price), None
+    return SushiOrderResult(count=count, type=roll_type, price=price), TRANSITION_IN_YAML
 
 
-async def get_delivery_estimate(flow_manager: FlowManager) -> tuple[DeliveryEstimateResult, None]:
+async def get_delivery_estimate(
+    flow_manager: FlowManager,
+) -> tuple[DeliveryEstimateResult, TransitionInYaml]:
     """Provide delivery estimate information."""
     delivery_time = datetime.now() + timedelta(minutes=30)
-    return DeliveryEstimateResult(time=f"{delivery_time}"), None
+    return DeliveryEstimateResult(time=f"{delivery_time}"), TRANSITION_IN_YAML

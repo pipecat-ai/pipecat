@@ -8,13 +8,13 @@
 
 Each tool is a Flows direct function: its name, description, and parameters
 come from the signature and docstring, and the body does the work. None of
-them chooses the next node. They return ``(result, None)`` and the flow config
+them chooses the next node. They return ``(result, TRANSITION_IN_YAML)`` and the flow config
 decides where each one leads.
 """
 
 from typing import TypedDict
 
-from pipecat.flows import FlowManager
+from pipecat.flows import TRANSITION_IN_YAML, FlowManager, TransitionInYaml
 
 
 class BirthdayVerificationResult(TypedDict):
@@ -39,7 +39,7 @@ class VisitReasonRecordResult(TypedDict):
 
 async def verify_birthday(
     flow_manager: FlowManager, birthday: str
-) -> tuple[BirthdayVerificationResult, None]:
+) -> tuple[BirthdayVerificationResult, TransitionInYaml]:
     """Verify the user has provided their correct birthday. Once confirmed, the next step is to record the user's prescriptions.
 
     Args:
@@ -51,12 +51,12 @@ async def verify_birthday(
     flow_manager.state["birthday_verified"] = is_valid
     flow_manager.state["birthday"] = birthday
 
-    return BirthdayVerificationResult(verified=is_valid), None
+    return BirthdayVerificationResult(verified=is_valid), TRANSITION_IN_YAML
 
 
 async def record_prescriptions(
     flow_manager: FlowManager, prescriptions: list[dict]
-) -> tuple[PrescriptionRecordResult, None]:
+) -> tuple[PrescriptionRecordResult, TransitionInYaml]:
     """Record the user's prescriptions. Once confirmed, the next step is to collect allergy information.
 
     Args:
@@ -65,12 +65,12 @@ async def record_prescriptions(
     flow_manager.state["prescriptions"] = prescriptions
 
     # In a real app, this would store in patient records
-    return PrescriptionRecordResult(count=len(prescriptions)), None
+    return PrescriptionRecordResult(count=len(prescriptions)), TRANSITION_IN_YAML
 
 
 async def record_allergies(
     flow_manager: FlowManager, allergies: list[dict]
-) -> tuple[AllergyRecordResult, None]:
+) -> tuple[AllergyRecordResult, TransitionInYaml]:
     """Record the user's allergies. Once confirmed, then next step is to collect medical conditions.
 
     Args:
@@ -79,12 +79,12 @@ async def record_allergies(
     flow_manager.state["allergies"] = allergies
 
     # In a real app, this would store in patient records
-    return AllergyRecordResult(count=len(allergies)), None
+    return AllergyRecordResult(count=len(allergies)), TRANSITION_IN_YAML
 
 
 async def record_conditions(
     flow_manager: FlowManager, conditions: list[dict]
-) -> tuple[ConditionRecordResult, None]:
+) -> tuple[ConditionRecordResult, TransitionInYaml]:
     """Record the user's medical conditions. Once confirmed, the next step is to collect visit reasons.
 
     Args:
@@ -93,12 +93,12 @@ async def record_conditions(
     flow_manager.state["conditions"] = conditions
 
     # In a real app, this would store in patient records
-    return ConditionRecordResult(count=len(conditions)), None
+    return ConditionRecordResult(count=len(conditions)), TRANSITION_IN_YAML
 
 
 async def record_visit_reasons(
     flow_manager: FlowManager, visit_reasons: list[dict]
-) -> tuple[VisitReasonRecordResult, None]:
+) -> tuple[VisitReasonRecordResult, TransitionInYaml]:
     """Record the reasons for their visit. Once confirmed, the next step is to verify all information.
 
     Args:
@@ -107,19 +107,19 @@ async def record_visit_reasons(
     flow_manager.state["visit_reasons"] = visit_reasons
 
     # In a real app, this would store in patient records
-    return VisitReasonRecordResult(count=len(visit_reasons)), None
+    return VisitReasonRecordResult(count=len(visit_reasons)), TRANSITION_IN_YAML
 
 
-async def revise_information(flow_manager: FlowManager) -> tuple[None, None]:
+async def revise_information(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """Return to prescriptions to revise information."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
-async def confirm_information(flow_manager: FlowManager) -> tuple[None, None]:
+async def confirm_information(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """Proceed with confirmed information."""
-    return None, None
+    return None, TRANSITION_IN_YAML
 
 
-async def complete_intake(flow_manager: FlowManager) -> tuple[None, None]:
+async def complete_intake(flow_manager: FlowManager) -> tuple[None, TransitionInYaml]:
     """Complete the intake process."""
-    return None, None
+    return None, TRANSITION_IN_YAML

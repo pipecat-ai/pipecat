@@ -52,14 +52,37 @@ Example YAML::
 """
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipecat.flows.types import ContextStrategy
 from pipecat.utils.yaml import include_loader
+
+TRANSITION_IN_PYTHON = "TRANSITION_IN_PYTHON"
+"""``transition_to`` value for a function whose tool decides the next node.
+
+The tool returns ``(result, "<node name>")``, naming a node in the config.
+The config still owns the set of nodes; only which one comes next is decided
+in Python.
+"""
+
+
+def case_key(value: Any) -> str:
+    """The canonical string a branch matches a case key or result value on.
+
+    Booleans, and strings spelling one in any case, become ``true`` and
+    ``false``; everything else is its ``str()``. So ``true:``, ``"True":``,
+    and a result of Python ``True`` all meet at the same case.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value)
+    lowered = text.lower()
+    return lowered if lowered in ("true", "false") else text
 
 
 class FlowConfig(BaseModel):
@@ -92,7 +115,10 @@ class FlowConfig(BaseModel):
 
         Parameters:
             field: Key of the tool's result whose value selects the case.
-            cases: Result value to node name.
+            cases: Result value to node name. Keys may be written as strings,
+                booleans, or numbers; they match the result value by its
+                canonical string (see :func:`case_key`), so ``true:`` matches a
+                result of ``True``.
             default: Node to transition to when the value matches no case.
                 When omitted, an unmatched value stays on the current node.
         """
@@ -102,6 +128,13 @@ class FlowConfig(BaseModel):
         field: str
         cases: dict[str, str] = Field(min_length=1)
         default: str | None = None
+
+        @field_validator("cases", mode="before")
+        @classmethod
+        def _canonical_keys(cls, value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {case_key(k): v for k, v in value.items()}
+            return value
 
         def targets(self) -> list[str]:
             """Every node name this branch can transition to."""
@@ -115,8 +148,9 @@ class FlowConfig(BaseModel):
                 :class:`~pipecat.flows.Flow` is constructed with. The
                 tool's description and parameters come from that function.
             transition_to: Node to transition to after the tool completes,
-                or a :class:`FlowConfig.Branch`. Omitted for tools that stay
-                on the current node.
+                a :class:`FlowConfig.Branch`, or :data:`TRANSITION_IN_PYTHON`
+                when the tool itself returns the next node's name. Omitted for
+                tools that stay on the current node.
         """
 
         model_config = ConfigDict(extra="forbid")
@@ -124,9 +158,18 @@ class FlowConfig(BaseModel):
         name: str
         transition_to: "str | FlowConfig.Branch | None" = None
 
+        @property
+        def decided_in_python(self) -> bool:
+            """Whether the tool returns the next node's name itself."""
+            return self.transition_to == TRANSITION_IN_PYTHON
+
         def targets(self) -> list[str]:
-            """Every node name this function can transition to."""
-            if self.transition_to is None:
+            """Every node name the config knows this function can transition to.
+
+            Empty for a function decided in Python, whose targets the config
+            cannot know.
+            """
+            if self.transition_to is None or self.decided_in_python:
                 return []
             if isinstance(self.transition_to, str):
                 return [self.transition_to]
@@ -211,6 +254,8 @@ class FlowConfig(BaseModel):
     def _check_graph(self) -> "FlowConfig":
         if self.initial_node not in self.nodes:
             raise ValueError(f"initial_node '{self.initial_node}' is not a defined node")
+        if TRANSITION_IN_PYTHON in self.nodes:
+            raise ValueError(f"'{TRANSITION_IN_PYTHON}' is reserved and cannot name a node")
 
         _check_unique([f.name for f in self.global_functions], "global_functions")
         global_names = {f.name for f in self.global_functions}

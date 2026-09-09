@@ -13,7 +13,7 @@ Pipecat Flows determines conversation structure at runtime, supporting function
 calling, action execution, and seamless transitions between conversation states.
 """
 
-from .config import FlowConfig
+from .config import TRANSITION_IN_PYTHON, FlowConfig
 from .exceptions import (
     ActionError,
     FlowError,
@@ -25,6 +25,7 @@ from .flow import Flow
 from .manager import FlowManager
 from .types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategy,
@@ -36,6 +37,7 @@ from .types import (
     FlowsFunctionSchema,
     LegacyFunctionHandler,
     NodeConfig,
+    TransitionInYaml,
     ZeroArgFunctionHandler,
     flows_direct_function,
     flows_tool_options,
@@ -52,6 +54,7 @@ __all__ = [
     "FlowManager",
     # Declarative config
     "FlowConfig",
+    "TRANSITION_IN_PYTHON",
     "Flow",
     # Types
     "ActionConfig",
@@ -62,10 +65,12 @@ __all__ = [
     "FlowResult",
     "ConsolidatedFunctionResult",
     "NO_RESPONSE",
+    "TRANSITION_IN_YAML",
     "FlowsFunctionSchema",
     "LegacyFunctionHandler",
     "FlowsDirectFunction",
     "NodeConfig",
+    "TransitionInYaml",
     "ZeroArgFunctionHandler",
     "flows_tool_options",
     "flows_direct_function",
