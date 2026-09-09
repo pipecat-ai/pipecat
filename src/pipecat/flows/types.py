@@ -257,14 +257,14 @@ For functions that transition to another node,
 """
 
 
-class TransitionInYaml:
-    """Type of the :data:`TRANSITION_IN_YAML` sentinel, for return annotations."""
+class _TransitionInYaml:
+    """Type of the :data:`TRANSITION_IN_YAML` sentinel."""
 
     def __repr__(self) -> str:
         return "TRANSITION_IN_YAML"
 
 
-TRANSITION_IN_YAML = TransitionInYaml()
+TRANSITION_IN_YAML = _TransitionInYaml()
 """Function return value (in the "next node" slot) deferring the transition to a flow config.
 
 Return ``(result, TRANSITION_IN_YAML)`` from a tool that a
