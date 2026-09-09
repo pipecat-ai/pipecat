@@ -26,7 +26,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, require_given
 
 try:
     import requests
@@ -211,6 +211,10 @@ class KokoroTTSService(TTSService):
 
         self._kokoro = Kokoro(str(model_file), str(voices))
 
+        voice = require_given(self._settings.voice, "Kokoro TTS voice")
+        if voice not in self._kokoro.voices:
+            raise ValueError(f"Kokoro TTS voice '{voice}' is not in the voices file")
+
         self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
@@ -242,12 +246,8 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_tts_usage_metrics(text)
 
-            voice = assert_given(self._settings.voice)
-            if voice is None:
-                raise ValueError("Kokoro TTS voice must be specified")
-            lang = assert_given(self._settings.language)
-            if lang is None:
-                raise ValueError("Kokoro TTS language must be specified")
+            voice = require_given(self._settings.voice, "Kokoro TTS voice")
+            lang = require_given(self._settings.language, "Kokoro TTS language")
             speed = assert_given(self._settings.speed)
             stream = self._kokoro.create_stream(text, voice=voice, lang=lang, speed=speed)
 

@@ -220,3 +220,11 @@ async def test_failed_reload_keeps_the_loaded_model(moonshine_module):
 
     assert service._transcriber is loaded
     assert errors == ["Moonshine model load error: boom"]
+
+
+@pytest.mark.parametrize("model", [None, ""], ids=["none", "blank"])
+def test_missing_or_blank_model_is_rejected(moonshine_module, model):
+    stt, _ = moonshine_module
+
+    with pytest.raises(ValueError, match="Moonshine model must be specified"):
+        stt.MoonshineSTTService(settings=stt.MoonshineSTTService.Settings(model=model))

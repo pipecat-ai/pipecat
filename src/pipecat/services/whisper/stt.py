@@ -27,7 +27,7 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given, require_given
 
 try:
     from faster_whisper import WhisperModel
@@ -340,9 +340,7 @@ class WhisperSTTService(SegmentedSTTService):
             ValueError: If the model can't transcribe the configured language.
         """
         logger.debug("Loading Whisper model...")
-        model_name = assert_given(self._settings.model)
-        if model_name is None:
-            raise ValueError("Whisper model must be specified")
+        model_name = require_given(self._settings.model, "Whisper model")
         self._model = WhisperModel(model_name, device=self._device, compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
         unsupported = self._unsupported_language()
@@ -541,7 +539,8 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             **kwargs,
         )
 
-        # No need to call _load() as MLX Whisper loads models on demand
+        # MLX Whisper loads the model on demand, so only the name is checked here.
+        require_given(self._settings.model, "Whisper model")
 
     @override
     def _load(self):
@@ -579,9 +578,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-            model_path = assert_given(self._settings.model)
-            if model_path is None:
-                raise ValueError("Whisper model must be specified")
+            model_path = require_given(self._settings.model, "Whisper model")
             temperature = assert_given(self._settings.temperature)
             language = cast("Language | None", assert_given(self._settings.language))
             chunk = await asyncio.to_thread(
