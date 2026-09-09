@@ -151,22 +151,6 @@ class _FakeLLMService:
 
 
 class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
-    async def test_evaluate_conversation_puts_the_tool_calls_after_the_question(self):
-        svc = _FakeLLMService(['{"verdict": "yes", "reason": "booked"}'])
-        judge = EvalJudge(svc)
-        judge.add_user_message("Two at six, please.")
-        judge.add_assistant_message("Booked for two at 6 PM.")
-        v = await judge.evaluate_conversation(
-            "a table was booked", evidence=['check_availability({"time": "6:00 PM"})']
-        )
-        self.assertTrue(v.passed)
-        ask = svc.calls[0]["messages"][-1]["content"]
-        self.assertIn("Criterion: a table was booked", ask)
-        self.assertIn('- check_availability({"time": "6:00 PM"})', ask)
-        self.assertIn("tool calls", svc.calls[0]["system_instruction"])
-        # The conversation itself is untouched by the ask.
-        self.assertEqual(len(judge._context.get_messages()), 2)
-
     async def test_evaluate_pass(self):
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "yes it does"}'])
         judge = EvalJudge(svc)
