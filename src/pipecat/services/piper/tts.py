@@ -7,6 +7,7 @@
 """Piper TTS service implementation."""
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,8 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Piper, you need to `uv add "pipecat-ai[piper]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+PIPER_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/piper"))
 
 
 @dataclass
@@ -80,7 +83,7 @@ class PiperTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             download_dir: Directory for storing voice model files. Defaults to
-                the current working directory.
+                Pipecat's cache directory.
             force_redownload: Re-download the voice model even if it already exists.
             use_cuda: Use CUDA for GPU-accelerated inference.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -108,11 +111,13 @@ class PiperTTSService(TTSService):
             **kwargs,
         )
 
-        download_dir = download_dir or Path.cwd()
+        download_dir = download_dir or PIPER_CACHE_DIR
+        if not download_dir.exists():
+            download_dir.mkdir(parents=True, exist_ok=True)
 
         _voice = require_given(self._settings.voice, "Piper TTS voice")
         model_file = f"{_voice}.onnx"
-        model_path_resolved = Path(download_dir) / model_file
+        model_path_resolved = download_dir / model_file
 
         if not model_path_resolved.exists():
             logger.debug(f"Downloading Piper '{_voice}' model")
