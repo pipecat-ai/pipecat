@@ -434,6 +434,18 @@ async def test_a_startup_error_is_fatal_for_every_session_not_just_the_first():
 
 
 @pytest.mark.asyncio
+async def test_the_turn_gap_applies_to_the_session_in_progress():
+    """The gap groups fragments here, not at the API, so it need not wait for a new session."""
+    service = await _make_service_with_tasks()
+    service._session_started = True
+
+    await service._update_settings(OpenAILiveLLMService.Settings(transcript_turn_gap_secs=2.5))
+
+    assert service._user_turn.gap_secs == 2.5
+    assert service._assistant_turn.gap_secs == 2.5
+
+
+@pytest.mark.asyncio
 async def test_the_opening_nudge_carries_a_null_delegation_id():
     """The append is session-wide, and the API requires the field even so."""
     service = await _make_service_with_tasks()

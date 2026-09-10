@@ -409,13 +409,24 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         await self._disconnect()
 
     async def _update_settings(self, delta):
-        """Apply a settings delta; the Live API fixes all of them at session start."""
+        """Apply a settings delta; most of these are fixed at session start."""
         changed = await super()._update_settings(delta)
-        if changed and self._session_started:
+        # The turn gap groups transcript fragments here rather than at the API,
+        # so a change to it applies to the session in progress.
+        if "transcript_turn_gap_secs" in changed:
+            gap = assert_given(self._settings.transcript_turn_gap_secs)
+            self._user_turn.gap_secs = self._assistant_turn.gap_secs = gap
+        # The session is configured from these when it starts, so a change to
+        # one reaches the API on the next session.
+        session_scoped = changed.keys() & {"model", "system_instruction", "voice"}
+        if session_scoped:
             logger.warning(
-                f"{self}: settings {sorted(changed)} cannot be changed after the session has "
-                "started; they take effect on the next session"
+                f"{self}: [{', '.join(sorted(session_scoped))}] cannot change during a session; "
+                "they take effect on the next one"
             )
+        self._warn_unhandled_updated_settings(
+            changed.keys() - session_scoped - {"transcript_turn_gap_secs"}
+        )
         return changed
 
     async def reset_conversation(self):
@@ -526,11 +537,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if self._opening_instruction:
             history = history[:-1]
 
-        # Settings the API fixes at session start are read here, so a change
-        # applied mid-session takes effect on the next one.
+        # The API fixes the model at session start, so it is read here: a
+        # change applied mid-session takes effect on the next one.
         self._session_model = assert_given(self._settings.model) or self._session_model
-        gap = assert_given(self._settings.transcript_turn_gap_secs)
-        self._user_turn.gap_secs = self._assistant_turn.gap_secs = gap
 
         voice = assert_given(self._settings.voice)
         session = events.SessionConfig(
