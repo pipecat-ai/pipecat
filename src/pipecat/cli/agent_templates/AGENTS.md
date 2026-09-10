@@ -210,19 +210,19 @@ Core concepts:
 
 ## 6. Verify your work (the eval harness)
 
-A voice app can't be eyeballed like a web page — but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`): a **scenario** is a YAML file the harness plays against your *running bot*, end to end. Every scenario has a **kind** and a **modality**:
+A voice app can't be eyeballed like a web page, but you don't need a live call to test it. Pipecat ships a **behavioral eval harness** (`pipecat.evals`): a **scenario** is a YAML file the harness plays against your *running bot*, end to end. Every scenario has a **kind** and a **modality**:
 
-- **Kind — scripted or simulated.** A *scripted* scenario writes the user's turns out and asserts on what the bot does after each one. A *simulated* scenario hands the user's side to an LLM with a persona and a goal, and a judge decides whether the bot got the job done and how well.
-- **Modality — text or audio.** *Text* sends the user's turns as text and reads the LLM's text back: only the brain runs. *Audio* synthesizes the user's speech and transcribes the bot's, so the real STT, VAD, and TTS run: the ears and mouth too.
+- **Kind: scripted or simulated.** A *scripted* scenario is for exact control: you write the user's turns out, so you can assert exactly what the bot does after each one. A *simulated* scenario is for a goal: an LLM plays a caller with a persona and a goal and adapts to whatever the bot says, so one file covers the many ways a conversation can go, and a judge decides whether the bot got the job done and how well.
+- **Modality: text or audio.** *Text* sends the user's turns as text and reads the LLM's text back: only the brain runs. *Audio* synthesizes the user's speech and transcribes the bot's, so the real STT, VAD, and TTS run: the ears and mouth too.
 
 | Kind ↓ / Modality → | **Text** (fast; the LLM only) | **Audio** (slow; the full round trip) |
 |---|---|---|
-| **Scripted** — pin one behavior, turn by turn | The inner loop: prompts, tool calls and their args, multi-turn context, barge-in. Run it constantly. | One behavior on the real speech path: how numbers, names, and accents transcribe; turn-taking and VAD timing; how the bot's speech sounds. |
-| **Simulated** — prove the bot reaches a goal | A flow end to end, against a caller who phrases things their own way. Conversation-level quality. | What a real caller experiences. The pre-ship pass, and the only option for speech-to-speech bots. |
+| **Scripted**: exact control, turn by turn | The inner loop: prompts, tool calls and their args, multi-turn context, barge-in. Run it constantly. | One behavior on the real speech path: how numbers, names, and accents transcribe; turn-taking and VAD timing; how the bot's speech sounds. |
+| **Simulated**: a goal, with the caller adapting to the bot | A flow end to end, against a caller who phrases things their own way. Conversation-level quality. | What a real caller experiences. The pre-ship pass, and the only option for speech-to-speech bots. |
 
-**The judge.** Natural-language criteria work in every cell of the grid. Only `eval:` criteria, `success:`, and judged `metrics:` need it — deterministic checks (`text_contains`, `function_call`, measured metrics) don't. Use a free local Ollama (`gemma4:12b`, the default) if one is available; otherwise ask the user whether to pull it (~7.6 GB) or set `judge: {service: openai, model: gpt-4.1}` with the bot's key.
+**The judge.** Natural-language criteria work in every cell of the grid. Only `eval:` criteria, `success:`, and judged `metrics:` need it; deterministic checks (`text_contains`, `function_call`, measured metrics) don't. Use the free local Ollama (`gemma4:12b`, the default) if one is available; otherwise ask the user whether to pull it (~7.6 GB) or to point `judge.eval` at another LLM through a `factory:` (a dotted path to a function that takes the block and returns an OpenAI-compatible service, using the bot's key).
 
-> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec — look them up via your Pipecat MCP (§3): **Overview**, **Scripted Scenarios**, **Simulated Scenarios**, **Using the Library**, **The Eval Loop**. The harness ships in the `pipecat-ai[evals]` extra (the `pipecat eval` command plus the local Kokoro/Moonshine speech models); scaffolding with `--eval` adds it, so run evals from the **bot's own environment**.
+> **Deep reference:** the **Pipecat Evals docs** are the authoritative spec. Look them up via your Pipecat MCP (§3): **Overview**, **Scripted Scenarios**, **Simulated Scenarios**, **Using the Library**, **The Eval Loop**. The harness ships in the `pipecat-ai[evals]` extra (the `pipecat eval` command plus the local Kokoro/Moonshine speech models); scaffolding with `--eval` adds it, so run evals from the **bot's own environment**.
 
 **Make your bot eval-able.** Scaffold with `pipecat init . --eval` whenever you intend to test the bot. The generated bot has the `eval` transport entry, eval dependencies in its env, and **runnable starter scenarios in `server/evals/`**: `starter_text.yaml` (cascade only) and `starter_audio.yaml`. They pass against the fresh scaffold, so run them *first* to prove the loop, then edit them to match the bot you're building and copy them to grow the suite rather than writing YAML from scratch. For an **existing** bot, add the transport entry by hand (RTVI is already on by default for `PipelineWorker`, so this is the only edit):
 ```python
@@ -235,9 +235,9 @@ transport_params = {
 ```
 The dev runner wraps this in the eval transport + serializer when you pass `-t eval`; you don't construct them. Audio-mode scenarios need `audio_in_enabled=True` here.
 
-**Boot it.** `uv run bot.py -t eval` starts the bot as a headless eval WebSocket server (default `ws://localhost:7860`); no exceptions + pipeline assembled is your fastest "did I wire it right" signal. Keep its stdout durable and greppable — e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt` — so when a scenario fails you grep for the traceback instead of re-running. The bot stays up between runs, so boot once and drive scenario after scenario from a second terminal.
+**Boot it.** `uv run bot.py -t eval` starts the bot as a headless eval WebSocket server (default `ws://localhost:7860`); no exceptions + pipeline assembled is your fastest "did I wire it right" signal. Keep its stdout durable and greppable (e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt`) so when a scenario fails you grep for the traceback instead of re-running. The bot stays up between runs, so boot once and drive scenario after scenario from a second terminal.
 
-**Scripted scenarios: the inner loop.** A list of `turns:`, each with `expect:` assertions on the events the bot emits back — `text_contains`, a `function_call` with its args, `within_ms` latency, or an `eval:` criterion for the judge. Same input every run, so a failure is reproducible and you fix from the assertion. A minimal one:
+**Scripted scenarios: the inner loop.** A list of `turns:`, each with `expect:` assertions on the events the bot emits back: `text_contains`, a `function_call` with its args, `within_ms` latency, or an `eval:` criterion for the judge. Same input every run, so a failure is reproducible and you fix from the assertion. A minimal one:
 ```yaml
 name: capital_of_germany
 turns:
@@ -254,9 +254,9 @@ turns:
 ```bash
 uv run pipecat eval run my_scenario.yaml -v
 ```
-Assert on what the bot *produced*, and prefer the modality-agnostic `response` event — the LLM text in text mode, the bot's transcribed speech in audio mode. `user_started_speaking`, `user_stopped_speaking`, and `tts_response` **only fire in audio mode** (`user_transcription` fires in both — STT in audio, the DTMF aggregator in text). Exit code is non-zero if any scenario fails; when a failure is confusing, re-run with `-d` for `<scenario>.debug.log`, the harness's full logs for its STT, TTS, and judge.
+Assert on what the bot *produced*, and prefer the modality-agnostic `response` event: the LLM text in text mode, the bot's transcribed speech in audio mode. `user_started_speaking`, `user_stopped_speaking`, and `tts_response` **only fire in audio mode** (`user_transcription` fires in both: STT in audio, the DTMF aggregator in text). Exit code is non-zero if any scenario fails; when a failure is confusing, re-run with `-d` for `<scenario>.debug.log`, the harness's full logs for its STT, TTS, and judge.
 
-**Simulated scenarios: prove the bot gets the job done.** A script walks one path through a flow. A simulation replaces `turns:` with a **persona** and a **goal**; an LLM plays that caller, pursues the goal in its own words, and hangs up with an `end_call` tool when done or stuck. The judge then reads the whole transcript — the bot's tool calls in place — to decide `success:` and to score every bot reply against your `metrics:`:
+**Simulated scenarios: check that the bot gets the job done.** A simulation replaces `turns:` with a **persona** and a **goal**. An LLM plays that caller, pursues the goal in its own words, and hangs up with an `end_call` tool when done or stuck. The judge then reads the whole transcript, with the bot's tool calls in place, to decide `success:` and to score every bot reply against your `metrics:`:
 ```yaml
 name: book_table
 simulator: {service: ollama, model: gemma4:12b, extra: {reasoning_effort: none}}  # the caller's LLM; optional, this is the default
@@ -269,21 +269,21 @@ metrics:
   - name: politeness
     criterion: "the reply is courteous, never curt or dismissive"
     min_score: 1            # share of replies that must pass: 1 = every reply
-  - measure: latency        # slowest reply, in seconds
-    max_value: 5
-runs: 3                     # every run must pass; one run is an anecdote
+  - measure: words          # longest reply, in words
+    max_value: 60
+runs: 3                     # every run must pass; one run proves little
 ```
 `uv run pipecat eval run book_table.yaml -v` streams the conversation and the judge's per-turn reasons; `run` plays the file once, and `pipecat eval suite` honors `runs:`. When writing one:
 - **Give the persona the facts the bot will ask for** (name, number, party size). Without them it invents or stalls, and the run fails for a reason that isn't the bot's.
 - **`success:` is the bot's side of the goal** and may name tool calls. Anything the bot must do *once* (read the order back, call `complete_order`) belongs here, not in a metric.
-- **A judged metric is scored per reply**: the judge answers yes or no for each reply, never a partial score, and the metric's score is the share of replies that got a yes. Phrase it as a condition plus what a reply outside it does ("when the reply turns down a time, it offers alternatives; a reply that turns down no time passes") — the judge reads a bare "never" as "always".
-- **A measured metric** (`turns`, `duration`, `words`, `latency`; `min_value` / `max_value`) **bounds the worst reply.** In text mode `latency` is persona-send to first LLM token, not silence — an LLM budget, not a listening budget. `measure: function_calls` with a `calls:` list checks the calls the bot made, by name and optionally args; `calls: []` says it must call nothing, the check for a caller who should be turned down.
+- **A judged metric is scored per reply**: the judge answers yes or no for each reply, never a partial score, and the metric's score is the share of replies that got a yes. Phrase it as a condition plus what a reply outside it does ("when the reply turns down a time, it offers alternatives; a reply that turns down no time passes"), or the judge may read a bare "never" as "always".
+- **A measured metric** (`turns`, `duration`, `words`, `latency`; `min_value` / `max_value`) **bounds the worst reply.** In text mode there is no speech, so `latency` is the time from the persona's message to the bot's first LLM token: a budget on the LLM, not on what a caller would hear. `measure: function_calls` with a `calls:` list checks the calls the bot made, by name and optionally args; `calls: []` says it must call nothing, the check for a caller who should be turned down.
 
-**Simulate to discover, script to pin.** A failing simulation shows *where* the bot lost the caller. Reproduce that exchange as a scripted scenario, fix the bot against it, and keep both: the script guards the fix on every edit, the simulation keeps checking the whole flow.
+**Which kind to write.** Use a script when the test is an exact exchange: "when the user says this, the bot calls this tool with these arguments". Use a simulation when the test is a goal: "this caller gets a table booked", without writing a scenario for every way the conversation could go. A failing simulation prints the conversation under `-v`, so you can see where the bot went wrong.
 
-**Switching to audio.** Either kind escalates the same way: `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` synthesizes the user's speech so the bot's real VAD + STT run, and `judge: {modality: audio}` (with a `transcription:` block) makes the bot speak and transcribes that audio into `response`. Kokoro and Moonshine run **locally with no API key** — slower than text, but free. Add `-a` to save `<record-dir>/<scenario>.wav` for a human to listen back. A **speech-to-speech bot** has no text LLM step to assert on, so for it both blocks are required rather than an escalation; scenarios, judge, and assertions are otherwise identical to a cascade bot.
+**Switching to audio.** Either kind switches the same way: `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` synthesizes the user's speech so the bot's real VAD + STT run, and `judge: {modality: audio}` (with a `transcription:` block) makes the bot speak and transcribes that audio into `response`. Kokoro and Moonshine run **locally with no API key**, slower than text but free. Add `-a` to save `<record-dir>/<scenario>.wav` for a human to listen back. A **speech-to-speech bot** has no text LLM step to assert on, so for it both blocks are required; scenarios, judge, and assertions are otherwise the same as for a cascade bot.
 
-**Running many scenarios.** Because the bot stays up, its context carries over — give a scripted scenario a top-level `context:` (a list of LLM messages) to start from a known state, or use `pipecat eval suite` (a fresh bot per run from a manifest listing both kinds; `-k script` / `-k simulation` selects one) when runs must be isolated. The bot's `on_client_disconnected` handler won't fire during a normal eval; pass `--trigger-disconnect` or set `trigger_disconnect: true` to exercise it, and if it cancels the pipeline treat that run as terminal. Route output with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); the suite writes to `eval-runs/<timestamp>/`.
+**Running many scenarios.** Because the bot stays up, its context carries over. Give a scripted scenario a top-level `context:` (a list of LLM messages) to start from a known state, or use `pipecat eval suite` (a fresh bot per run from a manifest listing both kinds; `-k script` / `-k simulation` selects one) when runs must be isolated. The bot's `on_client_disconnected` handler won't fire during a normal eval; pass `--trigger-disconnect` or set `trigger_disconnect: true` to exercise it, and if it cancels the pipeline treat that run as terminal. Route output with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); the suite writes to `eval-runs/<timestamp>/`.
 
 ## 7. Deploying (optional — Pipecat Cloud)
 
