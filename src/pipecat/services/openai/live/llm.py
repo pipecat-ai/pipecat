@@ -72,7 +72,7 @@ DEFAULT_MODEL = "gpt-live-1-diamond-alpha"
 
 # Quiet time that ends a speaker's turn. The API emits transcript fragments on
 # 200 ms frame boundaries, so this has to clear ordinary gaps within speech.
-DEFAULT_TURN_GAP_SECS = 0.8
+TURN_GAP_SECS = 0.8
 
 # The server drains delegation and output work for at most 10 seconds after
 # `session.close` before emitting `session.closed`.
@@ -91,14 +91,9 @@ class OpenAILiveLLMSettings(LLMSettings):
         voice: Output voice name (for example ``marin`` or ``cedar``). ``None``
             leaves the choice to the API. Cannot be changed once the session
             has started.
-        transcript_turn_gap_secs: How long a speaker's transcript must stay
-            quiet before their turn is treated as over. The API emits timed
-            fragments and no turn boundaries, so turns are grouped here; tune
-            this against recordings for the languages and pacing you expect.
     """
 
     voice: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    transcript_turn_gap_secs: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -281,7 +276,6 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             voice=None,
-            transcript_turn_gap_secs=DEFAULT_TURN_GAP_SECS,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -325,9 +319,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         # Turns assembled from transcript fragments, one per direction: in
         # full duplex the user and the model can be speaking at once.
-        gap = assert_given(default_settings.transcript_turn_gap_secs)
-        self._user_turn = _TurnGrouper(gap_secs=gap)
-        self._assistant_turn = _TurnGrouper(gap_secs=gap)
+        self._user_turn = _TurnGrouper(gap_secs=TURN_GAP_SECS)
+        self._assistant_turn = _TurnGrouper(gap_secs=TURN_GAP_SECS)
 
         # A trailing developer message asking the model to open the conversation.
         self._opening_instruction: str | None = None
@@ -411,11 +404,6 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     async def _update_settings(self, delta):
         """Apply a settings delta; most of these are fixed at session start."""
         changed = await super()._update_settings(delta)
-        # The turn gap groups transcript fragments here rather than at the API,
-        # so a change to it applies to the session in progress.
-        if "transcript_turn_gap_secs" in changed:
-            gap = assert_given(self._settings.transcript_turn_gap_secs)
-            self._user_turn.gap_secs = self._assistant_turn.gap_secs = gap
         # The session is configured from these when it starts, so a change to
         # one reaches the API on the next session.
         session_scoped = changed.keys() & {"model", "system_instruction", "voice"}
@@ -424,9 +412,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 f"{self}: [{', '.join(sorted(session_scoped))}] cannot change during a session; "
                 "they take effect on the next one"
             )
-        self._warn_unhandled_updated_settings(
-            changed.keys() - session_scoped - {"transcript_turn_gap_secs"}
-        )
+        self._warn_unhandled_updated_settings(changed.keys() - session_scoped)
         return changed
 
     async def reset_conversation(self):

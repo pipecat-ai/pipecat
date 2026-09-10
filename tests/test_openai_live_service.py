@@ -80,9 +80,9 @@ TEST_TURN_GAP_SECS = 0.05
 
 async def _make_service_with_tasks(*, delegation=None, settings=None) -> OpenAILiveLLMService:
     """A service wired to a task manager, for the paths that run turn timers."""
-    settings = settings or OpenAILiveLLMService.Settings()
-    settings.transcript_turn_gap_secs = TEST_TURN_GAP_SECS
     service = _make_service(delegation=delegation, settings=settings)
+    # The gap is a constant in the service; shorten it here to keep tests quick.
+    service._user_turn.gap_secs = service._assistant_turn.gap_secs = TEST_TURN_GAP_SECS
     await BaseObject.setup(service, TaskManager())
     return service
 
@@ -431,18 +431,6 @@ async def test_a_startup_error_is_fatal_for_every_session_not_just_the_first():
     await service.reset_conversation()
     await _drive(service, [_error()])
     assert service.push_error.await_args.kwargs.get("force_treat_as_permanent") is True
-
-
-@pytest.mark.asyncio
-async def test_the_turn_gap_applies_to_the_session_in_progress():
-    """The gap groups fragments here, not at the API, so it need not wait for a new session."""
-    service = await _make_service_with_tasks()
-    service._session_started = True
-
-    await service._update_settings(OpenAILiveLLMService.Settings(transcript_turn_gap_secs=2.5))
-
-    assert service._user_turn.gap_secs == 2.5
-    assert service._assistant_turn.gap_secs == 2.5
 
 
 @pytest.mark.asyncio
