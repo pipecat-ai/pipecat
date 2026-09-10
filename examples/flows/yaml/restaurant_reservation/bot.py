@@ -4,16 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The podcast interview flow, configured from YAML at runtime.
+"""The restaurant reservation flow, configured from YAML at runtime.
 
-The same conversation as podcast_interview.py, split along the seam Pipecat
-Flows offers for runtime configuration:
+A reservation conversation split along the seam Pipecat Flows offers for
+runtime configuration:
 
-- flow.yaml holds the graph: introduction, topic, interview,
-  conclusion, and final nodes, and where each tool leads. The interview node
-  transitions back to itself once per topic aspect.
-- handlers.py holds the tools: direct functions whose schema
-  comes from their signature and docstring.
+- flow.yaml holds the graph: the nodes, what each one says,
+  which tools each offers, and where each tool leads. The availability check
+  routes to confirmation or to alternative times through a branch table keyed
+  on the tool's reported status.
+- handlers.py holds the tools: direct functions whose
+  schema comes from their signature and docstring.
+
+This bot reads the YAML from disk when it starts a session. A production bot
+would fetch it from a database or CMS instead, so one deployment can run
+whichever flow the session calls for. Prompts refer to session facts and
+to what handlers have stored as {{ key }}, filled in from the manager's state.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)
@@ -75,7 +81,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Run the podcast interview bot."""
+    """Run the restaurant reservation bot."""
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY", ""))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
@@ -127,7 +133,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # validated as it loads; constructing the Flow checks that every tool it
     # names exists and has a valid direct-function signature.
     config = FlowConfig.from_file(FLOW_CONFIG_PATH)
-    flow = Flow(config, handlers=handlers)
+    flow = Flow(
+        config,
+        handlers=handlers,
+    )
 
     flow_manager = FlowManager(
         worker=worker,
@@ -136,6 +145,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         transport=transport,
         global_functions=flow.global_functions,
     )
+
+    # Session facts the prompts refer to as {{ key }}. The manager fills them
+    # in from its state when it enters each node.
+    flow_manager.state.update({"restaurant_name": os.getenv("RESTAURANT_NAME", "La Maison")})
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

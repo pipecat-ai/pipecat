@@ -6,8 +6,8 @@
 
 """The food ordering flow, configured from YAML at runtime.
 
-The same conversation as food_ordering.py, split along the seam Pipecat Flows
-offers for runtime configuration:
+The same conversation as python/food_ordering.py, split along the seam Pipecat
+Flows offers for runtime configuration:
 
 - flow.yaml holds the graph: the nodes, what each one says, which
   tools each offers, and where each tool leads.

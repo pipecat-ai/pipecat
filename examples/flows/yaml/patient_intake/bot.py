@@ -6,8 +6,8 @@
 
 """The patient intake flow, configured from YAML at runtime.
 
-The same conversation as patient_intake.py, split along the seam Pipecat Flows
-offers for runtime configuration:
+An intake conversation split along the seam Pipecat Flows offers for runtime
+configuration:
 
 - flow.yaml holds the graph: eight nodes, what each one says, which
   tool each offers, and where each tool leads. The birthday check routes on
@@ -15,10 +15,6 @@ offers for runtime configuration:
   The practice and patient names come from the manager's state per session.
 - handlers.py holds the tools: direct functions whose schema comes
   from their signature and docstring.
-
-The verification node summarizes the intake from the full conversation
-context. patient_intake.py shows the same node with a context reset and an
-LLM-generated summary instead.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)

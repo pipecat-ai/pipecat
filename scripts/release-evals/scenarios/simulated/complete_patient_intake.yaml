@@ -1,10 +1,10 @@
 name: complete_patient_intake
 
-# Text modality, against flows/patient_intake.py: a patient goes through the
+# Text modality, against the patient intake flow: a patient goes through the
 # whole intake. The bot verifies the date of birth, then collects prescriptions,
 # allergies, conditions, and the reason for the visit, reviews everything, and
-# completes the intake. The judge reads the record_* and complete_intake calls
-# along with the conversation.
+# completes the intake. The judge reads the conversation and the bot's tool
+# calls; the intake_recorded metric requires every step's call.
 
 simulator: !include ../simulator.yaml
 
@@ -27,6 +27,16 @@ metrics:
   - name: efficiency
     criterion: "the reply does not ask the patient to repeat information they already gave (confirming it back is fine)"
     min_score: 1
+  - name: intake_recorded
+    measure: function_calls
+    calls:
+      - verify_birthday
+      - record_prescriptions
+      - record_allergies
+      - record_conditions
+      - record_visit_reasons
+      - confirm_information
+      - complete_intake
 
 max_turns: 12
 max_duration_s: 180

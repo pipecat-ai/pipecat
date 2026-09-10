@@ -6,7 +6,7 @@
 
 """A 'Hello-World' introduction to Pipecat Flows, with the flow in YAML.
 
-The same bot as hello_world.py, split along the seam Pipecat Flows offers for
+The same bot as python/hello_world.py, split along the seam Pipecat Flows offers for
 runtime configuration: flow.yaml holds the two nodes and the transition
 between them, and handlers.py holds the one tool the flow calls.
 

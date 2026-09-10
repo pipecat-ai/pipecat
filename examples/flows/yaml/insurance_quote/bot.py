@@ -4,22 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The restaurant reservation flow, configured from YAML at runtime.
+"""The insurance quote flow, configured from YAML at runtime.
 
-The same conversation as restaurant_reservation.py, split along the seam
-Pipecat Flows offers for runtime configuration:
+A quote conversation whose prompts are built from values computed during the
+call. The handlers store each quote in the manager's state, and flow.yaml's
+quote_results node reads it back as {{ quote.monthly_premium }} and the like.
+Adjusting the coverage re-enters that node, which is rendered again with the
+new figures, so the prompt always carries the current quote.
 
-- flow.yaml holds the graph: the nodes, what each one says,
-  which tools each offers, and where each tool leads. The availability check
-  routes to confirmation or to alternative times through a branch table keyed
-  on the tool's reported status.
-- handlers.py holds the tools: direct functions whose
-  schema comes from their signature and docstring.
-
-This bot reads the YAML from disk when it starts a session. A production bot
-would fetch it from a database or CMS instead, so one deployment can run
-whichever flow the session calls for. Prompts refer to session facts and
-to what handlers have stored as {{ key }}, filled in from the manager's state.
+- flow.yaml holds the graph: the nodes, what each one says, which tools each
+  offers, and where each tool leads.
+- handlers.py holds the tools: direct functions whose schema comes from their
+  signature and docstring, plus the rate table they compute from.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)
@@ -81,7 +77,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Run the restaurant reservation bot."""
+    """Run the insurance quote bot."""
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY", ""))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
@@ -145,10 +141,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         transport=transport,
         global_functions=flow.global_functions,
     )
-
-    # Session facts the prompts refer to as {{ key }}. The manager fills them
-    # in from its state when it enters each node.
-    flow_manager.state.update({"restaurant_name": os.getenv("RESTAURANT_NAME", "La Maison")})
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
