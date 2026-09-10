@@ -8,7 +8,44 @@ import io
 import unittest
 import wave
 
-from pipecat.audio.utils import pcm_to_wav
+import numpy as np
+
+from pipecat.audio.utils import _apply_half_hann_fade_out, pcm_to_wav
+
+
+class TestHalfHannFadeOut(unittest.TestCase):
+    def test_matches_descending_half_hann_and_pins_endpoints(self):
+        samples = np.array([32767, -32768, 12000, -7000, 2000], dtype=np.int16)
+
+        faded = np.frombuffer(_apply_half_hann_fade_out(samples.tobytes()), dtype=np.int16)
+
+        phase = np.linspace(0.0, np.pi, num=len(samples), dtype=np.float64)
+        gains = 0.5 * (1.0 + np.cos(phase))
+        expected = np.rint(samples.astype(np.float64) * gains).astype(np.int16)
+        expected[0] = samples[0]
+        expected[-1] = 0
+        np.testing.assert_array_equal(faded, expected)
+        self.assertEqual(faded[0], samples[0])
+        self.assertEqual(faded[-1], 0)
+
+    def test_constant_signal_descends_monotonically_without_changing_length(self):
+        samples = np.full(640, -32768, dtype=np.int16)
+
+        faded_bytes = _apply_half_hann_fade_out(samples.tobytes())
+        faded = np.frombuffer(faded_bytes, dtype=np.int16)
+
+        self.assertEqual(len(faded_bytes), len(samples.tobytes()))
+        self.assertTrue(np.all(np.diff(np.abs(faded.astype(np.int32))) <= 0))
+
+    def test_handles_empty_and_single_sample_inputs(self):
+        self.assertEqual(_apply_half_hann_fade_out(b""), b"")
+        self.assertEqual(
+            _apply_half_hann_fade_out(np.array([123], dtype=np.int16).tobytes()), b"\0\0"
+        )
+
+    def test_rejects_partial_sample(self):
+        with self.assertRaisesRegex(ValueError, "complete 16-bit samples"):
+            _apply_half_hann_fade_out(b"\x01")
 
 
 class TestPcmToWav(unittest.TestCase):

@@ -9,7 +9,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
@@ -74,6 +74,7 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
     async def test_interruption_with_mixer_keeps_audio_task_and_mixer_output(self):
         transport = await self._make_transport(mixer=_PassthroughMixer())
         try:
+            transport._prepare_audio_interruption = MagicMock()
             sender = transport._media_senders[None]
             task_before = sender._audio_task
             self.assertIsNotNone(task_before)
@@ -92,6 +93,7 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             count_after_interruption = transport.write_audio_frame.call_count
             await asyncio.sleep(0.1)
             self.assertGreater(transport.write_audio_frame.call_count, count_after_interruption)
+            transport._prepare_audio_interruption.assert_not_called()
         finally:
             await transport.cancel(CancelFrame())
 
@@ -102,11 +104,132 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             task_before = sender._audio_task
             self.assertIsNotNone(task_before)
 
+            def prepare_audio_interruption(destination):
+                self.assertIsNone(destination)
+                self.assertFalse(task_before.done())
+                return True
+
+            transport._prepare_audio_interruption = MagicMock(
+                side_effect=prepare_audio_interruption
+            )
+            start_interruption = transport._start_interruption
+
+            async def assert_writer_cancelled_before_framework_interruption():
+                self.assertTrue(task_before.done())
+                await start_interruption()
+
+            transport._start_interruption = AsyncMock(
+                side_effect=assert_writer_cancelled_before_framework_interruption
+            )
+
             await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
             self.assertIsNot(sender._audio_task, task_before)
             self.assertIsNotNone(sender._audio_task)
+            self.assertTrue(task_before.done())
+            transport._prepare_audio_interruption.assert_called_once_with(None)
+            transport._start_interruption.assert_awaited_once_with()
         finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_default_transport_hook_keeps_existing_interruption_order(self):
+        transport = await self._make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+            self.assertIsNotNone(task_before)
+            start_interruption = transport._start_interruption
+
+            async def assert_writer_active_during_framework_interruption():
+                self.assertFalse(task_before.done())
+                await start_interruption()
+
+            transport._start_interruption = AsyncMock(
+                side_effect=assert_writer_active_during_framework_interruption
+            )
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertTrue(task_before.done())
+            self.assertIsNot(sender._audio_task, task_before)
+            self.assertIsNotNone(sender._audio_task)
+            transport._start_interruption.assert_awaited_once_with()
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_recreates_audio_task_when_transport_hook_fails(self):
+        transport = await self._make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            task_before = sender._audio_task
+            transport._prepare_audio_interruption = MagicMock(
+                side_effect=RuntimeError("release failed")
+            )
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertTrue(task_before.done())
+            self.assertIsNot(sender._audio_task, task_before)
+            self.assertIsNotNone(sender._audio_task)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_early_interruption_preserves_late_uninterruptible_frame(self):
+        transport = await self._make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            queue_before = sender._audio_queue
+            transport._prepare_audio_interruption = MagicMock(return_value=True)
+            start_interruption = transport._start_interruption
+
+            async def enqueue_during_cleanup():
+                self.assertIs(sender._audio_queue, queue_before)
+                sender._audio_queue.put_nowait(EndFrame())
+                await start_interruption()
+
+            transport._start_interruption = AsyncMock(side_effect=enqueue_during_cleanup)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertIsNot(sender._audio_queue, queue_before)
+            self.assertIsNotNone(sender._audio_task)
+            await asyncio.wait_for(sender._audio_task, timeout=1.0)
+            self.assertTrue(sender._audio_task.done())
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_with_uninterruptible_frame_skips_transport_hook(self):
+        transport = await self._make_transport(mixer=None)
+        release_write = asyncio.Event()
+        try:
+            sender = transport._media_senders[None]
+            transport._prepare_audio_interruption = MagicMock()
+            write_started = asyncio.Event()
+
+            async def slow_write(frame):
+                write_started.set()
+                await release_write.wait()
+                return True
+
+            transport.write_audio_frame = AsyncMock(side_effect=slow_write)
+            audio = OutputAudioRawFrame(
+                audio=b"\x01\x02" * (sender.audio_chunk_size // 2),
+                sample_rate=sender.sample_rate,
+                num_channels=1,
+            )
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            await write_started.wait()
+
+            task_before = sender._audio_task
+            sender._audio_queue.put_nowait(EndFrame())
+            self.assertTrue(sender._audio_queue.has_uninterruptible)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            self.assertIs(sender._audio_task, task_before)
+            transport._prepare_audio_interruption.assert_not_called()
+        finally:
+            release_write.set()
             await transport.cancel(CancelFrame())
 
     async def test_interruption_with_mixer_still_discards_queued_bot_audio(self):
