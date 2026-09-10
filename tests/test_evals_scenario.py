@@ -592,10 +592,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertFalse(s.stop_on_failure)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestTurnAudioFile(unittest.TestCase):
     """A turn can name an audio file to play instead of synthesizing its text."""
 
@@ -668,3 +664,7 @@ class TestTurnAudioFile(unittest.TestCase):
                 )
             )
         self.assertIn("turn(s) [1]", str(cm.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()
