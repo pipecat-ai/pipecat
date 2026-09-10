@@ -259,7 +259,7 @@ Assert on what the bot *produced*, and prefer the modality-agnostic `response` e
 **Simulated scenarios: prove the bot gets the job done.** A script walks one path through a flow. A simulation replaces `turns:` with a **persona** and a **goal**; an LLM plays that caller, pursues the goal in its own words, and hangs up with an `end_call` tool when done or stuck. The judge then reads the whole transcript — the bot's tool calls in place — to decide `success:` and to score every bot reply against your `metrics:`:
 ```yaml
 name: book_table
-simulator: {service: ollama, model: gemma4:12b}    # the caller's LLM; optional, this is the default
+simulator: {service: ollama, model: gemma4:12b, extra: {reasoning_effort: none}}  # the caller's LLM; optional, this is the default
 persona: |
   Jamie, booking dinner for two tonight at 6 PM. Gives a name and phone number
   when asked (Jamie Lee, 555-0142). Polite, answers one question at a time.
