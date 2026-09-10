@@ -350,9 +350,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         """A metric's score over its turn verdicts: the share of turns that passed.
 
         A metric that fell short only on turns the judge left unanswered is
-        judge trouble, and its kind says so.
+        judge trouble, and its failure kind says so.
         """
-        kind = None
+        failure_kind = None
         if not verdicts:
             score, reason, passed = None, "no bot turn to judge", True
         else:
@@ -365,7 +365,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             )
             passed = metric.min_score is None or score >= metric.min_score
             if not passed:
-                kind = "judge_no" if any(v.verdict == "no" for v in failed) else "judge_no_verdict"
+                failure_kind = (
+                    "judge_no" if any(v.verdict == "no" for v in failed) else "judge_no_verdict"
+                )
         self._trace.log(
             f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
             f"{'' if passed else f' (below {metric.min_score:.2f})'}: {reason}"
@@ -377,7 +379,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             reason=reason,
             min_score=metric.min_score,
             verdicts=verdicts,
-            kind=kind,
+            failure_kind=failure_kind,
         )
 
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
@@ -411,7 +413,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             passed=passed,
             reason=reason,
             value=value,
-            kind=None if passed else ("out_of_range" if metric.calls is None else "function_calls"),
+            failure_kind=(
+                None if passed else ("out_of_range" if metric.calls is None else "function_calls")
+            ),
         )
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:

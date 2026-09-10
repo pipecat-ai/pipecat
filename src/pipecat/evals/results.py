@@ -204,7 +204,7 @@ class EvalSimulationMetricScore:
             measured metric.
         value: What a measured metric measured, in its unit; ``None`` for a
             judged one, or when there was nothing to measure.
-        kind: How the metric failed, for grouping across runs: ``judge_no``
+        failure_kind: How the metric failed, for grouping across runs: ``judge_no``
             when the judge rejected a turn, ``judge_no_verdict`` when it only
             left turns unanswered, ``out_of_range`` for a measure outside its
             bounds, ``function_calls`` for a call list that did not match;
@@ -218,7 +218,7 @@ class EvalSimulationMetricScore:
     min_score: float | None = None
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
     value: float | None = None
-    kind: str | None = None
+    failure_kind: str | None = None
 
 
 @dataclass

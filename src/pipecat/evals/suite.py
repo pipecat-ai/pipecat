@@ -248,7 +248,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
                 "min_score": m.min_score,
                 "value": m.value,
                 "reason": m.reason,
-                "kind": m.kind,
+                "failure_kind": m.failure_kind,
                 "verdicts": [
                     {"turn": v.turn, "passed": v.passed, "verdict": v.verdict, "reason": v.reason}
                     for v in m.verdicts

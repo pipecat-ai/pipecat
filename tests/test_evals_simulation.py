@@ -866,7 +866,7 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSimulationMetricKinds(unittest.IsolatedAsyncioTestCase):
-    """A failed metric says whether the judge rejected a turn or left it unanswered."""
+    """A failed metric's failure kind says whether the judge rejected a turn or left it unanswered."""
 
     async def _score(self, turn_verdicts: list[dict[str, str]]):
         metrics = [EvalSimulationMetric("brevity", "short", min_score=1.0)]
@@ -888,17 +888,17 @@ class TestSimulationMetricKinds(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_rejected_turn_is_judge_no(self):
         metric = await self._score([{}, {"brevity": "no"}])
-        self.assertEqual((metric.passed, metric.kind), (False, "judge_no"))
+        self.assertEqual((metric.passed, metric.failure_kind), (False, "judge_no"))
         self.assertEqual([v.verdict for v in metric.verdicts], ["yes", "no"])
 
     async def test_an_unanswered_turn_alone_is_judge_no_verdict(self):
         metric = await self._score([{}, {"brevity": "none"}])
-        self.assertEqual((metric.passed, metric.kind), (False, "judge_no_verdict"))
+        self.assertEqual((metric.passed, metric.failure_kind), (False, "judge_no_verdict"))
         self.assertEqual([v.verdict for v in metric.verdicts], ["yes", "none"])
 
     async def test_a_passing_metric_has_no_kind(self):
         metric = await self._score([{}, {}])
-        self.assertEqual((metric.passed, metric.kind), (True, None))
+        self.assertEqual((metric.passed, metric.failure_kind), (True, None))
 
 
 class TestSimulatorDefault(unittest.TestCase):
