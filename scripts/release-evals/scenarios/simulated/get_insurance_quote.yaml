@@ -1,9 +1,10 @@
 name: get_insurance_quote
 
-# Text modality, against flows/insurance_quote.py: the caller gets a quote,
+# Text modality, against the insurance quote flow: the caller gets a quote,
 # then changes the coverage and gets an updated one. The judge reads the
-# collect_age, collect_marital_status, calculate_quote, update_coverage, and
-# end_quote calls along with the conversation.
+# conversation and the bot's tool calls; the quote_recorded metric requires
+# the collect_age, collect_marital_status, calculate_quote, update_coverage,
+# and end_quote calls.
 
 simulator: !include ../simulator.yaml
 
@@ -25,6 +26,9 @@ metrics:
   - name: politeness
     criterion: "the reply is courteous and helpful, never curt or dismissive"
     min_score: 1
+  - name: quote_recorded
+    measure: function_calls
+    calls: [collect_age, collect_marital_status, calculate_quote, update_coverage, end_quote]
 
 max_turns: 8
 max_duration_s: 120
