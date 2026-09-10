@@ -765,9 +765,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 frame.skip_tts = self._skip_tts
 
         if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            # A turn confirmed mid-response leaves the start frame marked and
-            # the end frame not. Nothing downstream reads the two as a pair, and
-            # the gate clears the mark on everything it releases anyway.
+            # Marks the response while it is unconfirmed, for whatever holds it
+            # back. The gate three lines down clears the mark on everything it
+            # releases, so the mark reaches the pipeline only if nothing gated
+            # the response at all.
             frame.speculation_id = self._speculation_gate.speculation_id
 
         # The gate decides synchronously, so its verdict can't be torn by

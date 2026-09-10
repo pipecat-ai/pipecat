@@ -1222,11 +1222,11 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
     """Frame withdrawing an eager end of turn.
 
     Emitted when a service reports the user resumed speaking after an eager end
-    of turn, or when the committed transcript doesn't match the eager one. Every
-    consumer of the speculation drops it: the LLM service stops generating, the
-    TTS service stops synthesizing, and the
+    of turn, or when the committed transcript doesn't match the eager one. The
+    LLM service stops generating, and its
     :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
-    buffered.
+    was holding — which is everything the response produced, so nothing further
+    down the pipeline has anything to undo.
 
     A system frame so it overtakes the speculative output it cancels.
 

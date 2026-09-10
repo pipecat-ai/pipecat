@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterruptionFrame,
-    LLMFullResponseStartFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -90,7 +89,6 @@ class BaseOutputTransport(FrameProcessor):
         # us to send multiple streams at the same time if the transport allows
         # it.
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
-        self._warned_unheld_speculation = False
 
         if params.video_out_bitrate is not None:
             import warnings
@@ -370,27 +368,7 @@ class BaseOutputTransport(FrameProcessor):
         elif direction == FrameDirection.UPSTREAM:
             await self.push_frame(frame, direction)
         else:
-            if isinstance(frame, LLMFullResponseStartFrame) and frame.speculation_id:
-                self._warn_unheld_speculation()
             await self._handle_frame(frame)
-
-    def _warn_unheld_speculation(self):
-        """Report a speculative response that reached the output unheld.
-
-        It answers a turn the user may not have finished, so speaking it is the
-        outcome speculation exists to avoid. The LLM service holds one until its
-        turn is confirmed and clears the id on the way out, so a response
-        arriving here still marked was never gated. Warned once: the
-        alternative is a line per turn for a problem that is fixed in one place.
-        """
-        if self._warned_unheld_speculation:
-            return
-        self._warned_unheld_speculation = True
-        logger.error(
-            f"{self}: a speculative response reached the output transport, so it will be "
-            "spoken before the user turn it answers is confirmed. Nothing between the LLM "
-            "and this transport is holding it back."
-        )
 
     async def _handle_frame(self, frame: Frame):
         """Handle frames by routing them to appropriate media senders."""

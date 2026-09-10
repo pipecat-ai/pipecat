@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EagerEndOfTurnTranscriptionFrame,
     EndFrame,
     ErrorFrame,
@@ -777,13 +776,6 @@ class TTSService(AIService):
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
-            # The response being synthesized answers a turn that turned out to be
-            # unfinished, so stop the same way an interruption would — the audio
-            # is discarded downstream either way, and half-synthesized state must
-            # not carry into the response that replaces it.
-            await self._handle_interruption(frame, direction)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._llm_response_started = True
             # New LLM turn → assign a fresh context ID shared by all sentences
@@ -1038,9 +1030,7 @@ class TTSService(AIService):
             audio = await maybe_resample(bytes(buffer))
             yield TTSAudioRawFrame(audio, self.sample_rate, 1)
 
-    async def _handle_interruption(
-        self, frame: InterruptionFrame | EagerEndOfTurnCancelFrame, direction: FrameDirection
-    ):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
@@ -2009,9 +1999,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         # that produces no audio look like one that played.
         self._tts_started: bool = False
 
-    async def _handle_interruption(
-        self, frame: InterruptionFrame | EagerEndOfTurnCancelFrame, direction: FrameDirection
-    ):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         # If the bot is not speaking we don't need to reconnect when the user
         # speaks. If the bot is speaking and the user interrupts we need to
         # reconnect. Captured before calling super(), which clears

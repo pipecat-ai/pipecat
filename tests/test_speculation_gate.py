@@ -474,36 +474,6 @@ class TestResolvedResponsesCarryNoSpeculationId(unittest.IsolatedAsyncioTestCase
         ] == [None, None]
 
 
-class TestUnheldSpeculationWarning(unittest.IsolatedAsyncioTestCase):
-    async def test_the_output_transport_reports_a_speculation_nothing_held(self):
-        # Speculating without anything holding the response speaks unconfirmed
-        # replies, which is the outcome the feature exists to avoid, so it is
-        # reported where it does the harm rather than failing silently.
-        transport = BaseOutputTransport(TransportParams())
-        transport._handle_frame = AsyncMock()
-
-        start = LLMFullResponseStartFrame()
-        start.speculation_id = "abc"
-
-        with patch.object(logger, "error") as error:
-            await transport.process_frame(start, DOWN)
-            await transport.process_frame(start, DOWN)
-
-        # Reported once: a line per turn would not tell anyone anything new.
-        assert error.call_count == 1
-        assert "speculative response reached" in str(error.call_args[0][0])
-        assert transport._handle_frame.await_count == 2
-
-    async def test_an_ordinary_response_is_not_reported(self):
-        transport = BaseOutputTransport(TransportParams())
-        transport._handle_frame = AsyncMock()
-
-        with patch.object(logger, "error") as error:
-            await transport.process_frame(LLMFullResponseStartFrame(), DOWN)
-
-        assert error.call_count == 0
-
-
 class GatedLLM(LLMService):
     """Answers every context frame, gating what it pushes as `LLMService` does."""
 
@@ -522,9 +492,10 @@ class GatedLLM(LLMService):
 
 
 class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
-    async def test_a_gated_speculation_is_not_reported_to_the_output_transport(self):
-        # The whole path, which is where a released response and an ungated one
-        # have to look different: aggregator, gating LLM, output transport.
+    async def test_the_transport_sees_a_response_only_once_it_is_confirmed(self):
+        # The whole path: aggregator, gating LLM, output transport. Nothing the
+        # speculation produced reaches the transport before the turn ends, and
+        # the context records the committed transcript rather than the eager one.
         context = LLMContext()
         aggregator = LLMUserAggregator(
             context,
@@ -533,23 +504,22 @@ class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
         transport = BaseOutputTransport(TransportParams())
         transport._handle_frame = AsyncMock()
 
-        with patch.object(logger, "error") as error:
-            await run_test(
-                Pipeline([aggregator, GatedLLM(), transport]),
-                frames_to_send=[
-                    ProposedUserStartedSpeakingFrame(),
-                    SleepFrame(),
-                    EagerEndOfTurnTranscriptionFrame("book a flight", "user", "t", "abc"),
-                    SleepFrame(),
-                    TranscriptionFrame("Book a flight.", "user", "t"),
-                    SleepFrame(),
-                    ProposedUserStoppedSpeakingFrame(),
-                    SleepFrame(sleep=1.0),
-                ],
-            )
+        await run_test(
+            Pipeline([aggregator, GatedLLM(), transport]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                EagerEndOfTurnTranscriptionFrame("book a flight", "user", "t", "abc"),
+                SleepFrame(),
+                TranscriptionFrame("Book a flight.", "user", "t"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
 
-        reported = [str(call.args[0]) for call in error.call_args_list]
-        assert not any("speculative response reached" in message for message in reported)
+        spoken = [call.args[0] for call in transport._handle_frame.await_args_list]
+        assert [f.text for f in spoken if isinstance(f, LLMTextFrame)] == ["Booking your flight."]
         assert context.messages == [{"role": "user", "content": "Book a flight."}]
 
 

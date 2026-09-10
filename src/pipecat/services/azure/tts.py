@@ -15,7 +15,6 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -720,9 +719,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         """Flush any pending audio data."""
         logger.trace(f"{self}: flushing audio")
 
-    async def _handle_interruption(
-        self, frame: InterruptionFrame | EagerEndOfTurnCancelFrame, direction: FrameDirection
-    ):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by stopping current synthesis.
 
         Args:
