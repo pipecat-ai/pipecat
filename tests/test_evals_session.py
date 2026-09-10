@@ -93,9 +93,7 @@ def _client(
     bot_url: str = "ws://localhost:0",
 ) -> EvalClient:
     scenario = scenario or EvalScriptScenario(name="t", turns=[], bot_audio=bot_audio)
-    return EvalClient.for_scenario(
-        scenario, bot_url, stream=_stream(scenario.bot_audio), trace=EvalTrace()
-    )
+    return EvalScriptSession(scenario, bot_url)._client
 
 
 def _capture_injected(client: EvalClient) -> list:
@@ -1482,7 +1480,9 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             turns=[EvalScriptTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
         )
         result = await EvalScriptSession.from_scenario(
-            scenario, f"ws://localhost:{_free_port()}", connect_timeout_s=0.5
+            scenario,
+            f"ws://localhost:{_free_port()}",
+            params=EvalSessionParams(connect_timeout_s=0.5),
         ).run()
         self.assertFalse(result.passed)
         self.assertEqual(len(result.failures), 1)
@@ -1701,6 +1701,7 @@ if __name__ == "__main__":
 
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
+from pipecat.evals.session import EvalSession, EvalSessionParams  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
 from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
@@ -1865,3 +1866,73 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.error, result.debug_log)
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(result.succeeded)
+
+
+class TestSessionFromScenario(unittest.TestCase):
+    """``EvalSession.from_scenario`` builds the session of the scenario's kind."""
+
+    def _script(self) -> EvalScriptScenario:
+        return EvalScriptScenario(
+            name="capital",
+            bot_audio=False,
+            turns=[EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_started")])],
+        )
+
+    def _simulation(self) -> EvalSimulationScenario:
+        return EvalSimulationScenario(
+            name="capital",
+            persona="A curious traveler.",
+            goal="Learn the capital of Germany.",
+            simulator={"service": "scripted"},
+            success="the bot named Berlin",
+            bot_audio=False,
+        )
+
+    def test_script_scenario_gets_a_script_session(self):
+        session = EvalSession.from_scenario(self._script(), "ws://localhost:0")
+        self.assertIsInstance(session, EvalScriptSession)
+
+    def test_simulation_gets_a_simulation_session(self):
+        session = EvalSession.from_scenario(
+            self._simulation(),
+            "ws://localhost:0",
+            persona_llm=_ScriptedPersonaLLM({}),
+            judge=_YesJudge(),
+        )
+        self.assertIsInstance(session, EvalSimulationSession)
+
+    def test_params_reach_the_driver_and_the_client(self):
+        params = EvalSessionParams(default_timeout_ms=1234, trigger_disconnect=True)
+        session = EvalSession.from_scenario(self._script(), "ws://localhost:0", params=params)
+        self.assertEqual(session._driver._default_timeout_ms, 1234)
+        self.assertIn("trigger_disconnect=true", session._client._connect_url())
+
+    def test_deprecated_knobs_fold_into_params(self):
+        # A knob passed by its old name wins over the params field of the same
+        # name, and the others keep the params object's values.
+        for build in (EvalSession.from_scenario, EvalScriptSession.from_scenario):
+            with self.subTest(build=build.__qualname__):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    session = build(
+                        self._script(),
+                        "ws://localhost:0",
+                        params=EvalSessionParams(stop_bot=False, use_cache=False),
+                        stop_bot=True,
+                        default_timeout_ms=1234,
+                    )
+                self.assertEqual([w.category for w in caught], [DeprecationWarning])
+                self.assertIn("`default_timeout_ms`, `stop_bot` of", str(caught[0].message))
+                self.assertTrue(session._params.stop_bot)
+                self.assertEqual(session._params.default_timeout_ms, 1234)
+                self.assertFalse(session._params.use_cache)
+
+    def test_persona_llm_is_rejected_for_a_script(self):
+        with self.assertRaises(ValueError):
+            EvalSession.from_scenario(
+                self._script(), "ws://localhost:0", persona_llm=_ScriptedPersonaLLM({})
+            )
+
+    def test_other_objects_are_rejected(self):
+        with self.assertRaises(TypeError):
+            EvalSession.from_scenario({"name": "x"}, "ws://localhost:0")  # type: ignore[arg-type]

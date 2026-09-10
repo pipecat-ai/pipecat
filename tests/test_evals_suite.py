@@ -178,6 +178,13 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
         # The callback takes only the run, not the suite an event handler gets.
         self.assertEqual(seen, ["running", "done"])
 
+    async def test_deprecated_knobs_still_work(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.suite.run(self.logs_dir, use_cache=False, default_timeout_ms=1234)
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIn("`EvalSuite.run`", str(caught[0].message))
+
     async def test_callback_stays_scoped_to_the_call_it_was_passed_to(self):
         """The callback is a per-call parameter, so a reused suite doesn't accumulate it."""
         seen = []

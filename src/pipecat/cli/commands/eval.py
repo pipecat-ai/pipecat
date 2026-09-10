@@ -29,7 +29,6 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.results import (
     EvalProgress,
     EvalScriptResult,
@@ -45,8 +44,7 @@ from pipecat.evals.scenario import (
     is_scenario_file,
     load_scenario_file,
 )
-from pipecat.evals.script_session import EvalScriptSession
-from pipecat.evals.simulation_session import EvalSimulationSession
+from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
     SCENARIO_SUFFIXES,
     EvalManifest,
@@ -149,7 +147,7 @@ _SPEAKER_COLOR = {"bot": "32", "user": "36"}
 _ENDING_COLOR = {"end_call": "32", "bot": "33"}
 
 
-def _print_progress(session: BaseEvalSession, p: EvalProgress) -> None:
+def _print_progress(session: EvalSession, p: EvalProgress) -> None:
     """Print a progress record as it arrives (verbose mode).
 
     A scripted scenario's per-turn and per-expectation lines, or a
@@ -281,13 +279,9 @@ async def _execute_scenario(
     *,
     audio: bool,
     record_dir: str,
-    cache_dir: str | None,
-    use_cache: bool,
-    default_timeout_ms: int,
+    params: EvalSessionParams,
     logs_dir: str,
     debug: bool,
-    stop_bot: bool,
-    trigger_disconnect: bool,
     verbose: bool,
 ) -> None:
     """Run one scenario file, scripted or a simulation, against its ``bot_url``.
@@ -306,28 +300,9 @@ async def _execute_scenario(
         loaded = load_scenario_file(run.scenario_path)
         record_path = _record_path(record_dir, run.scenario) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
-            session: EvalScriptSession | EvalSimulationSession
-            if isinstance(loaded, EvalSimulationScenario):
-                session = EvalSimulationSession.from_scenario(
-                    loaded,
-                    url,
-                    record_path=record_path,
-                    cache_dir=cache_dir,
-                    use_cache=use_cache,
-                    stop_bot=stop_bot,
-                    trigger_disconnect=trigger_disconnect,
-                )
-            else:
-                session = EvalScriptSession.from_scenario(
-                    loaded,
-                    url,
-                    default_timeout_ms=default_timeout_ms,
-                    record_path=record_path,
-                    cache_dir=cache_dir,
-                    use_cache=use_cache,
-                    stop_bot=stop_bot,
-                    trigger_disconnect=trigger_disconnect,
-                )
+            session = EvalSession.from_scenario(
+                loaded, url, params=params.model_copy(update={"record_path": record_path})
+            )
             if verbose:
                 session.add_event_handler("on_progress", _print_progress)
                 if isinstance(loaded, EvalSimulationScenario):
@@ -358,14 +333,10 @@ async def _run_scenarios_all(
     *,
     audio: bool,
     record_dir: str,
-    cache_dir: str | None,
-    use_cache: bool,
-    default_timeout_ms: int,
+    params: EvalSessionParams,
     logs_dir: str,
     verbose: bool,
     debug: bool,
-    stop_bot: bool,
-    trigger_disconnect: bool,
     started: float,
 ) -> None:
     """Run scenarios sequentially against a fixed bot, with the suite's display.
@@ -380,13 +351,9 @@ async def _run_scenarios_all(
             run,
             audio=audio,
             record_dir=record_dir,
-            cache_dir=cache_dir,
-            use_cache=use_cache,
-            default_timeout_ms=default_timeout_ms,
+            params=params,
             logs_dir=logs_dir,
             debug=debug,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
             verbose=verbose,
         )
 
@@ -493,20 +460,23 @@ def run(
     runs = _build_scenario_runs(_expand_scenario_paths(scenarios), bot_url)
     _print_scenario_configs(runs)
 
+    params = EvalSessionParams(
+        default_timeout_ms=timeout * 1000,
+        cache_dir=cache_dir,
+        use_cache=not no_cache,
+        stop_bot=stop_bot,
+        trigger_disconnect=trigger_disconnect,
+    )
     started = time.monotonic()
     asyncio.run(
         _run_scenarios_all(
             runs,
             audio=audio,
             record_dir=record_dir,
-            cache_dir=cache_dir,
-            use_cache=not no_cache,
-            default_timeout_ms=timeout * 1000,
+            params=params,
             logs_dir=logs_dir,
             verbose=verbose,
             debug=debug,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
             started=started,
         )
     )
@@ -991,8 +961,7 @@ async def _run_suite_all(
     results_path: Path | None,
     started: float,
     debug: bool,
-    use_cache: bool,
-    default_timeout_ms: int,
+    params: EvalSessionParams,
 ) -> None:
     """Run the suite with a live dashboard (TTY) or streamed lines (piped)."""
     grouped = any(r.attempts > 1 for r in suite.runs)
@@ -1004,8 +973,7 @@ async def _run_suite_all(
                 record_dir=record_dir,
                 results_path=results_path,
                 debug=debug,
-                use_cache=use_cache,
-                default_timeout_ms=default_timeout_ms,
+                params=params,
             )
     else:
         suite.add_event_handler(
@@ -1016,8 +984,7 @@ async def _run_suite_all(
             record_dir=record_dir,
             results_path=results_path,
             debug=debug,
-            use_cache=use_cache,
-            default_timeout_ms=default_timeout_ms,
+            params=params,
         )
 
 
@@ -1127,8 +1094,7 @@ def suite(
             run_dir / "results.jsonl",
             started,
             debug,
-            not no_cache,
-            timeout * 1000,
+            EvalSessionParams(default_timeout_ms=timeout * 1000, use_cache=not no_cache),
         )
     )
     exit_code = _finalize_evals(

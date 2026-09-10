@@ -27,7 +27,6 @@ from collections.abc import Callable
 from loguru import logger
 
 from pipecat.evals.base_driver import BaseEvalDriver
-from pipecat.evals.base_session import BaseEvalSession
 from pipecat.evals.client import EvalClient, EvalClientParams
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
@@ -37,17 +36,12 @@ from pipecat.evals.scenario_config import describe_config
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
+from pipecat.evals.session import EvalSession, EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
-from pipecat.utils.deprecation import deprecated
-
-# Generous default so an expectation without an explicit ``within_ms`` waits
-# long enough for slow LLM/TTS responses (and function-call round-trips) rather
-# than failing on latency. Set ``within_ms`` explicitly to assert on timing.
-DEFAULT_EVENT_TIMEOUT_MS = 60000
 
 
-class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
+class EvalScriptSession(EvalSession[EvalScriptResult]):
     """Runs one :class:`~pipecat.evals.script.EvalScriptScenario` against a bot.
 
     Build one with :meth:`from_scenario`, which constructs the judge, the user
@@ -65,26 +59,21 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         scenario: EvalScriptScenario,
         bot_url: str,
         *,
-        params: EvalClientParams | None = None,
-        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
+        params: EvalSessionParams | None = None,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
         judge: EvalJudge | None = None,
+        user_tts: CachingTTSService | None = None,
+        bot_stt: STTService | None = None,
     ):
         """Initialize the eval session.
 
-        The services come pre-built: :meth:`from_scenario` constructs the
-        defaults, the judge here and the user TTS and bot STT in ``params``. Pass
-        your own to override them.
+        The services come pre-built, or ``None`` where the scenario has no use
+        for them; :meth:`from_scenario` constructs the ones a scenario needs.
 
         Args:
             scenario: The parsed scenario to run.
             bot_url: WebSocket URL of the bot's eval transport.
-            params: How the run talks to the bot (timeouts, recording, teardown)
-                and the services in its pipeline, an
-                :class:`~pipecat.evals.client.EvalClientParams`.
-            default_timeout_ms: Per-expectation latency budget for expectations
-                without their own ``within_ms`` (the turn's expectations share one
-                deadline anchored at the send). Defaults to 60s.
+            params: How the run behaves; ``None`` for the defaults.
             on_progress: Optional callback invoked with a :class:`EvalScriptTurnProgress`
                 as each turn and expectation resolves (used for verbose output).
 
@@ -94,24 +83,39 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
 
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
+            user_tts: The user-audio TTS, or ``None`` for text mode.
+            bot_stt: The bot-audio STT for the ``response`` transcription, or
+                ``None`` when the scenario has none.
         """
-        super().__init__(kind=EvalKind.SCRIPT, name=scenario.name, bot_url=bot_url)
+        super().__init__(kind=EvalKind.SCRIPT, name=scenario.name, bot_url=bot_url, params=params)
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
-        # The connection to the bot: the eval pipeline and the user's sends.
-        self._client = EvalClient.for_scenario(
-            scenario,
+        # The connection to the bot: the eval pipeline and the user's sends,
+        # asking the bot for what the scenario's assertions need.
+        self._client = EvalClient(
             bot_url,
-            params=params,
+            params=EvalClientParams(
+                bot_audio=scenario.bot_audio,
+                user_audio=scenario.user_audio,
+                user_speech=scenario.user_speech,
+                capture_bot_audio=scenario.wants_response(),
+                report_level=scenario.required_report_level(),
+                vad_events=scenario.needs_vad_events(),
+                context=list(scenario.context or []),
+                trigger_disconnect=scenario.trigger_disconnect,
+            ),
+            session_params=self._params,
             stream=self._stream,
             trace=self._trace,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
         )
         # What the user says next and how the outcome is scored: a scenario is
         # played by the eval driver.
         self._driver: BaseEvalDriver[EvalScriptResult] = EvalScriptDriver(
             scenario=scenario,
-            default_timeout_ms=default_timeout_ms,
+            default_timeout_ms=self._params.default_timeout_ms,
             client=self._client,
             stream=self._stream,
             judge=judge,
@@ -127,17 +131,18 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         scenario: EvalScriptScenario,
         bot_url: str,
         *,
-        connect_timeout_s: float = 5.0,
-        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
+        params: EvalSessionParams | None = None,
         on_progress: Callable[[EvalScriptTurnProgress], None] | None = None,
-        record_path: str | None = None,
-        cache_dir: str | None = None,
-        use_cache: bool = True,
-        stop_bot: bool = False,
-        trigger_disconnect: bool = False,
         judge: EvalJudge | None = None,
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
+        connect_timeout_s: float | None = None,
+        default_timeout_ms: int | None = None,
+        record_path: str | None = None,
+        cache_dir: str | None = None,
+        use_cache: bool | None = None,
+        stop_bot: bool | None = None,
+        trigger_disconnect: bool | None = None,
     ) -> "EvalScriptSession":
         """Build a ready-to-run session from a scenario, constructing the services it needs.
 
@@ -150,36 +155,68 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         Args:
             scenario: The parsed scenario to run.
             bot_url: WebSocket URL of the bot's eval transport.
-            connect_timeout_s: How long to wait for the bot to accept the WS
-                connection before giving up.
-            default_timeout_ms: Per-expectation latency budget for expectations
-                without their own ``within_ms``. Defaults to 60s.
+            params: How the run behaves; ``None`` for the defaults.
             on_progress: Optional per-turn/expectation progress callback (verbose).
 
                 .. deprecated:: 1.9.0
                     Use the ``on_progress`` event handler instead.
                     Will be removed in 2.0.0.
 
-            record_path: Optional path to record the conversation audio (audio mode).
-            cache_dir: Optional directory for cached synthesized user audio
-                (default ``<user-cache-dir>/pipecat/tts``).
-            use_cache: When False, ignore cached user audio and force fresh synthesis
-                (no cache reads or writes). Defaults to True.
-            stop_bot: When True, ask the bot to cancel its pipeline (and exit) on
-                teardown. Leave False to keep it running for more scenarios.
-            trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
-                handler when the connection ends (the scenario's own
-                ``trigger_disconnect`` field also opts in). Off by default.
             judge: Override the judge (default: built from ``scenario.judge`` when the
                 scenario has ``eval:`` assertions).
             user_tts: Override the user-audio TTS (default: built from
                 ``scenario.user_speech`` in audio mode).
             bot_stt: Override the bot-audio STT (default: built from
                 ``scenario.transcriber`` when the scenario asserts ``response``).
+            connect_timeout_s: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            default_timeout_ms: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            record_path: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            cache_dir: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            use_cache: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            stop_bot: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            trigger_disconnect: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
 
         Returns:
             A configured session, ready for :meth:`run`.
         """
+        params = _params_with_deprecated_knobs(
+            params,
+            "EvalScriptSession.from_scenario",
+            connect_timeout_s=connect_timeout_s,
+            default_timeout_ms=default_timeout_ms,
+            record_path=record_path,
+            cache_dir=cache_dir,
+            use_cache=use_cache,
+            stop_bot=stop_bot,
+            trigger_disconnect=trigger_disconnect,
+        )
         turns = scenario.turns
         if judge is None and any(exp.eval is not None for turn in turns for exp in turn.expect):
             with logger.contextualize(eval_pipeline="judge"):
@@ -188,28 +225,21 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
         if user_tts is None and scenario.user_speech is not None:
             with logger.contextualize(eval_pipeline="speech"):
                 user_tts = tts_service_from_config(
-                    scenario.user_speech, cache_dir=cache_dir, use_cache=use_cache
+                    scenario.user_speech, cache_dir=params.cache_dir, use_cache=params.use_cache
                 )
 
         if bot_stt is None and scenario.wants_response() and scenario.bot_audio:
             with logger.contextualize(eval_pipeline="transcription"):
                 bot_stt = stt_service_from_config(scenario.transcriber)
 
-        params = EvalClientParams(
-            connect_timeout_s=connect_timeout_s,
-            record_path=record_path,
-            stop_bot=stop_bot,
-            trigger_disconnect=trigger_disconnect,
-            user_tts=user_tts,
-            bot_stt=bot_stt,
-        )
         return cls(
             scenario,
             bot_url,
             params=params,
-            default_timeout_ms=default_timeout_ms,
             on_progress=on_progress,
             judge=judge,
+            user_tts=user_tts,
+            bot_stt=bot_stt,
         )
 
     def _describe(self) -> str:
@@ -235,15 +265,3 @@ class EvalScriptSession(BaseEvalSession[EvalScriptResult]):
             stacklevel=3,
         )
         self.add_event_handler("on_progress", lambda _session, record: on_progress(record))
-
-
-@deprecated(
-    "`EvalSession` is deprecated since 1.9.0 and will be removed in 2.0.0. "
-    "Use `EvalScriptSession` instead."
-)
-class EvalSession(EvalScriptSession):
-    """Deprecated alias for :class:`EvalScriptSession`.
-
-    .. deprecated:: 1.9.0
-        Use :class:`EvalScriptSession` instead. Will be removed in 2.0.0.
-    """

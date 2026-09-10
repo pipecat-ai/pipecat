@@ -11,7 +11,7 @@ models on its own GIL; in one shared process those loads would stall the
 event loop that paces every other run's audio.
 
 Invoked as ``python -m pipecat.evals._session_subprocess <config.json>``.
-The config carries the scenario path, the bot URL, and the run's options;
+The config carries the scenario path, the bot URL, and the run's params;
 the result is written back as JSON to the ``result_path`` it names.
 """
 
@@ -25,38 +25,15 @@ from loguru import logger
 
 from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
 from pipecat.evals.scenario import load_scenario_file
-from pipecat.evals.script_session import EvalScriptSession
-from pipecat.evals.simulation import EvalSimulationScenario
-from pipecat.evals.simulation_session import EvalSimulationSession
+from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import capture_pipeline_logs
 
 
 async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
     """Build and run the session for the scenario file in ``config``, whichever kind it is."""
     loaded = load_scenario_file(Path(config["scenario_path"]))
-    if isinstance(loaded, EvalSimulationScenario):
-        session = EvalSimulationSession.from_scenario(
-            loaded,
-            config["bot_url"],
-            connect_timeout_s=config["connect_timeout_s"],
-            record_path=config.get("record_path"),
-            cache_dir=config.get("cache_dir"),
-            use_cache=config["use_cache"],
-            stop_bot=config["stop_bot"],
-            trigger_disconnect=config.get("trigger_disconnect", False),
-        )
-        return await session.run()
-    session = EvalScriptSession.from_scenario(
-        loaded,
-        config["bot_url"],
-        connect_timeout_s=config["connect_timeout_s"],
-        default_timeout_ms=config["default_timeout_ms"],
-        record_path=config.get("record_path"),
-        cache_dir=config.get("cache_dir"),
-        use_cache=config["use_cache"],
-        stop_bot=config["stop_bot"],
-        trigger_disconnect=config.get("trigger_disconnect", False),
-    )
+    params = EvalSessionParams.model_validate(config["params"])
+    session = EvalSession.from_scenario(loaded, config["bot_url"], params=params)
     return await session.run()
 
 

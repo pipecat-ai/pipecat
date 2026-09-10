@@ -84,7 +84,7 @@ from pipecat.evals.results import (
     EvalSimulationTurnVerdict,
 )
 from pipecat.evals.scenario import EvalKind, load_scenario_file
-from pipecat.evals.script_session import DEFAULT_EVENT_TIMEOUT_MS
+from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 
@@ -723,8 +723,9 @@ class EvalSuite(BaseObject):
         results_path: Path | None = None,
         on_update: Callable[[EvalRun], None] | None = None,
         debug: bool = False,
-        use_cache: bool = True,
-        default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS,
+        params: EvalSessionParams | None = None,
+        use_cache: bool | None = None,
+        default_timeout_ms: int | None = None,
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
@@ -745,10 +746,23 @@ class EvalSuite(BaseObject):
                     Will be removed in 2.0.0.
 
             debug: When True, save each run's combined ``<run>.debug.log``.
-            use_cache: When False, ignore cached user audio and force fresh synthesis.
-            default_timeout_ms: Per-expectation budget for expectations without
-                their own ``within_ms``. Defaults to 60s.
+            params: How each run behaves; ``None`` for the defaults. The suite
+                sets what it owns on each run's copy: the connect timeout, the
+                recording, the manifest's cache directory, and stopping the bot
+                it spawned.
+            use_cache: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
+
+            default_timeout_ms: The ``params`` field of the same name.
+
+                .. deprecated:: 1.9.0
+                    Use ``params`` instead. Will be removed in 2.0.0.
         """
+        params = _params_with_deprecated_knobs(
+            params, "EvalSuite.run", use_cache=use_cache, default_timeout_ms=default_timeout_ms
+        )
         logger.remove()  # keep stdout clean for the caller's display
         logs_dir.mkdir(parents=True, exist_ok=True)
         if record_dir:
@@ -769,8 +783,7 @@ class EvalSuite(BaseObject):
                         results_path,
                         sem,
                         debug,
-                        use_cache,
-                        default_timeout_ms,
+                        params,
                     )
                     for i, run in enumerate(self.runs)
                 )
@@ -788,8 +801,7 @@ class EvalSuite(BaseObject):
         results_path: Path | None,
         sem: asyncio.Semaphore,
         debug: bool,
-        use_cache: bool,
-        default_timeout_ms: int,
+        params: EvalSessionParams,
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
         async with sem:
@@ -804,14 +816,7 @@ class EvalSuite(BaseObject):
                 if run.error is not None:
                     return
                 bot = await self._spawn_bot(run, port, files)
-                worker = await self._run_harness(
-                    run,
-                    port,
-                    files,
-                    debug=debug,
-                    use_cache=use_cache,
-                    default_timeout_ms=default_timeout_ms,
-                )
+                worker = await self._run_harness(run, port, files, debug=debug, params=params)
             except Exception as e:
                 # The worker reports its own failures in its result; this is a
                 # problem on the suite's side (spawning, reading the result back).
@@ -856,26 +861,28 @@ class EvalSuite(BaseObject):
         files: "_RunFiles",
         *,
         debug: bool,
-        use_cache: bool,
-        default_timeout_ms: int,
+        params: EvalSessionParams,
     ) -> asyncio.subprocess.Process:
         """Run the harness worker for this run and read its result back onto ``run``.
 
         The worker gets its config as a file and writes its result as one; a
         worker that times out or exits without a result leaves ``run.error``.
         """
+        run_params = params.model_copy(
+            update={
+                "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
+                "record_path": str(files.record) if files.record else None,
+                "cache_dir": self.manifest.cache_dir,
+                # The suite spawned this bot, so it is cancelled on teardown, which is
+                # faster than the kill fallback.
+                "stop_bot": True,
+            }
+        )
         config = {
             "scenario_path": str(run.scenario_path),
             "scenario_name": run.scenario,
             "bot_url": f"ws://localhost:{port}",
-            "connect_timeout_s": BOT_CONNECT_TIMEOUT_S,
-            "default_timeout_ms": default_timeout_ms,
-            "record_path": str(files.record) if files.record else None,
-            "cache_dir": self.manifest.cache_dir,
-            "use_cache": use_cache,
-            # The suite spawned this bot, so it is cancelled on teardown, which is
-            # faster than the kill fallback.
-            "stop_bot": True,
+            "params": run_params.model_dump(),
             "debug": debug,
             "logs_dir": str(files.log.parent),
             "prefix": files.prefix,

@@ -9,7 +9,7 @@
 import unittest
 import warnings
 
-from pipecat.evals import client, results, script, script_driver, script_session
+from pipecat.evals import client, results, script, script_driver, session
 
 
 class TestHarnessShim(unittest.TestCase):
@@ -19,8 +19,8 @@ class TestHarnessShim(unittest.TestCase):
             from pipecat.evals import harness
 
         expected = {
-            "EvalSession": script_session.EvalSession,
-            "DEFAULT_EVENT_TIMEOUT_MS": script_session.DEFAULT_EVENT_TIMEOUT_MS,
+            "EvalSession": session.EvalSession,
+            "DEFAULT_EVENT_TIMEOUT_MS": session.DEFAULT_EVENT_TIMEOUT_MS,
             "BOT_READY_TIMEOUT_S": client.BOT_READY_TIMEOUT_S,
             "SEND_AFTER_MAX_WAIT_S": script_driver.SEND_AFTER_MAX_WAIT_S,
             "SEND_AFTER_POLL_S": script_driver.SEND_AFTER_POLL_S,
