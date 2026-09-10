@@ -16,7 +16,10 @@ nodes:
       conversation.
     task_messages:
       - role: developer
-        content: Greet the customer briefly and ask how old they are.
+        content: >-
+          Greet the customer, say you can put together a quick insurance quote
+          with a couple of details, and ask how old they are. Keep it to two
+          short sentences.
     functions:
       - name: collect_age
         transition_to: marital_status

@@ -13,7 +13,8 @@ judge: !include ../judge_text.yaml
 persona: |
   Morgan, shopping for insurance. Direct and organized: 30 years old, married.
   Once quoted, asks for the coverage raised to 500,000 dollars with a 2,000
-  dollar deductible, and is done after hearing the updated premium.
+  dollar deductible, and after hearing the updated premium says that's all
+  they need.
 
 goal: "Get an insurance quote, then an updated quote for 500,000 dollars of coverage with a 2,000 dollar deductible."
 
