@@ -72,7 +72,8 @@ U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 # parameter and only takes effect on a new connection.
 HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 
-# Longest declared-language list AssemblyAI accepts.
+# Longest declared-language list the streaming API accepts. The Sync API sets no
+# such limit, so it prepares its codes without a cap.
 MAX_LANGUAGE_CODES = 10
 
 
@@ -153,7 +154,9 @@ def language_to_assemblyai_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
+def _prepare_language_codes(
+    language_codes: list[Language], *, max_codes: int | None = MAX_LANGUAGE_CODES
+) -> list[str]:
     """Resolve declared languages to the AssemblyAI codes sent on the wire.
 
     Duplicates are collapsed — regional variants of one language share a base
@@ -161,19 +164,21 @@ def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
 
     Args:
         language_codes: Declared languages.
+        max_codes: Most distinct codes the endpoint accepts, or None for an
+            endpoint that sets no limit.
 
     Returns:
         AssemblyAI language codes, deduplicated in declaration order.
 
     Raises:
-        ValueError: If more than ``MAX_LANGUAGE_CODES`` distinct languages remain
-            after resolution.
+        ValueError: If more than ``max_codes`` distinct languages remain after
+            resolution.
     """
     prepared = [language_to_assemblyai_language(lang) for lang in language_codes]
     deduped = list(dict.fromkeys(prepared))
-    if len(deduped) > MAX_LANGUAGE_CODES:
+    if max_codes is not None and len(deduped) > max_codes:
         raise ValueError(
-            f"language_codes accepts at most {MAX_LANGUAGE_CODES} languages, got {len(deduped)}."
+            f"language_codes accepts at most {max_codes} languages, got {len(deduped)}."
         )
     return deduped
 
@@ -1277,9 +1282,9 @@ class AssemblyAISyncSTTSettings(STTSettings):
     """Settings for :class:`AssemblyAISyncSTTService`.
 
     Parameters:
-        prompt: Custom transcription instruction prepended to the model's system
-            prompt. When set, ``language`` is ignored — state the language in the
-            prompt instead.
+        prompt: A natural-language description of what the audio is about: the
+            domain, the scenario, or details of the conversation. Prepended to the
+            model's system prompt to guide transcription.
         keyterms_prompt: Key terms or phrases to bias the decoder toward.
         conversation_context: Prior turns from the same conversation, oldest
             first, giving the model the surrounding dialogue for better continuity
@@ -1287,6 +1292,16 @@ class AssemblyAISyncSTTSettings(STTSettings):
             string is treated as one turn. Setting this explicitly turns off the
             service's automatic context buffer and sends exactly this value; leave
             it unset to let the service manage context (see ``max_context_turns``).
+        language_codes: Declared audio languages for multilingual or
+            code-switching audio (e.g. ``[Language.EN, Language.ES]``). A
+            single-element list pins one language. Regional variants resolve to
+            their base code and duplicates are dropped, preserving declaration
+            order. Bound in preference to the single ``language`` setting when
+            both are set. Defaults to unset (the single ``language`` is used).
+        timestamps: Whether to compute per-word ``start``/``end`` timestamps,
+            returned on the ``words`` of the transcription result, at a small
+            added latency. Left unset by default, so the API default of ``False``
+            (no timestamps) applies.
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1294,6 +1309,8 @@ class AssemblyAISyncSTTSettings(STTSettings):
     conversation_context: str | list[str] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISyncSTTService(SegmentedSTTService):
@@ -1381,6 +1398,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             prompt=None,
             keyterms_prompt=None,
             conversation_context=None,
+            language_codes=None,
+            timestamps=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -1437,10 +1456,14 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         """Assemble the optional ``config`` part from the current settings."""
         config: dict[str, Any] = {}
 
+        # ``language_codes`` (multilingual / code-switching) wins over the single
+        # ``language`` when both are set; either way the wire field is a list.
+        language_codes = self._settings.language_codes
         language = self._settings.language
-        if is_given(language) and language is not None:
-            # ``language_codes`` accepts a string or a list; a single
-            # language goes as a one-element list.
+        if is_given(language_codes) and language_codes:
+            # The Sync API caps no declared-language list, so none is imposed here.
+            config["language_codes"] = _prepare_language_codes(language_codes, max_codes=None)
+        elif is_given(language) and language is not None:
             config["language_codes"] = [language]
 
         prompt = self._settings.prompt
@@ -1450,6 +1473,10 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         keyterms_prompt = self._settings.keyterms_prompt
         if is_given(keyterms_prompt) and keyterms_prompt:
             config["keyterms_prompt"] = list(keyterms_prompt)
+
+        timestamps = self._settings.timestamps
+        if is_given(timestamps) and timestamps is not None:
+            config["timestamps"] = timestamps
 
         if self._context_is_manual():
             config["conversation_context"] = self._settings.conversation_context
