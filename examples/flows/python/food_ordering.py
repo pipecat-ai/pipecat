@@ -188,11 +188,11 @@ def create_initial_node() -> NodeConfig:
     """Create the initial node for food type selection."""
     return NodeConfig(
         name="initial",
-        role_message="You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversation and your responses will be converted to audio. Keep the conversation friendly, casual, and polite. Avoid outputting special characters and emojis.",
+        role_message="You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversation and your responses will be converted to audio. Keep the conversation friendly, casual, and polite. Keep every reply to one or two short sentences, the way a person on the phone talks, and don't repeat the order unless the caller asks. Only give a delivery time that came from get_delivery_estimate. Avoid outputting special characters and emojis.",
         task_messages=[
             {
                 "role": "developer",
-                "content": "For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start off by greeting them. Be friendly and casual; you're taking an order for food over the phone.",
+                "content": "Greet the caller briefly and ask whether they'd like pizza or sushi, then wait for them to use a function to choose. Be friendly and casual; you're taking an order for food over the phone.",
             }
         ],
         pre_actions=[
@@ -212,15 +212,12 @@ def create_pizza_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": """You are handling a pizza order. Use the available functions:
-- Use select_pizza_order when the user specifies both size AND type
+                "content": """Your only job on this step is to get the pizza's size and type and call select_pizza_order with them. If the caller has already given both, call it immediately; if one is missing, ask for it in one short sentence. Don't quote a price or say the order is in: the function works out the price and the next step reads the order back. Pizza is the only thing on this menu; don't offer drinks or sides.
 
-Pricing:
+Pricing, for questions only:
 - Small: $10
 - Medium: $15
-- Large: $20
-
-Remember to be friendly and casual.""",
+- Large: $20""",
             }
         ],
         functions=[select_pizza_order],
@@ -234,13 +231,10 @@ def create_sushi_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": """You are handling a sushi order. Use the available functions:
-- Use select_sushi_order when the user specifies both count AND type
+                "content": """Your only job on this step is to get the roll count and type and call select_sushi_order with them. If the caller has already given both, call it immediately; if one is missing, ask for it in one short sentence. Don't quote a price or say the order is in: the function works out the price and the next step reads the order back. Sushi is the only thing on this menu; don't offer drinks or sides.
 
-Pricing:
-- $8 per roll
-
-Remember to be friendly and casual.""",
+Pricing, for questions only:
+- $8 per roll""",
             }
         ],
         functions=[select_sushi_order],
@@ -254,11 +248,9 @@ def create_confirmation_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": """Read back the complete order details to the user and ask if they want anything else or if they want to make changes. Use the available functions:
-- Use complete_order when the user confirms that the order is correct and no changes are needed
-- Use revise_order if they want to change something
-
-Be friendly and clear when reading back the order details.""",
+                "content": """Say the order back once with the total and ask if that's right, for example "So that's one large pepperoni, twenty dollars. Sound good?" Nothing is ordered until the caller confirms, so don't say the order is placed or on its way before then. If they ask a question first, answer it in a sentence without repeating the order. Use the available functions:
+- Use complete_order when the user confirms the order is correct
+- Use revise_order if they want to change something""",
             }
         ],
         functions=[complete_order, revise_order],
@@ -272,7 +264,7 @@ def create_end_node() -> NodeConfig:
         task_messages=[
             {
                 "role": "developer",
-                "content": "Thank the user for their order and end the conversation politely and concisely.",
+                "content": "Thank the caller for the order and say goodbye, in one or two sentences.",
             }
         ],
         post_actions=[{"type": "end_conversation"}],
