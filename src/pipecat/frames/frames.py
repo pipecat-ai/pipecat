@@ -487,7 +487,6 @@ class InterimTranscriptionFrame(TextFrame):
         result: Raw result from the STT service.
     """
 
-    text: str
     user_id: str
     timestamp: str
     language: Language | None = None
