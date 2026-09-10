@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMSetToolsFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -357,6 +358,45 @@ async def test_tools_change_sends_sparse_update_in_responses_mode():
     await service._handle_context(context)
     (update,) = recorder.of_type("session.update")
     assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}
+
+
+@pytest.mark.asyncio
+async def test_set_tools_frame_updates_the_session_without_a_context_frame():
+    """A continuous session gets no context frame per turn, so the frame is what prompts the update."""
+    service = await _make_service_with_tasks(delegation=_responses_delegation())
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    service.push_frame = _FrameRecorder()
+
+    context = LLMContext([{"role": "user", "content": "hi"}], tools=[_weather_tool()])
+    await service._handle_context(context)
+    service._session_started = True
+
+    # The user aggregator sets the new tools on the shared context and forwards
+    # the frame; the service turns that into a session update.
+    new_tools = ToolsSchema(standard_tools=[])
+    context.set_tools(new_tools)
+    await service.process_frame(LLMSetToolsFrame(tools=new_tools), FrameDirection.DOWNSTREAM)
+
+    (update,) = recorder.of_type("session.update")
+    assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_disconnect_still_allows_the_next_session_to_send():
+    """`_disconnecting` gates every send, so it is cleared even when teardown fails."""
+    service = await _make_service_with_tasks()
+    service.push_error = AsyncMock()
+
+    class _FailingWebSocket:
+        async def close(self):
+            raise RuntimeError("close failed")
+
+    service._websocket = _FailingWebSocket()
+    await service._disconnect()
+
+    service.push_error.assert_awaited_once()
+    assert service._disconnecting is False
 
 
 # ---------------------------------------------------------------------------

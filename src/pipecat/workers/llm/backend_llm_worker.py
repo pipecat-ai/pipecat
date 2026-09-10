@@ -92,7 +92,7 @@ class BackendOutput:
             text=str(payload.get("text") or ""),
             is_thought=bool(payload.get("is_thought")),
             is_final=bool(payload.get("is_final")),
-            prefers_spoken=bool(payload.get("prefers_spoken")),
+            prefers_spoken=bool(payload.get("prefers_spoken", True)),
         )
 
 
@@ -330,14 +330,15 @@ class BackendLLMWorker(LLMContextWorker):
             and not self.llm.has_queued_frame(LLMContextFrame)
         )
         text = (message.content or "").strip()
+        sent = None
         if text:
             # Default behavior: only the final answer asks to be spoken.
             # This behavior can be adjusted by a transform_output callback.
-            await self._emit(
+            sent = await self._emit(
                 run, BackendOutput(text=text, is_final=finished, prefers_spoken=finished)
             )
         if finished:
-            run.final_text = text
+            run.final_text = sent.text if sent else ""
             run.finished.set()
 
     async def _on_assistant_thought(self, message: AssistantThoughtMessage):
@@ -346,12 +347,17 @@ class BackendLLMWorker(LLMContextWorker):
         if run is not None and text:
             await self._emit(run, BackendOutput(text=text, is_thought=True, prefers_spoken=False))
 
-    async def _emit(self, run: "_BackendRun", output: BackendOutput):
-        """Send one output as a job update, after any configured transform."""
+    async def _emit(self, run: "_BackendRun", output: BackendOutput) -> BackendOutput:
+        """Send one output as a job update, after any configured transform.
+
+        Returns:
+            The output as it was sent, so a caller sees the transformed text.
+        """
         if self._transform_output is not None:
             output = await self._transform_output(output)
         if output.text:
             await self.send_job_update(run.job_id, output.to_payload())
+        return output
 
 
 async def _delegate_to_backend(

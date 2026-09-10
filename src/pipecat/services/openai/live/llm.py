@@ -613,6 +613,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             )
 
     async def _disconnect(self):
+        # `_disconnecting` gates every outgoing event, so it is cleared in a
+        # finally: a teardown that fails part-way still leaves the service able
+        # to speak on its next session.
         try:
             self._disconnecting = True
             self._session_started = False
@@ -631,9 +634,10 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             self._sent_tools_snapshot = None
             self._open_function_calls.clear()
             self._pending_responses.clear()
-            self._disconnecting = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
+        finally:
+            self._disconnecting = False
 
     async def _close_session(self):
         """Ask the server to shut down gracefully and wait for ``session.closed``."""

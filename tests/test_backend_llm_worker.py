@@ -386,6 +386,26 @@ async def test_transform_output_can_rewrite_text_and_speakability():
     ]
 
 
+@pytest.mark.asyncio
+async def test_the_response_carries_the_transformed_answer():
+    """The final update and the return value are the same answer, transform included."""
+    llm = _ScriptedLLM([[("text", "raw answer")]])
+
+    async def transform_output(output: BackendOutput) -> BackendOutput:
+        return replace(output, text=output.text.upper())
+
+    text, updates, _ = await _run_backend(llm, transform_output=transform_output)
+
+    assert [u.text for u in updates] == ["RAW ANSWER"]
+    assert text == "RAW ANSWER"
+
+
+def test_a_payload_without_the_speech_flag_keeps_the_default():
+    """A sender that predates the flag should not silence the backend."""
+    rebuilt = BackendOutput.from_payload({"text": "hello"})
+    assert rebuilt.prefers_spoken is BackendOutput(text="hello").prefers_spoken is True
+
+
 def test_render_transcript_request_flattens_what_a_transcript_can_hold():
     """A frontend can pass its context slice as-is; only spoken text survives."""
     rendered = _render_transcript_request(
