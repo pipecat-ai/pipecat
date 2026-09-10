@@ -88,12 +88,15 @@ class BackendOutput:
         Returns:
             The output.
         """
-        return cls(
-            text=str(payload.get("text") or ""),
-            is_thought=bool(payload.get("is_thought")),
-            is_final=bool(payload.get("is_final")),
-            prefers_spoken=bool(payload.get("prefers_spoken", True)),
-        )
+        # A flag the payload omits is left to the field's default, so the
+        # defaults live in one place; one it carries is coerced, since a
+        # payload can arrive from another process.
+        flags = {
+            name: bool(payload[name])
+            for name in ("is_thought", "is_final", "prefers_spoken")
+            if name in payload
+        }
+        return cls(text=str(payload.get("text") or ""), **flags)
 
 
 #: Called with each piece of output a backend produces, as it is produced.

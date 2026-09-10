@@ -400,10 +400,17 @@ async def test_the_response_carries_the_transformed_answer():
     assert text == "RAW ANSWER"
 
 
-def test_a_payload_without_the_speech_flag_keeps_the_default():
-    """A sender that predates the flag should not silence the backend."""
-    rebuilt = BackendOutput.from_payload({"text": "hello"})
-    assert rebuilt.prefers_spoken is BackendOutput(text="hello").prefers_spoken is True
+def test_a_payload_leaves_the_flags_it_omits_at_their_defaults():
+    """A sender that predates a flag should not decide its value."""
+    assert BackendOutput.from_payload({"text": "hello"}) == BackendOutput(text="hello")
+
+
+def test_a_payload_coerces_the_flags_it_carries():
+    """Flags cross a bus, so what arrives may not be a bool."""
+    rebuilt = BackendOutput.from_payload(
+        {"text": "hello", "is_thought": 1, "is_final": "", "prefers_spoken": 0}
+    )
+    assert (rebuilt.is_thought, rebuilt.is_final, rebuilt.prefers_spoken) == (True, False, False)
 
 
 def test_render_transcript_request_flattens_what_a_transcript_can_hold():
