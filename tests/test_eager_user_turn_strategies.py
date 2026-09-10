@@ -307,10 +307,6 @@ class TestSpeculativeToolCalls(unittest.IsolatedAsyncioTestCase):
         assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in [*down, *up])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
     async def test_new_turn_withdraws_a_speculation_left_in_flight(self):
         # A turn boundary the service didn't resolve — a fresh turn starting
@@ -638,3 +634,7 @@ class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
 
         assert llm.calls == ["call-1"]
         assert self.withdrawals(down, up) == []
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -390,10 +390,6 @@ async def test_connection_wait_returns_once_confirmed():
     await service._await_connection_established()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def test_flux_recommends_external_strategies_by_default():
     service = DeepgramFluxSTTService(api_key="test-key")
     strategies = service.service_metadata_frame().user_turn_strategies
@@ -421,3 +417,7 @@ def test_flux_keeps_a_configured_eager_threshold():
     )
 
     assert service._settings.eager_eot_threshold == 0.8
+
+
+if __name__ == "__main__":
+    unittest.main()
