@@ -90,11 +90,21 @@ def case_key(value: Any) -> str:
 
 
 class FlowConfig(BaseModel):
-    """A conversation flow described as data.
+    r"""A conversation flow described as data.
 
     Load one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`
     for YAML text, :meth:`from_json` for JSON text, or Pydantic's
     ``model_validate`` for a dict that is already parsed.
+
+    Prompt text may refer to the manager's state with ``{{ key }}``
+    placeholders: a node's ``role_message``, the ``content`` of its
+    ``task_messages``, and the ``text`` of a ``tts_say`` action.
+    :class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``
+    each time it enters the node, so a value stored by a handler earlier in the
+    conversation can appear in a later prompt. ``{{ order.size }}`` walks into
+    a stored mapping, and values are rendered with ``str()``. A key that is not
+    in state raises :class:`~pipecat.flows.FlowError` when the node is entered.
+    To show the LLM a literal ``{{ key }}``, escape it as ``\{{ key }}``.
 
     Parameters:
         initial_node: Name of the node the flow starts in.
@@ -109,8 +119,8 @@ class FlowConfig(BaseModel):
 
         Parameters:
             role: Message role, e.g. ``developer`` or ``system``.
-            content: Message text. May contain ``{{ variable }}`` placeholders
-                substituted when a :class:`~pipecat.flows.Flow` is constructed.
+            content: Message text. May contain ``{{ key }}`` placeholders;
+                see :class:`FlowConfig`.
         """
 
         model_config = ConfigDict(extra="forbid")
@@ -228,7 +238,8 @@ class FlowConfig(BaseModel):
         may name a handler too, which then runs immediately when the node's
         actions execute; a custom type without one must be registered in code
         with ``FlowManager.register_action``. Any additional keys pass through
-        to the handler.
+        to the handler. The ``text`` of a ``tts_say`` action may contain
+        ``{{ key }}`` placeholders; see :class:`FlowConfig`.
 
         Parameters:
             type: Action type identifier.
@@ -267,7 +278,8 @@ class FlowConfig(BaseModel):
             task_messages: What the LLM should do at this node.
             role_message: The bot's role or personality, sent as the LLM's
                 system instruction on entering this node. It persists across
-                transitions until another node sets its own.
+                transitions until another node sets its own. May contain
+                ``{{ key }}`` placeholders; see :class:`FlowConfig`.
             functions: Tools offered at this node, in addition to the
                 config's ``global_functions``.
             pre_actions: Actions run before the LLM responds at this node.

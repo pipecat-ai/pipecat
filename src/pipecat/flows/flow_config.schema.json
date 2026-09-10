@@ -3,7 +3,7 @@
   "$defs": {
     "Action": {
       "additionalProperties": true,
-      "description": "A pre- or post-action on a node.\n\nThe built-in ``tts_say`` and ``end_conversation`` types take no\nhandler. The built-in ``function`` type requires one: the handler runs\ninline in the pipeline, queued behind the bot's turn. A custom type\nmay name a handler too, which then runs immediately when the node's\nactions execute; a custom type without one must be registered in code\nwith ``FlowManager.register_action``. Any additional keys pass through\nto the handler.\n\nParameters:\n    type: Action type identifier.\n    handler: Name of the handler in the handlers a\n        :class:`~pipecat.flows.Flow` is constructed with. Required\n        for ``function``, optional for custom types, not allowed on\n        ``tts_say`` or ``end_conversation``.",
+      "description": "A pre- or post-action on a node.\n\nThe built-in ``tts_say`` and ``end_conversation`` types take no\nhandler. The built-in ``function`` type requires one: the handler runs\ninline in the pipeline, queued behind the bot's turn. A custom type\nmay name a handler too, which then runs immediately when the node's\nactions execute; a custom type without one must be registered in code\nwith ``FlowManager.register_action``. Any additional keys pass through\nto the handler. The ``text`` of a ``tts_say`` action may contain\n``{{ key }}`` placeholders; see :class:`FlowConfig`.\n\nParameters:\n    type: Action type identifier.\n    handler: Name of the handler in the handlers a\n        :class:`~pipecat.flows.Flow` is constructed with. Required\n        for ``function``, optional for custom types, not allowed on\n        ``tts_say`` or ``end_conversation``.",
       "properties": {
         "type": {
           "title": "Type",
@@ -141,7 +141,7 @@
     },
     "Message": {
       "additionalProperties": false,
-      "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ variable }}`` placeholders\n        substituted when a :class:`~pipecat.flows.Flow` is constructed.",
+      "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ key }}`` placeholders;\n        see :class:`FlowConfig`.",
       "properties": {
         "role": {
           "title": "Role",
@@ -161,7 +161,7 @@
     },
     "Node": {
       "additionalProperties": false,
-      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
+      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
       "properties": {
         "task_messages": {
           "items": {
@@ -233,7 +233,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.",
+  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\nPrompt text may refer to the manager's state with ``{{ key }}``\nplaceholders: a node's ``role_message``, the ``content`` of its\n``task_messages``, and the ``text`` of a ``tts_say`` action.\n:class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``\neach time it enters the node, so a value stored by a handler earlier in the\nconversation can appear in a later prompt. ``{{ order.size }}`` walks into\na stored mapping, and values are rendered with ``str()``. A key that is not\nin state raises :class:`~pipecat.flows.FlowError` when the node is entered.\nTo show the LLM a literal ``{{ key }}``, escape it as ``\\{{ key }}``.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.",
   "properties": {
     "initial_node": {
       "title": "Initial Node",

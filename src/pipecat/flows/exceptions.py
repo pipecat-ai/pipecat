@@ -66,12 +66,12 @@ class ActionError(FlowError):
 
 @dataclass
 class FlowProblem:
-    """One reference a flow config makes that its handlers or variables do not satisfy.
+    """One reference a flow config makes that its handlers do not satisfy.
 
     Parameters:
         code: Stable identifier for the kind of problem: ``missing_tool``,
-            ``ambiguous_tool``, ``invalid_tool``, ``missing_handler``,
-            ``ambiguous_handler``, or ``missing_variable``.
+            ``ambiguous_tool``, ``invalid_tool``, ``missing_handler``, or
+            ``ambiguous_handler``.
         message: Human-readable description naming the node, function, or
             variable involved.
         node: The node the problem is about, when there is one.

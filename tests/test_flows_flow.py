@@ -194,11 +194,8 @@ def single_node(function: dict, **node_extras) -> FlowConfig:
     )
 
 
-VARIABLES = {"restaurant": "Luigi's", "caller": "friend"}
-
-
-def make_flow(cfg: FlowConfig, handlers=TOOLS, variables=VARIABLES) -> Flow:
-    return Flow(cfg, handlers=handlers, variables=variables)
+def make_flow(cfg: FlowConfig, handlers=TOOLS) -> Flow:
+    return Flow(cfg, handlers=handlers)
 
 
 class TestConstruction(unittest.TestCase):
@@ -297,7 +294,7 @@ class TestConstruction(unittest.TestCase):
         flow = make_flow(cfg, handlers={})
         schema = flow.node("a")["functions"][0]
         self.assertEqual(schema.name, "start_over")
-        self.assertEqual(schema.description, "Start over at Luigi's.")
+        self.assertEqual(schema.description, "Start over at {{ restaurant }}.")
         self.assertEqual(schema.properties, {})
         self.assertEqual(schema.required, [])
 
@@ -342,31 +339,19 @@ class TestConstruction(unittest.TestCase):
         cfg = single_node(
             {"name": "no_such_tool"},
             pre_actions=[{"type": "function", "handler": "no_such_handler"}],
-            role_message="Hi {{ nobody }}",
         )
         with self.assertRaises(FlowReferenceError) as cm:
-            make_flow(cfg, variables={})
+            make_flow(cfg)
         codes = [p.code for p in cm.exception.problems]
-        self.assertEqual(codes, ["missing_variable", "missing_tool", "missing_handler"])
-        self.assertEqual(cm.exception.problems[1].node, "a")
-        self.assertEqual(cm.exception.problems[1].function, "no_such_tool")
-        self.assertIn("3 problems", str(cm.exception))
+        self.assertEqual(codes, ["missing_tool", "missing_handler"])
+        self.assertEqual(cm.exception.problems[0].node, "a")
+        self.assertEqual(cm.exception.problems[0].function, "no_such_tool")
+        self.assertIn("2 problems", str(cm.exception))
         self.assertIn("no_such_handler", str(cm.exception))
 
-    def test_missing_variable(self):
-        with self.assertRaises(FlowError) as cm:
-            make_flow(config(), variables={"restaurant": "Luigi's"})
-        self.assertIn("node 'initial' task_messages uses variable 'caller'", str(cm.exception))
-
-    def test_variables_render_everywhere(self):
-        flow = make_flow(config(), variables={"restaurant": "Luigi's", "caller": 7})
-        initial, pizza = flow.node("initial"), flow.node("pizza")
-        self.assertEqual(initial["role_message"], "You work for Luigi's.")
-        self.assertEqual(initial["task_messages"][0]["content"], "Greet the 7.")
-        self.assertEqual(pizza["post_actions"][0]["text"], "Thanks, 7!")
-
-    def test_unused_variables_are_fine(self):
-        make_flow(config(), variables={**VARIABLES, "extra": "unused"})
+    def test_placeholders_are_left_for_the_manager(self):
+        initial = make_flow(config()).node("initial")
+        self.assertEqual(initial["role_message"], "You work for {{ restaurant }}.")
 
     def test_annotation_warning(self):
         records = []
@@ -463,7 +448,7 @@ class TestConstruction(unittest.TestCase):
             make_flow(cfg)
         self.assertIn("post_actions references action handler 'nope'", str(cm.exception))
         post = self.flow.node("pizza")["post_actions"]
-        self.assertEqual(post, [{"type": "tts_say", "text": "Thanks, friend!"}])
+        self.assertEqual(post, [{"type": "tts_say", "text": "Thanks, {{ caller }}!"}])
 
     def test_global_functions(self):
         globals_ = self.flow.global_functions
@@ -620,12 +605,15 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         kitchen_checks.clear()
 
     def make_manager(self, flow: Flow) -> FlowManager:
-        return FlowManager(
+        manager = FlowManager(
             worker=self.mock_worker,
             llm=self.llm,
             context_aggregator=self.context_aggregator,
             global_functions=flow.global_functions,
         )
+        # What the config's prompts refer to as {{ restaurant }} and {{ caller }}.
+        manager.state.update({"restaurant": "Luigi's", "caller": "friend"})
+        return manager
 
     async def invoke(self, name: str, arguments: dict | None = None):
         """Call an advertised tool the way the LLM service would, then let the
@@ -698,6 +686,64 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         result = await self.invoke("start_over")
         self.assertEqual(result, {"status": "acknowledged"})
         self.assertEqual(flow_manager.current_node, "initial")
+
+    def queued_messages(self) -> list[dict]:
+        """Every message the manager has sent to the LLM context so far."""
+        messages = []
+        for call in self.mock_worker.queue_frames.call_args_list:
+            for frame in call.args[0]:
+                messages.extend(getattr(frame, "messages", None) or [])
+        return messages
+
+    async def test_prompts_render_from_state_on_entry(self):
+        flow = make_flow(config())
+        flow_manager = self.make_manager(flow)
+        flow_manager.state["caller"] = "Ada"
+        await flow_manager.initialize(flow.initial_node)
+
+        contents = [m["content"] for m in self.queued_messages()]
+        self.assertIn("Greet the Ada.", contents)
+        # The flow's own node is untouched; rendering happens on a copy.
+        self.assertEqual(
+            flow.initial_node["task_messages"][0]["content"], "Greet the {{ caller }}."
+        )
+
+    async def test_render_node_walks_into_mappings(self):
+        flow_manager = self.make_manager(make_flow(config()))
+        flow_manager.state["order"] = {"size": "large", "type": "cheese"}
+        node = {
+            "role_message": "You work for {{ restaurant }}.",
+            "task_messages": [
+                {"role": "developer", "content": "Confirm the {{ order.size }} pizza."}
+            ],
+            "post_actions": [
+                {"type": "tts_say", "text": "One {{order.type}} pizza."},
+                {"type": "function", "handler": check_kitchen_status},
+            ],
+        }
+        rendered = flow_manager._render_node("n", node)
+        self.assertEqual(rendered["role_message"], "You work for Luigi's.")
+        self.assertEqual(rendered["task_messages"][0]["content"], "Confirm the large pizza.")
+        self.assertEqual(rendered["post_actions"][0]["text"], "One cheese pizza.")
+        self.assertIs(rendered["post_actions"][1]["handler"], check_kitchen_status)
+
+    async def test_backslash_escapes_a_placeholder(self):
+        flow_manager = self.make_manager(make_flow(config()))
+        node = {
+            "task_messages": [
+                {"role": "developer", "content": "Write \\{{ caller }} for {{ caller }}."}
+            ]
+        }
+        rendered = flow_manager._render_node("n", node)
+        self.assertEqual(rendered["task_messages"][0]["content"], "Write {{ caller }} for friend.")
+
+    async def test_missing_state_key_fails_on_entry(self):
+        flow = make_flow(config())
+        flow_manager = self.make_manager(flow)
+        del flow_manager.state["caller"]
+        with self.assertRaises(FlowError) as cm:
+            await flow_manager.initialize(flow.initial_node)
+        self.assertIn("uses '{{ caller }}', which is not in state", str(cm.exception))
 
     async def test_contract_violation_reaches_llm_as_error(self):
         flow = make_flow(single_node({"name": "returns_bare"}))

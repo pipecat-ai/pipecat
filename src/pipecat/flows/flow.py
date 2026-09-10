@@ -10,14 +10,15 @@ A :class:`Flow` is a :class:`~pipecat.flows.FlowConfig` joined to the code it
 names: the config's nodes turned into runnable
 :data:`~pipecat.flows.NodeConfig` dicts, with every tool reference resolved
 to a Flows direct function, every ``transition_only`` function built from the
-config alone, every template variable substituted, and every transition wired
-to the node the config names.
+config alone, and every transition wired to the node the config names.
 
 Constructing a flow validates the references the config could not: each
 tool exists and has a valid direct-function signature, each ``function``
-action names a callable, and each ``{{ variable }}`` has a value. Tool return values are
-checked at call time against the configured-flow contract: a tool returns
-``(result, TRANSITION_IN_YAML)`` and the config decides the next node.
+action names a callable. Tool return values are checked at call time against
+the configured-flow contract: a tool returns ``(result, TRANSITION_IN_YAML)``
+and the config decides the next node. ``{{ key }}`` placeholders in prompts
+are left in place; :class:`~pipecat.flows.FlowManager` fills them from its
+state when it enters the node.
 """
 
 import inspect
@@ -46,17 +47,15 @@ if TYPE_CHECKING:
     from pipecat.flows.config import FlowConfig
     from pipecat.flows.manager import FlowManager
 
-_VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-
 
 class Flow:
-    """A :class:`~pipecat.flows.FlowConfig` joined to handlers and variables.
+    """A :class:`~pipecat.flows.FlowConfig` joined to handlers.
 
     The flow hands ready-made node configs to
     :class:`~pipecat.flows.FlowManager`::
 
         config = FlowConfig.from_file("flow.yaml")
-        flow = Flow(config, handlers=handlers, variables={"restaurant_name": "Luigi's"})
+        flow = Flow(config, handlers=handlers)
         flow_manager = FlowManager(..., global_functions=flow.global_functions)
         await flow_manager.initialize(flow.initial_node)
     """
@@ -66,9 +65,8 @@ class Flow:
         config: "FlowConfig",
         *,
         handlers: Mapping[str, Callable] | Sequence[Mapping[str, Callable] | Any] | Any,
-        variables: Mapping[str, Any] | None = None,
     ):
-        """Join a config to the handlers and variables it refers to.
+        """Join a config to the handlers it refers to.
 
         Args:
             config: The flow config.
@@ -80,18 +78,15 @@ class Flow:
                 separate modules; a name that resolves to different callables
                 in more than one of them is an error rather than a silent
                 choice. Only the names the config references are looked up.
-            variables: Values for the ``{{ variable }}`` placeholders in the
-                config's messages and action text.
 
         Raises:
             ~pipecat.flows.FlowReferenceError: If a referenced tool or handler
-                is missing or ambiguous, a tool is not a valid direct
-                function, or a template variable has no value. Every such
-                problem is collected and reported together.
+                is missing or ambiguous, or a tool is not a valid direct
+                function. Every such problem is collected and reported
+                together.
         """
         self._config = config
         self._handlers = list(handlers) if isinstance(handlers, (list, tuple)) else [handlers]
-        self._variables = dict(variables or {})
         self._problems: list[FlowProblem] = []
 
         self._nodes: dict[str, NodeConfig] = {
@@ -145,14 +140,11 @@ class Flow:
         where = f"node '{name}'"
         config: NodeConfig = {
             "name": name,
-            "task_messages": [
-                {"role": m.role, "content": self._render(m.content, f"{where} task_messages")}
-                for m in node.task_messages
-            ],
+            "task_messages": [{"role": m.role, "content": m.content} for m in node.task_messages],
             "respond_immediately": node.respond_immediately,
         }
         if node.role_message is not None:
-            config["role_message"] = self._render(node.role_message, f"{where} role_message")
+            config["role_message"] = node.role_message
         if node.functions:
             config["functions"] = [
                 schema
@@ -181,7 +173,7 @@ class Flow:
         if ref.transition_only:
             return FlowsFunctionSchema(
                 name=ref.name,
-                description=self._render(ref.description or "", f"{where} tool '{ref.name}'"),
+                description=ref.description or "",
                 properties={},
                 required=[],
                 handler=self._make_transition_handler(ref),
@@ -222,8 +214,6 @@ class Flow:
             if handler is not None:
                 config["handler"] = handler
         for key, value in action.extras().items():
-            if key == "text" and isinstance(value, str):
-                value = self._render(value, f"{where} {action.type} text")
             config[key] = value  # type: ignore[literal-required]
         return config
 
@@ -272,20 +262,6 @@ class Flow:
         namespace = self._handlers[index]
         name = getattr(namespace, "__name__", None)
         return f"handlers[{index}] {name}" if isinstance(name, str) else f"handlers[{index}]"
-
-    def _render(self, text: str, where: str) -> str:
-        """Substitute variables into ``text``, recording any without a value."""
-
-        def substitute(match: re.Match) -> str:
-            name = match.group(1)
-            if name not in self._variables:
-                self._problem(
-                    "missing_variable", f"{where} uses variable '{name}', which has no value"
-                )
-                return match.group(0)
-            return str(self._variables[name])
-
-        return _VARIABLE.sub(substitute, text)
 
     def _problem(
         self, code: str, message: str, *, node: str | None = None, function: str | None = None
