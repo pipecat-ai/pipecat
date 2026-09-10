@@ -651,6 +651,10 @@ class RTVIProcessor(FrameProcessor):
                 run_llm=opts.run_immediately,
             )
         else:
+            # "id" never reaches here: the FileId branch above always
+            # narrows `type` to "bytes", and the catch-all source case
+            # returns early.
+            assert type != "id"
             file_frame = UserFileRawFrame(
                 text=data.content,
                 file=source,
