@@ -152,6 +152,138 @@ async def test_config_carries_prompt_and_keyterms(aiohttp_client):
 
 
 @pytest.mark.asyncio
+async def test_config_carries_declared_language_codes(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(
+                language_codes=[Language.EN, Language.ES],
+            ),
+        )
+
+        await service._transcribe(WAV)
+
+    assert _config(captured)["language_codes"] == ["en", "es"]
+
+
+@pytest.mark.asyncio
+async def test_language_codes_resolve_to_base_codes_deduped_in_order(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(
+                language_codes=[Language.ES_MX, Language.EN_US, Language.ES],
+            ),
+        )
+
+        await service._transcribe(WAV)
+
+    assert _config(captured)["language_codes"] == ["es", "en"]
+
+
+@pytest.mark.asyncio
+async def test_language_codes_are_not_capped(aiohttp_client):
+    """The Sync API sets no limit, unlike the streaming API's ten."""
+    captured = {}
+    declared = [
+        Language.EN,
+        Language.ES,
+        Language.FR,
+        Language.DE,
+        Language.IT,
+        Language.PT,
+        Language.NL,
+        Language.SV,
+        Language.DA,
+        Language.FI,
+        Language.HI,
+        Language.JA,
+    ]
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(language_codes=declared),
+        )
+
+        await service._transcribe(WAV)
+
+    assert len(_config(captured)["language_codes"]) == len(declared)
+
+
+@pytest.mark.asyncio
+async def test_language_codes_win_over_the_single_language(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(
+                language=Language.FR,
+                language_codes=[Language.EN, Language.ES],
+            ),
+        )
+
+        await service._transcribe(WAV)
+
+    assert _config(captured)["language_codes"] == ["en", "es"]
+
+
+@pytest.mark.asyncio
+async def test_the_single_language_is_used_when_no_codes_are_declared(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(
+                language=Language.FR,
+                language_codes=[],
+            ),
+        )
+
+        await service._transcribe(WAV)
+
+    assert _config(captured)["language_codes"] == ["fr"]
+
+
+@pytest.mark.asyncio
+async def test_config_carries_timestamps_when_requested(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _transcribe_app(captured),
+            session,
+            settings=AssemblyAISyncSTTService.Settings(timestamps=True),
+        )
+
+        await service._transcribe(WAV)
+
+    assert _config(captured)["timestamps"] is True
+
+
+@pytest.mark.asyncio
+async def test_timestamps_are_omitted_by_default(aiohttp_client):
+    captured = {}
+    async with aiohttp.ClientSession() as session:
+        service = await _service(aiohttp_client, _transcribe_app(captured), session)
+
+        await service._transcribe(WAV)
+
+    assert "timestamps" not in _config(captured)
+
+
+@pytest.mark.asyncio
 async def test_config_part_is_omitted_when_nothing_applies(aiohttp_client):
     captured = {}
     async with aiohttp.ClientSession() as session:

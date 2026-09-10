@@ -75,7 +75,8 @@ U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 # parameter and only takes effect on a new connection.
 HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 
-# Longest declared-language list AssemblyAI accepts.
+# Longest declared-language list the streaming API accepts. The Sync API sets no
+# such limit, so it prepares its codes without a cap.
 MAX_LANGUAGE_CODES = 10
 
 
@@ -156,7 +157,9 @@ def language_to_assemblyai_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
+def _prepare_language_codes(
+    language_codes: list[Language], *, max_codes: int | None = MAX_LANGUAGE_CODES
+) -> list[str]:
     """Resolve declared languages to the AssemblyAI codes sent on the wire.
 
     Duplicates are collapsed — regional variants of one language share a base
@@ -164,19 +167,21 @@ def _prepare_language_codes(language_codes: list[Language]) -> list[str]:
 
     Args:
         language_codes: Declared languages.
+        max_codes: Most distinct codes the endpoint accepts, or None for an
+            endpoint that sets no limit.
 
     Returns:
         AssemblyAI language codes, deduplicated in declaration order.
 
     Raises:
-        ValueError: If more than ``MAX_LANGUAGE_CODES`` distinct languages remain
-            after resolution.
+        ValueError: If more than ``max_codes`` distinct languages remain after
+            resolution.
     """
     prepared = [language_to_assemblyai_language(lang) for lang in language_codes]
     deduped = list(dict.fromkeys(prepared))
-    if len(deduped) > MAX_LANGUAGE_CODES:
+    if max_codes is not None and len(deduped) > max_codes:
         raise ValueError(
-            f"language_codes accepts at most {MAX_LANGUAGE_CODES} languages, got {len(deduped)}."
+            f"language_codes accepts at most {max_codes} languages, got {len(deduped)}."
         )
     return deduped
 
@@ -1292,9 +1297,10 @@ class AssemblyAISyncSTTSettings(STTSettings):
             it unset to let the service manage context (see ``max_context_turns``).
         language_codes: Declared audio languages for multilingual or
             code-switching audio (e.g. ``[Language.EN, Language.ES]``). A
-            single-element list pins one language. Bound in preference to the
-            single ``language`` setting when both are set. Defaults to unset (the
-            single ``language`` is used).
+            single-element list pins one language. Regional variants resolve to
+            their base code and duplicates are dropped, preserving declaration
+            order. Bound in preference to the single ``language`` setting when
+            both are set. Defaults to unset (the single ``language`` is used).
         timestamps: Whether to compute per-word ``start``/``end`` timestamps,
             returned on the ``words`` of the transcription result, at a small
             added latency. Left unset by default, so the API default of ``False``
@@ -1458,7 +1464,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
         language_codes = self._settings.language_codes
         language = self._settings.language
         if is_given(language_codes) and language_codes:
-            config["language_codes"] = self._resolve_language_codes(language_codes)
+            # The Sync API caps no declared-language list, so none is imposed here.
+            config["language_codes"] = _prepare_language_codes(language_codes, max_codes=None)
         elif is_given(language) and language is not None:
             config["language_codes"] = [language]
 
@@ -1480,19 +1487,6 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             config["conversation_context"] = list(self._context_turns)
 
         return config
-
-    @staticmethod
-    def _resolve_language_codes(language_codes: list[Language]) -> list[str]:
-        """Resolve declared languages to AssemblyAI codes, deduped in order.
-
-        Regional variants resolve to their base code, and duplicates are dropped
-        while preserving declaration order.
-        """
-        resolved = [
-            language_to_assemblyai_language(lang) if isinstance(lang, Language) else lang
-            for lang in language_codes
-        ]
-        return list(dict.fromkeys(resolved))
 
     def _context_is_manual(self) -> bool:
         """Whether conversation_context was supplied explicitly in settings."""
