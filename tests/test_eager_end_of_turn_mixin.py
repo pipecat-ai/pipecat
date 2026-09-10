@@ -32,10 +32,11 @@ class Predictor(EagerEndOfTurnSTTServiceMixin, FrameProcessor):
 
 
 class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
-    async def test_a_withdrawal_names_the_prediction_it_withdraws(self):
+    async def test_a_prediction_is_pushed_and_a_resume_withdraws_it(self):
         service = Predictor()
 
         await service._push_eager_end_of_turn("book a flight", user_id="user")
+        assert service.eager_end_of_turn_pending
         await service._cancel_eager_end_of_turn()
 
         prediction, withdrawal = service.pushed
@@ -43,18 +44,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         assert prediction.text == "book a flight"
         assert prediction.user_id == "user"
         assert isinstance(withdrawal, EagerEndOfTurnCancelFrame)
-        assert withdrawal.speculation_id == prediction.speculation_id
-        assert service.eager_speculation_id is None
-
-    async def test_each_prediction_gets_its_own_id(self):
-        service = Predictor()
-
-        await service._push_eager_end_of_turn("i think", user_id="user")
-        await service._push_eager_end_of_turn("i think i'll book it", user_id="user")
-
-        first, second = service.pushed
-        assert first.speculation_id and second.speculation_id
-        assert first.speculation_id != second.speculation_id
+        assert not service.eager_end_of_turn_pending
 
     async def test_a_committed_turn_resolves_the_prediction_without_withdrawing_it(self):
         service = Predictor()
@@ -66,7 +56,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         await service._cancel_eager_end_of_turn()
 
         assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in service.pushed)
-        assert service.eager_speculation_id is None
+        assert not service.eager_end_of_turn_pending
 
     async def test_withdrawing_without_a_prediction_does_nothing(self):
         service = Predictor()
@@ -75,7 +65,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         service._clear_eager_end_of_turn()
 
         assert service.pushed == []
-        assert service.eager_speculation_id is None
+        assert not service.eager_end_of_turn_pending
 
 
 class TestEagerEndOfTurnIsOptIn(unittest.IsolatedAsyncioTestCase):
@@ -89,7 +79,7 @@ class TestEagerEndOfTurnIsOptIn(unittest.IsolatedAsyncioTestCase):
         service._clear_eager_end_of_turn()
 
         assert service.pushed == []
-        assert service.eager_speculation_id is None
+        assert not service.eager_end_of_turn_pending
         assert not service.eager_end_of_turn_enabled
 
     def test_it_recommends_eager_strategies_only_when_enabled(self):

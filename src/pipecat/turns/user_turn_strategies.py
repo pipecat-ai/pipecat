@@ -193,6 +193,8 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
         enable_interruptions: Whether to broadcast an interruption when a
             proposal starts a turn. Services route their ``should_interrupt``
             setting here.
+        speculation_timeout: Seconds a speculation may wait for the service to
+            commit or withdraw the eager end of turn before it is withdrawn.
 
     Example::
 
@@ -203,7 +205,12 @@ class EagerUserTurnStrategies(ExternalUserTurnStrategies):
     """
 
     match_policy: EagerMatchPolicy | None = None
+    speculation_timeout: float = 5.0
 
     def __post_init__(self):
         super().__post_init__()
-        self.stop = [EagerUserTurnStopStrategy(match_policy=self.match_policy)]
+        self.stop = [
+            EagerUserTurnStopStrategy(
+                match_policy=self.match_policy, speculation_timeout=self.speculation_timeout
+            )
+        ]

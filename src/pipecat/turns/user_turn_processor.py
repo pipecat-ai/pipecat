@@ -231,9 +231,7 @@ class UserTurnProcessor(FrameProcessor):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            await self.broadcast_frame(
-                UserStoppedSpeakingFrame, speculation_id=params.speculation_id
-            )
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 

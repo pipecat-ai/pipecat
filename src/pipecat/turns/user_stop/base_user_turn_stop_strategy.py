@@ -29,14 +29,15 @@ class UserTurnStoppedParams:
             turn. False when the turn end was already announced elsewhere — by a
             shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
             or by a service that emits turn frames rather than proposing them.
-        speculation_id: The speculative response this turn end confirms, if any.
-            Travels to the :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame`
-            the aggregator emits, which is what releases that response.
-
+        speculated: Whether the turn's inference already ran, speculatively,
+            on an eager end of turn that held. The aggregator then writes the
+            turn to the context without running inference again; the
+            :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` it emits
+            releases the response.
     """
 
     enable_user_speaking_frames: bool
-    speculation_id: str | None = None
+    speculated: bool = False
 
 
 class BaseUserTurnStopStrategy(BaseObject):
@@ -245,7 +246,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         self,
         *,
         enable_user_speaking_frames: bool | None = None,
-        speculation_id: str | None = None,
+        speculated: bool = False,
     ):
         """Trigger only the `on_user_turn_stopped` event.
 
@@ -254,9 +255,9 @@ class BaseUserTurnStopStrategy(BaseObject):
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn. Pass False when something else in the pipeline has already
                 emitted it.
-            speculation_id: The speculative response this turn end confirms, if
-                any. Pass it to release a response generated ahead of the turn
-                ending.
+            speculated: Whether the turn's inference already ran speculatively,
+                so the turn end only writes the context and releases the
+                response generated ahead of it.
         """
         await self._call_event_handler(
             "on_user_turn_stopped",
@@ -266,6 +267,6 @@ class BaseUserTurnStopStrategy(BaseObject):
                     if enable_user_speaking_frames is None
                     else enable_user_speaking_frames
                 ),
-                speculation_id=speculation_id,
+                speculated=speculated,
             ),
         )

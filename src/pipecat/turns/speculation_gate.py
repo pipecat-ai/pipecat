@@ -4,10 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Decision engine holding a speculative bot response until its turn is confirmed."""
+"""Decision engine holding a speculative bot response until its turn ends."""
 
-import asyncio
-from collections.abc import Awaitable, Callable
 from enum import Enum
 
 from loguru import logger
@@ -21,6 +19,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     SystemFrame,
     UninterruptibleFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -35,7 +34,7 @@ class SpeculationState(Enum):
     """What the gate is doing with the frames passing through it.
 
     - ``OPEN``: emitting everything.
-    - ``HOLDING``: holding a speculative response until it is confirmed.
+    - ``HOLDING``: holding a speculative response until its turn ends.
     - ``DROPPING``: discarding the rest of a withdrawn speculative response.
     """
 
@@ -47,34 +46,32 @@ class SpeculationState(Enum):
 class SpeculationGate(BaseObject):
     """Decides which frames of a speculative bot response may be emitted, and when.
 
-    A speculative response is generated from an eager end of turn — a
-    provisional guess that the user has finished talking — so it may answer a
+    A speculative response is generated from an eager end of turn, a
+    provisional guess that the user has finished talking, so it may answer a
     transcript the user never actually completed. This holds everything such a
-    response produces until the turn is confirmed, then releases it, or discards
-    it if the guess is withdrawn.
+    response produces while the user turn is still open, then releases it when
+    the turn ends, or discards it if the guess is withdrawn.
 
-    A host calls :meth:`begin_speculation` when it starts an inference for a
-    turn that may not have ended, and the response that follows is held from its
-    :class:`~pipecat.frames.frames.LLMFullResponseStartFrame` onward. A
-    :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` naming that
-    speculation releases the response (the turn ended, and this response answers
-    it) and an :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame`
-    discards it.
+    A host calls :meth:`begin_speculation` when it starts an inference, saying
+    whether the turn it answers may not have ended. A speculative response is
+    held from its :class:`~pipecat.frames.frames.LLMFullResponseStartFrame`
+    onward. A :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` ends the
+    turn and releases the response, and an
+    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` withdraws the
+    speculation and discards it.
 
-    Whether an inference is still answering an unconfirmed turn is therefore the
-    gate's to answer, through :attr:`speculation_id`, rather than something a
-    host tracks alongside it. A host that kept its own copy would
-    have to clear it on every path that settles a speculation, and the two would
-    disagree on the paths it missed.
-
-    Only one speculation is ever in flight, since producing one takes a whole
-    user turn, so the gate tracks a single response. Both signals still carry an
-    id: a turn that ends without naming a speculation must not release one, and
-    a confirmation can arrive before the response it confirms, since Pipecat
-    dispatches system frames ahead of the queued frames they pass.
+    There is one speculation per user turn and one component that settles it,
+    the stop strategy that started it, so the gate needs no identity for it:
+    the turn's end releases whatever is held, and a withdrawal discards it.
+    The two are system frames, which keep their order, so a withdrawal always
+    precedes the turn end that follows it. What the gate does track is whether
+    the turn is open, from the user speaking frames: the turn end is a system
+    frame and can overtake the queued context frame that starts the inference
+    it confirms, and a speculative inference that begins after its turn has
+    ended answers a turn that is over, so it is not held at all.
 
     While holding, everything is held in arrival order except system frames,
-    which are out-of-band throughout Pipecat — and which carry the verdicts the
+    which are out-of-band throughout Pipecat, and which carry the verdicts the
     gate is waiting for, so holding them would deadlock it. That includes
     :class:`~pipecat.frames.frames.UninterruptibleFrame` ones, which are ordered
     like any other frame; discarding a speculation keeps them and emits them on,
@@ -82,79 +79,35 @@ class SpeculationGate(BaseObject):
 
     This decides rather than processes frames: :meth:`process` is synchronous
     and returns the frames its caller should push, in order. A host can
-    therefore push from several tasks at once — every state transition
+    therefore push from several tasks at once, since every state transition
     completes without an await for another task to interleave with.
     :class:`~pipecat.services.llm_service.LLMService` hosts one, gating every
     response it produces.
 
-    A hold bounds itself. A service that stops sending turn signals
-    mid-speculation would otherwise leave the bot silent for the rest of the
-    session, so a hold that outlasts ``max_hold_duration`` is discarded. That
-    is the one point where frames leave with no caller to hand them to, so they
-    go to ``withdraw_expired`` instead of being returned — along with the
-    speculation to withdraw, since giving up on a response is only half the
-    job.
-
     Example::
 
-        gate = SpeculationGate(withdraw_expired=self._withdraw_expired_speculation)
-        await gate.setup(task_manager)
-
+        gate = SpeculationGate()
         for frame, direction in gate.process(frame, direction):
             await self.push_frame(frame, direction)
     """
 
-    def __init__(
-        self,
-        *,
-        withdraw_expired: Callable[[str, list[GatedFrame]], Awaitable[None]],
-        max_hold_duration: float = 5.0,
-        **kwargs,
-    ):
+    def __init__(self, **kwargs):
         """Initialize the speculation gate.
 
         Args:
-            withdraw_expired: Called with the speculation a hold was for and
-                the frames it leaves behind when it outlasts
-                ``max_hold_duration``. The frames are whatever the discarded
-                response was holding back that has to be delivered anyway,
-                handed over rather than returned because the hold runs out on
-                the gate's own task with no :meth:`process` caller waiting to
-                push them. The speculation comes with them because the gate can
-                only settle its own state: whoever started the speculation is
-                elsewhere and has to be told it is over, or a turn confirming it
-                would be answered by nothing.
-            max_hold_duration: Seconds a response may be held before the gate
-                gives up on it.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
-        self._withdraw_expired = withdraw_expired
-        self._max_hold_duration = max_hold_duration
-        # A hold is bounded by a task waiting for it to end. Waiting rather than
-        # being cancelled at the end: holds start and end inside `process`,
-        # which is synchronous, and cancelling a task has to be awaited.
-        self._hold_ended = asyncio.Event()
-        self._hold_timeout_task: asyncio.Task | None = None
         self._state = SpeculationState.OPEN
-        # The inference in flight for a turn that has not been confirmed. Set
+        # Whether the inference in flight answers a turn that has not ended. Set
         # when the inference starts, cleared when the turn settles it either
-        # way — so it outlives any one response frame.
-        self._speculation_id: str | None = None
+        # way, so it outlives any one response frame.
+        self._speculating = False
+        # Whether the user turn has ended and no new one has begun. A
+        # speculative inference that begins in that state answers a turn that
+        # is already over, so its response needs no holding.
+        self._turn_ended = False
         self._buffer: FrameQueue = FrameQueue(frame_getter=lambda item: item[0])
-        # A speculation confirmed before its response arrived. The confirmation
-        # travels as a system frame, so it can pass the queued frames it
-        # confirms, and nothing follows it to correct a response held by
-        # mistake — the turn is over, so no further response is coming.
-        # One slot is enough: only one speculation is ever in flight.
-        self._confirmed_id: str | None = None
-
-    async def cleanup(self):
-        """Stop bounding a hold that outlived the pipeline."""
-        await super().cleanup()
-        if self._hold_timeout_task:
-            task, self._hold_timeout_task = self._hold_timeout_task, None
-            await self.cancel_task(task)
 
     @property
     def state(self) -> SpeculationState:
@@ -162,35 +115,31 @@ class SpeculationGate(BaseObject):
         return self._state
 
     @property
-    def speculation_id(self) -> str | None:
-        """The inference answering a turn that has not been confirmed, if any.
+    def speculating(self) -> bool:
+        """Whether the inference in flight answers a turn that has not ended.
 
         Set from :meth:`begin_speculation` until the turn settles it, so it
         covers the whole inference rather than only the stretch with frames in
-        flight. None means whatever is generating now answers a turn that has
+        flight. False means whatever is generating now answers a turn that has
         ended, and its side effects can be let through. Use :attr:`state` to ask
         the narrower question of whether frames are being held right now.
         """
-        return self._speculation_id
+        return self._speculating
 
-    def begin_speculation(self, speculation_id: str | None):
-        """Take note of an inference whose turn may not have ended.
+    def begin_speculation(self, speculative: bool):
+        """Take note of an inference starting, and whether its turn may not have ended.
 
         Called when the inference starts rather than when its first response
-        frame arrives, so a turn confirmed in between is already accounted for
+        frame arrives, so a turn that ended in between is already accounted for
         by the time the response shows up.
 
         Args:
-            speculation_id: The speculation the inference answers, or None for
-                an ordinary inference against a turn that has ended.
+            speculative: Whether the inference answers an eager end of turn.
+                False for an ordinary inference against a turn that has ended.
         """
-        if speculation_id and speculation_id == self._confirmed_id:
-            # The turn ended before the inference reached us, so the response
-            # answers a turn that is already over and needs no holding.
-            self._confirmed_id = None
-            speculation_id = None
-
-        self._speculation_id = speculation_id
+        # A speculative inference that begins after its turn ended answers a
+        # turn that is over: the turn end overtook its context frame.
+        self._speculating = speculative and not self._turn_ended
 
     def process(self, frame: Frame, direction: FrameDirection) -> list[GatedFrame]:
         """Decide what a frame passing through the gate releases.
@@ -211,19 +160,20 @@ class SpeculationGate(BaseObject):
             # Emitted before the verdict is applied, so a released response
             # still follows the frame that ended the turn it answers.
             emitted = [(frame, direction)]
-            if isinstance(frame, EagerEndOfTurnCancelFrame):
-                emitted += self._discard(frame.speculation_id)
+            if isinstance(frame, UserStartedSpeakingFrame):
+                self._turn_ended = False
             elif isinstance(frame, UserStoppedSpeakingFrame):
-                emitted += self._release(frame.speculation_id)
-            elif isinstance(frame, InterruptionFrame):
-                emitted += self._discard(None)
+                self._turn_ended = True
+                emitted += self._release()
+            elif isinstance(frame, (EagerEndOfTurnCancelFrame, InterruptionFrame)):
+                emitted += self._discard()
             return emitted
 
         if isinstance(frame, EndFrame):
             # Uninterruptible, and the runner awaits it: holding it hangs
             # shutdown. Discarding first delivers whatever is held that has to
             # outlive the speculation, ahead of it.
-            return self._discard(None) + [(frame, direction)]
+            return self._discard() + [(frame, direction)]
 
         emitted: list[GatedFrame] = []
         if isinstance(frame, LLMFullResponseStartFrame):
@@ -242,69 +192,12 @@ class SpeculationGate(BaseObject):
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._state = SpeculationState.OPEN
         else:
-            emitted.append(self._resolved(frame, direction))
-
+            emitted.append((frame, direction))
         return emitted
-
-    def _bound_hold(self):
-        """Start the clock on the hold just taken.
-
-        Starting a task needs no await, so this runs inside the state
-        transition that took the hold. A hold that supersedes another leaves
-        that one's task to notice the end and exit.
-        """
-        self._hold_ended.clear()
-        self._hold_timeout_task = self.create_task(self._hold_timeout_handler(), "_hold_timeout")
-
-    def _end_hold(self, state: SpeculationState):
-        """Leave the hold, releasing the bound on it.
-
-        The single exit from ``HOLDING``, which is what lets the bound end
-        exactly once however the hold ended. Whether the speculation itself is
-        over is a separate question — a response superseded by a new one ends
-        its hold while the inference that replaced it is still pending.
-
-        Args:
-            state: What the gate does with the frames that follow.
-        """
-        self._state = state
-        self._hold_ended.set()
-
-    async def _hold_timeout_handler(self):
-        """Discard a hold that outlasted its bound, and withdraw what it held."""
-        try:
-            await asyncio.wait_for(self._hold_ended.wait(), self._max_hold_duration)
-            return
-        except TimeoutError:
-            pass
-
-        speculation_id = self._speculation_id
-        if not speculation_id:
-            # Settled between the bound running out and this line.
-            return
-
-        logger.warning(
-            f"{self}: speculative response unresolved after {self._max_hold_duration}s, "
-            "discarding it"
-        )
-        await self._withdraw_expired(speculation_id, self._discard(None))
-
-    def _resolved(self, frame: Frame, direction: FrameDirection) -> GatedFrame:
-        """Prepare a frame the gate has resolved.
-
-        A response that gets past the gate has been confirmed, or never belonged
-        to a speculation, so it carries no speculation id onward. That keeps the
-        id meaning exactly one thing downstream: this response answers a turn
-        that may not have ended.
-        """
-        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            frame.speculation_id = None
-        return (frame, direction)
 
     def _begin(self) -> list[GatedFrame]:
         """Decide what to do with the response opening here."""
         emitted: list[GatedFrame] = []
-
         if self._state != SpeculationState.OPEN:
             # A new response supersedes the one we were holding or dropping. A
             # withdrawn response may never send its end frame, since its
@@ -312,69 +205,41 @@ class SpeculationGate(BaseObject):
             # void once something else starts answering. Nothing of it can still
             # be queued behind this frame, so there is no tail left to drop.
             emitted += self._drop_held("superseded by a new response", keep_dropping=False)
-
         # Whether this response is speculative was settled when its inference
-        # started, so a turn confirmed since then already cleared it.
-        if not self._speculation_id:
-            return emitted
-
-        self._state = SpeculationState.HOLDING
-        self._bound_hold()
+        # started, so a turn that ended since then already cleared it.
+        if self._speculating:
+            self._state = SpeculationState.HOLDING
         return emitted
 
-    def _release(self, speculation_id: str | None) -> list[GatedFrame]:
-        """Release the response the turn end confirms.
-
-        Args:
-            speculation_id: The speculation the turn confirms. A turn that ends
-                without naming one confirms nothing, and releases nothing.
+    def _release(self) -> list[GatedFrame]:
+        """Release the held response: the turn it answers has ended.
 
         Returns:
-            The frames the confirmation releases, in arrival order.
+            The frames the turn end releases, in arrival order.
         """
-        if not speculation_id:
-            return []
-
-        if speculation_id != self._speculation_id:
-            # Confirmed before its inference reached us. Remember it, or the
-            # response would be held on arrival and never released: the turn is
-            # over, so nothing follows to supersede it.
-            self._confirmed_id = speculation_id
-            return []
-
         # The turn ended, so nothing this inference still produces is
-        # speculative — including a tool call it has yet to reach.
-        self._speculation_id = None
-
+        # speculative, including a tool call it has yet to reach.
+        self._speculating = False
         if self._state != SpeculationState.HOLDING:
             return []
-
         logger.debug(f"{self}: releasing speculative response ({self._buffer.qsize()} frames)")
-        self._end_hold(SpeculationState.OPEN)
+        self._state = SpeculationState.OPEN
         return self._flush()
 
-    def _discard(self, speculation_id: str | None) -> list[GatedFrame]:
-        """Discard the response a withdrawal or an interruption voids.
+    def _discard(self) -> list[GatedFrame]:
+        """Discard the held response: the speculation was withdrawn, or an interruption voided it.
 
         A withdrawal that arrives before the response it voids needs no memory:
         the response is held on arrival, and whatever answers the turn instead
-        supersedes it — or the bound on the hold runs out if nothing does.
-
-        Args:
-            speculation_id: The speculation being withdrawn, or None to discard
-                whatever is held, which is what an interruption and shutdown do.
+        supersedes it.
 
         Returns:
             Whatever the discarded response was holding back that has to be
             delivered anyway.
         """
-        if speculation_id and speculation_id != self._speculation_id:
-            return []
-
         # The speculation is void, so nothing the inference still produces
         # answers a turn worth holding for.
-        self._speculation_id = None
-
+        self._speculating = False
         return self._drop_held("withdrawn", keep_dropping=True)
 
     def _drop_held(self, reason: str, *, keep_dropping: bool) -> list[GatedFrame]:
@@ -392,7 +257,6 @@ class SpeculationGate(BaseObject):
         if self._state != SpeculationState.HOLDING:
             self._state = SpeculationState.OPEN
             return []
-
         logger.debug(
             f"{self}: discarding speculative response ({self._buffer.qsize()} frames, {reason})"
         )
@@ -401,7 +265,7 @@ class SpeculationGate(BaseObject):
         # Drops the speculative response and keeps anything that must always be
         # delivered, which is then emitted rather than discarded with it.
         self._buffer.reset()
-        self._end_hold(
+        self._state = (
             SpeculationState.DROPPING if keep_dropping and not complete else SpeculationState.OPEN
         )
         return self._flush()
@@ -412,5 +276,5 @@ class SpeculationGate(BaseObject):
         while not self._buffer.empty():
             frame, direction = self._buffer.get_nowait()
             self._buffer.task_done()
-            emitted.append(self._resolved(frame, direction))
+            emitted.append((frame, direction))
         return emitted

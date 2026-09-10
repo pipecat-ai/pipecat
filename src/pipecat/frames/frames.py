@@ -511,17 +511,12 @@ class EagerTranscriptionFrame(TextFrame):
     Parameters:
         user_id: Identifier for the user who spoke.
         timestamp: When the eager end of turn occurred.
-        speculation_id: Identifies this prediction, so whatever is generated from
-            it can be matched against the
-            :class:`EagerEndOfTurnCancelFrame` that may withdraw it. Minted by
-            the service, which is the authority on which prediction it withdraws.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
     """
 
     user_id: str
     timestamp: str
-    speculation_id: str
     language: Language | None = None
     result: Any | None = None
 
@@ -588,14 +583,14 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
-        speculation_id: Identifies a speculative inference, run from a provisional
-            context that is not part of the conversation. Non-None means the
-            response must not reach the user or the context until the speculation
-            is confirmed, and that the service must not execute tool calls for it.
+        speculative: Whether the inference answers an eager end of turn, run
+            from a provisional context that is not part of the conversation.
+            The response must then not reach the user or the context until the
+            turn ends, and the service must not execute tool calls for it.
     """
 
     context: LLMContext
-    speculation_id: str | None = None
+    speculative: bool = False
 
 
 @dataclass
@@ -1203,18 +1198,12 @@ class UserStoppedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has ended.
 
     Emitted when the user turn ends. This usually coincides with the start of
-    the bot turn.
-
-    Parameters:
-        speculation_id: Set when the turn ended on an eager end of turn that
-            held, naming the speculative response that answers it. The
-            :class:`~pipecat.turns.speculation_gate.SpeculationGate` releases
-            that response on this frame. None on every other turn end, including
-            one where the eager prediction missed — a response held for a
-            speculation this frame doesn't name is never released by it.
+    the bot turn. A response generated speculatively for the turn, from an
+    eager end of turn, is released on this frame by the
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate`.
     """
 
-    speculation_id: str | None = None
+    pass
 
 
 @dataclass
@@ -1228,14 +1217,11 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
     was holding — which is everything the response produced, so nothing further
     down the pipeline has anything to undo.
 
-    A system frame so it overtakes the speculative output it cancels.
-
-    Parameters:
-        speculation_id: The prediction being withdrawn, from the
-            :class:`EagerTranscriptionFrame` that made it.
+    A system frame so it overtakes the speculative output it cancels. There is
+    one prediction per user turn, so the frame names none.
     """
 
-    speculation_id: str
+    pass
 
 
 @dataclass
@@ -2151,19 +2137,13 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Parameters:
         skip_tts: Whether the response should be skipped by the TTS service.
-        speculation_id: Set by the LLM service when the response comes from a
-            speculative inference. It bounds the speculation: every frame between
-            this frame and the matching :class:`LLMFullResponseEndFrame` belongs
-            to it.
     """
 
     skip_tts: bool | None = field(init=False)
-    speculation_id: str | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
-        self.speculation_id = None
 
 
 @dataclass
@@ -2172,18 +2152,13 @@ class LLMFullResponseEndFrame(ControlFrame):
 
     Parameters:
         skip_tts: Whether the response should be skipped by the TTS service.
-        speculation_id: Set by the LLM service when the response comes from a
-            speculative inference. Closes the window opened by the matching
-            :class:`LLMFullResponseStartFrame`.
     """
 
     skip_tts: bool | None = field(init=False)
-    speculation_id: str | None = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
-        self.speculation_id = None
 
 
 @dataclass

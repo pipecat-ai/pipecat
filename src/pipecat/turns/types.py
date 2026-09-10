@@ -34,11 +34,7 @@ class UserTurnSpeculation:
     until the turn is confirmed.
 
     Parameters:
-        id: Identifies this speculation across the pipeline. The LLM service
-            stamps it onto the response frames so the gate holding the response
-            can tell which frames it owns.
         text: The user turn text the inference was run against.
     """
 
-    id: str
     text: str

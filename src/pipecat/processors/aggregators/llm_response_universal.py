@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
     Frame,
@@ -742,6 +743,10 @@ class LLMUserAggregator(LLMContextAggregator):
             "on_reset_aggregation", self._on_reset_aggregation
         )
 
+        # Whether a speculative inference is in flight for the current turn,
+        # started on an eager end of turn and not yet withdrawn or confirmed.
+        self._speculation_pending = False
+
         self._user_idle_controller = UserIdleController(
             user_idle_timeout=self._params.user_idle_timeout
         )
@@ -832,6 +837,10 @@ class LLMUserAggregator(LLMContextAggregator):
             # final TranscriptionFrame. The turn strategies still see them: the
             # controller is fed every frame below.
             pass
+        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+            # The service, or the stop strategy, withdrew the speculation.
+            self._speculation_pending = False
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -1386,7 +1395,8 @@ class LLMUserAggregator(LLMContextAggregator):
             tools=self._context.tools,
             tool_choice=self._context.tool_choice,
         )
-        await self.push_frame(LLMContextFrame(context=provisional, speculation_id=speculation.id))
+        self._speculation_pending = True
+        await self.push_frame(LLMContextFrame(context=provisional, speculative=True))
 
     async def _on_user_turn_stopped(
         self,
@@ -1396,10 +1406,18 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
+        if self._speculation_pending and not params.speculated:
+            # The turn ended without confirming the speculation: the committed
+            # transcript differed, or nothing was committed at all. Withdraw it
+            # ahead of the turn end, which would otherwise release the held
+            # response, and ahead of the fresh inference below, which the
+            # withdrawal's interruption at the LLM would otherwise flush.
+            logger.debug(f"{self}: turn ended without confirming the speculation, withdrawing it")
+            await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+        self._speculation_pending = False
+
         if params.enable_user_speaking_frames:
-            await self.broadcast_frame(
-                UserStoppedSpeakingFrame, speculation_id=params.speculation_id
-            )
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
@@ -1415,10 +1433,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             return
 
-        # A turn end that confirms a speculation has its response already: the
-        # context write is all that's left, and running inference again would
-        # answer the same turn twice.
-        await self._maybe_emit_user_turn_stopped(strategy, run_llm=params.speculation_id is None)
+        # A turn already answered speculatively has its response: the context
+        # write is all that's left, and running inference again would answer
+        # the same turn twice.
+        await self._maybe_emit_user_turn_stopped(strategy, run_llm=not params.speculated)
 
     async def _on_reset_aggregation(
         self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy

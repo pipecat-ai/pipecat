@@ -6,7 +6,6 @@
 
 """Mixin for STT services that predict the end of a turn before committing to it."""
 
-import uuid
 from typing import Any
 
 from loguru import logger
@@ -31,8 +30,7 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
 
     Some services report that a turn has probably ended before committing to it,
     and withdraw the prediction if the user turns out to be mid-sentence. A
-    response can be generated during that gap, so the prediction carries an id
-    identifying it across the pipeline — see
+    response can be generated during that gap; see
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`, which acts on
     the frames pushed here.
 
@@ -76,7 +74,7 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         super().__init__(*args, **kwargs)
         self._enable_eager_end_of_turn = enable_eager_end_of_turn
         self._eager_match_policy = eager_match_policy
-        self._eager_speculation_id: str | None = None
+        self._eager_end_of_turn_pending = False
 
     @property
     def eager_end_of_turn_enabled(self) -> bool:
@@ -84,9 +82,9 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         return self._enable_eager_end_of_turn
 
     @property
-    def eager_speculation_id(self) -> str | None:
-        """The prediction awaiting a committed end of turn, if any."""
-        return self._eager_speculation_id
+    def eager_end_of_turn_pending(self) -> bool:
+        """Whether a prediction awaits a committed end of turn."""
+        return self._eager_end_of_turn_pending
 
     def recommended_user_turn_strategies(self, *, enable_interruptions: bool) -> UserTurnStrategies:
         """Build the turn strategies this service recommends.
@@ -129,27 +127,22 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         if not self._enable_eager_end_of_turn:
             return
 
-        self._eager_speculation_id = str(uuid.uuid4())
+        self._eager_end_of_turn_pending = True
         logger.trace(f"{self}: eager end of turn: [{transcript}]")
         await self.push_frame(
             EagerTranscriptionFrame(
-                transcript,
-                user_id,
-                time_now_iso8601(),
-                self._eager_speculation_id,
-                language,
-                result=result,
+                transcript, user_id, time_now_iso8601(), language, result=result
             )
         )
 
     async def _cancel_eager_end_of_turn(self):
-        """Withdraw the prediction, naming it so consumers can match it."""
-        if not self._eager_speculation_id:
+        """Withdraw the prediction."""
+        if not self._eager_end_of_turn_pending:
             return
 
         logger.trace(f"{self}: eager end of turn withdrawn")
-        speculation_id, self._eager_speculation_id = self._eager_speculation_id, None
-        await self.push_frame(EagerEndOfTurnCancelFrame(speculation_id))
+        self._eager_end_of_turn_pending = False
+        await self.push_frame(EagerEndOfTurnCancelFrame())
 
     def _clear_eager_end_of_turn(self):
         """Resolve the prediction without withdrawing it.
@@ -157,4 +150,4 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         Called when the turn is committed: whatever was generated from the
         prediction is settled by the committed transcript, not by this.
         """
-        self._eager_speculation_id = None
+        self._eager_end_of_turn_pending = False
