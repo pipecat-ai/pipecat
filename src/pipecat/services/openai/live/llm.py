@@ -313,9 +313,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._session_started = False
         self._session_closed_event = asyncio.Event()
         self._sent_tools_snapshot: str | None = None
-        # Whether a session has ever started on this service, which tells a
-        # startup failure apart from an error arriving as one shuts down.
-        self._session_ever_started = False
+        # Whether a session has started on the current connection. Until one
+        # has, an error indicates that the session failed to start. Unlike
+        # _session_started, this is not cleared on session close (which helps
+        # us avoid treating errors during shutdown as session start failures).
+        # It is cleared on disconnect, so the next connection is judged afresh.
+        self._session_started_on_connection = False
 
         self._resampler = create_stream_resampler()
         self._warned_audio_dropped = False
@@ -628,6 +631,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         try:
             self._disconnecting = True
             self._session_started = False
+            self._session_started_on_connection = False
             await self.stop_all_metrics()
             if self._websocket:
                 await self._websocket.close()
@@ -722,7 +726,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
     async def _handle_evt_session_started(self, evt: events.SessionStartedEvent):
         self._session_started = True
-        self._session_ever_started = True
+        self._session_started_on_connection = True
         logger.info(
             f"{self}: session {evt.session.id} started. The live model handles being "
             "interrupted by itself; no InterruptionFrame is broadcast, so tools run to "
@@ -747,8 +751,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         details = f"{error.type or 'error'}/{error.code or 'unknown'}: {error.message}"
         if error.param:
             details += f" (param: {error.param})"
-        if not self._session_ever_started:
-            # No session has started, so this one never will.
+        if not self._session_started_on_connection:
+            # No session has started on this connection, so this one will not.
             await self.push_error(
                 error_msg=f"Session startup failed: {details}", force_treat_as_permanent=True
             )

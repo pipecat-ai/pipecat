@@ -399,6 +399,40 @@ async def test_a_failed_disconnect_still_allows_the_next_session_to_send():
     assert service._disconnecting is False
 
 
+def _error(message: str = "boom") -> dict[str, Any]:
+    return {"type": "error", "error": {"type": "invalid_request", "message": message}}
+
+
+@pytest.mark.asyncio
+async def test_a_startup_error_is_fatal_for_every_session_not_just_the_first():
+    """A reset asks for a new session, so its startup can fail in turn."""
+    service = await _make_service_with_tasks()
+    service.send_client_event = _EventRecorder()
+    service.push_frame = _FrameRecorder()
+    service.push_error = AsyncMock()
+    service._connect = AsyncMock()
+
+    context = LLMContext([{"role": "user", "content": "hi"}])
+    await service._handle_context(context)
+
+    # First session: an error before it starts is a startup failure.
+    await _drive(service, [_error()])
+    assert service.push_error.await_args.kwargs.get("force_treat_as_permanent") is True
+
+    # It starts, and a later error is just an error.
+    await _drive(service, [_session_started(), _error()])
+    assert service.push_error.await_args.kwargs.get("force_treat_as_permanent") is not True
+
+    # An error while it shuts down is not a startup failure either.
+    await _drive(service, [{"type": "session.closed", "reason": "done"}, _error()])
+    assert service.push_error.await_args.kwargs.get("force_treat_as_permanent") is not True
+
+    # A reset asks for a second session; its startup can fail the same way.
+    await service.reset_conversation()
+    await _drive(service, [_error()])
+    assert service.push_error.await_args.kwargs.get("force_treat_as_permanent") is True
+
+
 @pytest.mark.asyncio
 async def test_the_opening_nudge_carries_a_null_delegation_id():
     """The append is session-wide, and the API requires the field even so."""
