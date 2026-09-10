@@ -8,6 +8,7 @@
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -107,6 +108,7 @@ class LLMContextSummarizer(BaseObject):
         context: LLMContext,
         config: LLMAutoContextSummarizationConfig | None = None,
         auto_trigger: bool = True,
+        should_summarize_callback: Callable[[LLMContext], bool] | None = None,
     ):
         """Initialize the context summarizer.
 
@@ -119,12 +121,16 @@ class LLMContextSummarizer(BaseObject):
                 thresholds are reached. When False, summarization only happens
                 when an ``LLMSummarizeContextFrame`` is pushed into the pipeline.
                 Defaults to True.
+            should_summarize_callback: Optional predicate for automatic
+                summarization. When provided, it replaces threshold evaluation
+                after automatic triggering and in-progress guards are checked.
         """
         super().__init__()
 
         self._context = context
         self._auto_config = config or LLMAutoContextSummarizationConfig()
         self._auto_trigger = auto_trigger
+        self._should_summarize_callback = should_summarize_callback
 
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
@@ -273,6 +279,9 @@ class LLMContextSummarizer(BaseObject):
         if self._summarization_in_progress:
             logger.debug(f"{self}: Summarization already in progress")
             return False
+
+        if self._should_summarize_callback is not None:
+            return self._should_summarize_callback(self._context)
 
         # Estimate tokens in context
         total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
