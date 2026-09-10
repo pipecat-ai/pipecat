@@ -11,6 +11,8 @@ import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -30,7 +32,12 @@ class _FakeWebsocket:
     def __init__(self, messages, *, state=State.OPEN, send_side_effect=None):
         self._messages = messages
         self.state = state
+        self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
+
+    async def close(self):
+        self.closed = True
+        self.state = State.CLOSED
 
     def __aiter__(self):
         return self._iter_messages()
@@ -527,3 +534,60 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     assert final_frames[0].language is None
     assert final_frames[0].finalized is True
     assert traced_transcriptions == [("Tell me a joke.", True, None)]
+
+
+def _connected_service():
+    """Build a service holding an open fake socket, without touching the network."""
+    service = SonioxSTTService(api_key="test-key")
+    service._setup = frame_processor_setup(TaskManager())
+    websocket = _FakeWebsocket([])
+    service._websocket = websocket
+    return service, websocket
+
+
+def _sent_payloads(websocket):
+    return [call.args[0] for call in websocket.send.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_stop_sends_end_of_audio_while_the_socket_is_open():
+    service, websocket = _connected_service()
+
+    await service.stop(EndFrame())
+
+    assert _sent_payloads(websocket) == [""]
+    assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_stop_disconnects_once():
+    service, _ = _connected_service()
+    service._disconnect_websocket = AsyncMock(wraps=service._disconnect_websocket)
+
+    await service.stop(EndFrame())
+
+    service._disconnect_websocket.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_does_not_send_end_of_audio():
+    service, websocket = _connected_service()
+
+    await service.cancel(CancelFrame())
+
+    assert _sent_payloads(websocket) == []
+    assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_stop_completes_teardown_when_the_end_of_audio_send_fails():
+    service, websocket = _connected_service()
+    websocket.send = AsyncMock(side_effect=ConnectionResetError("transient send failure"))
+    service._flush_stt_usage_metrics = AsyncMock(wraps=service._flush_stt_usage_metrics)
+
+    await service.stop(EndFrame())
+
+    # The send is best-effort: everything after it still has to run.
+    service._flush_stt_usage_metrics.assert_awaited_once()
+    assert service._disconnecting is True
+    assert websocket.closed
