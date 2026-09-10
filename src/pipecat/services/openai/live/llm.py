@@ -21,7 +21,6 @@ from websockets.exceptions import ConnectionClosed
 from pipecat.adapters.services.open_ai_live_adapter import (
     OpenAILiveLLMAdapter,
     OpenAILiveLLMInvocationParams,
-    OpenAILiveLLMToolParams,
 )
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -488,22 +487,22 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         await super().push_frame(frame, direction)
 
     async def _handle_context(self, context: LLMContext):
+        """Take the context, configuring the session from the first one.
+
+        A later context carries messages the aggregators recorded from this
+        session's own transcripts, tool results (delivered to the API as they
+        are produced, see :meth:`push_frame`), or messages the app appended.
+        None of it reaches the API: user and assistant messages can't be told
+        apart from the transcript recordings. Newly appended system/developer
+        messages can only come from the app (the aggregators add user,
+        assistant and tool messages, and async-tool envelopes that
+        ``async_tool_messages.parse_message`` identifies), so a future diff
+        could forward those as ``session.context.append(channel="developer")``
+        unambiguously.
+        """
         self._context = context
         if self._needs_session_config:
             await self._send_session_config()
-            return
-
-        # A later context carries messages the aggregators recorded from this
-        # session's own transcripts, tool results (delivered to the API as
-        # they are produced, see push_frame), or messages the app appended.
-        # The app's additions are not forwarded to the API: user and
-        # assistant messages can't be told apart from the transcript
-        # recordings. Newly appended system/developer messages can only come
-        # from the app (the aggregators add user, assistant and tool messages,
-        # and async-tool envelopes that async_tool_messages.parse_message
-        # identifies), so a future diff could forward those as
-        # session.context.append(channel="developer") unambiguously.
-        await self._maybe_send_tools_update()
 
     #
     # session configuration
@@ -570,9 +569,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             and isinstance(self._delegation, ResponsesDelegation)
         ):
             return
-        # Only the tool configuration is derived here: the startup history
-        # grows with the conversation, and the comparison never reads it.
-        params = self.get_llm_adapter().get_tool_params(self._context)
+        params = self._invocation_params()
         snapshot = self._tools_snapshot(params)
         if snapshot == self._sent_tools_snapshot:
             return
@@ -589,7 +586,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
 
     @staticmethod
-    def _tools_snapshot(params: OpenAILiveLLMToolParams) -> str:
+    def _tools_snapshot(params: OpenAILiveLLMInvocationParams) -> str:
         return json.dumps(
             {"tools": params["tools"], "tool_choice": params["tool_choice"]},
             sort_keys=True,
@@ -734,6 +731,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             "interrupted by itself; no InterruptionFrame is broadcast, so tools run to "
             "completion regardless of cancel_on_interruption."
         )
+        # The API takes a session update only once the session has started, so
+        # tools that changed while it was starting are sent now.
+        await self._maybe_send_tools_update()
         await self._call_event_handler("on_session_started", evt.session)
         if self._opening_instruction:
             # Speakable context is how the API asks the model to open the

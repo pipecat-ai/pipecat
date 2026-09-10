@@ -343,29 +343,8 @@ async def test_later_context_frames_send_nothing_in_client_mode():
 
 
 @pytest.mark.asyncio
-async def test_tools_change_sends_sparse_update_in_responses_mode():
-    service = _make_service(delegation=_responses_delegation())
-    recorder = _EventRecorder()
-    service.send_client_event = recorder
-
-    context = LLMContext([{"role": "user", "content": "hi"}], tools=[_weather_tool()])
-    await service._handle_context(context)
-    service._session_started = True
-
-    # Same tools: nothing to send.
-    await service._handle_context(context)
-    assert recorder.of_type("session.update") == []
-
-    # New tool set: sparse delegation update carrying only the tools.
-    context.set_tools(ToolsSchema(standard_tools=[]))
-    await service._handle_context(context)
-    (update,) = recorder.of_type("session.update")
-    assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}
-
-
-@pytest.mark.asyncio
-async def test_set_tools_frame_updates_the_session_without_a_context_frame():
-    """A continuous session gets no context frame per turn, so the frame is what prompts the update."""
+async def test_a_set_tools_frame_sends_a_sparse_update_in_responses_mode():
+    """The frame is what says the tools changed; a context frame carries no such news."""
     service = await _make_service_with_tasks(delegation=_responses_delegation())
     recorder = _EventRecorder()
     service.send_client_event = recorder
@@ -375,11 +354,37 @@ async def test_set_tools_frame_updates_the_session_without_a_context_frame():
     await service._handle_context(context)
     service._session_started = True
 
-    # The user aggregator sets the new tools on the shared context and forwards
-    # the frame; the service turns that into a session update.
+    # Same tools: nothing to send.
+    await service.process_frame(LLMSetToolsFrame(tools=context.tools), FrameDirection.DOWNSTREAM)
+    assert recorder.of_type("session.update") == []
+
+    # New tool set: sparse delegation update carrying only the tools. The user
+    # aggregator sets them on the shared context and forwards the frame.
     new_tools = ToolsSchema(standard_tools=[])
     context.set_tools(new_tools)
     await service.process_frame(LLMSetToolsFrame(tools=new_tools), FrameDirection.DOWNSTREAM)
+
+    (update,) = recorder.of_type("session.update")
+    assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}
+
+
+@pytest.mark.asyncio
+async def test_tools_that_change_while_the_session_starts_are_sent_once_it_has():
+    """A session update has nowhere to land until the session has started."""
+    service = await _make_service_with_tasks(delegation=_responses_delegation())
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    service.push_frame = _FrameRecorder()
+
+    context = LLMContext([{"role": "user", "content": "hi"}], tools=[_weather_tool()])
+    await service._handle_context(context)
+
+    new_tools = ToolsSchema(standard_tools=[])
+    context.set_tools(new_tools)
+    await service.process_frame(LLMSetToolsFrame(tools=new_tools), FrameDirection.DOWNSTREAM)
+    assert recorder.of_type("session.update") == []
+
+    await _drive(service, [_session_started()])
 
     (update,) = recorder.of_type("session.update")
     assert update["session"] == {"delegation": {"type": "responses", "responses": {"tools": []}}}

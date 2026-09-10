@@ -18,30 +18,20 @@ from pipecat.services.openai.live import events
 from pipecat.utils.types import NotGiven, is_given
 
 
-class OpenAILiveLLMToolParams(TypedDict):
-    """The backend model's tool configuration, derived from a universal ``LLMContext``.
-
-    Parameters:
-        tools: Function tools in Responses API format, for the backend model.
-        tool_choice: Tool choice in Responses API format, or ``None``.
-    """
-
-    tools: list[dict[str, Any]]
-    tool_choice: Any | None
-
-
-class OpenAILiveLLMInvocationParams(OpenAILiveLLMToolParams):
+class OpenAILiveLLMInvocationParams(TypedDict):
     """Session configuration derived from a universal ``LLMContext``.
-
-    Carries the tool configuration of :class:`OpenAILiveLLMToolParams` too.
 
     Parameters:
         instructions: System instructions for the live model, or ``None``.
         input: Prior text-only messages to seed the session with.
+        tools: Function tools in Responses API format, for the backend model.
+        tool_choice: Tool choice in Responses API format, or ``None``.
     """
 
     instructions: str | None
     input: list[events.InputItem]
+    tools: list[dict[str, Any]]
+    tool_choice: Any | None
 
 
 class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
@@ -92,25 +82,10 @@ class OpenAILiveLLMAdapter(BaseLLMAdapter[OpenAILiveLLMInvocationParams]):
             system_from_context, system_instruction, discard_context_system=True
         )
 
-        tool_params = self.get_tool_params(context)
         return {
             "instructions": instructions,
             "input": self._to_input_items(messages),
-            "tools": tool_params["tools"],
-            "tool_choice": tool_params["tool_choice"],
-        }
-
-    def get_tool_params(self, context: LLMContext) -> OpenAILiveLLMToolParams:
-        """Derive the backend model's tool configuration from a universal LLM context.
-
-        Args:
-            context: The LLM context containing tools and tool choice.
-
-        Returns:
-            The tool configuration.
-        """
-        # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-        return {
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
             "tool_choice": self._to_tool_choice(context.tool_choice),
         }
