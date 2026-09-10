@@ -10,7 +10,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     Frame,
 )
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
@@ -74,7 +74,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         Returns:
             Always CONTINUE, so subsequent stop strategies are evaluated.
         """
-        if isinstance(frame, EagerEndOfTurnTranscriptionFrame):
+        if isinstance(frame, EagerTranscriptionFrame):
             await self._speculate(frame)
         elif isinstance(frame, EagerEndOfTurnCancelFrame):
             # The service withdrew its prediction, and its frame reaches every
@@ -134,7 +134,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             logger.debug(f"{self}: turn ended unresolved, discarding the speculative response")
             await self.push_frame(EagerEndOfTurnCancelFrame(speculation.id))
 
-    async def _speculate(self, frame: EagerEndOfTurnTranscriptionFrame):
+    async def _speculate(self, frame: EagerTranscriptionFrame):
         """Answer an eager end of turn, leaving the turn open."""
         # Segments committed earlier in this turn are part of what the LLM will
         # see, so they're part of what the committed transcript is compared to.

@@ -11,7 +11,7 @@ complete sentences, only outputting when a sentence-ending pattern is detected.
 """
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
@@ -53,7 +53,7 @@ class SentenceAggregator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # We ignore interim and eager (provisional) transcriptions at this point.
-        if isinstance(frame, (InterimTranscriptionFrame, EagerEndOfTurnTranscriptionFrame)):
+        if isinstance(frame, (InterimTranscriptionFrame, EagerTranscriptionFrame)):
             return
 
         if isinstance(frame, TextFrame):

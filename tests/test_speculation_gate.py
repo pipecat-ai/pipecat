@@ -12,7 +12,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     EndFrame,
     Frame,
     FunctionCallResultFrame,
@@ -521,7 +521,7 @@ class TestGatedPipeline(unittest.IsolatedAsyncioTestCase):
             frames_to_send=[
                 ProposedUserStartedSpeakingFrame(),
                 SleepFrame(),
-                EagerEndOfTurnTranscriptionFrame("book a flight", "user", "t", "abc"),
+                EagerTranscriptionFrame("book a flight", "user", "t", "abc"),
                 SleepFrame(),
                 TranscriptionFrame("Book a flight.", "user", "t"),
                 SleepFrame(),

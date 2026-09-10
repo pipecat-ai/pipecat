@@ -8,7 +8,7 @@ import unittest
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     Frame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -39,7 +39,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         await service._cancel_eager_end_of_turn()
 
         prediction, withdrawal = service.pushed
-        assert isinstance(prediction, EagerEndOfTurnTranscriptionFrame)
+        assert isinstance(prediction, EagerTranscriptionFrame)
         assert prediction.text == "book a flight"
         assert prediction.user_id == "user"
         assert isinstance(withdrawal, EagerEndOfTurnCancelFrame)

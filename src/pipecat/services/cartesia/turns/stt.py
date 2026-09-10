@@ -73,7 +73,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     ``turn.update`` pushes an :class:`InterimTranscriptionFrame`; ``turn.end``
     pushes a final :class:`TranscriptionFrame` followed by a
     :class:`ProposedUserStoppedSpeakingFrame`. ``turn.eager_end`` pushes an
-    :class:`EagerEndOfTurnTranscriptionFrame` and ``turn.resume`` an
+    :class:`EagerTranscriptionFrame` and ``turn.resume`` an
     :class:`EagerEndOfTurnCancelFrame`, which
     :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` uses to
     answer a predicted end of turn ahead of the committed one.

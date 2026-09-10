@@ -9,7 +9,7 @@ import unittest
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     FunctionCallFromLLM,
     InterruptionFrame,
     LLMContextFrame,
@@ -47,8 +47,8 @@ def aggregator(
     )
 
 
-def eager(text: str, speculation_id: str = "abc") -> EagerEndOfTurnTranscriptionFrame:
-    return EagerEndOfTurnTranscriptionFrame(text, "user", "2026-09-03T00:00:00Z", speculation_id)
+def eager(text: str, speculation_id: str = "abc") -> EagerTranscriptionFrame:
+    return EagerTranscriptionFrame(text, "user", "2026-09-03T00:00:00Z", speculation_id)
 
 
 def final(text: str) -> TranscriptionFrame:
@@ -246,7 +246,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        assert not any(isinstance(f, EagerEndOfTurnTranscriptionFrame) for f in down)
+        assert not any(isinstance(f, EagerTranscriptionFrame) for f in down)
 
 
 class SpeculativeToolCallLLM(LLMService):

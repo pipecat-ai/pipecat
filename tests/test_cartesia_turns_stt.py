@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from pipecat.frames.frames import EagerEndOfTurnTranscriptionFrame
+from pipecat.frames.frames import EagerTranscriptionFrame
 from pipecat.services.cartesia.turns.stt import CartesiaTurnsSTTService
 from pipecat.turns.user_turn_strategies import (
     EagerUserTurnStrategies,
@@ -100,7 +100,7 @@ def test_cartesia_turns_recommends_eager_strategies_when_asked():
 
 @pytest.mark.asyncio
 async def test_cartesia_turns_reports_an_eager_end_of_turn_only_when_enabled():
-    for enabled, expected in ((False, []), (True, [EagerEndOfTurnTranscriptionFrame])):
+    for enabled, expected in ((False, []), (True, [EagerTranscriptionFrame])):
         service = _service(enable_eager_end_of_turn=enabled)
         service.push_frame = AsyncMock()
 

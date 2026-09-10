@@ -498,7 +498,7 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
-class EagerEndOfTurnTranscriptionFrame(TextFrame):
+class EagerTranscriptionFrame(TextFrame):
     """Transcript of a turn a service predicts has ended, before it commits.
 
     Some STT services emit a provisional end of turn ahead of the real one, so a
@@ -1232,7 +1232,7 @@ class EagerEndOfTurnCancelFrame(SystemFrame):
 
     Parameters:
         speculation_id: The prediction being withdrawn, from the
-            :class:`EagerEndOfTurnTranscriptionFrame` that made it.
+            :class:`EagerTranscriptionFrame` that made it.
     """
 
     speculation_id: str

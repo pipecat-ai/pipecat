@@ -13,7 +13,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     EagerEndOfTurnCancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transcriptions.language import Language
@@ -132,7 +132,7 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         self._eager_speculation_id = str(uuid.uuid4())
         logger.trace(f"{self}: eager end of turn: [{transcript}]")
         await self.push_frame(
-            EagerEndOfTurnTranscriptionFrame(
+            EagerTranscriptionFrame(
                 transcript,
                 user_id,
                 time_now_iso8601(),

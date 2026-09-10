@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EagerEndOfTurnTranscriptionFrame,
+    EagerTranscriptionFrame,
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
@@ -824,7 +824,7 @@ class LLMUserAggregator(LLMContextAggregator):
             (
                 InterimTranscriptionFrame,
                 TranslationFrame,
-                EagerEndOfTurnTranscriptionFrame,
+                EagerTranscriptionFrame,
             ),
         ):
             # Interim transcriptions, translations and eager end-of-turn
@@ -1194,7 +1194,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 InputAudioRawFrame,
                 InterimTranscriptionFrame,
                 TranscriptionFrame,
-                EagerEndOfTurnTranscriptionFrame,
+                EagerTranscriptionFrame,
             ),
         )
 
@@ -2147,7 +2147,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 TranscriptionFrame,
                 TranslationFrame,
                 InterimTranscriptionFrame,
-                EagerEndOfTurnTranscriptionFrame,
+                EagerTranscriptionFrame,
             ),
         ):
             return
