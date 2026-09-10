@@ -21,8 +21,8 @@ from typing import Any
 from loguru import logger
 
 from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame
-from pipecat.pipeline.job_context import JobEvent, JobParams
+from pipecat.frames.frames import ErrorFrame, LLMContextFrame, LLMMessagesAppendFrame
+from pipecat.pipeline.job_context import JobEvent, JobParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -38,6 +38,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.llm_service import LLMService
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.errors import ErrorCategory
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 
@@ -195,6 +196,7 @@ class _BackendRun:
     runs_requested: int = 0
     runs_completed: int = 0
     final_text: str = ""
+    error: str = ""
     finished: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -215,7 +217,9 @@ class BackendLLMWorker(LLMContextWorker):
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
     - response: ``{"text": str}`` — the final answer, or ``""`` if the
-      delegation ended without one.
+      delegation ended without one. A backend LLM failure answers the job
+      with ``JobStatus.ERROR``, so the frontend hears about it as soon as it
+      happens.
 
     The final answer arrives twice, as the last update and as the response, so
     a caller uses one or the other: a frontend relaying output as it arrives
@@ -293,6 +297,10 @@ class BackendLLMWorker(LLMContextWorker):
         async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
             await self._on_assistant_thought(message)
 
+        @self.event_handler("on_pipeline_error")
+        async def on_pipeline_error(worker, frame: ErrorFrame):
+            await self._on_pipeline_error(frame)
+
     @job(name=BACKEND_JOB_NAME, sequential=True)
     async def run_delegation(self, message: BusJobRequestMessage):
         """Run one delegation to completion, streaming what the backend produces as updates.
@@ -314,6 +322,11 @@ class BackendLLMWorker(LLMContextWorker):
             await run.finished.wait()
         finally:
             self._run = None
+        # An error fails the job only when it left the backend with nothing to say.
+        if run.error and not run.final_text:
+            logger.warning(f"Worker '{self.name}': job {message.job_id} failed: {run.error}")
+            await self.send_job_response(message.job_id, {"text": ""}, status=JobStatus.ERROR)
+            return
         await self.send_job_response(message.job_id, {"text": run.final_text})
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
@@ -343,6 +356,19 @@ class BackendLLMWorker(LLMContextWorker):
         if finished:
             run.final_text = sent.text if sent else ""
             run.finished.set()
+
+    async def _on_pipeline_error(self, frame: ErrorFrame):
+        """End the delegation in progress: the backend cannot answer it.
+
+        A tool handler that raises is the exception. The LLM service reports
+        that as ``ErrorCategory.APPLICATION``, settles the call with an error
+        result and carries on, so the delegation still has an answer coming.
+        """
+        run = self._run
+        if run is None or frame.category == ErrorCategory.APPLICATION:
+            return
+        run.error = frame.error
+        run.finished.set()
 
     async def _on_assistant_thought(self, message: AssistantThoughtMessage):
         run = self._run

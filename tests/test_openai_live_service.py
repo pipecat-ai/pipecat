@@ -159,8 +159,11 @@ def _delegation_created(delegation_id: str, target: str = "client") -> dict[str,
     return {"type": "session.delegation.created", "offset_ms": 1000, "delegation": delegation}
 
 
-def _response_event(inner: dict[str, Any], delegation_id: str = "item_d1") -> dict[str, Any]:
-    return {"type": "response.event", "delegation_id": delegation_id, "event": inner}
+def _response_event(inner: dict[str, Any], delegation_id: str | None = "item_d1") -> dict[str, Any]:
+    envelope: dict[str, Any] = {"type": "response.event", "event": inner}
+    if delegation_id is not None:
+        envelope["delegation_id"] = delegation_id
+    return envelope
 
 
 def _session_started() -> dict[str, Any]:
@@ -594,6 +597,34 @@ async def test_a_gap_ends_a_turn_and_the_next_fragment_starts_another():
 
 
 @pytest.mark.asyncio
+async def test_a_turn_closing_as_the_next_one_opens_keeps_its_frames_together():
+    """The gap timer closes a turn from its own task, alongside the receive loop."""
+    service = await _make_service_with_tasks()
+    recorder = _FrameRecorder()
+
+    async def suspending_push(frame, direction=FrameDirection.DOWNSTREAM):
+        await asyncio.sleep(0)
+        await recorder(frame, direction)
+
+    service.push_frame = suspending_push
+
+    await _drive(service, [_transcript_delta("assistant", "First.")])
+    await asyncio.gather(
+        service._close_turn("assistant"),
+        _drive(service, [_transcript_delta("assistant", "Second.", start_ms=5000)]),
+    )
+    await _let_turns_close(service)
+
+    brackets = recorder.of_types(LLMFullResponseStartFrame, LLMFullResponseEndFrame)
+    assert [type(f) for f in brackets] == [
+        LLMFullResponseStartFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
+        LLMFullResponseEndFrame,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_both_speakers_can_hold_a_turn_at_once():
     """Full duplex: the two directions are grouped independently."""
     service = await _make_service_with_tasks()
@@ -724,6 +755,35 @@ async def test_function_result_is_queued_and_the_response_continued_once_all_are
         )
     )
     assert len(recorder.of_type("response.item.create")) == 2
+    assert len(recorder.of_type("response.create")) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_envelope_without_a_delegation_id_still_correlates_its_events():
+    """The wrapped Responses events do not all name their response."""
+    service = _make_service(delegation=_responses_delegation())
+    service._context = LLMContext([], tools=[_weather_tool()])
+    service.run_function_calls = AsyncMock()
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+
+    await _drive(
+        service,
+        [
+            _response_event(_response_created(), delegation_id=None),
+            _response_event(_function_call_item("call_1"), delegation_id=None),
+            _response_event(_response_completed(), delegation_id=None),
+        ],
+    )
+    await service.push_frame(
+        FunctionCallResultFrame(
+            function_name="get_weather",
+            tool_call_id="call_1",
+            arguments={"location": "Seattle"},
+            result={"temp": 62},
+        )
+    )
+
     assert len(recorder.of_type("response.create")) == 1
 
 
@@ -1159,6 +1219,19 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkeypatch):
+    async def silent_delegate_to_backend(*args, **kwargs):
+        return ""
+
+    service, recorder = await _client_delegation_service(monkeypatch, silent_delegate_to_backend)
+
+    await service._run_client_delegation(_client_delegation("item_d1"))
+
+    (append,) = recorder.of_type("session.commentary.append")
+    assert "without an answer" in append["content"]
+
+
+@pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
     async def _delegate_to_backend(*args, on_update, **kwargs):
         text = " ".join(f"Sentence number {i} is here." for i in range(120))
@@ -1171,7 +1244,7 @@ async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkey
     appends = recorder.of_type("session.commentary.append")
     assert len(appends) > 1
     for append in appends:
-        assert len(append["content"]) <= live_llm.MAX_CONTEXT_APPEND_CHARS
+        assert live_llm._estimated_tokens(append["content"]) <= live_llm.MAX_CONTEXT_APPEND_TOKENS
         assert append["content"].endswith(".")
     assert " ".join(a["content"] for a in appends).count("Sentence number") == 120
 
@@ -1179,6 +1252,15 @@ async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkey
 def test_chunk_text_splits_overlong_sentences_on_whitespace():
     words = " ".join(["word"] * 400)
     chunks = live_llm._chunk_text(words, 100)
-    assert all(len(c) <= 100 for c in chunks)
+    assert all(live_llm._estimated_tokens(c) <= 100 for c in chunks)
     assert " ".join(chunks) == words
     assert live_llm._chunk_text("   ", 100) == []
+
+
+def test_chunk_text_keeps_cjk_within_the_token_budget():
+    # CJK costs about a token per character, so the same character count buys
+    # far fewer of them than Latin script does.
+    text = "".join("天気はどうですか。" for _ in range(200))
+    chunks = live_llm._chunk_text(text, 100)
+    assert all(live_llm._estimated_tokens(c) <= 100 for c in chunks)
+    assert "".join(chunks).count("天気") == 200

@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
 )
+from pipecat.pipeline.job_context import JobError
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
@@ -45,8 +46,8 @@ from pipecat.workers.runner import WorkerRunner
 class _ScriptedLLM(LLMService):
     """Plays one scripted response per LLMContextFrame.
 
-    A script step is ``("text", str)``, ``("thought", str)`` or
-    ``("call", name, call_id, args)``.
+    A script step is ``("text", str)``, ``("thought", str)``,
+    ``("error", str)`` or ``("call", name, call_id, args)``.
     ``settle_secs`` holds the response open after issuing its calls so a fast
     tool can return before the response ends.
     """
@@ -88,6 +89,8 @@ class _ScriptedLLM(LLMService):
                 await self.push_frame(LLMThoughtStartFrame())
                 await self.push_frame(LLMThoughtTextFrame(step[1]))
                 await self.push_frame(LLMThoughtEndFrame())
+            elif step[0] == "error":
+                await self.push_error(error_msg=step[1])
             else:
                 _, name, call_id, args = step
                 calls.append(
@@ -121,6 +124,11 @@ async def check_flight_status(params: FunctionCallParams, flight_number: str):
         flight_number: The flight number.
     """
     await params.result_callback({"status": "delayed", "departure_time": "14:30"})
+
+
+async def raise_an_error(params: FunctionCallParams):
+    """Fail."""
+    raise RuntimeError("the tool broke")
 
 
 async def book_taxi(params: FunctionCallParams, time: str):
@@ -273,6 +281,29 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
     assert text == "It's raining."
     # The tool-only response produces no text; only the final answer is sent.
     assert [(u.text, u.is_final) for u in updates] == [("It's raining.", True)]
+
+
+@pytest.mark.asyncio
+async def test_a_backend_llm_error_fails_the_job():
+    llm = _ScriptedLLM([[("error", "the provider is down")]])
+
+    with pytest.raises(JobError, match="errored"):
+        await _run_backend(llm)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_handler_that_raises_leaves_the_delegation_running():
+    llm = _ScriptedLLM(
+        [
+            [("call", "raise_an_error", "call_1", {})],
+            [("text", "That did not work, sorry.")],
+        ]
+    )
+
+    text, updates, _ = await _run_backend(llm, tools=[raise_an_error])
+
+    assert text == "That did not work, sorry."
+    assert [(u.text, u.is_final) for u in updates] == [("That did not work, sorry.", True)]
 
 
 @pytest.mark.asyncio

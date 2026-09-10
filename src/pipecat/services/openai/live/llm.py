@@ -21,6 +21,7 @@ from websockets.exceptions import ConnectionClosed
 from pipecat.adapters.services.open_ai_live_adapter import (
     OpenAILiveLLMAdapter,
     OpenAILiveLLMInvocationParams,
+    OpenAILiveLLMToolParams,
 )
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -78,9 +79,12 @@ TURN_GAP_SECS = 0.8
 # `session.close` before emitting `session.closed`.
 SESSION_CLOSE_TIMEOUT_SECS = 10.0
 
-# Each context append takes one text part of at most 500 tokens; this keeps
-# a chunk comfortably below that.
-MAX_CONTEXT_APPEND_CHARS = 1200
+# Each context append takes one text part of at most 500 tokens. Chunks are
+# measured against a lower budget, since what counts them is an estimate.
+MAX_CONTEXT_APPEND_TOKENS = 450
+
+# Correlation key for a wrapped event whose envelope carries no delegation id.
+_UNCORRELATED_DELEGATION = "uncorrelated"
 
 
 @dataclass
@@ -105,12 +109,16 @@ class _TurnGrouper:
         text: Fragments accumulated so far.
         open: Whether a turn is currently open.
         timer: The task that closes the turn once ``gap_secs`` elapses.
+        lock: Held while the turn opens or closes. The timer runs in its own
+            task, so this is what keeps one turn's end frames from landing
+            among the next turn's start frames.
     """
 
     gap_secs: float
     text: str = ""
     open: bool = False
     timer: asyncio.Task | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 @dataclass
@@ -562,7 +570,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             and isinstance(self._delegation, ResponsesDelegation)
         ):
             return
-        params = self._invocation_params()
+        # Only the tool configuration is derived here: the startup history
+        # grows with the conversation, and the comparison never reads it.
+        params = self.get_llm_adapter().get_tool_params(self._context)
         snapshot = self._tools_snapshot(params)
         if snapshot == self._sent_tools_snapshot:
             return
@@ -579,7 +589,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
 
     @staticmethod
-    def _tools_snapshot(params: OpenAILiveLLMInvocationParams) -> str:
+    def _tools_snapshot(params: OpenAILiveLLMToolParams) -> str:
         return json.dumps(
             {"tools": params["tools"], "tool_choice": params["tool_choice"]},
             sort_keys=True,
@@ -796,13 +806,14 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._remember_fragment(role, evt.delta)
 
         turn = self._user_turn if role == "user" else self._assistant_turn
-        if not turn.open:
-            turn.open = True
-            turn.text = ""
-            await self._open_turn(role)
-        turn.text += evt.delta
-        await self._append_turn(role, evt.delta, turn.text, evt)
-        await self._restart_turn_timer(role, turn)
+        async with turn.lock:
+            if not turn.open:
+                turn.open = True
+                turn.text = ""
+                await self._open_turn(role)
+            turn.text += evt.delta
+            await self._append_turn(role, evt.delta, turn.text, evt)
+            await self._restart_turn_timer(role, turn)
 
     async def _restart_turn_timer(self, role: str, turn: "_TurnGrouper"):
         if turn.timer is not None:
@@ -811,16 +822,23 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
     async def _close_turn_after_gap(self, role: str, turn: "_TurnGrouper"):
         await asyncio.sleep(turn.gap_secs)
-        # Running inside the turn's own timer, so the timer must not cancel itself.
-        turn.timer = None
-        await self._close_turn(role)
+        async with turn.lock:
+            # Running inside the turn's own timer, so the timer must not cancel itself.
+            turn.timer = None
+            await self._end_turn(role)
 
     async def _close_turn(self, role: str):
         """Close an open turn, if any, emitting its end frames."""
         turn = self._user_turn if role == "user" else self._assistant_turn
-        if turn.timer is not None:
-            await self.cancel_task(turn.timer)
-            turn.timer = None
+        async with turn.lock:
+            if turn.timer is not None:
+                await self.cancel_task(turn.timer)
+                turn.timer = None
+            await self._end_turn(role)
+
+    async def _end_turn(self, role: str):
+        """Emit an open turn's end frames, with the turn's lock held."""
+        turn = self._user_turn if role == "user" else self._assistant_turn
         if not turn.open:
             return
         turn.open = False
@@ -940,7 +958,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         )
         self._delegated_before = True
 
+        answered = False
+
         async def on_update(output: BackendOutput):
+            nonlocal answered
+            answered = True
             await self._send_context_append(
                 delegation.id, output.text, spoken=output.prefers_spoken
             )
@@ -955,6 +977,16 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 on_update=on_update,
                 timeout_secs=config.timeout_secs,
             )
+            if not answered:
+                # The live model holds the conversation until the delegation
+                # says something, so a run that produced no text still gets a
+                # word back.
+                logger.warning(f"{self}: delegation {delegation.id} produced no output")
+                await self._send_context_append(
+                    delegation.id,
+                    "The delegated work finished without an answer.",
+                    spoken=True,
+                )
         except Exception as e:
             logger.warning(f"{self}: delegation {delegation.id} failed: {e}")
             await self._send_context_append(
@@ -974,7 +1006,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         go unspoken without being anything like a thought.
         """
         channel = "commentary" if spoken else "thinking"
-        for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_CHARS):
+        for chunk in _chunk_text(text, MAX_CONTEXT_APPEND_TOKENS):
             logger.debug(f"{self}: delegation {delegation_id} {channel} context: {chunk!r}")
             event_class = (
                 events.SessionCommentaryAppendEvent if spoken else events.SessionThinkingAppendEvent
@@ -1000,13 +1032,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     def _track_response(self, evt: events.ResponseEventEnvelope) -> str:
         """Remember a delegated response so its function calls can be collected.
 
-        Correlation runs on the envelope's delegation, which every wrapped
-        event carries; the individual Responses events do not all name their
-        response.
+        Returns:
+            The response's correlation key.
         """
         key = _correlation_key(evt)
-        if key and key not in self._pending_responses:
-            self._pending_responses[key] = _PendingResponse(delegation_id=evt.delegation_id)
+        self._pending_responses.setdefault(key, _PendingResponse())
         return key
 
     async def _handle_response_output_item_done(self, evt: events.ResponseEventEnvelope):
@@ -1032,10 +1062,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             return
 
         key = self._track_response(evt)
-        pending = self._pending_responses.get(key)
-        if pending is not None:
-            pending.call_ids.add(item.call_id)
-            pending.had_calls = True
+        pending = self._pending_responses[key]
+        pending.call_ids.add(item.call_id)
+        pending.had_calls = True
         self._open_function_calls[item.call_id] = key
         await self.run_function_calls(
             [
@@ -1155,13 +1184,11 @@ class _PendingResponse:
     """A delegated Responses run whose function calls we are collecting.
 
     Parameters:
-        delegation_id: The delegation the response belongs to.
         call_ids: Calls still awaiting an output.
         had_calls: Whether the response asked for any function call at all.
         finished: Whether the response emitted all of its output items.
     """
 
-    delegation_id: str | None = None
     call_ids: set[str] = field(default_factory=set)
     had_calls: bool = False
     finished: bool = False
@@ -1170,16 +1197,12 @@ class _PendingResponse:
 def _correlation_key(evt: events.ResponseEventEnvelope) -> str:
     """Identify the delegated work a wrapped Responses event belongs to.
 
-    The envelope's ``delegation_id`` is the correlator the API guarantees; the
-    response id is a fallback for an envelope that arrives without one.
+    The envelope's ``delegation_id`` is the correlator every wrapped event
+    carries; the Responses events inside do not all name their response. An
+    envelope without one falls back to a shared key, which keeps a single
+    delegated response's events together.
     """
-    if evt.delegation_id:
-        return evt.delegation_id
-    response = evt.event.get("response")
-    if isinstance(response, dict) and isinstance(response.get("id"), str):
-        return response["id"]
-    response_id = evt.event.get("response_id")
-    return response_id if isinstance(response_id, str) else ""
+    return evt.delegation_id or _UNCORRELATED_DELEGATION
 
 
 def _trailing_developer_text(items: list[events.InputItem]) -> str | None:
@@ -1239,11 +1262,51 @@ def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, A
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
-def _chunk_text(text: str, limit: int) -> list[str]:
-    """Split text into chunks of at most ``limit`` characters, preferring sentence boundaries."""
+def _estimated_tokens(text: str) -> int:
+    """Estimate how many tokens a piece of text costs.
+
+    A byte-pair encoding packs about four characters of ASCII into a token.
+    Other scripts cost more per character — CJK runs close to one token each —
+    so anything outside ASCII is counted whole.
+    """
+    return (_token_quarters(text) + 3) // 4
+
+
+def _token_quarters(text: str) -> int:
+    """Return a text's cost in quarter-tokens: one for an ASCII character, four for any other."""
+    return sum(1 if char.isascii() else 4 for char in text)
+
+
+def _split_at_token_limit(text: str, token_limit: int) -> tuple[str, str]:
+    """Split off the longest prefix of ``text`` that fits ``token_limit``.
+
+    The cut lands on the last space within the limit, so words stay whole.
+    """
+    budget = token_limit * 4
+    end = len(text)
+    cost = 0
+    for index, char in enumerate(text):
+        cost += _token_quarters(char)
+        if cost > budget:
+            end = max(index, 1)
+            break
+    space = text.rfind(" ", 0, end)
+    if space > 0:
+        end = space
+    return text[:end].strip(), text[end:].strip()
+
+
+def _chunk_text(text: str, token_limit: int) -> list[str]:
+    """Split text into chunks of at most ``token_limit`` estimated tokens.
+
+    Chunks break on sentence boundaries; a sentence longer than the limit is
+    split at a space.
+    """
     text = text.strip()
-    if len(text) <= limit:
-        return [text] if text else []
+    if not text:
+        return []
+    if _estimated_tokens(text) <= token_limit:
+        return [text]
 
     chunks: list[str] = []
     current = ""
@@ -1256,17 +1319,13 @@ def _chunk_text(text: str, limit: int) -> list[str]:
 
     for piece in _SENTENCE_BOUNDARY.split(text):
         piece = piece.strip()
-        while len(piece) > limit:
-            # An overlong sentence: cut at the last space before the limit.
-            cut = piece.rfind(" ", 0, limit)
-            if cut <= 0:
-                cut = limit
+        while _estimated_tokens(piece) > token_limit:
+            head, piece = _split_at_token_limit(piece, token_limit)
             flush()
-            chunks.append(piece[:cut].strip())
-            piece = piece[cut:].strip()
+            chunks.append(head)
         if not piece:
             continue
-        if current and len(current) + 1 + len(piece) > limit:
+        if current and _estimated_tokens(f"{current} {piece}") > token_limit:
             flush()
         current = f"{current} {piece}".strip()
     flush()
