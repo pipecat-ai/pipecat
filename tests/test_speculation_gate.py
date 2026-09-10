@@ -82,6 +82,18 @@ async def _collect(into: list, frames: list[GatedFrame]):
     into.append([frame for frame, _ in frames])
 
 
+def speculate(
+    gate: SpeculationGate, speculation_id: str | None, *texts: str, end: bool = True, then=()
+) -> list[Frame]:
+    """Run an inference through the gate the way a host does.
+
+    The gate is told what the inference answers before its frames arrive, which
+    is what decides whether the response is held.
+    """
+    gate.begin_speculation(speculation_id)
+    return emit(gate, *response(speculation_id, *texts, end=end), *then)
+
+
 def emit(gate: SpeculationGate, *frames: Frame) -> list[Frame]:
     """Send frames through the gate, collecting everything it lets out."""
     emitted = []
@@ -98,7 +110,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_non_speculative_response_passes_through(self):
         gate = await make_gate()
 
-        assert types(emit(gate, *response(None, "Hello."))) == [
+        assert types(speculate(gate, None, "Hello.")) == [
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMFullResponseEndFrame,
@@ -107,7 +119,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_speculative_response_is_held_until_the_turn_ends(self):
         gate = await make_gate()
 
-        assert emit(gate, *response("abc", "Booking ", "your flight.")) == []
+        assert speculate(gate, "abc", "Booking ", "your flight.") == []
         assert gate.state == SpeculationState.HOLDING
 
         # Confirmed: the whole response follows, in the order it was generated.
@@ -128,7 +140,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_withdrawn_speculation_is_discarded(self):
         gate = await make_gate()
 
-        assert emit(gate, *response("abc", "Cancelling ", "your booking.", end=False)) == []
+        assert speculate(gate, "abc", "Cancelling ", "your booking.", end=False) == []
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
             EagerEndOfTurnCancelFrame
         ]
@@ -136,7 +148,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         # Straggling frames of the withdrawn response, still queued behind the
         # cancellation, which overtook them.
         assert emit(gate, LLMTextFrame(" Done.")) == []
-        assert types(emit(gate, *response(None, "Rescheduling instead."))) == [
+        assert types(speculate(gate, None, "Rescheduling instead.")) == [
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMFullResponseEndFrame,
@@ -150,8 +162,8 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
             EagerEndOfTurnCancelFrame
         ]
-        assert emit(gate, *response("abc", "Cancelling.")) == []
-        assert types(emit(gate, *response(None, "Rescheduling instead."))) == [
+        assert speculate(gate, "abc", "Cancelling.") == []
+        assert types(speculate(gate, None, "Rescheduling instead.")) == [
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMFullResponseEndFrame,
@@ -160,7 +172,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_withdrawal_leaves_a_different_speculation_alone(self):
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking."))
+        speculate(gate, "abc", "Booking.")
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="other"))) == [
             EagerEndOfTurnCancelFrame
         ]
@@ -176,7 +188,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         gate = await make_gate()
         audio = TTSAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1)
 
-        assert emit(gate, *response("abc", "Hi.", end=False), audio) == []
+        assert speculate(gate, "abc", "Hi.", end=False, then=(audio,)) == []
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
             EagerEndOfTurnCancelFrame
         ]
@@ -184,13 +196,13 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
     async def test_interruption_discards_the_speculation(self):
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False))
+        speculate(gate, "abc", "Booking.", end=False)
         assert types(emit(gate, InterruptionFrame())) == [InterruptionFrame]
 
     async def test_upstream_frames_are_never_held(self):
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False))
+        speculate(gate, "abc", "Booking.", end=False)
         upstream = LLMTextFrame("upstream")
         assert gate.process(upstream, FrameDirection.UPSTREAM) == [
             (upstream, FrameDirection.UPSTREAM)
@@ -201,14 +213,14 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         # would hang shutdown.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False), tool_result())
+        speculate(gate, "abc", "Booking.", end=False, then=(tool_result(),))
         assert types(emit(gate, EndFrame())) == [FunctionCallResultFrame, EndFrame]
 
     async def test_a_hold_that_outlasts_its_bound_is_discarded(self):
         expired = []
         gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
 
-        emit(gate, *response("abc", "Booking."))
+        speculate(gate, "abc", "Booking.")
         await asyncio.sleep(0.2)
 
         assert gate.state == SpeculationState.OPEN
@@ -222,7 +234,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         expired = []
         gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
 
-        emit(gate, *response("abc", "Booking."))
+        speculate(gate, "abc", "Booking.")
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
         await asyncio.sleep(0.2)
 
@@ -232,34 +244,86 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         expired = []
         gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
 
-        emit(gate, *response("abc", "Booking.", end=False), tool_result())
+        speculate(gate, "abc", "Booking.", end=False, then=(tool_result(),))
         await asyncio.sleep(0.2)
 
         assert [types(batch) for batch in expired] == [[FunctionCallResultFrame]]
 
 
-class TestSpeculationHoldSignal(unittest.IsolatedAsyncioTestCase):
-    """`speculation_id` is what a host arms its hold timer on."""
+class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
+    """What the gate reports about the inference in flight.
 
-    async def test_it_names_the_held_speculation_only_while_holding(self):
+    A host asks this rather than tracking it alongside, so it has to hold up
+    however the turn and the inference are ordered.
+    """
+
+    async def test_an_ordinary_inference_is_never_pending(self):
+        gate = await make_gate()
+        gate.begin_speculation(None)
+
+        assert gate.speculation_id is None
+
+    async def test_it_names_the_inference_until_the_turn_is_confirmed(self):
         gate = await make_gate()
         assert gate.speculation_id is None
 
-        emit(gate, *response("abc", "Booking."))
+        speculate(gate, "abc", "Booking.", end=False)
         assert gate.speculation_id == "abc"
 
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
         assert gate.speculation_id is None
 
-    async def test_a_superseding_speculation_renames_the_hold(self):
-        # The timer has to start over rather than inherit the remainder of the
-        # hold it supersedes.
+    async def test_a_turn_confirmed_mid_inference_clears_it_before_the_response_ends(self):
+        # The window the feature exists to exploit: the turn is confirmed while
+        # the inference is still generating, so what it does next is committed.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False))
-        assert gate.speculation_id == "abc"
+        gate.begin_speculation("abc")
+        emit(gate, response("abc", "Let me check.", end=False)[0])
+        emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
 
-        emit(gate, *response("def", "Rescheduling.", end=False))
+        assert gate.speculation_id is None
+
+    async def test_a_turn_confirmed_before_the_inference_is_never_pending(self):
+        # The confirmation is a system frame and can pass the context frame that
+        # starts the inference it confirms.
+        gate = await make_gate()
+
+        emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
+        gate.begin_speculation("abc")
+
+        assert gate.speculation_id is None
+        # And nothing is held back, since the turn it answers is already over.
+        assert types(emit(gate, *response("abc", "Booking."))) == [
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+
+    async def test_a_withdrawal_clears_it(self):
+        gate = await make_gate()
+
+        speculate(gate, "abc", "Booking.", end=False)
+        emit(gate, EagerEndOfTurnCancelFrame("abc"))
+
+        assert gate.speculation_id is None
+
+    async def test_an_interruption_clears_it(self):
+        gate = await make_gate()
+
+        speculate(gate, "abc", "Booking.", end=False)
+        emit(gate, InterruptionFrame())
+
+        assert gate.speculation_id is None
+
+    async def test_a_superseding_inference_keeps_its_own(self):
+        # Dropping the held response ends that hold, but the inference that
+        # replaced it is pending and must stay so.
+        gate = await make_gate()
+
+        speculate(gate, "abc", "Booking.", end=False)
+        speculate(gate, "def", "Rescheduling.", end=False)
+
         assert gate.speculation_id == "def"
 
 
@@ -289,7 +353,7 @@ class TestSpeculationGateOrdering(unittest.IsolatedAsyncioTestCase):
         # two signals can arrive in either order.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Cancelling.", end=False))
+        speculate(gate, "abc", "Cancelling.", end=False)
         assert types(emit(gate, UserStoppedSpeakingFrame())) == [UserStoppedSpeakingFrame]
         assert types(emit(gate, EagerEndOfTurnCancelFrame(speculation_id="abc"))) == [
             EagerEndOfTurnCancelFrame
@@ -301,7 +365,7 @@ class TestSpeculationGateOrdering(unittest.IsolatedAsyncioTestCase):
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
             UserStoppedSpeakingFrame
         ]
-        assert types(emit(gate, *response("abc", "Booking."))) == [
+        assert types(speculate(gate, "abc", "Booking.")) == [
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMFullResponseEndFrame,
@@ -316,8 +380,8 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
         gate = await make_gate()
 
         emit(gate, EagerEndOfTurnCancelFrame("abc"))
-        assert emit(gate, *response("abc", "Cancelling.", end=False)) == []
-        assert types(emit(gate, *response(None, "Rescheduling instead."))) == [
+        assert speculate(gate, "abc", "Cancelling.", end=False) == []
+        assert types(speculate(gate, None, "Rescheduling instead.")) == [
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMFullResponseEndFrame,
@@ -332,8 +396,8 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
         # frame that arrived after it.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False))
-        emitted = emit(gate, *response(None, "Something else entirely."))
+        speculate(gate, "abc", "Booking.", end=False)
+        emitted = speculate(gate, None, "Something else entirely.")
 
         assert types(emitted) == [
             LLMFullResponseStartFrame,
@@ -352,7 +416,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         # guaranteed delivery, so discarding the speculation around it keeps it.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False), tool_result())
+        speculate(gate, "abc", "Booking.", end=False, then=(tool_result(),))
         emitted = emit(gate, EagerEndOfTurnCancelFrame("abc"))
 
         assert types(emitted) == [EagerEndOfTurnCancelFrame, FunctionCallResultFrame]
@@ -363,7 +427,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         # mid-response is released in the position it arrived in.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False), tool_result())
+        speculate(gate, "abc", "Booking.", end=False, then=(tool_result(),))
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
             UserStoppedSpeakingFrame,
             LLMFullResponseStartFrame,
@@ -376,7 +440,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         # uninterruptible frame passes on in order rather than being dropped.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking.", end=False))
+        speculate(gate, "abc", "Booking.", end=False)
         assert types(emit(gate, EagerEndOfTurnCancelFrame("abc"))) == [EagerEndOfTurnCancelFrame]
         # Still queued behind the withdrawal, which overtook it.
         assert types(emit(gate, LLMTextFrame(" Done."), tool_result())) == [FunctionCallResultFrame]
@@ -388,7 +452,7 @@ class TestResolvedResponsesCarryNoSpeculationId(unittest.IsolatedAsyncioTestCase
         # downstream means nothing held the response back.
         gate = await make_gate()
 
-        emit(gate, *response("abc", "Booking."))
+        speculate(gate, "abc", "Booking.")
         emitted = emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
 
         assert [
@@ -401,7 +465,7 @@ class TestResolvedResponsesCarryNoSpeculationId(unittest.IsolatedAsyncioTestCase
         gate = await make_gate()
 
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
-        emitted = emit(gate, *response("abc", "Booking."))
+        emitted = speculate(gate, "abc", "Booking.")
 
         assert [
             f.speculation_id

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 
 from pipecat.frames.frames import (
@@ -515,7 +516,7 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
             ImpatientLLM(),
             frames_to_send=[
                 self.context_frame("abc"),
-                SleepFrame(sleep=0.5),
+                SleepFrame(sleep=0.8),
                 # Confirmation arriving after the service gave up on it.
                 UserStoppedSpeakingFrame(speculation_id="abc"),
                 SleepFrame(),
@@ -523,3 +524,117 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
         )
 
         assert self.response_frames(down) == []
+
+
+class StreamingToolCallLLM(LLMService):
+    """LLM service whose completion streams for a while before calling a tool.
+
+    Models the window the feature exists to exploit: the committed end of turn
+    can land while the response is still being generated, before the call the
+    response ends up making.
+    """
+
+    def __init__(self, *, stream_for: float, **kwargs):
+        super().__init__(settings=LLMSettings(model="test-model"), **kwargs)
+        self._stream_for = stream_for
+        self.calls: list[str] = []
+        self.register_function("book_flight", lambda params: self.calls.append(params.tool_call_id))
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMTextFrame("Let me check that."))
+        # The turn can be confirmed anywhere in here.
+        await asyncio.sleep(self._stream_for)
+        await self.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="book_flight",
+                    tool_call_id="call-1",
+                    arguments={},
+                    context=frame.context,
+                )
+            ]
+        )
+        await self.push_frame(LLMFullResponseEndFrame())
+
+
+class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
+    """A tool call is speculative only until the turn it answers is confirmed."""
+
+    @staticmethod
+    def context_frame(speculation_id=None):
+        context = LLMContext(messages=[{"role": "user", "content": "book a flight"}])
+        return LLMContextFrame(context=context, speculation_id=speculation_id)
+
+    @staticmethod
+    def withdrawals(down, up):
+        return [f for f in [*down, *up] if isinstance(f, EagerEndOfTurnCancelFrame)]
+
+    async def test_a_turn_confirmed_mid_stream_lets_the_call_run(self):
+        # The committed end of turn arrives while the response is still
+        # generating, so by the time it reaches its tool call the response is
+        # confirmed and the call is an ordinary one.
+        llm = StreamingToolCallLLM(stream_for=0.4)
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[
+                self.context_frame("abc"),
+                SleepFrame(sleep=0.15),
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        assert llm.calls == ["call-1"]
+        # The released response survives: nothing withdraws it, which is what
+        # used to leave the bot speaking a preamble and then falling silent.
+        assert [f.text for f in down if isinstance(f, LLMTextFrame)] == ["Let me check that."]
+        assert self.withdrawals(down, up) == []
+
+    async def test_a_confirmation_that_overtakes_the_inference_lets_the_call_run(self):
+        # The confirmation is a system frame, so it can pass the context frame
+        # that starts the inference it confirms.
+        llm = StreamingToolCallLLM(stream_for=0.1)
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[
+                UserStoppedSpeakingFrame(speculation_id="abc"),
+                SleepFrame(),
+                self.context_frame("abc"),
+                SleepFrame(sleep=0.5),
+            ],
+        )
+
+        assert llm.calls == ["call-1"]
+        assert self.withdrawals(down, up) == []
+
+    async def test_a_call_reached_before_the_turn_ends_is_withdrawn(self):
+        # Still speculative: the tool must not run, and the withdrawal names the
+        # speculation so the strategy re-runs on the committed transcript.
+        llm = StreamingToolCallLLM(stream_for=0.05)
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[self.context_frame("abc"), SleepFrame(sleep=0.8)],
+        )
+
+        assert llm.calls == []
+        assert [f.speculation_id for f in self.withdrawals(down, up)] == ["abc", "abc"]
+
+    async def test_an_ordinary_inference_calls_its_tool(self):
+        llm = StreamingToolCallLLM(stream_for=0.05)
+
+        down, up = await run_test(
+            llm,
+            frames_to_send=[self.context_frame(), SleepFrame(sleep=0.8)],
+        )
+
+        assert llm.calls == ["call-1"]
+        assert self.withdrawals(down, up) == []
