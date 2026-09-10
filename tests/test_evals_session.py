@@ -1927,6 +1927,24 @@ class TestSessionFromScenario(unittest.TestCase):
                 self.assertEqual(session._params.default_timeout_ms, 1234)
                 self.assertFalse(session._params.use_cache)
 
+    def test_deprecated_progress_callback_reaches_a_script_session(self):
+        seen = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            session = EvalSession.from_scenario(
+                self._script(), "ws://localhost:0", on_progress=seen.append
+            )
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIsInstance(session, EvalScriptSession)
+        with self.assertRaises(ValueError):
+            EvalSession.from_scenario(
+                self._simulation(),
+                "ws://localhost:0",
+                persona_llm=_ScriptedPersonaLLM({}),
+                judge=_YesJudge(),
+                on_progress=seen.append,
+            )
+
     def test_persona_llm_is_rejected_for_a_script(self):
         with self.assertRaises(ValueError):
             EvalSession.from_scenario(

@@ -289,6 +289,17 @@
       "location": "pipecat/evals/session.py"
     },
     {
+      "subject": "EvalSession.from_scenario.on_progress",
+      "module": "pipecat.evals.session",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_progress",
+      "message": "Use the ``on_progress`` event handler instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/session.py"
+    },
+    {
       "subject": "EvalSession.from_scenario.record_path",
       "module": "pipecat.evals.session",
       "kind": "parameter",
