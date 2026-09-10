@@ -130,7 +130,7 @@ class _EventRecorder:
         self.events: list[dict[str, Any]] = []
 
     async def __call__(self, event: events.ClientEvent):
-        self.events.append(event.model_dump(exclude_none=True))
+        self.events.append(event.to_payload())
 
     def of_type(self, event_type: str) -> list[dict[str, Any]]:
         return [e for e in self.events if e["type"] == event_type]
@@ -397,6 +397,23 @@ async def test_a_failed_disconnect_still_allows_the_next_session_to_send():
 
     service.push_error.assert_awaited_once()
     assert service._disconnecting is False
+
+
+@pytest.mark.asyncio
+async def test_the_opening_nudge_carries_a_null_delegation_id():
+    """The append is session-wide, and the API requires the field even so."""
+    service = await _make_service_with_tasks()
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    service.push_frame = _FrameRecorder()
+
+    context = LLMContext([{"role": "developer", "content": "Greet the user."}])
+    await service._handle_context(context)
+    await _drive(service, [_session_started()])
+
+    (append,) = recorder.of_type("session.commentary.append")
+    assert append["delegation_id"] is None
+    assert append["content"] == "Greet the user."
 
 
 # ---------------------------------------------------------------------------
@@ -1100,9 +1117,11 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
 
     await service._run_client_delegation(_client_delegation("item_d1"))
 
+    # The model is told the work failed; the detail goes to the error instead.
     (append,) = recorder.of_type("session.commentary.append")
-    assert "timed out" in append["content"]
+    assert "timed out" not in append["content"]
     service.push_error.assert_awaited_once()
+    assert "timed out" in service.push_error.await_args.kwargs["error_msg"]
 
 
 @pytest.mark.asyncio

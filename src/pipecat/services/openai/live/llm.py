@@ -313,6 +313,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._session_started = False
         self._session_closed_event = asyncio.Event()
         self._sent_tools_snapshot: str | None = None
+        # Whether a session has ever started on this service, which tells a
+        # startup failure apart from an error arriving as one shuts down.
+        self._session_ever_started = False
 
         self._resampler = create_stream_resampler()
         self._warned_audio_dropped = False
@@ -520,6 +523,12 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if self._opening_instruction:
             history = history[:-1]
 
+        # Settings the API fixes at session start are read here, so a change
+        # applied mid-session takes effect on the next one.
+        self._session_model = assert_given(self._settings.model) or self._session_model
+        gap = assert_given(self._settings.transcript_turn_gap_secs)
+        self._user_turn.gap_secs = self._assistant_turn.gap_secs = gap
+
         voice = assert_given(self._settings.voice)
         session = events.SessionConfig(
             model=self._session_model,
@@ -713,6 +722,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
     async def _handle_evt_session_started(self, evt: events.SessionStartedEvent):
         self._session_started = True
+        self._session_ever_started = True
         logger.info(
             f"{self}: session {evt.session.id} started. The live model handles being "
             "interrupted by itself; no InterruptionFrame is broadcast, so tools run to "
@@ -737,8 +747,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         details = f"{error.type or 'error'}/{error.code or 'unknown'}: {error.message}"
         if error.param:
             details += f" (param: {error.param})"
-        if not self._session_started:
-            # A startup error means no session will start.
+        if not self._session_ever_started:
+            # No session has started, so this one never will.
             await self.push_error(
                 error_msg=f"Session startup failed: {details}", force_treat_as_permanent=True
             )
@@ -953,7 +963,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             logger.warning(f"{self}: delegation {delegation.id} failed: {e}")
             await self._send_context_append(
                 delegation.id,
-                f"The delegated task could not be completed: {e}",
+                "The delegated work could not be completed.",
                 spoken=True,
             )
             await self.push_error(error_msg=f"Delegation {delegation.id} failed: {e}", exception=e)
