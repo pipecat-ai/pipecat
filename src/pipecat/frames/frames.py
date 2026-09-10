@@ -497,6 +497,33 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class EagerTranscriptionFrame(TextFrame):
+    """Transcript of a turn a service predicts has ended, before it commits.
+
+    Some STT services emit a provisional end of turn ahead of the real one, so a
+    response can be generated during the gap. The prediction may be withdrawn
+    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    from this one, so nothing produced from it may reach the user or the context
+    until it is confirmed. See
+    :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
+
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the eager end of turn occurred.
+        language: Detected or specified language of the speech.
+        result: Raw result from the STT service.
+    """
+
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+    result: Any | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
 class TranslationFrame(TextFrame):
     """Text frame containing translated transcription data.
 
@@ -555,9 +582,14 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
+        speculation: Whether this inference is speculative, run from a
+            provisional context that is not part of the conversation. Its
+            response must not reach the user or the context until the turn is
+            confirmed, and the service must not execute tool calls for it.
     """
 
     context: LLMContext
+    speculation: bool = False
 
 
 @dataclass
@@ -1169,7 +1201,27 @@ class UserStoppedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has ended.
 
     Emitted when the user turn ends. This usually coincides with the start of
-    the bot turn.
+    the bot turn. A
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` releases whatever
+    speculative response it is holding on this frame, since the turn that
+    response answers has now ended.
+    """
+
+    pass
+
+
+@dataclass
+class EagerEndOfTurnCancelFrame(SystemFrame):
+    """Frame withdrawing an eager end of turn.
+
+    Emitted when a service reports the user resumed speaking after an eager end
+    of turn, or when the committed transcript doesn't match the eager one. The
+    LLM service stops generating, and its
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
+    was holding — which is everything the response produced, so nothing further
+    down the pipeline has anything to undo.
+
+    A system frame so it overtakes the speculative output it cancels.
     """
 
     pass
@@ -2085,6 +2137,9 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Used to indicate the beginning of an LLM response. Followed by one or
     more TextFrames and a final LLMFullResponseEndFrame.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
     """
 
     skip_tts: bool | None = field(init=False)
@@ -2096,7 +2151,11 @@ class LLMFullResponseStartFrame(ControlFrame):
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Frame indicating the end of an LLM response."""
+    """Frame indicating the end of an LLM response.
+
+    Parameters:
+        skip_tts: Whether the response should be skipped by the TTS service.
+    """
 
     skip_tts: bool | None = field(init=False)
 

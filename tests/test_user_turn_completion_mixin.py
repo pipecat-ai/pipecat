@@ -688,10 +688,6 @@ class TestSystemInstructionComposition(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._settings.system_instruction, expected)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
     """Markers are configurable, and the prompts follow whatever is configured."""
 
@@ -747,3 +743,7 @@ class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
 
         marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
         self.assertEqual([f.marker for f in marker_frames], ["Y"])
+
+
+if __name__ == "__main__":
+    unittest.main()

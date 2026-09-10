@@ -20,7 +20,6 @@ from typing_extensions import override
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
@@ -30,7 +29,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -173,7 +172,7 @@ class DeepgramFluxSTTSettings(STTSettings):
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class DeepgramFluxSTTBase(STTService):
+class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     """Base class for Deepgram Flux STT services across transports.
 
     Contains all shared Flux protocol logic (message handling, turn detection,
@@ -209,6 +208,10 @@ class DeepgramFluxSTTBase(STTService):
     _ERROR_CODE_CATEGORIES = {
         "UNPARSABLE_CLIENT_MESSAGE": ErrorCategory.INVALID_REQUEST,
     }
+    # Threshold applied when eager end of turn is enabled without one. Flux
+    # reports a prediction only above this confidence: lower is more eager
+    # (faster responses, more discarded inferences), higher more conservative.
+    _DEFAULT_EAGER_EOT_THRESHOLD = 0.5
     # How long an in-flight Configure is trusted before a new update supersedes
     # it outright. Flux caps the number of un-acked Configure messages, so at
     # most one is ever in flight; this bounds how long a missing ack can block
@@ -223,6 +226,7 @@ class DeepgramFluxSTTBase(STTService):
         tag: list | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         settings: Settings,
         **kwargs,
     ):
@@ -240,11 +244,25 @@ class DeepgramFluxSTTBase(STTService):
             watchdog_min_timeout: minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. Off by
+                default: it spends an inference on every prediction, including
+                the ones Flux withdraws. Turning it on sets
+                ``eager_eot_threshold`` to ``_DEFAULT_EAGER_EOT_THRESHOLD`` when the settings leave it
+                unset, since Flux reports no prediction without it.
             settings: Fully resolved settings instance (built by concrete subclass).
             **kwargs: Additional arguments passed to the parent STTService (e.g.
                 ``sample_rate``, ``reconnect_on_error``).
         """
-        super().__init__(settings=settings, **kwargs)
+        super().__init__(
+            settings=settings, enable_eager_end_of_turn=enable_eager_end_of_turn, **kwargs
+        )
+
+        # Flux reports no prediction unless a threshold asks for one, so an
+        # unconfigured threshold would leave the feature silently inert.
+        if self.eager_end_of_turn_enabled and self._settings.eager_eot_threshold is None:
+            self._settings.eager_eot_threshold = self._DEFAULT_EAGER_EOT_THRESHOLD
 
         self._encoding = encoding
         self._mip_opt_out = mip_opt_out
@@ -287,15 +305,17 @@ class DeepgramFluxSTTBase(STTService):
         return True
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies: Flux detects turns server-side.
+        """Recommend turn strategies that leave turn detection to Flux.
 
         Flux emits its own start-of-turn and end-of-turn events (as
         ``ProposedUserStarted/StoppedSpeakingFrame``), so the user aggregator
-        resolves those rather than running local VAD/smart-turn. Applied unless
-        the user passed their own ``user_turn_strategies``.
+        resolves those rather than running local VAD/smart-turn. With
+        ``enable_eager_end_of_turn``, the recommendation also answers Flux's
+        predicted end of turn. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
+        frame.user_turn_strategies = self.recommended_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
         )
         return frame
@@ -801,13 +821,15 @@ class DeepgramFluxSTTBase(STTService):
         """Handle TurnResumed events from Deepgram Flux.
 
         TurnResumed events indicate that speech has resumed after a brief pause
-        within the same turn. This is primarily used for logging and debugging
-        purposes and doesn't trigger any significant processing changes.
+        within the same turn, which withdraws the EagerEndOfTurn that preceded
+        it: whatever was generated from that prediction no longer answers the
+        turn the user is still speaking.
 
         Args:
             event: The event type string for logging purposes.
         """
         logger.trace(f"Received event TurnResumed: {event}")
+        await self._cancel_eager_end_of_turn()
         await self._call_event_handler("on_turn_resumed")
 
     def _calculate_average_confidence(self, transcript_data) -> float | None:
@@ -860,6 +882,8 @@ class DeepgramFluxSTTBase(STTService):
         """
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
+        # The turn is committed, so any eager prediction it followed is resolved.
+        self._clear_eager_end_of_turn()
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
@@ -899,44 +923,23 @@ class DeepgramFluxSTTBase(STTService):
         """Handle EagerEndOfTurn events from Deepgram Flux.
 
         EagerEndOfTurn events are fired when the end-of-turn confidence reaches the
-        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn threshold.
-        These provide interim transcripts that can be used for faster response
-        generation while still allowing the user to continue speaking.
+        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn
+        threshold, so a response can be generated during the gap.
 
-        EagerEndOfTurn events enable more responsive conversational AI by allowing
-        the LLM to start processing likely final transcripts before the turn
-        is definitively ended.
+        The prediction may not hold: the user may resume speaking, or the
+        committed transcript may differ from this one. Pair the service with
+        :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` to
+        have a response generated here and discarded if either happens.
 
         Args:
-            transcript: The interim transcript text that triggered the EagerEndOfTurn event.
+            transcript: The predicted transcript for the turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.trace(f"EagerEndOfTurn - {transcript}")
-        # Deepgram's EagerEndOfTurn feature enables lower-latency voice agents by sending
-        # medium-confidence transcripts before EndOfTurn certainty, allowing LLM processing to
-        # begin early.
-        #
-        # However, if speech resumes or the transcripts differ from the final EndOfTurn, the
-        # EagerEndOfTurn response should be cancelled to avoid incorrect or partial responses.
-        #
-        # Pipecat doesn't yet provide built-in Gate/control mechanisms to:
-        # 1. Start LLM/TTS processing early on EagerEndOfTurn events
-        # 2. Cancel in-flight processing when TurnResumed occurs
-        #
-        # By pushing EagerEndOfTurn transcripts as InterimTranscriptionFrame, we enable
-        # developers to implement custom EagerEndOfTurn handling in their applications while
-        # maintaining compatibility with existing interim transcription workflows.
-        #
-        # TODO: Implement proper EagerEndOfTurn support with cancellable processing pipeline
-        # that can start response generation on EagerEndOfTurn and cancel or confirm it.
-        await self.push_frame(
-            InterimTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._primary_detected_language(data),
-                result=data,
-            )
+        await self._push_eager_end_of_turn(
+            transcript,
+            user_id=self._user_id,
+            language=self._primary_detected_language(data),
+            result=data,
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 
