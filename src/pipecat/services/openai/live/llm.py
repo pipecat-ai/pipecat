@@ -215,10 +215,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
     The context aggregators record both sides of the conversation from the
     transcript frames. Unlike the Realtime services, this one is not flagged
-    as a realtime service for the aggregators: a user turn's final transcript
-    arrives with its ``turn.done``, so the user aggregator writes each user
-    turn to the context as it ends — before any tool calls it triggers —
-    rather than when the assistant starts to respond.
+    as a realtime service for the aggregators: the service closes a user turn
+    itself once the speaker falls quiet and pushes its final transcript then,
+    so the user aggregator writes each user turn to the context as it ends —
+    before any tool calls it triggers — rather than when the assistant starts
+    to respond.
 
     The session starts on the first ``LLMContextFrame`` (typically queued as an
     ``LLMRunFrame``): the context's leading system message (or
