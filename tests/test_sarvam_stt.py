@@ -133,6 +133,95 @@ def test_sarvam_without_vad_signals_recommends_no_strategies():
     assert service.service_metadata_frame().user_turn_strategies is None
 
 
+class _FakeSarvamData:
+    """Stands in for the SDK's `message.data` on a "data" (transcript) event."""
+
+    def __init__(self, transcript: str, language_code: str | None = None):
+        self.transcript = transcript
+        self.language_code = language_code
+
+
+class _FakeSarvamMessage:
+    """Stands in for the SDK's parsed response object passed to `_handle_message`."""
+
+    type = "data"
+
+    def __init__(self, transcript: str, language_code: str | None = None):
+        self.data = _FakeSarvamData(transcript, language_code)
+
+    def dict(self):
+        return {"type": self.type, "data": {"transcript": self.data.transcript}}
+
+
+@pytest.mark.asyncio
+async def test_default_configuration_leaves_language_unset(monkeypatch):
+    """No configured language and no language_code on the message -- Sarvam's own
+    "unknown" auto-detect placeholder -- leaves the frame's language unset rather
+    than guessing one."""
+    service = SarvamSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+
+    await service._handle_message(_FakeSarvamMessage("Hello there"))
+
+    assert len(pushed) == 1
+    assert pushed[0].language is None
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_language_code_leaves_language_unset(monkeypatch):
+    """A real Sarvam code with no `Language` equivalent at all (Sanskrit has no
+    "sa-IN" member, only the base "sa") is left unset, not silently relabeled as
+    a different language, and is warned about exactly once."""
+    service = SarvamSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+
+    await service._handle_message(_FakeSarvamMessage("first", language_code="sa-IN"))
+    await service._handle_message(_FakeSarvamMessage("second", language_code="sa-IN"))
+
+    assert pushed[0].language is None
+    assert pushed[1].language is None
+    assert service._unmapped_language_codes_warned == {"sa-IN"}
+
+
+@pytest.mark.asyncio
+async def test_recognized_language_code_is_mapped(monkeypatch):
+    """A language_code the table does have an entry for still resolves normally."""
+    service = SarvamSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+
+    await service._handle_message(_FakeSarvamMessage("नमस्ते", language_code="hi-IN"))
+
+    assert pushed[0].language == Language.HI_IN
+
+
+@pytest.mark.parametrize(
+    ("language_code", "language"),
+    [
+        ("ur-IN", Language.UR_IN),
+        ("mai-IN", Language.MAI_IN),
+        ("sd-IN", Language.SD_IN),
+        ("kok-IN", Language.KOK_IN),
+    ],
+)
+def test_previously_missing_codes_now_map(language_code, language):
+    """Urdu, Maithili, Sindhi, and Konkani have exact `Language` matches and are
+    real entries in SarvamRealtimeSTTService's SUPPORTED_LANGUAGES -- they were
+    simply missing from this table."""
+    service = SarvamSTTService(api_key="test-key")
+    assert service._map_language_code_to_enum(language_code) == language
+
+
+def test_configured_language_is_used_when_message_has_none():
+    """An explicitly configured language is honored when the message carries none."""
+    service = SarvamSTTService(
+        api_key="test-key", settings=SarvamSTTService.Settings(language=Language.EN_IN)
+    )
+    assert service._map_language_code_to_enum(service._get_language_string()) == Language.EN_IN
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
