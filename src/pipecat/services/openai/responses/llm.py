@@ -64,6 +64,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.errors import classify_openai_response_error_code
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -1174,12 +1175,31 @@ class OpenAIResponsesLLMService(
 
                 break  # Response complete
 
-            elif event_type in ("response.failed", "response.incomplete"):
-                response = event.get("response", {})
-                status_details = response.get("status_details") or {}
-                error_info = status_details.get("error") or {}
-                error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
-                await self.push_error(error_msg=f"LLM response error: {error_msg}")
+            elif event_type == "response.failed":
+                response = event.get("response") or {}
+                error_info = response.get("error") or {}
+                message = error_info.get("message") or "Response failed"
+                response_id = response.get("id")
+                code = error_info.get("code")
+                metadata = ", ".join(
+                    detail
+                    for detail in (
+                        f"response_id={response_id}" if response_id else "",
+                        f"code={code}" if code else "",
+                    )
+                    if detail
+                )
+                await self.push_error(
+                    error_msg=f"LLM response error{' [' + metadata + ']' if metadata else ''}: {message}",
+                    category=classify_openai_response_error_code(code),
+                )
+                break
+
+            elif event_type == "response.incomplete":
+                response = event.get("response") or {}
+                details = response.get("incomplete_details") or {}
+                reason = details.get("reason") or "Response incomplete"
+                await self.push_error(error_msg=f"LLM response error: {reason}")
                 break
 
             elif event_type == "error":

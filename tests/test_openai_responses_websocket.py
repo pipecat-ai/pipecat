@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     LLMMessagesAppendFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
@@ -24,6 +25,7 @@ from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMService,
     _model_supports_reasoning,
 )
+from pipecat.utils.errors import ErrorCategory
 
 
 def _make_service(**kwargs):
@@ -513,16 +515,14 @@ class TestReceiveResponseEventsErrors:
         service = _make_service()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()
-        service.push_error = AsyncMock()
+        service.push_error_frame = AsyncMock()
 
         ws = _ws_events(
             {
                 "type": "response.failed",
                 "response": {
                     "id": "resp_1",
-                    "status_details": {
-                        "error": {"message": "Content filter triggered"},
-                    },
+                    "error": {"code": "server_error", "message": "Content filter triggered"},
                 },
             },
         )
@@ -531,8 +531,35 @@ class TestReceiveResponseEventsErrors:
         context = MagicMock(spec=LLMContext)
         await service._receive_response_events(context, [])
 
-        service.push_error.assert_called_once()
-        assert "Content filter triggered" in service.push_error.call_args.kwargs["error_msg"]
+        service.push_error_frame.assert_called_once()
+        error_frame = service.push_error_frame.call_args.kwargs["error"]
+        assert isinstance(error_frame, ErrorFrame)
+        assert "Content filter triggered" in error_frame.error
+        assert "resp_1" in error_frame.error
+        assert "server_error" in error_frame.error
+        assert error_frame.category == ErrorCategory.SERVER
+
+    @pytest.mark.asyncio
+    async def test_response_failed_with_sparse_payload_uses_generic_unknown_error(self):
+        service = _make_service()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.push_error_frame = AsyncMock()
+
+        service._websocket = _ws_events(
+            {
+                "type": "response.failed",
+                "response": {},
+            },
+        )
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        service.push_error_frame.assert_called_once()
+        error_frame = service.push_error_frame.call_args.kwargs["error"]
+        assert error_frame.error == "LLM response error: Response failed"
+        assert error_frame.category == ErrorCategory.UNKNOWN
 
     @pytest.mark.asyncio
     async def test_response_incomplete_pushes_error(self):

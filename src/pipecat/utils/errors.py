@@ -16,6 +16,7 @@ from enum import Enum
 
 __all__ = [
     "ErrorCategory",
+    "classify_openai_response_error_code",
     "classify_http_exception",
     "classify_http_status_code",
     "extract_http_status_code",
@@ -79,6 +80,29 @@ _HTTP_STATUS_CODE_CATEGORIES = {
     429: ErrorCategory.RATE_LIMIT,
 }
 
+_OPENAI_RESPONSE_ERROR_CODE_CATEGORIES = {
+    "server_error": ErrorCategory.SERVER,
+    "vector_store_timeout": ErrorCategory.SERVER,
+    "rate_limit_exceeded": ErrorCategory.RATE_LIMIT,
+    "invalid_prompt": ErrorCategory.INVALID_REQUEST,
+    "data_residency_mismatch": ErrorCategory.INVALID_REQUEST,
+    "bio_policy": ErrorCategory.INVALID_REQUEST,
+    "invalid_image": ErrorCategory.INVALID_REQUEST,
+    "invalid_image_format": ErrorCategory.INVALID_REQUEST,
+    "invalid_base64_image": ErrorCategory.INVALID_REQUEST,
+    "invalid_image_url": ErrorCategory.INVALID_REQUEST,
+    "image_too_large": ErrorCategory.INVALID_REQUEST,
+    "image_too_small": ErrorCategory.INVALID_REQUEST,
+    "image_parse_error": ErrorCategory.INVALID_REQUEST,
+    "image_content_policy_violation": ErrorCategory.INVALID_REQUEST,
+    "invalid_image_mode": ErrorCategory.INVALID_REQUEST,
+    "image_file_too_large": ErrorCategory.INVALID_REQUEST,
+    "unsupported_image_media_type": ErrorCategory.INVALID_REQUEST,
+    "empty_image_file": ErrorCategory.INVALID_REQUEST,
+    "failed_to_download_image": ErrorCategory.INVALID_REQUEST,
+    "image_file_not_found": ErrorCategory.INVALID_REQUEST,
+}
+
 _CONNECTIVITY_EXCEPTIONS = (ConnectionError, TimeoutError, socket.gaierror)
 
 
@@ -98,6 +122,19 @@ def classify_http_status_code(status_code: int) -> ErrorCategory:
     if 500 <= status_code < 600:
         return ErrorCategory.SERVER
     return ErrorCategory.UNKNOWN
+
+
+def classify_openai_response_error_code(code: str | None) -> ErrorCategory:
+    """Classify an OpenAI Responses API error code.
+
+    Args:
+        code: The code carried by a Responses API ``response.failed`` event.
+
+    Returns:
+        The matching category, or `ErrorCategory.UNKNOWN` for a missing or
+        unrecognized provider code.
+    """
+    return _OPENAI_RESPONSE_ERROR_CODE_CATEGORIES.get(code, ErrorCategory.UNKNOWN)
 
 
 def extract_http_status_code(exception: BaseException) -> int | None:

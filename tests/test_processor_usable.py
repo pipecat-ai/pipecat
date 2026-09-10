@@ -20,6 +20,7 @@ from pipecat.utils.errors import (
     ErrorCategory,
     classify_http_exception,
     classify_http_status_code,
+    classify_openai_response_error_code,
     extract_http_status_code,
 )
 
@@ -62,6 +63,21 @@ class TestErrorClassification(unittest.TestCase):
     def test_unremarkable_status_codes_are_unknown(self):
         for status_code in (200, 301, 418, 600):
             self.assertEqual(classify_http_status_code(status_code), ErrorCategory.UNKNOWN)
+
+    def test_openai_response_error_codes_map_to_categories(self):
+        cases = {
+            "server_error": ErrorCategory.SERVER,
+            "vector_store_timeout": ErrorCategory.SERVER,
+            "rate_limit_exceeded": ErrorCategory.RATE_LIMIT,
+            "invalid_prompt": ErrorCategory.INVALID_REQUEST,
+            "invalid_image": ErrorCategory.INVALID_REQUEST,
+            "future_openai_code": ErrorCategory.UNKNOWN,
+            None: ErrorCategory.UNKNOWN,
+        }
+
+        for code, category in cases.items():
+            with self.subTest(code=code):
+                self.assertEqual(classify_openai_response_error_code(code), category)
 
     def test_extracts_status_code_from_websocket_rejection(self):
         self.assertEqual(extract_http_status_code(websocket_rejection(401)), 401)
