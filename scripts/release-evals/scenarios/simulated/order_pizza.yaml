@@ -1,9 +1,10 @@
 name: order_pizza
 
-# Text modality, against flows/food_ordering.py: the caller orders a pizza and
-# asks how long delivery takes. The judge reads the choose_pizza,
-# select_pizza_order, get_delivery_estimate, and complete_order calls along
-# with the conversation.
+# Text modality, against the food-ordering flows: the caller orders a pizza and
+# asks how long delivery takes. The judge reads the conversation and the bot's
+# tool calls; the order_recorded metric requires the choose_pizza,
+# select_pizza_order, get_delivery_estimate, and complete_order calls, so a
+# bot that only talks the order through cannot pass.
 
 simulator: !include ../simulator.yaml
 
@@ -25,6 +26,9 @@ metrics:
   - name: politeness
     criterion: "the reply is courteous and helpful, never curt or dismissive"
     min_score: 1
+  - name: order_recorded
+    measure: function_calls
+    calls: [choose_pizza, select_pizza_order, get_delivery_estimate, complete_order]
 
 max_turns: 8
 max_duration_s: 120
