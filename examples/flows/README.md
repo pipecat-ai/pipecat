@@ -43,6 +43,7 @@ The Python examples support multiple LLM providers (OpenAI, Anthropic, Google Ge
 - [`yaml/food_ordering/`](./yaml/food_ordering) — the full-featured flow: branching between pizza and sushi, a pre-action, a global function, and transition-only entries
 - [`yaml/restaurant_reservation/`](./yaml/restaurant_reservation) — a branch table keyed on a tool's result, and the shim pattern for transitions that depend on logic: flow-agnostic business logic under a thin tool that reports its outcome as a `status` field
 - [`yaml/patient_intake/`](./yaml/patient_intake) — data-capture tools, a branch on a boolean result, and session facts such as the practice and patient names read from state
+- [`yaml/insurance_quote/`](./yaml/insurance_quote) — prompts built from computed values: the handlers store each quote in state, the results node reads it with `{{ quote.monthly_premium }}`, and adjusting the coverage re-enters the node with the new figures
 - [`yaml/podcast_interview/`](./yaml/podcast_interview) — a node that transitions back to itself
 
 ## Flows in Python

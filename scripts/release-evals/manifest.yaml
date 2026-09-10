@@ -398,6 +398,8 @@ suite:
     scenarios: [scripted/food_ordering_pizza]
   - bot: flows/python/food_ordering_advanced_functionschema.py
     scenarios: [scripted/food_ordering_sushi]
+  - bot: flows/yaml/insurance_quote/bot.py
+    scenarios: [scripted/insurance_quote]
   - bot: flows/python/multi_worker_handoff.py
     scenarios: [scripted/multi_worker_handoff, scripted/multi_worker_handoff_back_and_forth]
   - bot: flows/yaml/patient_intake/bot.py
@@ -452,3 +454,5 @@ suite:
     scenarios: [simulated/order_pizza]
   - bot: flows/python/food_ordering_advanced_functionschema.py
     scenarios: [simulated/order_sushi]
+  - bot: flows/yaml/insurance_quote/bot.py
+    scenarios: [simulated/get_insurance_quote]
