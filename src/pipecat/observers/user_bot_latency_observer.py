@@ -151,111 +151,192 @@ class _Owner(Enum):
 
 _TURN_COMPLETION = "config: filter_incomplete_user_turns"
 
+
+@dataclass(frozen=True)
+class _Span:
+    """One stretch of a cycle, named by the moments at its ends.
+
+    Parameters:
+        start: The moment the stretch runs from.
+        end: The moment it runs to.
+        key: Stable identifier, which survives a label being reworded.
+        label: How the stretch reads in a timeline.
+        owner: The setting that governs the time, the bot whose code spends
+            it, or which end of the span supplies the processor that does.
+        core: Whether this is a core stage, which stays listed however brief
+            so the timeline keeps its shape from one turn to the next.
+    """
+
+    start: _MomentKind
+    end: _MomentKind
+    key: str
+    label: str
+    owner: str | _Owner
+    core: bool
+
+
 # Each pair of adjacent moments names the span between them, and a pair that is
-# absent leaves that stretch unnamed, to be reported as pipeline time. A setting
-# that governs the time owns it; otherwise the owner is the processor at one
-# end. The flag marks a core stage, which stays listed however brief so the
-# timeline keeps its shape from one turn to the next.
-_SPANS: dict[tuple[_MomentKind, _MomentKind], tuple[str, str, str | _Owner, bool]] = {
+# absent leaves that stretch unnamed, to be reported as pipeline time.
+_SPANS: tuple[_Span, ...] = (
     # Silence the VAD had to hear before it would call the turn over. It is a
     # setting rather than a service, and shortening it trades latency for
     # transcription accuracy.
-    (_MomentKind.SILENCE, _MomentKind.VAD_STOP): (
-        "endpointing_wait",
-        "endpointing wait",
-        "config: VAD stop_secs",
-        True,
+    _Span(
+        start=_MomentKind.SILENCE,
+        end=_MomentKind.VAD_STOP,
+        key="endpointing_wait",
+        label="endpointing wait",
+        owner="config: VAD stop_secs",
+        core=True,
     ),
     # From a pipeline that is ready with a client on it, to the bot asking for
     # something to say: the application's connected handler, and the frame it
     # queues reaching the LLM.
-    (_MomentKind.READY, _MomentKind.LLM_REQUEST): ("first_request", "first request", "bot", True),
-    (_MomentKind.VAD_STOP, _MomentKind.TRANSCRIPT): (
-        "transcription",
-        "transcription",
-        _Owner.CLOSER,
-        True,
+    _Span(
+        start=_MomentKind.READY,
+        end=_MomentKind.LLM_REQUEST,
+        key="first_request",
+        label="first request",
+        owner="bot",
+        core=True,
+    ),
+    _Span(
+        start=_MomentKind.VAD_STOP,
+        end=_MomentKind.TRANSCRIPT,
+        key="transcription",
+        label="transcription",
+        owner=_Owner.CLOSER,
+        core=True,
     ),
     # Whatever decides the user is done: a fixed speech timeout, a smart-turn
     # model's inference, or an external signal.
-    (_MomentKind.TRANSCRIPT, _MomentKind.LLM_REQUEST): (
-        "turn_detection",
-        "turn detection",
-        "config: user turn strategies",
-        True,
+    _Span(
+        start=_MomentKind.TRANSCRIPT,
+        end=_MomentKind.LLM_REQUEST,
+        key="turn_detection",
+        label="turn detection",
+        owner="config: user turn strategies",
+        core=True,
     ),
-    (_MomentKind.LLM_REQUEST, _MomentKind.LLM_CHUNK): (
-        "llm_inference",
-        "LLM inference",
-        _Owner.OPENER,
-        True,
+    _Span(
+        start=_MomentKind.LLM_REQUEST,
+        end=_MomentKind.LLM_CHUNK,
+        key="llm_inference",
+        label="LLM inference",
+        owner=_Owner.OPENER,
+        core=True,
     ),
     # The gate reading the verdict, whichever way it went.
-    (_MomentKind.LLM_CHUNK, _MomentKind.MARKER_COMPLETE): (
-        "turn_completion",
-        "turn completion",
-        _TURN_COMPLETION,
-        False,
+    _Span(
+        start=_MomentKind.LLM_CHUNK,
+        end=_MomentKind.MARKER_COMPLETE,
+        key="turn_completion",
+        label="turn completion",
+        owner=_TURN_COMPLETION,
+        core=False,
     ),
-    (_MomentKind.LLM_CHUNK, _MomentKind.MARKER_INCOMPLETE): (
-        "turn_completion",
-        "turn completion",
-        _TURN_COMPLETION,
-        False,
+    _Span(
+        start=_MomentKind.LLM_CHUNK,
+        end=_MomentKind.MARKER_INCOMPLETE,
+        key="turn_completion",
+        label="turn completion",
+        owner=_TURN_COMPLETION,
+        core=False,
     ),
     # The token the marker occupies before anything can be spoken.
-    (_MomentKind.MARKER_COMPLETE, _MomentKind.FIRST_TEXT): (
-        "turn_completion",
-        "turn completion",
-        _TURN_COMPLETION,
-        False,
+    _Span(
+        start=_MomentKind.MARKER_COMPLETE,
+        end=_MomentKind.FIRST_TEXT,
+        key="turn_completion",
+        label="turn completion",
+        owner=_TURN_COMPLETION,
+        core=False,
     ),
-    (_MomentKind.MARKER_INCOMPLETE, _MomentKind.LLM_REQUEST): (
-        "waiting_for_user",
-        "waiting for user",
-        _TURN_COMPLETION,
-        False,
+    _Span(
+        start=_MomentKind.MARKER_INCOMPLETE,
+        end=_MomentKind.LLM_REQUEST,
+        key="waiting_for_user",
+        label="waiting for user",
+        owner=_TURN_COMPLETION,
+        core=False,
     ),
     # Between the LLM's first chunk and the call being dispatched, the LLM is
     # still writing the call.
-    (_MomentKind.LLM_CHUNK, _MomentKind.HANDLERS_START): (
-        "llm_tool_call",
-        "LLM tool call",
-        _Owner.OPENER,
-        False,
+    _Span(
+        start=_MomentKind.LLM_CHUNK,
+        end=_MomentKind.HANDLERS_START,
+        key="llm_tool_call",
+        label="LLM tool call",
+        owner=_Owner.OPENER,
+        core=False,
     ),
-    (_MomentKind.HANDLERS_START, _MomentKind.HANDLERS_END): (
-        "function_handler",
-        "function handler",
-        _Owner.CLOSER,
-        False,
+    _Span(
+        start=_MomentKind.HANDLERS_START,
+        end=_MomentKind.HANDLERS_END,
+        key="function_handler",
+        label="function handler",
+        owner=_Owner.CLOSER,
+        core=False,
     ),
     # Waiting for a full sentence before speaking any of it.
-    (_MomentKind.FIRST_TEXT, _MomentKind.SENTENCE): (
-        "sentence_aggregation",
-        "sentence aggregation",
-        "config: text_aggregation_mode",
-        False,
+    _Span(
+        start=_MomentKind.FIRST_TEXT,
+        end=_MomentKind.SENTENCE,
+        key="sentence_aggregation",
+        label="sentence aggregation",
+        owner="config: text_aggregation_mode",
+        core=False,
     ),
-    (_MomentKind.SENTENCE, _MomentKind.FIRST_AUDIO): (
-        "speech_synthesis",
-        "speech synthesis",
-        _Owner.CLOSER,
-        True,
+    _Span(
+        start=_MomentKind.SENTENCE,
+        end=_MomentKind.FIRST_AUDIO,
+        key="speech_synthesis",
+        label="speech synthesis",
+        owner=_Owner.CLOSER,
+        core=True,
     ),
-    (_MomentKind.FIRST_TEXT, _MomentKind.FIRST_AUDIO): (
-        "speech_synthesis",
-        "speech synthesis",
-        _Owner.CLOSER,
-        True,
+    _Span(
+        start=_MomentKind.FIRST_TEXT,
+        end=_MomentKind.FIRST_AUDIO,
+        key="speech_synthesis",
+        label="speech synthesis",
+        owner=_Owner.CLOSER,
+        core=True,
     ),
-    (_MomentKind.FIRST_AUDIO, _MomentKind.BOT_SPEAKING): (
-        "output_transport",
-        "output transport",
-        _Owner.CLOSER,
-        False,
+    _Span(
+        start=_MomentKind.FIRST_AUDIO,
+        end=_MomentKind.BOT_SPEAKING,
+        key="output_transport",
+        label="output transport",
+        owner=_Owner.CLOSER,
+        core=False,
     ),
+)
+
+_SPANS_BY_MOMENTS: dict[tuple[_MomentKind, _MomentKind], _Span] = {
+    (span.start, span.end): span for span in _SPANS
 }
+
+# One stretch is two spans rather than one, so it is chosen rather than looked
+# up: where turn completion is in use, a response that carried no marker is
+# buffered whole before anything can be spoken; where it is not, the same wait
+# is the LLM still streaming, so its inference covers it.
+_AWAITING_SPEAKABLE_TEXT = _Span(
+    start=_MomentKind.LLM_CHUNK,
+    end=_MomentKind.FIRST_TEXT,
+    key="awaiting_speakable_text",
+    label="awaiting speakable text",
+    owner=_Owner.CLOSER,
+    core=False,
+)
+_LLM_INFERENCE_UNTIL_TEXT = _Span(
+    start=_MomentKind.LLM_CHUNK,
+    end=_MomentKind.FIRST_TEXT,
+    key="llm_inference",
+    label="LLM inference",
+    owner=_Owner.OPENER,
+    core=True,
+)
 
 
 class MeasuredFrom(StrEnum):
@@ -787,20 +868,12 @@ class UserBotLatencyObserver(BaseObserver):
             if closer.at <= opener.at:
                 continue
             if (opener.kind, closer.kind) == (_MomentKind.LLM_CHUNK, _MomentKind.FIRST_TEXT):
-                # Where turn completion is in use, a response that carried no
-                # marker is buffered whole before anything can be spoken. Where
-                # it is not, the same wait is the LLM still streaming, so its
-                # inference covers it.
-                entry = (
-                    ("awaiting_speakable_text", "awaiting speakable text", _Owner.CLOSER, False)
-                    if self._markers_seen
-                    else ("llm_inference", "LLM inference", _Owner.OPENER, True)
-                )
+                span = _AWAITING_SPEAKABLE_TEXT if self._markers_seen else _LLM_INFERENCE_UNTIL_TEXT
             else:
-                entry = _SPANS.get((opener.kind, closer.kind))
-            if entry is None:
+                span = _SPANS_BY_MOMENTS.get((opener.kind, closer.kind))
+            if span is None:
                 continue
-            key, label, owner, is_core = entry
+            owner = span.owner
             owner_kind = LatencyOwnerKind.SERVICE
             if owner is _Owner.OPENER:
                 owner = opener.source
@@ -814,12 +887,12 @@ class UserBotLatencyObserver(BaseObserver):
                     if owner.startswith("config: ")
                     else LatencyOwnerKind.BOT
                 )
-            if is_core:
-                core.add(label)
+            if span.core:
+                core.add(span.label)
             spans.append(
                 LatencyContribution(
-                    key=key,
-                    label=label,
+                    key=span.key,
+                    label=span.label,
                     owner=owner,
                     owner_kind=owner_kind,
                     start_time=opener.at,
