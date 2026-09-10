@@ -23,6 +23,7 @@ from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai import APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import (
+    Response,
     ResponseCompletedEvent,
     ResponseErrorEvent,
     ResponseFailedEvent,
@@ -37,7 +38,7 @@ from openai.types.responses import (
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.services.open_ai_responses_adapter import (
@@ -58,8 +59,10 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import (
+    BaseModelT,
     FunctionCallFromLLM,
     LLMService,
+    StructuredInferenceResult,
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
@@ -433,6 +436,94 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         response = await self._client.responses.create(**params)
 
         return response.output_text
+
+    async def run_structured_inference(
+        self,
+        context: LLMContext,
+        output_type: type[BaseModelT],
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> StructuredInferenceResult[BaseModelT]:
+        """Run a one-shot, out-of-band inference with structured output and metadata.
+
+        Always uses the HTTP client regardless of transport variant.
+
+        Args:
+            context: The LLM context containing conversation history.
+            output_type: A Pydantic model class describing the desired output schema.
+            max_tokens: Optional maximum number of tokens to generate.
+            system_instruction: Optional system instruction for this inference.
+
+        Returns:
+            Structured output, token usage, and completion or refusal details.
+        """
+        adapter = self.get_llm_adapter()
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
+        invocation_params = adapter.get_llm_invocation_params(
+            context, system_instruction=effective_instruction
+        )
+
+        params = self._build_response_params(invocation_params)
+
+        params["stream"] = False
+
+        if max_tokens is not None:
+            params["max_output_tokens"] = max_tokens
+
+        params["text_format"] = output_type
+
+        # Inspect status before parsing JSON, which may be truncated or refused.
+        raw = await self._client.responses.with_raw_response.parse(**params)
+        response = Response.construct(**raw.http_response.json())
+        response._request_id = raw.request_id
+        result = StructuredInferenceResult[BaseModelT](
+            parsed=None, status="failed", raw_response=response
+        )
+        if usage := response.usage:
+            result.usage = LLMTokenUsage(
+                prompt_tokens=usage.input_tokens,
+                completion_tokens=usage.output_tokens,
+                total_tokens=usage.total_tokens,
+                cache_read_input_tokens=(
+                    usage.input_tokens_details.cached_tokens if usage.input_tokens_details else None
+                ),
+                cache_creation_input_tokens=getattr(
+                    usage.input_tokens_details, "cache_write_tokens", None
+                ),
+                reasoning_tokens=(
+                    usage.output_tokens_details.reasoning_tokens
+                    if usage.output_tokens_details
+                    else None
+                ),
+            )
+        refusals = [
+            part.refusal
+            for item in response.output
+            if item.type == "message"
+            for part in item.content
+            if part.type == "refusal"
+        ]
+        result.refusal = "\n".join(refusals) if refusals else None
+        if response.status == "incomplete":
+            result.status = "incomplete"
+            result.reason = (
+                response.incomplete_details.reason if response.incomplete_details else None
+            )
+        elif response.status != "completed":
+            result.reason = response.error.code if response.error else response.status
+        elif result.refusal is not None:
+            result.status = "refused"
+        elif not response.output_text:
+            result.reason = "no_structured_output"
+        else:
+            try:
+                result.parsed = output_type.model_validate_json(response.output_text)
+                result.status = "success"
+            except ValidationError:
+                result.reason = "invalid_response"
+        return result
 
     def _process_function_calls(
         self,
