@@ -30,18 +30,18 @@ class TestParseRunVerdicts(unittest.TestCase):
             ["politeness", "brevity"],
             2,
         )
-        self.assertEqual(out.goal.reason, "(judge gave no verdict)")
-        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "no"])
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("no", "(no reason given)"))
+        self.assertEqual([v.verdict for v in out.turns["politeness"]], ["yes", "none"])
         self.assertEqual(out.turns["politeness"][1].reason, "(judge gave no verdict)")
         self.assertEqual([v.reason for v in out.turns["brevity"]], ["(judge gave no verdict)"] * 2)
 
     def test_a_failed_call_or_no_json_fails_everything(self):
         out = _parse_run_verdicts("\0judge call failed: Boom", ["politeness"], 1)
-        self.assertEqual((out.goal.verdict, out.goal.reason), ("no", "judge call failed: Boom"))
+        self.assertEqual((out.goal.verdict, out.goal.reason), ("none", "judge call failed: Boom"))
         self.assertEqual(out.turns["politeness"][0].reason, "judge call failed: Boom")
         out = _parse_run_verdicts("no json here", ["politeness"], 1)
-        self.assertEqual(out.goal.verdict, "no")
-        self.assertEqual(out.turns["politeness"][0].verdict, "no")
+        self.assertEqual(out.goal.verdict, "none")
+        self.assertEqual(out.turns["politeness"][0].verdict, "none")
 
 
 class TestParseVerdict(unittest.TestCase):

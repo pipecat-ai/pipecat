@@ -259,7 +259,7 @@ Assert on what the bot *produced*, and prefer the modality-agnostic `response` e
 **Simulated scenarios: prove the bot gets the job done.** A script walks one path through a flow. A simulation replaces `turns:` with a **persona** and a **goal**; an LLM plays that caller, pursues the goal in its own words, and hangs up with an `end_call` tool when done or stuck. The judge then reads the whole transcript — the bot's tool calls in place — to decide `success:` and to score every bot reply against your `metrics:`:
 ```yaml
 name: book_table
-simulator: {service: openai, model: gpt-4o-mini}   # the caller; needs tool calling + its key
+simulator: {service: ollama, model: gemma4:12b, extra: {reasoning_effort: none}}  # the caller's LLM; optional, this is the default
 persona: |
   Jamie, booking dinner for two tonight at 6 PM. Gives a name and phone number
   when asked (Jamie Lee, 555-0142). Polite, answers one question at a time.
@@ -268,7 +268,7 @@ success: "the bot confirmed a reservation for two at 6 PM (a booking tool was ca
 metrics:
   - name: politeness
     criterion: "the reply is courteous, never curt or dismissive"
-    min_quality: 1          # share of replies that must pass: 1 = every reply
+    min_score: 1            # share of replies that must pass: 1 = every reply
   - measure: latency        # slowest reply, in seconds
     max_value: 5
 runs: 3                     # every run must pass; one run is an anecdote

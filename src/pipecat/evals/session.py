@@ -25,12 +25,18 @@ import time
 import traceback
 import warnings
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.evals.results import EvalAssertionFailure, EvalProgress, EvalTrace
+from pipecat.evals.results import (
+    EvalAssertionFailure,
+    EvalProgress,
+    EvalScriptTurnProgress,
+    EvalTrace,
+)
 from pipecat.evals.scenario import EvalKind, EvalScriptScenario, EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 
@@ -173,6 +179,7 @@ class EvalSession(BaseObject, Generic[R]):
         judge: "EvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
+        on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
         connect_timeout_s: float | None = None,
         default_timeout_ms: int | None = None,
         record_path: str | None = None,
@@ -215,6 +222,7 @@ class EvalSession(BaseObject, Generic[R]):
         judge: "EvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
+        on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
         connect_timeout_s: float | None = None,
         default_timeout_ms: int | None = None,
         record_path: str | None = None,
@@ -235,6 +243,7 @@ class EvalSession(BaseObject, Generic[R]):
         judge: "EvalJudge | None" = None,
         user_tts: "CachingTTSService | None" = None,
         bot_stt: "STTService | None" = None,
+        on_progress: "Callable[[EvalScriptTurnProgress], None] | None" = None,
         connect_timeout_s: float | None = None,
         default_timeout_ms: int | None = None,
         record_path: str | None = None,
@@ -268,6 +277,13 @@ class EvalSession(BaseObject, Generic[R]):
                 scenario's ``user_speech`` in audio mode).
             bot_stt: Override the bot-audio STT (default: built from the
                 scenario's ``transcriber`` when the run transcribes the bot).
+            on_progress: Scripted scenarios only: a callback for each turn and
+                expectation as it resolves.
+
+                .. deprecated:: 1.9.0
+                    Use the ``on_progress`` event handler instead.
+                    Will be removed in 2.0.0.
+
             connect_timeout_s: The ``params`` field of the same name.
 
                 .. deprecated:: 1.9.0
@@ -308,7 +324,8 @@ class EvalSession(BaseObject, Generic[R]):
 
         Raises:
             ValueError: If ``persona_llm`` is given for a scripted scenario,
-                which has no persona.
+                which has no persona, or ``on_progress`` for a simulation,
+                which reports its progress through the event handler alone.
             TypeError: If ``scenario`` is neither kind.
         """
         # Imported here rather than at module level: both subclasses import this module.
@@ -327,6 +344,11 @@ class EvalSession(BaseObject, Generic[R]):
             trigger_disconnect=trigger_disconnect,
         )
         if isinstance(scenario, EvalSimulationScenario):
+            if on_progress is not None:
+                raise ValueError(
+                    f"on_progress applies to scripted scenarios only; {scenario.name!r} is a "
+                    "simulation"
+                )
             return EvalSimulationSession.from_scenario(
                 scenario,
                 bot_url,
@@ -345,6 +367,7 @@ class EvalSession(BaseObject, Generic[R]):
                 scenario,
                 bot_url,
                 params=params,
+                on_progress=on_progress,
                 judge=judge,
                 user_tts=user_tts,
                 bot_stt=bot_stt,

@@ -319,7 +319,7 @@ class TestSimulationRecords(unittest.TestCase):
                     score=0.5,
                     passed=False,
                     reason="turn 2: curt",
-                    min_quality=1.0,
+                    min_score=1.0,
                     verdicts=[
                         EvalSimulationTurnVerdict(1, True, "warm"),
                         EvalSimulationTurnVerdict(2, False, "curt"),

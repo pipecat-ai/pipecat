@@ -1,2 +1,9 @@
-service: openai
-model: gpt-4o-mini
+# The persona LLM: the same local model as the default judge, so a simulation
+# needs no API key. Any tool-calling model works; the persona hangs up through
+# its end_call tool, and a model that writes the call out as text never does.
+# Reasoning is off as for the judge: the persona's turns are short, and
+# thinking only adds latency to each one.
+service: ollama
+model: gemma4:12b
+extra:
+  reasoning_effort: none

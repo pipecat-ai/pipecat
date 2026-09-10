@@ -256,7 +256,8 @@ class EvalJudge:
 
         Returns:
             The goal's verdict and, per criterion, a verdict per bot turn in
-            order; a turn the judge left out is a ``no``.
+            order. A verdict of ``none`` is one the judge did not give: a turn
+            it left out, a goal it did not answer, or a call that failed.
         """
         lines = []
         turn = 0
@@ -357,20 +358,23 @@ _NO_VERDICT = "(judge gave no verdict)"
 def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
     """Parse the run judge's answer into the goal's verdict and one per turn per criterion.
 
-    Anything missing or malformed is a ``no`` with a reason, and the raw
+    Anything missing or malformed is a ``none`` with a reason, and the raw
     answer is logged, so a bad answer never passes a turn silently.
     """
     if response.startswith("\0"):
-        failed = JudgeVerdict(verdict="no", reason=response[1:], raw_response="")
+        failed = JudgeVerdict(verdict="none", reason=response[1:], raw_response="")
         return RunVerdicts(goal=failed, turns={n: [failed] * turn_count for n in names})
     obj = _judge_json(response)
     goal = obj.get("goal")
     if not isinstance(goal, dict):
         goal = {}
-    goal_verdict = "yes" if str(goal.get("verdict", "")).strip().lower() == "yes" else "no"
+    answer = str(goal.get("verdict", "")).strip().lower()
+    goal_verdict = answer if answer in ("yes", "no") else "none"
     goal_reason = str(goal.get("reason", "")).strip()
-    if goal_verdict == "no" and not goal_reason:
+    if goal_verdict == "none":
         goal_reason = _NO_VERDICT
+    elif goal_verdict == "no" and not goal_reason:
+        goal_reason = "(no reason given)"
     return RunVerdicts(
         goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
         turns={name: _turn_verdicts(obj, name, turn_count, response) for name in names},
@@ -395,7 +399,7 @@ def _judge_json(response: str) -> dict:
 
 
 def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list[JudgeVerdict]:
-    """One verdict per bot turn for criterion ``name``; a turn the judge left out is a ``no``.
+    """One verdict per bot turn for criterion ``name``; a turn the judge left out is a ``none``.
 
     Criterion names match case-insensitively; a ``reasons`` entry, keyed by
     the turn number, gives a ``no`` its reason.
@@ -419,7 +423,7 @@ def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list
         if isinstance(answer, dict):
             answer = answer.get("verdict")
         if answer is None:
-            verdicts.append(JudgeVerdict(verdict="no", reason=_NO_VERDICT, raw_response=response))
+            verdicts.append(JudgeVerdict(verdict="none", reason=_NO_VERDICT, raw_response=response))
             continue
         verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
         reason = str(reasons.get(str(index + 1), "")).strip()

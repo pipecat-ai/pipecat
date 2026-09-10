@@ -1,0 +1,1 @@
+- A simulation ends as soon as it is going nowhere: `silence` when neither side does anything for `max_silence_s` (30 s by default), and an error the moment the harness's own pipeline fails, the persona LLM first among them, instead of waiting out `max_duration_s`.

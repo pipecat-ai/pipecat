@@ -89,6 +89,9 @@ class EvalEventStream:
         # Events are stamped in seconds since here (``at``), and a reply with the
         # arrival of its first token (``started_at``), for the timing measures.
         self._t0 = time.monotonic()
+        # When either side last did anything: an event, or a frame that only
+        # buffers toward one (a bot token, a persona sentence).
+        self.last_activity = self._t0
         self._llm_text_at: float | None = None
         # The reply rule's flag: set by a send or an interruption, cleared at the
         # bot's next llm-started. While set, LLM text is dropped: an interrupted
@@ -113,6 +116,7 @@ class EvalEventStream:
             event: The event dict, with at least a ``type``.
         """
         event.setdefault("at", self.elapsed())
+        self.touch()
         self.events_seen.append(event)
         self.latest_event_times[event["type"]] = time.monotonic()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
@@ -190,6 +194,10 @@ class EvalEventStream:
         """Seconds since the stream began, the clock the events' ``at`` is on."""
         return round(time.monotonic() - self._t0, 3)
 
+    def touch(self) -> None:
+        """Note activity that makes no event, so a lull is measured from it."""
+        self.last_activity = time.monotonic()
+
     def frame_to_event(self, frame: Frame) -> dict | None:
         """Translate one frame from the bot into the event it maps to, if any.
 
@@ -205,6 +213,7 @@ class EvalEventStream:
         Returns:
             The event the frame maps to, or ``None``; most frames map to none.
         """
+        self.touch()
         if isinstance(frame, InputTransportMessageFrame):
             event = self._message_to_event(frame.message)
             if event is not None and event["type"] in _INTERRUPTION_EVENTS:

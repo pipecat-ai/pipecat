@@ -16,15 +16,12 @@ ones. Example::
     persona: |
       A curious, polite traveler who asks one thing at a time.
     goal: "Find out what the capital of Germany is, then say goodbye."
-    simulator:
-      service: openai
-      model: gpt-4o-mini
     judge: !include judge_text.yaml
     success: "the bot told the caller that the capital of Germany is Berlin"
     metrics:
       - name: politeness
         criterion: "the bot stayed courteous throughout"
-        min_quality: 1
+        min_score: 1
     max_turns: 10
 
 Fields:
@@ -34,10 +31,11 @@ Fields:
     the persona LLM's instructions (see :mod:`pipecat.evals.persona`).
 
 ``simulator``
-    the persona LLM: ``service`` (``openai`` or ``ollama``), ``model``, and the
-    optional ``endpoint`` / ``extra`` the judge config also takes. The model
-    must support function calling: the persona ends the call by calling its
-    ``end_call`` tool.
+    the persona LLM: ``service`` (``ollama``) or a ``factory``, ``model``, and
+    the optional ``endpoint`` / ``extra`` the judge config also takes. Omitted,
+    the persona runs on the same local Ollama model as the default judge. The
+    model must support function calling: the persona ends the call by calling
+    its ``end_call`` tool.
 
 ``user``, ``judge``
     the blocks scenarios use (see :mod:`pipecat.evals.script`):
@@ -61,14 +59,15 @@ Fields:
 
 ``metrics``
     judged quality criteria, each with ``name``, ``criterion``, and an optional
-    ``min_quality`` in 0..1. A criterion says what every reply of the bot should
+    ``min_score`` in 0..1. A criterion says what every reply of the bot should
     be; the judge decides it for each bot turn, in the light of the conversation
     before it and the tool calls the bot had made by then, with a yes or a no,
     never a partial score. The metric's score is the share of turns that got a
     yes: 0.80 is four replies in five. A turn the judge leaves out counts as a
-    no, and a run with no bot turn has no score and passes. A metric with a
-    ``min_quality`` fails the run when its score is below it; one without is
-    reported and never fails anything. Something the bot must do once, read
+    no, recorded as a verdict of ``none`` so a sweep can tell judge trouble
+    from bot trouble, and a run with no bot turn has no score and passes. A
+    metric with a ``min_score`` fails the run when its score is below it; one
+    without is reported and never fails anything. Something the bot must do once, read
     the order back, belongs in ``success``, not here.
 
     A metric can measure instead of judge: ``measure`` names one of
@@ -80,7 +79,8 @@ Fields:
     hang-up, ``words`` the longest bot reply in words, and ``latency`` the slowest
     reply in seconds: from the persona's send to the reply's first token in
     text mode, from the bot noticing the persona stop to its first spoken
-    sentence in audio mode. The per-reply measures bound every reply.
+    sentence in audio mode, which a failure's reason spells out, since the two
+    are not comparable. The per-reply measures bound every reply.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and
@@ -88,9 +88,13 @@ Fields:
     nothing, the check for a caller who should be turned down. A call the bot
     cancelled did not happen.
 
-``max_turns``, ``max_duration_s``
-    backstops on the persona's turns (default 20) and on the run's wall clock
-    (default 300 s). A run they end has not succeeded.
+``max_turns``, ``max_duration_s``, ``max_silence_s``
+    backstops on the persona's turns (default 20), on the run's wall clock
+    (default 300 s), and on a lull in which neither side does anything
+    (default 30 s), so a bot that never greets, or stops answering, ends the
+    run as ``silence`` instead of running out the clock. A run they end has
+    not succeeded. A failure of the harness's own pipeline, the persona LLM
+    first among them, ends the run at once as an error.
 
 ``runs``
     how many times the suite runs the simulation (default 1). Every run must
@@ -109,6 +113,7 @@ from pipecat.evals.scenario_config import (
     _config_lines,
     _ConfigLine,
     _judge_segments,
+    _llm_identity,
     _parse_judge_block,
     _parse_user_block,
     _user_segments,
@@ -118,6 +123,7 @@ from pipecat.evals.script import EvalFunctionCall
 
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
+DEFAULT_MAX_SILENCE_S = 30.0
 
 # What a measured metric can measure, computed by the harness from the run.
 SIMULATION_MEASURES = ("turns", "duration", "words", "latency", "function_calls")
@@ -131,7 +137,7 @@ class EvalSimulationMetric:
         name: The metric's name in the results.
         criterion: What the judge decides on each bot turn; ``None`` for a
             measured metric.
-        min_quality: The share of the bot's turns the judge must answer yes
+        min_score: The share of the bot's turns the judge must answer yes
             for, in 0..1, below which a judged metric fails the run; ``None``
             reports the score without gating.
         measure: One of ``SIMULATION_MEASURES``; ``None`` for a judged metric.
@@ -144,7 +150,7 @@ class EvalSimulationMetric:
 
     name: str
     criterion: str | None = None
-    min_quality: float | None = None
+    min_score: float | None = None
     measure: str | None = None
     min_value: float | None = None
     max_value: float | None = None
@@ -160,7 +166,8 @@ class EvalSimulationScenario:
         persona: Who the caller is, as free text for the persona LLM.
         goal: What the caller wants from the call.
         simulator: The persona LLM config (``service``, ``model``, optional
-            ``endpoint`` / ``extra``), the same shape as ``judge.eval``.
+            ``endpoint`` / ``extra``), the same shape as ``judge.eval``; empty
+            for the default local model.
         success: What counts as the bot having done its job, for the judge.
         metrics: The judged quality criteria.
         judge: Judge LLM config, as for a scenario.
@@ -172,6 +179,7 @@ class EvalSimulationScenario:
             audio modality, else None.
         max_turns: Cap on the persona's turns.
         max_duration_s: Cap on the run's wall clock, in seconds.
+        max_silence_s: Cap on a lull with no event from either side, in seconds.
         runs: How many times the suite runs the simulation; every run must pass.
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when the connection ends.
@@ -181,8 +189,8 @@ class EvalSimulationScenario:
     name: str
     persona: str
     goal: str
-    simulator: dict
     success: str
+    simulator: dict = field(default_factory=dict)
     metrics: list[EvalSimulationMetric] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
     bot_audio: bool = False
@@ -191,6 +199,7 @@ class EvalSimulationScenario:
     user_speech: dict | None = None
     max_turns: int = DEFAULT_MAX_TURNS
     max_duration_s: float = DEFAULT_MAX_DURATION_S
+    max_silence_s: float = DEFAULT_MAX_SILENCE_S
     runs: int = 1
     trigger_disconnect: bool = False
     source_path: Path | None = None
@@ -218,12 +227,9 @@ class EvalSimulationScenario:
                 raise ValueError(f"{path}: missing or invalid '{key}:' field (a non-empty string)")
             return value.strip()
 
-        simulator = data.get("simulator")
-        if not isinstance(simulator, dict) or not simulator.get("service"):
-            raise ValueError(
-                f"{path}: 'simulator:' must be a mapping naming the persona LLM "
-                "(at least 'service:')"
-            )
+        simulator = data.get("simulator") or {}
+        if not isinstance(simulator, dict):
+            raise ValueError(f"{path}: 'simulator:' must be a mapping naming the persona LLM")
 
         user_audio, user_speech = _parse_user_block(data.get("user"), path)
         if user_audio and user_speech is None:
@@ -247,6 +253,7 @@ class EvalSimulationScenario:
             user_speech=user_speech,
             max_turns=_positive_int(data, "max_turns", DEFAULT_MAX_TURNS, path),
             max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
+            max_silence_s=_positive_number(data, "max_silence_s", DEFAULT_MAX_SILENCE_S, path),
             runs=_positive_int(data, "runs", 1, path),
             trigger_disconnect=bool(data.get("trigger_disconnect", False)),
             source_path=path,
@@ -279,18 +286,18 @@ def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:
             continue
         if not criterion or not isinstance(criterion, str):
             raise ValueError(f"{path}: metric {name!r} needs a 'criterion:' for the judge")
-        min_quality = item.get("min_quality")
-        if min_quality is not None and (
-            isinstance(min_quality, bool)
-            or not isinstance(min_quality, (int, float))
-            or not 0 <= min_quality <= 1
+        min_score = item.get("min_score")
+        if min_score is not None and (
+            isinstance(min_score, bool)
+            or not isinstance(min_score, (int, float))
+            or not 0 <= min_score <= 1
         ):
-            raise ValueError(f"{path}: metric {name!r} 'min_quality:' must be a number in 0..1")
+            raise ValueError(f"{path}: metric {name!r} 'min_score:' must be a number in 0..1")
         metrics.append(
             EvalSimulationMetric(
                 name=name,
                 criterion=criterion,
-                min_quality=None if min_quality is None else float(min_quality),
+                min_score=None if min_score is None else float(min_score),
             )
         )
     return metrics
@@ -302,10 +309,8 @@ def _parse_measure(item: dict, name: str, measure: Any, path: Path) -> EvalSimul
         raise ValueError(
             f"{path}: metric {name!r} 'measure:' must be one of {', '.join(SIMULATION_MEASURES)}"
         )
-    if "min_quality" in item:
-        raise ValueError(
-            f"{path}: metric {name!r} is measured; it takes a range, not 'min_quality:'"
-        )
+    if "min_score" in item:
+        raise ValueError(f"{path}: metric {name!r} is measured; it takes a range, not 'min_score:'")
     if measure == "function_calls":
         return _parse_calls_measure(item, name, path)
     if "calls" in item:
@@ -375,7 +380,7 @@ def describe_simulation(simulation: EvalSimulationScenario, *, color: bool = Fal
     also naming the persona LLM that plays the user and the run's caps, then the
     caller's goal, e.g.::
 
-        user  -> modality: text | persona: openai/gpt-4o-mini | max_turns: 8 | max_duration_s: 120
+        user  -> modality: text | persona: ollama/gemma4:12b | max_turns: 8 | max_duration_s: 120 | max_silence_s: 30
         judge -> modality: text | eval: ollama/gemma4:12b
         goal  -> Book a table for two at 6 PM, then end the call.
 
@@ -386,11 +391,11 @@ def describe_simulation(simulation: EvalSimulationScenario, *, color: bool = Fal
     Returns:
         The summary, one line per section.
     """
-    persona = f"{simulation.simulator.get('service', '?')}/{simulation.simulator.get('model', '?')}"
     user = _user_segments(simulation) + [
-        ("persona", persona, _CFG_EVAL),
+        ("persona", _llm_identity(simulation.simulator), _CFG_EVAL),
         ("max_turns", str(simulation.max_turns), _CFG_LIMIT),
         ("max_duration_s", f"{simulation.max_duration_s:g}", _CFG_LIMIT),
+        ("max_silence_s", f"{simulation.max_silence_s:g}", _CFG_LIMIT),
     ]
     goal = " ".join(simulation.goal.split())
     lines: list[_ConfigLine] = [

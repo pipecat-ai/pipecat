@@ -7,18 +7,47 @@
 """Service constructors for the eval harness: a Pipecat service from a scenario's config mapping.
 
 The dispatchers pick a provider by its ``service:`` name, or call a
-``factory``; the per-provider builders do the rest. Provider imports stay
-inside the functions, so importing this module is cheap.
+``factory``; the per-provider builders do the rest. The built-in names are
+the local, keyless services: Ollama for the judge and the persona, Kokoro for
+the user's voice, Moonshine and Whisper for the bot's audio. Any other
+provider is a ``factory``: a dotted path to a callable that takes the config
+mapping and returns the service, so a scenario stays a description of the
+test while the provider, its settings, and its key live in code::
+
+    # my_evals.py
+    def judge(config):
+        return OpenAILLMService(settings=OpenAILLMService.Settings(model=config["model"]))
+
+    def voice(config):
+        return CartesiaHttpTTSService(
+            api_key=os.environ["CARTESIA_API_KEY"],
+            settings=CartesiaHttpTTSService.Settings(voice=config["voice"]),
+        )
+
+    # in the scenario
+    judge:
+      eval: {factory: my_evals.judge, model: gpt-4o-mini}
+    user:
+      speech: {factory: my_evals.voice, voice: 71a7ad14-091c-4e8e-a314-022ece01c121}
+
+What a factory must return: the judge's and the persona's LLM must be
+OpenAI-compatible, a ``BaseOpenAILLMService`` subclass; the user's TTS must
+be a local or HTTP service, since the cache around it drives ``run_tts``
+directly and a WebSocket-streaming one yields nothing there; the bot's STT
+can be any pipeline STT. Provider imports stay inside the functions, so
+importing this module is cheap.
 """
 
 import importlib
 import os
+import warnings
 from typing import TYPE_CHECKING, Any
 
 from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 if TYPE_CHECKING:
@@ -85,8 +114,8 @@ def stt_service_from_config(config: dict | None) -> STTService:
         return moonshine_service(config)
 
     raise ValueError(
-        f"Unknown STT service: {name!r}. Known: whisper, moonshine. "
-        "Or set transcription.factory to a 'module.func' returning an STTService."
+        f"Unknown STT service: {name!r}. Known: moonshine, whisper. "
+        "For any other, set transcription.factory to a 'module.func' returning an STTService."
     )
 
 
@@ -99,13 +128,19 @@ def tts_service_from_config(
     """Build the user-audio TTS, wrapped in a cache, from a ``user_audio`` mapping.
 
     A ``factory`` (a dotted path to a callable taking the voice config) builds
-    the inner service; otherwise the ``service`` name picks one, ``kokoro``
-    or ``cartesia``. The wrapper synthesizes each user utterance once and
-    reuses it across runs. The pipeline sets the sample rate.
+    the inner service; otherwise the ``service`` name picks one, ``kokoro``.
+    The wrapper synthesizes each user utterance once and reuses it across
+    runs. The pipeline sets the sample rate.
 
     Args:
-        voice_cfg: ``user_audio`` mapping — ``service`` and ``voice`` at minimum;
-            optional ``model`` / ``api_key`` for Cartesia.
+        voice_cfg: ``user_audio`` mapping — ``service`` or ``factory``, and
+            ``voice``, at minimum. ``service: cartesia`` still builds a
+            Cartesia HTTP TTS, with a warning.
+
+            .. deprecated:: 1.9.0
+                Use ``factory`` instead of ``service: cartesia``.
+                Will be removed in 2.0.0.
+
         cache_dir: Where to store cached audio (see ``CachingTTSService``).
         use_cache: When False, force fresh synthesis.
 
@@ -131,11 +166,17 @@ def tts_service_from_config(
         if name == "kokoro":
             inner = kokoro_service(voice_cfg)
         elif name == "cartesia":
-            inner = cartesia_service(voice_cfg)
+            warnings.warn(
+                "`service: cartesia` in `user.speech` is deprecated since 1.9.0 and will be "
+                "removed in 2.0.0. Use `factory` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            inner = _cartesia_service(voice_cfg)
         else:
             raise ValueError(
-                f"Unknown TTS service: {name!r}. Known: kokoro, cartesia. "
-                "Or set user_audio.factory to a 'module.func' returning a TTSService."
+                f"Unknown TTS service: {name!r}. Known: kokoro. "
+                "For any other, set user_audio.factory to a 'module.func' returning a TTSService."
             )
 
     return CachingTTSService(
@@ -171,8 +212,17 @@ def kokoro_service(voice_cfg: dict) -> TTSService:
     )
 
 
+@deprecated(
+    "`cartesia_service` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `user.speech.factory` instead."
+)
 def cartesia_service(voice_cfg: dict) -> TTSService:
     """Build a Cartesia TTS service from the ``user_audio`` config.
+
+    .. deprecated:: 1.9.0
+        Use ``user.speech.factory`` instead: a factory that constructs
+        :class:`~pipecat.services.cartesia.tts.CartesiaHttpTTSService`.
+        Will be removed in 2.0.0.
 
     Args:
         voice_cfg: The ``user.speech`` config mapping:
@@ -186,6 +236,11 @@ def cartesia_service(voice_cfg: dict) -> TTSService:
     Raises:
         RuntimeError: If no API key is given in the config or the environment.
     """
+    return _cartesia_service(voice_cfg)
+
+
+def _cartesia_service(voice_cfg: dict) -> TTSService:
+    """A Cartesia HTTP TTS from a ``user.speech`` config, keyed from the config or the environment."""
     from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 
     # Prefer an explicit api_key in the config; fall back to the env var so
@@ -287,6 +342,7 @@ def moonshine_service(config: dict) -> STTService:
 
 
 DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
+DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 # The default judge is thinking-capable, and only its JSON verdict is ever read,
 # so reasoning buys nothing while costing latency and eating into the token
@@ -298,12 +354,18 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
     """Build an LLM service from a ``service:`` block, the judge's or a persona's.
 
     A ``factory`` (a dotted path to a callable taking the config) builds it;
-    otherwise the ``service`` name picks a provider, ``ollama`` by default.
+    otherwise the ``service`` name picks a provider, ``ollama``, the default.
 
     Args:
         config: Mapping with keys ``service`` (default ``"ollama"``), ``model``,
             optional ``endpoint``, and an optional ``extra`` mapping forwarded to
             the model as top-level request parameters. ``None`` uses all defaults.
+            ``service: openai`` still builds an OpenAI service, with a warning.
+
+            .. deprecated:: 1.9.0
+                Use ``factory`` instead of ``service: openai``.
+                Will be removed in 2.0.0.
+
         where: The config block's name in the file, for error messages
             (``"judge.eval"``, ``"simulator"``).
 
@@ -325,10 +387,16 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
     if service_name == "ollama":
         return ollama_service(config)
     if service_name == "openai":
-        return openai_service(config)
+        warnings.warn(
+            f"`service: openai` in `{where}` is deprecated since 1.9.0 and will be removed in "
+            "2.0.0. Use `factory` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _openai_service(config)
     raise ValueError(
-        f"Unknown {where} service: {service_name!r}. Known: ollama, openai. "
-        f"Or set {where}.factory to a 'module.func' returning an LLM service."
+        f"Unknown {where} service: {service_name!r}. Known: ollama. "
+        f"For any other, set {where}.factory to a 'module.func' returning an LLM service."
     )
 
 
@@ -357,16 +425,31 @@ def ollama_service(config: dict) -> LLMService[Any]:
     )
 
 
+@deprecated(
+    "`openai_service` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `judge.eval.factory` instead."
+)
 def openai_service(config: dict) -> LLMService[Any]:
     """Build an OpenAI LLM service from the ``judge:`` config.
 
+    .. deprecated:: 1.9.0
+        Use ``judge.eval.factory`` (or ``simulator.factory``) instead: a
+        factory that constructs
+        :class:`~pipecat.services.openai.llm.OpenAILLMService`.
+        Will be removed in 2.0.0.
+
     An ``extra:`` mapping is forwarded verbatim as top-level request parameters.
     """
+    return _openai_service(config)
+
+
+def _openai_service(config: dict) -> LLMService[Any]:
+    """An OpenAI LLM from a ``service:`` block, its ``extra:`` forwarded as request parameters."""
     from pipecat.services.openai.llm import OpenAILLMService
 
     return OpenAILLMService(
         settings=OpenAILLMService.Settings(
-            model=config.get("model", "gpt-4o"),
+            model=config.get("model", DEFAULT_OPENAI_MODEL),
             extra=config.get("extra") or {},
         )
     )
