@@ -4,21 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The patient intake flow, configured from YAML at runtime.
+"""The podcast interview flow, configured from YAML at runtime.
 
-The same conversation as patient_intake.py, split along the seam Pipecat Flows
-offers for runtime configuration:
+An interview conversation split along the seam Pipecat Flows offers for
+runtime configuration:
 
-- flow.yaml holds the graph: eight nodes, what each one says, which
-  tool each offers, and where each tool leads. The birthday check routes on
-  its result, so an unverified caller stays on the first node to try again.
-  The practice and patient names come from the manager's state per session.
-- handlers.py holds the tools: direct functions whose schema comes
-  from their signature and docstring.
-
-The verification node summarizes the intake from the full conversation
-context. patient_intake.py shows the same node with a context reset and an
-LLM-generated summary instead.
+- flow.yaml holds the graph: introduction, topic, interview,
+  conclusion, and final nodes, and where each tool leads. The interview node
+  transitions back to itself once per topic aspect.
+- handlers.py holds the tools: direct functions whose schema
+  comes from their signature and docstring.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)
@@ -80,12 +75,12 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Run the patient intake bot."""
+    """Run the podcast interview bot."""
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY", ""))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
         settings=CartesiaTTSService.Settings(
-            voice="820a3788-2b37-4d21-847a-b65d8a68c99a",  # Salesman
+            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
         ),
     )
     llm = OpenAIResponsesLLMService(
@@ -132,10 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # validated as it loads; constructing the Flow checks that every tool it
     # names exists and has a valid direct-function signature.
     config = FlowConfig.from_file(FLOW_CONFIG_PATH)
-    flow = Flow(
-        config,
-        handlers=handlers,
-    )
+    flow = Flow(config, handlers=handlers)
 
     flow_manager = FlowManager(
         worker=worker,
@@ -143,15 +135,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context_aggregator=context_aggregator,
         transport=transport,
         global_functions=flow.global_functions,
-    )
-
-    # Session facts the prompts refer to as {{ key }}. The manager fills them
-    # in from its state when it enters each node.
-    flow_manager.state.update(
-        {
-            "practice_name": os.getenv("PRACTICE_NAME", "Tri-County Health Services"),
-            "patient_name": os.getenv("PATIENT_NAME", "Chad Bailey"),
-        }
     )
 
     @transport.event_handler("on_client_connected")

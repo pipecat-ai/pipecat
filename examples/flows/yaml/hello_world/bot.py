@@ -4,26 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The food ordering flow, configured from YAML at runtime.
+"""A 'Hello-World' introduction to Pipecat Flows, with the flow in YAML.
 
-The same conversation as food_ordering.py, split along the seam Pipecat Flows
-offers for runtime configuration:
-
-- flow.yaml holds the graph: the nodes, what each one says, which
-  tools each offers, and where each tool leads.
-- handlers.py holds the tools: direct functions whose schema comes
-  from their signature and docstring.
-
-This bot reads the YAML from disk when it starts a session. A production bot
-would fetch it from a database or CMS instead, so one deployment can run
-whichever flow the session calls for. Prompts refer to session facts and
-to what handlers have stored as {{ key }}, filled in from the manager's state.
+The same bot as python/hello_world.py, split along the seam Pipecat Flows offers for
+runtime configuration: flow.yaml holds the two nodes and the transition
+between them, and handlers.py holds the one tool the flow calls.
 
 Requirements:
-- CARTESIA_API_KEY (for TTS)
-- DEEPGRAM_API_KEY (for STT)
-- DAILY_API_KEY (for transport)
-- OPENAI_API_KEY (for the LLM)
+- CARTESIA_API_KEY
+- GOOGLE_API_KEY
+
+Run the example:
+uv run bot.py
 """
 
 import os
@@ -45,9 +37,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -79,18 +71,14 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Run the food ordering bot."""
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY", ""))
+    stt = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY", ""))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
         settings=CartesiaTTSService.Settings(
-            voice="820a3788-2b37-4d21-847a-b65d8a68c99a",  # Salesman
+            voice="32b3f3c5-7171-46aa-abe7-b598964aa793",
         ),
     )
-    llm = OpenAIResponsesLLMService(
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1"),
-    )
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY", ""))
 
     context = LLMContext()
     context_aggregator = LLMContextAggregatorPair(
@@ -103,13 +91,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -127,14 +115,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.add_workers(worker)
 
-    # Load the flow graph and join it to the handlers module. The config is
-    # validated as it loads; constructing the Flow checks that every tool it
-    # names exists and has a valid direct-function signature.
+    # The flow is data: load it, then join it to the tool it names.
     config = FlowConfig.from_file(FLOW_CONFIG_PATH)
-    flow = Flow(
-        config,
-        handlers=handlers,
-    )
+    flow = Flow(config, handlers=handlers)
 
     flow_manager = FlowManager(
         worker=worker,
@@ -142,12 +125,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context_aggregator=context_aggregator,
         transport=transport,
         global_functions=flow.global_functions,
-    )
-
-    # Session facts the prompts refer to as {{ key }}. The manager fills them
-    # in from its state when it enters each node.
-    flow_manager.state.update(
-        {"restaurant_name": os.getenv("RESTAURANT_NAME", "Pipecat Pizza and Sushi")}
     )
 
     @transport.event_handler("on_client_connected")
