@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from pipecat.utils.yaml import include_loader
+
 
 class _ScenarioLoader(yaml.SafeLoader):
     """A SafeLoader that reads only plain decimal numbers as ints.
@@ -51,32 +53,8 @@ def _load_mapping(path: Path) -> dict:
     Raises:
         ValueError: If the top level is not a mapping.
     """
-
-    class _Loader(_ScenarioLoader):
-        pass
-
-    _add_include_constructor(_Loader, path.parent)
     with path.open() as f:
-        data = yaml.load(f, _Loader)
+        data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top level must be a mapping")
     return data
-
-
-def _add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
-    """Register an ``!include <relative-path>`` constructor on ``loader_class``.
-
-    Included files load with the same loader, so nested includes work; paths
-    resolve against ``base_dir``.
-    """
-
-    def _include(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
-        if not isinstance(node, yaml.ScalarNode):
-            raise yaml.constructor.ConstructorError(
-                None, None, "!include expects a file path", node.start_mark
-            )
-        include_path = base_dir / str(loader.construct_scalar(node))
-        with include_path.open() as f:
-            return yaml.load(f, loader_class)
-
-    loader_class.add_constructor("!include", _include)

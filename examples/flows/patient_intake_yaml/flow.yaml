@@ -1,0 +1,119 @@
+# The patient intake flow as data. Loaded by bot.py and joined
+# to the tools in handlers.py. Every function named here is a
+# direct function in that module; its description and parameters come from the
+# code. {{ practice_name }} and {{ patient_name }} are filled in from state.
+# The birthday check routes on its result: a verified caller moves on, and
+# anything else stays here to try again.
+
+initial_node: start
+
+nodes:
+  start:
+    role_message: >
+      You are Jessica, an agent for {{ practice_name }}. You must ALWAYS use
+      one of the available functions to progress the conversation. Be
+      professional but friendly.
+    task_messages:
+      - role: developer
+        content: >
+          Start by introducing yourself to {{ patient_name }}, then ask for
+          their date of birth, including the year. Once they provide their
+          birthday, use verify_birthday to check it. If it does not verify,
+          ask them to try again.
+    functions:
+      - name: verify_birthday
+        transition_to:
+          field: verified
+          cases:
+            true: get_prescriptions
+
+  get_prescriptions:
+    role_message: >
+      You are Jessica, an agent for {{ practice_name }}. You must ALWAYS use
+      one of the available functions to progress the conversation. Be
+      professional but friendly.
+    task_messages:
+      - role: developer
+        content: >
+          This step is for collecting prescriptions. Ask them what
+          prescriptions they're taking, including the dosage. Get to the point
+          by saying 'Thanks for confirming that. First up, what prescriptions
+          are you currently taking, including the dosage for each medication?'.
+          After recording prescriptions (or confirming none), proceed to
+          allergies.
+    context_strategy: reset
+    functions:
+      - name: record_prescriptions
+        transition_to: get_allergies
+
+  get_allergies:
+    task_messages:
+      - role: developer
+        content: >
+          Collect allergy information. Ask about any allergies they have.
+          After recording allergies (or confirming none), proceed to medical
+          conditions.
+    functions:
+      - name: record_allergies
+        transition_to: get_conditions
+
+  get_conditions:
+    task_messages:
+      - role: developer
+        content: >
+          Collect medical condition information. Ask about any medical
+          conditions they have. After recording conditions (or confirming
+          none), proceed to visit reasons.
+    functions:
+      - name: record_conditions
+        transition_to: get_visit_reasons
+
+  get_visit_reasons:
+    task_messages:
+      - role: developer
+        content: >
+          Collect information about the reason for their visit. Ask what brings
+          them to the doctor today. After recording their reasons, proceed to
+          verification.
+    functions:
+      - name: record_visit_reasons
+        transition_to: verify
+
+  verify:
+    task_messages:
+      - role: developer
+        content: |
+          Review all collected information with the patient. Follow these steps:
+          1. Summarize their prescriptions, allergies, conditions, and visit reasons
+          2. Ask if everything is correct
+          3. Use the appropriate function based on their response
+
+          Be thorough in reviewing all details and wait for explicit confirmation.
+    functions:
+      - name: revise_information
+        transition_only: true
+        description: Return to prescriptions to revise information.
+        transition_to: get_prescriptions
+      - name: confirm_information
+        transition_only: true
+        description: Proceed with confirmed information.
+        transition_to: confirm
+
+  confirm:
+    task_messages:
+      - role: developer
+        content: >
+          Once confirmed, thank them, then use the complete_intake function to
+          end the conversation.
+    functions:
+      - name: complete_intake
+        transition_only: true
+        description: Complete the intake process.
+        transition_to: end
+
+  end:
+    task_messages:
+      - role: developer
+        content: Thank them for their time and end the conversation.
+    post_actions:
+      - type: end_conversation

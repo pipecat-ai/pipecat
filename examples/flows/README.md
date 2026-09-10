@@ -4,7 +4,7 @@
 
 ## Hello, world
 
-[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below.
+[`hello_world.py`](./hello_world.py) is the smallest possible Flow: a bot that asks for your favorite color and then says goodbye. It's a good first read — it shows the basics of nodes, functions, and transitions. To run it, see Setup below. [`hello_world_yaml/`](./hello_world_yaml) is the same bot with its two nodes in [`flow.yaml`](./hello_world_yaml/flow.yaml) and its one tool in [`handlers.py`](./hello_world_yaml/handlers.py), the shape to copy when the flow should be configuration rather than code. Every `*_yaml/` folder has the same three files: `bot.py` runs the pipeline, `flow.yaml` is the graph, and `handlers.py` is the Python the graph names: direct functions for its tools and callables for its actions. A function that only moves the conversation to another node is written in the YAML alone, as a `transition_only` entry with its own `description`; `handlers.py` holds only the functions that capture data or do work.
 
 ## Setup
 
@@ -32,10 +32,14 @@ All examples support multiple LLM providers (OpenAI, Anthropic, Google Gemini, A
 ### Core flows
 
 - [`food_ordering.py`](./food_ordering.py) — restaurant order flow demonstrating node and edge functions
+- [`food_ordering_yaml/`](./food_ordering_yaml) — the same order flow with its graph loaded from [`flow.yaml`](./food_ordering_yaml/flow.yaml) at runtime via `FlowConfig`, and its tools in [`handlers.py`](./food_ordering_yaml/handlers.py); the seam for configuring a deployed bot per session
 - [`restaurant_reservation.py`](./restaurant_reservation.py) — reservation system with availability checking
+- [`restaurant_reservation_yaml/`](./restaurant_reservation_yaml) — the reservation flow as [`flow.yaml`](./restaurant_reservation_yaml/flow.yaml) plus [`handlers.py`](./restaurant_reservation_yaml/handlers.py); shows the shim pattern for transitions that depend on logic: flow-agnostic business logic, a thin tool that reports its outcome as a `status` field, and a branch table in the YAML that routes on it
 - [`patient_intake.py`](./patient_intake.py) — medical intake system showing complex state management
+- [`patient_intake_yaml/`](./patient_intake_yaml) — the intake flow as [`flow.yaml`](./patient_intake_yaml/flow.yaml) plus [`handlers.py`](./patient_intake_yaml/handlers.py); the birthday check routes on a boolean result, and the practice and patient names come from `flow_manager.state`
 - [`insurance_quote.py`](./insurance_quote.py) — insurance quote system with data collection
 - [`podcast_interview.py`](./podcast_interview.py) — podcast interview flow
+- [`podcast_interview_yaml/`](./podcast_interview_yaml) — the interview flow as [`flow.yaml`](./podcast_interview_yaml/flow.yaml) plus [`handlers.py`](./podcast_interview_yaml/handlers.py); its interview node transitions back to itself
 
 ### Advanced features
 

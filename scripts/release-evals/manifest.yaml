@@ -389,7 +389,11 @@ suite:
   #
   - bot: flows/hello_world.py
     scenarios: [scripted/hello_world]
+  - bot: flows/hello_world_yaml/bot.py
+    scenarios: [scripted/hello_world]
   - bot: flows/food_ordering.py
+    scenarios: [scripted/food_ordering_pizza]
+  - bot: flows/food_ordering_yaml/bot.py
     scenarios: [scripted/food_ordering_pizza]
   - bot: flows/food_ordering_advanced_functionschema.py
     scenarios: [scripted/food_ordering_sushi]
@@ -397,7 +401,11 @@ suite:
     scenarios: [scripted/multi_worker_handoff, scripted/multi_worker_handoff_back_and_forth]
   - bot: flows/patient_intake.py
     scenarios: [scripted/patient_intake]
+  - bot: flows/patient_intake_yaml/bot.py
+    scenarios: [scripted/patient_intake]
   - bot: flows/restaurant_reservation.py
+    scenarios: [scripted/restaurant_reservation_available, scripted/restaurant_reservation_no_availability]
+  - bot: flows/restaurant_reservation_yaml/bot.py
     scenarios: [scripted/restaurant_reservation_available, scripted/restaurant_reservation_no_availability]
   - bot: flows/insurance_quote.py
     scenarios: [scripted/insurance_quote]
@@ -441,9 +449,15 @@ suite:
     scenarios: [simulated/capital_curious, simulated/capital_curious_audio]
   - bot: flows/restaurant_reservation.py
     scenarios: [simulated/book_table_available, simulated/book_table_flexible, simulated/book_table_impossible]
+  - bot: flows/restaurant_reservation_yaml/bot.py
+    scenarios: [simulated/book_table_available, simulated/book_table_flexible, simulated/book_table_impossible]
   - bot: flows/patient_intake.py
     scenarios: [simulated/complete_patient_intake]
+  - bot: flows/patient_intake_yaml/bot.py
+    scenarios: [simulated/complete_patient_intake]
   - bot: flows/food_ordering.py
+    scenarios: [simulated/order_pizza]
+  - bot: flows/food_ordering_yaml/bot.py
     scenarios: [simulated/order_pizza]
   - bot: flows/food_ordering_advanced_functionschema.py
     scenarios: [simulated/order_sushi]
