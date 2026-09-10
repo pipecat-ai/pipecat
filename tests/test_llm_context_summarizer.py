@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregator,
     LLMAssistantAggregatorParams,
 )
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
@@ -259,16 +260,26 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(request_frame)
         await summarizer.cleanup()
 
-    async def test_assistant_aggregator_forwards_should_summarize_callback(self):
-        """Assistant aggregator parameters configure the owned summarizer."""
-        callback = lambda context: True
+    async def test_assistant_aggregator_uses_should_summarize_callback(self):
+        """Assistant aggregator parameters control automatic summarization."""
+        callback_contexts = []
         aggregator = LLMAssistantAggregator(
             context=self.context,
-            params=LLMAssistantAggregatorParams(should_summarize_callback=callback),
+            params=LLMAssistantAggregatorParams(
+                enable_auto_context_summarization=True,
+                should_summarize_callback=lambda context: callback_contexts.append(context) or True,
+            ),
         )
 
-        self.assertIsNotNone(aggregator._summarizer)
-        self.assertIs(aggregator._summarizer._should_summarize_callback, callback)
+        _, upstream_frames = await run_test(
+            aggregator,
+            frames_to_send=[LLMFullResponseStartFrame()],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextSummaryRequestFrame],
+        )
+
+        self.assertEqual(callback_contexts, [self.context])
+        self.assertEqual(upstream_frames[0].context, self.context)
 
     async def test_summarization_in_progress_prevents_duplicate(self):
         """Test that a summarization in progress prevents triggering another."""
