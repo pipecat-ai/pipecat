@@ -402,17 +402,14 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         await self._disconnect()
 
     async def _update_settings(self, delta):
-        """Apply a settings delta; most of these are fixed at session start."""
+        """Apply a settings delta.
+
+        The API fixes the session's settings when it starts, so a change is
+        stored and reaches the API on the next session (see
+        :meth:`reset_conversation`).
+        """
         changed = await super()._update_settings(delta)
-        # The session is configured from these when it starts, so a change to
-        # one reaches the API on the next session.
-        session_scoped = changed.keys() & {"model", "system_instruction", "voice"}
-        if session_scoped:
-            logger.warning(
-                f"{self}: [{', '.join(sorted(session_scoped))}] cannot change during a session; "
-                "they take effect on the next one"
-            )
-        self._warn_unhandled_updated_settings(changed.keys() - session_scoped)
+        self._warn_unhandled_updated_settings(changed)
         return changed
 
     async def reset_conversation(self):
