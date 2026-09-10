@@ -508,7 +508,7 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
         class ImpatientLLM(SpeculativeLLM):
             SPECULATION_HOLD_TIMEOUT = 0.2
 
-        down, _ = await run_test(
+        down, up = await run_test(
             ImpatientLLM(),
             frames_to_send=[
                 self.context_frame("abc"),
@@ -520,6 +520,69 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
         )
 
         assert self.response_frames(down) == []
+        # Withdrawn, so the strategy that started it stops expecting it. Without
+        # this the committed turn confirms a response that no longer exists.
+        withdrawals = [f for f in [*down, *up] if isinstance(f, EagerEndOfTurnCancelFrame)]
+        assert [f.speculation_id for f in withdrawals] == ["abc", "abc"]
+
+
+class TestATurnOutlastingTheHoldIsStillAnswered(unittest.IsolatedAsyncioTestCase):
+    """A hold that runs out must not cost the turn its reply.
+
+    The bound exists so the bot is never left silent; giving up on the held
+    response has to put the turn back on the ordinary path rather than leave the
+    strategy waiting for a response the gate has already dropped.
+    """
+
+    @staticmethod
+    def aggregator_and_llm(hold_timeout: float):
+        class ImpatientLLM(SpeculativeLLM):
+            SPECULATION_HOLD_TIMEOUT = hold_timeout
+
+        context = LLMContext()
+        return context, aggregator(context), ImpatientLLM()
+
+    async def test_a_matching_commit_after_the_hold_expires_runs_a_fresh_inference(self):
+        context, user_aggregator, llm = self.aggregator_and_llm(0.2)
+
+        down, _ = await run_test(
+            Pipeline([user_aggregator, llm]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                # Longer than the hold, so the gate gives up before the commit.
+                SleepFrame(sleep=0.8),
+                final("Book a flight."),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        # The turn is answered, and the context records the committed
+        # transcript once rather than an unanswered user message.
+        assert [f.text for f in down if isinstance(f, LLMTextFrame)] == ["Booking your flight."]
+        assert context.messages == [{"role": "user", "content": "Book a flight."}]
+
+    async def test_a_hold_that_does_not_expire_is_released_as_before(self):
+        context, user_aggregator, llm = self.aggregator_and_llm(5.0)
+
+        down, _ = await run_test(
+            Pipeline([user_aggregator, llm]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+                final("Book a flight."),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        assert [f.text for f in down if isinstance(f, LLMTextFrame)] == ["Booking your flight."]
 
 
 class StreamingToolCallLLM(LLMService):

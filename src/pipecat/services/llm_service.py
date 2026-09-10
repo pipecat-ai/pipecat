@@ -369,7 +369,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(
             name=f"{self}::SpeculationGate",
-            push_expired=self._push_past_gate,
+            withdraw_expired=self._withdraw_expired_speculation,
             max_hold_duration=self.SPECULATION_HOLD_TIMEOUT,
         )
         self._warn_turn_completion_settings_are_strategy_owned()
@@ -819,13 +819,25 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._start_interruption()
         await self.stop_all_metrics()
 
-    async def _push_past_gate(self, frames: list[GatedFrame]):
-        """Push frames the gate has already resolved.
+    async def _withdraw_expired_speculation(self, speculation_id: str, frames: list[GatedFrame]):
+        """Deliver what an expired hold left behind, then withdraw the speculation.
 
-        Routing them back through :meth:`push_frame` would re-gate them.
+        The frames go past the gate, since it has already resolved them; routing
+        them back through :meth:`push_frame` would re-gate them.
+
+        The withdrawal goes both ways, because the strategy that started the
+        speculation is upstream and nothing else tells it the response is gone.
+        A turn that then confirmed this speculation would be answered by
+        nothing: the gate has no response left to release, and the aggregator
+        skips inference for a turn it believes is already answered.
         """
         for frame, direction in frames:
             await super().push_frame(frame, direction)
+
+        # Inert within this service — the gate cleared the speculation before
+        # calling us, so `_handle_eager_end_of_turn_cancel` matches nothing.
+        # There is no inference left to stop; this is for upstream.
+        await self.broadcast_frame(EagerEndOfTurnCancelFrame, speculation_id=speculation_id)
 
     async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
         """Handle context summarization request from aggregator.

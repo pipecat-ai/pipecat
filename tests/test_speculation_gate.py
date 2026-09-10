@@ -69,17 +69,19 @@ def tool_result(value: str = "booked") -> FunctionCallResultFrame:
 
 async def make_gate(**kwargs) -> SpeculationGate:
     """Build a gate wired up the way a host wires one."""
-    gate = SpeculationGate(push_expired=kwargs.pop("push_expired", None) or _ignore, **kwargs)
+    gate = SpeculationGate(
+        withdraw_expired=kwargs.pop("withdraw_expired", None) or _ignore, **kwargs
+    )
     await gate.setup(TaskManager())
     return gate
 
 
-async def _ignore(frames: list[GatedFrame]):
+async def _ignore(speculation_id: str, frames: list[GatedFrame]):
     pass
 
 
-async def _collect(into: list, frames: list[GatedFrame]):
-    into.append([frame for frame, _ in frames])
+async def _collect(into: list, speculation_id: str, frames: list[GatedFrame]):
+    into.append((speculation_id, [frame for frame, _ in frames]))
 
 
 def speculate(
@@ -218,13 +220,17 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_hold_that_outlasts_its_bound_is_discarded(self):
         expired = []
-        gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
+        gate = await make_gate(
+            max_hold_duration=0.05, withdraw_expired=lambda i, f: _collect(expired, i, f)
+        )
 
         speculate(gate, "abc", "Booking.")
         await asyncio.sleep(0.2)
 
         assert gate.state == SpeculationState.OPEN
-        assert expired == [[]]
+        # The speculation comes with the frames: the gate can settle its own
+        # state, but whoever started it has to be told it is over.
+        assert expired == [("abc", [])]
         # Confirmation arriving after the gate gave up releases nothing.
         assert types(emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))) == [
             UserStoppedSpeakingFrame
@@ -232,7 +238,9 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_hold_resolved_in_time_never_expires(self):
         expired = []
-        gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
+        gate = await make_gate(
+            max_hold_duration=0.05, withdraw_expired=lambda i, f: _collect(expired, i, f)
+        )
 
         speculate(gate, "abc", "Booking.")
         emit(gate, UserStoppedSpeakingFrame(speculation_id="abc"))
@@ -242,12 +250,16 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_expired_hold_still_delivers_what_must_outlive_it(self):
         expired = []
-        gate = await make_gate(max_hold_duration=0.05, push_expired=lambda f: _collect(expired, f))
+        gate = await make_gate(
+            max_hold_duration=0.05, withdraw_expired=lambda i, f: _collect(expired, i, f)
+        )
 
         speculate(gate, "abc", "Booking.", end=False, then=(tool_result(),))
         await asyncio.sleep(0.2)
 
-        assert [types(batch) for batch in expired] == [[FunctionCallResultFrame]]
+        assert [(spec, types(frames)) for spec, frames in expired] == [
+            ("abc", [FunctionCallResultFrame])
+        ]
 
 
 class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
