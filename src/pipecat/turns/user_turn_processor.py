@@ -10,6 +10,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
@@ -23,6 +24,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
     FrameProcessorSetup,
 )
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -107,6 +109,9 @@ class UserTurnProcessor(FrameProcessor):
         )
         self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)
         self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
+        )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_started", self._on_user_turn_started
         )
@@ -203,6 +208,9 @@ class UserTurnProcessor(FrameProcessor):
     async def _on_broadcast_frame(self, controller, frame_cls: type[Frame], **kwargs):
         await self.broadcast_frame(frame_cls, **kwargs)
 
+    async def _on_user_turn_speculation_cancelled(self, controller):
+        await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+
     async def _on_user_turn_started(
         self,
         controller: UserTurnController,
@@ -246,6 +254,7 @@ class UserTurnProcessor(FrameProcessor):
         self,
         controller: UserTurnController,
         strategy: BaseUserTurnStopStrategy,
+        speculation: UserTurnSpeculation | None,
     ):
         logger.debug(f"{self}: User turn inference triggered (strategy: {strategy})")
         await self._call_event_handler("on_user_turn_inference_triggered", strategy)
