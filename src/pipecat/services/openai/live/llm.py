@@ -68,7 +68,7 @@ from pipecat.workers.llm.backend_llm_worker import (
 
 from . import events
 
-DEFAULT_MODEL = "gpt-live-1-diamond-alpha"
+DEFAULT_MODEL = "gpt-live-1"
 
 # Quiet time that ends a speaker's turn. The API emits transcript fragments on
 # 200 ms frame boundaries, so this has to clear ordinary gaps within speech.
@@ -611,10 +611,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 return
             self._websocket = await websocket_connect(
                 uri=self.base_url,
-                additional_headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "OpenAI-Alpha": events.OPENAI_LIVE_ALPHA_HEADER,
-                },
+                additional_headers={"Authorization": f"Bearer {self.api_key}"},
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:

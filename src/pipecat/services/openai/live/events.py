@@ -11,9 +11,9 @@ speaks at the same time and decides on its own when to talk. Clients start a
 session, stream audio in, receive audio and transcript events out, and answer
 the model's *delegations* (units of work it hands to a backend model).
 
-Server events are parsed leniently: fields the alpha adds are kept, and event
-types this module doesn't model yet become :class:`UnknownServerEvent` rather
-than errors, since the API is expected to change during the alpha.
+Server events are parsed leniently: unrecognised fields are kept, and event
+types this module doesn't model become :class:`UnknownServerEvent` rather than
+errors, so an addition to the API doesn't break the receive loop.
 """
 
 import json
@@ -21,9 +21,6 @@ import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-#: Value of the ``OpenAI-Alpha`` header that selects the Live API alpha.
-OPENAI_LIVE_ALPHA_HEADER = "quicksilver=v3"
 
 #: Maximum number of startup ``input`` messages a session accepts.
 MAX_INPUT_ITEMS = 128
@@ -352,7 +349,7 @@ class SessionCloseEvent(ClientEvent):
 class ServerEvent(BaseModel):
     """Base class for events received from the Live API.
 
-    Unknown fields are retained so events keep parsing as the alpha evolves.
+    Unknown fields are retained so events keep parsing as the API grows.
 
     Parameters:
         type: The event type.

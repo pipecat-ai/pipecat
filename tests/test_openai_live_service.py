@@ -169,7 +169,7 @@ def _response_event(inner: dict[str, Any], delegation_id: str | None = "item_d1"
 def _session_started() -> dict[str, Any]:
     return {
         "type": "session.started",
-        "session": {"id": "live_123", "model": "gpt-live-1-diamond-alpha"},
+        "session": {"id": "live_123", "model": "gpt-live-1"},
     }
 
 
