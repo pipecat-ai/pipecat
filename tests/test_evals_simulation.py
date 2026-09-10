@@ -264,7 +264,7 @@ from types import SimpleNamespace  # noqa: E402
 
 from pipecat.evals.client import (  # noqa: E402
     BOT_ENDED_EVENT,
-    HARNESS_ERROR_EVENT,  # noqa: E402
+    HARNESS_ERROR_EVENT,
     PERSONA_TURN_EVENT,
 )
 from pipecat.evals.events import EvalEventStream  # noqa: E402
@@ -272,6 +272,7 @@ from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
+from pipecat.frames.frames import LLMTextFrame  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
@@ -819,10 +820,13 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
         )
 
         async def conversation():
-            # Three events spaced inside the lull cap, spanning more than the cap.
+            # Activity spaced inside the lull cap, spanning more than the cap:
+            # an event, then frames that only buffer toward one.
+            await asyncio.sleep(0.1)
+            await stream.append({"type": "llm_started"})
             for _ in range(3):
                 await asyncio.sleep(0.1)
-                await stream.append({"type": "llm_started"})
+                stream.frame_to_event(LLMTextFrame(text="token "))
             await _end_call(llm, success=True, reason="done")
 
         task = asyncio.create_task(conversation())
@@ -915,3 +919,18 @@ class TestSimulatorDefault(unittest.TestCase):
         s = EvalSimulationScenario.load(_write(MINIMAL + "max_silence_s: 7\n"))
         self.assertEqual(s.max_silence_s, 7.0)
         self.assertIn("persona: openai/gpt-4o-mini", describe_simulation(s))
+
+    def test_the_summary_names_what_the_block_builds(self):
+        # A service without a model shows the model the builder defaults to; a
+        # factory is named as such, since the summary cannot know what it builds.
+        without = "\n".join(l for l in MINIMAL.splitlines() if not l.startswith("simulator"))
+        openai = EvalSimulationScenario.load(_write(without + "\nsimulator: {service: openai}\n"))
+        self.assertIn("persona: openai/gpt-4o", describe_simulation(openai))
+        factory = EvalSimulationScenario.load(
+            _write(without + "\nsimulator: {factory: my_evals.persona}\n")
+        )
+        self.assertIn("persona: factory:my_evals.persona", describe_simulation(factory))
+        judged = EvalSimulationScenario.load(
+            _write(MINIMAL + "judge: {eval: {factory: my_evals.judge}}\n")
+        )
+        self.assertIn("eval: factory:my_evals.judge", describe_simulation(judged))

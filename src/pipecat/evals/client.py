@@ -215,6 +215,7 @@ class _PersonaTurnRelay(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        self._stream.touch()
         if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
             self._text = []
             self._spoken = []

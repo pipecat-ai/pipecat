@@ -267,6 +267,17 @@
       "location": "pipecat/evals/services.py"
     },
     {
+      "subject": "llm_service_from_config.config",
+      "module": "pipecat.evals.services",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "factory",
+      "message": "Use ``factory`` instead of ``service: openai``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
       "subject": "openai_service",
       "module": "pipecat.evals.services",
       "kind": "function",
@@ -275,6 +286,17 @@
       "relation": "use_existing",
       "replacement": "judge.eval.factory",
       "message": "`openai_service` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `judge.eval.factory` instead.",
+      "location": "pipecat/evals/services.py"
+    },
+    {
+      "subject": "tts_service_from_config.voice_cfg",
+      "module": "pipecat.evals.services",
+      "kind": "parameter",
+      "deprecated_in": "1.9.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "factory",
+      "message": "Use ``factory`` instead of ``service: cartesia``. Will be removed in 2.0.0.",
       "location": "pipecat/evals/services.py"
     },
     {

@@ -115,23 +115,27 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # of what it said, in text mode its LLM text.
         started = time.monotonic()
         deadline = started + simulation.max_duration_s
-        # Any event at all breaks a lull: the bot starting to answer counts,
-        # so a slow reply is not silence, only nothing happening is.
-        last_event = started
+        # A lull is measured from the stream's last activity, which a token or
+        # a spoken sentence refreshes without making an event, so a reply in
+        # progress on either side is never silence, only nothing happening is.
+        self._stream.touch()
         failures: list[EvalAssertionFailure] = []
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
         )
         while self._ended_by is None:
+            lull_ends = self._stream.last_activity + simulation.max_silence_s
             try:
-                event = await self._stream.next_any(
-                    min(deadline, last_event + simulation.max_silence_s)
-                )
+                event = await self._stream.next_any(min(deadline, lull_ends))
             except TimeoutError:
-                self._ended_by = "max_duration" if time.monotonic() >= deadline else "silence"
+                if time.monotonic() >= deadline:
+                    self._ended_by = "max_duration"
+                    break
+                if self._stream.last_activity + simulation.max_silence_s > time.monotonic():
+                    continue
+                self._ended_by = "silence"
                 break
-            last_event = time.monotonic()
             self._observe_new_events()
             if event["type"] == END_CALL_EVENT:
                 self._ended_by = "end_call"

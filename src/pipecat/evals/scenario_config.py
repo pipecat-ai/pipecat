@@ -15,7 +15,11 @@ renders both as the two-line summary printed before a run.
 from pathlib import Path
 from typing import Any, Protocol
 
-from pipecat.evals.services import DEFAULT_OLLAMA_JUDGE_EXTRA, DEFAULT_OLLAMA_JUDGE_MODEL
+from pipecat.evals.services import (
+    DEFAULT_OLLAMA_JUDGE_EXTRA,
+    DEFAULT_OLLAMA_JUDGE_MODEL,
+    DEFAULT_OPENAI_MODEL,
+)
 
 _DEFAULT_JUDGE = {
     "service": "ollama",
@@ -91,11 +95,30 @@ class EvalConfigured(Protocol):
     judge: dict
 
 
-def _svc_model(cfg: dict, default_service: str, model_key: str) -> str:
-    """``service/model`` for a service config block, or the service alone without a model."""
-    service = cfg.get("service", default_service)
-    model = cfg.get(model_key)
-    return f"{service}/{model}" if model else str(service)
+# The model each LLM service builds with when the block names none.
+_DEFAULT_LLM_MODELS = {"ollama": DEFAULT_OLLAMA_JUDGE_MODEL, "openai": DEFAULT_OPENAI_MODEL}
+
+
+def _svc_model(
+    cfg: dict, default_service: str, model_key: str, default_models: dict[str, str] | None = None
+) -> str:
+    """What a service config block builds, as the run summary names it.
+
+    ``factory:<path>`` for a factory, else ``service/model``, the model being
+    the block's or the one the service builds with by default, or the service
+    alone when neither is known.
+    """
+    factory = cfg.get("factory")
+    if factory:
+        return f"factory:{factory}"
+    service = str(cfg.get("service", default_service))
+    model = cfg.get(model_key) or (default_models or {}).get(service.lower())
+    return f"{service}/{model}" if model else service
+
+
+def _llm_identity(cfg: dict) -> str:
+    """What a ``judge.eval`` or ``simulator`` block builds, as the run summary names it."""
+    return _svc_model(cfg, "ollama", "model", _DEFAULT_LLM_MODELS)
 
 
 def _user_segments(scenario: EvalConfigured) -> list[_ConfigSegment]:
@@ -113,8 +136,7 @@ def _judge_segments(scenario: EvalConfigured) -> list[_ConfigSegment]:
     if scenario.bot_audio:
         transcription = _svc_model(scenario.transcriber or {}, "whisper", "model")
         segs.append(("transcription", transcription, _CFG_SERVICE))
-    eval_svc = f"{scenario.judge.get('service', '?')}/{scenario.judge.get('model', '?')}"
-    segs.append(("eval", eval_svc, _CFG_EVAL))
+    segs.append(("eval", _llm_identity(scenario.judge), _CFG_EVAL))
     return segs
 
 

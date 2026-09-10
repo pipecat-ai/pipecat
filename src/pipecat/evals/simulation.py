@@ -113,9 +113,9 @@ from pipecat.evals.scenario_config import (
     _config_lines,
     _ConfigLine,
     _judge_segments,
+    _llm_identity,
     _parse_judge_block,
     _parse_user_block,
-    _svc_model,
     _user_segments,
 )
 from pipecat.evals.scenario_loader import _load_mapping
@@ -391,9 +391,8 @@ def describe_simulation(simulation: EvalSimulationScenario, *, color: bool = Fal
     Returns:
         The summary, one line per section.
     """
-    persona = _svc_model({**_DEFAULT_JUDGE, **simulation.simulator}, "ollama", "model")
     user = _user_segments(simulation) + [
-        ("persona", persona, _CFG_EVAL),
+        ("persona", _llm_identity(simulation.simulator), _CFG_EVAL),
         ("max_turns", str(simulation.max_turns), _CFG_LIMIT),
         ("max_duration_s", f"{simulation.max_duration_s:g}", _CFG_LIMIT),
         ("max_silence_s", f"{simulation.max_silence_s:g}", _CFG_LIMIT),

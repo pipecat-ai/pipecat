@@ -134,7 +134,13 @@ def tts_service_from_config(
 
     Args:
         voice_cfg: ``user_audio`` mapping — ``service`` or ``factory``, and
-            ``voice``, at minimum.
+            ``voice``, at minimum. ``service: cartesia`` still builds a
+            Cartesia HTTP TTS, with a warning.
+
+            .. deprecated:: 1.9.0
+                Use ``factory`` instead of ``service: cartesia``.
+                Will be removed in 2.0.0.
+
         cache_dir: Where to store cached audio (see ``CachingTTSService``).
         use_cache: When False, force fresh synthesis.
 
@@ -336,6 +342,7 @@ def moonshine_service(config: dict) -> STTService:
 
 
 DEFAULT_OLLAMA_JUDGE_MODEL = "gemma4:12b"
+DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 # The default judge is thinking-capable, and only its JSON verdict is ever read,
 # so reasoning buys nothing while costing latency and eating into the token
@@ -353,6 +360,12 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
         config: Mapping with keys ``service`` (default ``"ollama"``), ``model``,
             optional ``endpoint``, and an optional ``extra`` mapping forwarded to
             the model as top-level request parameters. ``None`` uses all defaults.
+            ``service: openai`` still builds an OpenAI service, with a warning.
+
+            .. deprecated:: 1.9.0
+                Use ``factory`` instead of ``service: openai``.
+                Will be removed in 2.0.0.
+
         where: The config block's name in the file, for error messages
             (``"judge.eval"``, ``"simulator"``).
 
@@ -436,7 +449,7 @@ def _openai_service(config: dict) -> LLMService[Any]:
 
     return OpenAILLMService(
         settings=OpenAILLMService.Settings(
-            model=config.get("model", "gpt-4o"),
+            model=config.get("model", DEFAULT_OPENAI_MODEL),
             extra=config.get("extra") or {},
         )
     )
