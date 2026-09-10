@@ -18,12 +18,16 @@ from .exceptions import (
     ActionError,
     FlowError,
     FlowInitializationError,
+    FlowProblem,
+    FlowReferenceError,
     FlowTransitionError,
     InvalidFunctionError,
 )
+from .flow import Flow
 from .manager import FlowManager
 from .types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     ActionConfig,
     ConsolidatedFunctionResult,
     ContextStrategy,
@@ -51,6 +55,7 @@ __all__ = [
     "FlowManager",
     # Declarative config
     "FlowConfig",
+    "Flow",
     # Types
     "ActionConfig",
     "ContextStrategy",
@@ -60,6 +65,7 @@ __all__ = [
     "FlowResult",
     "ConsolidatedFunctionResult",
     "NO_RESPONSE",
+    "TRANSITION_IN_YAML",
     "FlowsFunctionSchema",
     "LegacyFunctionHandler",
     "FlowsDirectFunction",
@@ -70,6 +76,8 @@ __all__ = [
     # Exceptions
     "FlowError",
     "FlowInitializationError",
+    "FlowProblem",
+    "FlowReferenceError",
     "FlowTransitionError",
     "InvalidFunctionError",
     "ActionError",
