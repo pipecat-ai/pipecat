@@ -165,7 +165,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         events: list[str] = []
 
         @controller.event_handler("on_user_turn_inference_triggered")
-        async def on_user_turn_inference_triggered(controller, strategy):
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
             events.append("inference_triggered")
 
         @controller.event_handler("on_user_turn_stopped")
@@ -194,7 +194,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         events: list[str] = []
 
         @controller.event_handler("on_user_turn_inference_triggered")
-        async def on_user_turn_inference_triggered(controller, strategy):
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
             events.append("inference_triggered")
 
         @controller.event_handler("on_user_turn_stopped")
