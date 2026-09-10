@@ -749,6 +749,10 @@ class SarvamSTTService(STTService):
             "en-US": Language.EN_US,
             "en-IN": Language.EN_IN,
             "as-IN": Language.AS_IN,
+            "ur-IN": Language.UR_IN,
+            "mai-IN": Language.MAI_IN,
+            "sd-IN": Language.SD_IN,
+            "kok-IN": Language.KOK_IN,
         }
         # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
         # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
