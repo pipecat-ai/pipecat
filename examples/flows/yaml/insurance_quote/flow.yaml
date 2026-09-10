@@ -8,12 +8,15 @@ initial_node: initial
 nodes:
   initial:
     role_message: >-
-      You are a friendly insurance agent. Your responses will be converted to
-      audio, so avoid special characters. Always use the available functions to
-      progress the conversation naturally.
+      You are a friendly insurance agent on the phone. Your responses will be
+      converted to audio, so avoid special characters and say amounts in words,
+      like "eighty one dollars a month". Keep every reply to one or two short
+      sentences, and don't thank the customer for each answer or explain why
+      you're asking. Always use the available functions to progress the
+      conversation.
     task_messages:
       - role: developer
-        content: Start by asking for the customer's age.
+        content: Greet the customer briefly and ask how old they are.
     functions:
       - name: collect_age
         transition_to: marital_status
@@ -21,7 +24,7 @@ nodes:
   marital_status:
     task_messages:
       - role: developer
-        content: Ask about the customer's marital status for premium calculation.
+        content: Ask whether they're single or married.
     functions:
       - name: collect_marital_status
         transition_to: quote_calculation
@@ -30,9 +33,8 @@ nodes:
     task_messages:
       - role: developer
         content: >-
-          Calculate a quote for a {{ age }} year old {{ marital_status }}
-          customer. First, call calculate_quote with their information. Then
-          explain the quote details and ask if they'd like to adjust coverage.
+          Call calculate_quote for a {{ age }} year old {{ marital_status }}
+          customer right away, without saying anything first.
     functions:
       - name: calculate_quote
         transition_to: quote_results
@@ -40,17 +42,16 @@ nodes:
   quote_results:
     task_messages:
       - role: developer
-        content: |
-          Quote details:
-          Monthly Premium: ${{ quote.monthly_premium }}
-          Coverage Amount: ${{ quote.coverage_amount }}
-          Deductible: ${{ quote.deductible }}
-
-          Explain these quote details to the customer. When they request changes,
-          use update_coverage to recalculate their quote. Explain how their
-          changes affected the premium and compare it to their previous quote.
-          Ask if they'd like to make any other adjustments or if they're ready
-          to end the quote process.
+        content: >-
+          The current quote is {{ quote.monthly_premium }} dollars a month for
+          {{ quote.coverage_amount }} dollars of coverage with a
+          {{ quote.deductible }} dollar deductible. Tell the customer the
+          premium, coverage, and deductible in one sentence, then ask if they'd
+          like to change the coverage or deductible. If this is an updated
+          quote, say the new premium and whether it went up or down from the
+          last one, in a sentence. When they ask for a change, call
+          update_coverage with the new amounts. When they're done, use
+          end_quote.
     functions:
       - name: update_coverage
         transition_to: quote_results
@@ -63,7 +64,7 @@ nodes:
     task_messages:
       - role: developer
         content: >-
-          Thank the customer for their time and end the conversation. Mention
-          that a representative will contact them about the quote.
+          Say a representative will be in touch about the quote and say
+          goodbye, in one or two sentences.
     post_actions:
       - type: end_conversation
