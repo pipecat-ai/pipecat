@@ -94,8 +94,8 @@ class FunctionCallMetrics(BaseModel):
 # it is rolled into the single pipeline contribution.
 MIN_CONTRIBUTION_SECS = 0.005
 
-# Half of the last digit contribution_lines() prints, below which a span would
-# show as zero and so is not part of the timeline at all.
+# Half of the last digit turn_contribution_lines() prints, below which a span
+# would show as zero and so is not part of the timeline at all.
 PRINTS_AS_ZERO_SECS = 0.0005
 
 
@@ -354,13 +354,13 @@ class LatencyBreakdown(BaseModel):
 
     @deprecated(
         "`LatencyBreakdown.chronological_events` is deprecated since 1.9.0 and will be removed "
-        "in 2.0.0. Use `LatencyBreakdown.contribution_lines` instead."
+        "in 2.0.0. Use `LatencyBreakdown.turn_contribution_lines` instead."
     )
     def chronological_events(self) -> list[str]:
         """Return human-readable event labels sorted by start time.
 
         .. deprecated:: 1.9.0
-            Use :meth:`contribution_lines` instead, which names every part of
+            Use :meth:`turn_contribution_lines` instead, which names every part of
             the interval rather than the services that reported a metric. Will
             be removed in 2.0.0.
 
@@ -390,8 +390,13 @@ class LatencyBreakdown(BaseModel):
         events.sort(key=lambda e: e[0])
         return [label for _, label in events]
 
-    def contribution_lines(self, *, by_cost: bool = False) -> list[str]:
+    def turn_contribution_lines(self, *, by_cost: bool = False) -> list[str]:
         """Format the contributions for logging, one per line plus a total.
+
+        One breakdown covers one user-to-bot cycle, so these lines describe a
+        single turn — or, for the first thing the bot says, the wait before it
+        from the pipeline being ready with a client on it, which the total
+        line names.
 
         Args:
             by_cost: Order by duration, largest first, rather than in the
@@ -435,7 +440,7 @@ class UserBotLatencyObserver(BaseObserver):
     (TTFB, text aggregation) and, in ``contributions``, the whole interval
     named part by part::
 
-        for line in breakdown.contribution_lines():
+        for line in breakdown.turn_contribution_lines():
             logger.info(line)
 
         # 0.200s  endpointing wait     [config: VAD stop_secs]

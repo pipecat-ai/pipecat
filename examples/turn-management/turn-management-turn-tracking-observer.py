@@ -190,9 +190,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @latency_observer.event_handler("on_latency_breakdown")
     async def on_latency_breakdown(observer, breakdown):
         # Each line is one part of the turn, in the order it happened, and the
-        # lines sum to the latency above. A `config:` owner means the time is
-        # governed by a setting rather than by how fast a service answered.
-        for line in breakdown.contribution_lines():
+        # lines sum to the latency `UserBotLatencyObserver` reports through
+        # `on_latency_measured`. A `config:` owner means the time is governed
+        # by a setting rather than by how fast a service answered.
+        for line in breakdown.turn_contribution_lines():
             logger.info(f"  {line}")
 
     @transport.event_handler("on_client_connected")

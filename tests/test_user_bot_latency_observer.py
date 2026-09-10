@@ -798,7 +798,7 @@ class TestLatencyContributions(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         buffered = next(c for c in breakdown.contributions if c.label == "awaiting speakable text")
         self.assertGreater(buffered.duration_secs, 0.04)
 
-    def test_contribution_lines_order_and_total(self):
+    def test_turn_contribution_lines_order_and_total(self):
         """Chronological by default, largest first by cost, always with a total."""
         breakdown = LatencyBreakdown(
             contributions=[
@@ -820,9 +820,9 @@ class TestLatencyContributions(_CycleDriver, unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        self.assertIn("endpointing wait", breakdown.contribution_lines()[0])
-        self.assertIn("speech synthesis", breakdown.contribution_lines(by_cost=True)[0])
-        self.assertIn("0.600s  TOTAL", breakdown.contribution_lines()[-1])
+        self.assertIn("endpointing wait", breakdown.turn_contribution_lines()[0])
+        self.assertIn("speech synthesis", breakdown.turn_contribution_lines(by_cost=True)[0])
+        self.assertIn("0.600s  TOTAL", breakdown.turn_contribution_lines()[-1])
 
     async def test_turn_completion_covers_the_gate_and_the_marker_token(self):
         """The span runs from the LLM's first chunk to the first speakable token."""
@@ -1063,7 +1063,7 @@ class TestLatencyContributions(_CycleDriver, unittest.IsolatedAsyncioTestCase):
 
         breakdown = self.breakdowns[-1]
         self.assertEqual(breakdown.measured_from, MeasuredFrom.CLIENT_CONNECTED)
-        self.assertIn("TOTAL (from client connected)", breakdown.contribution_lines()[-1])
+        self.assertIn("TOTAL (from client connected)", breakdown.turn_contribution_lines()[-1])
 
     async def test_every_part_carries_a_key_and_an_owner_kind(self):
         """Which is what a dashboard groups on, rather than the wording."""
@@ -1283,7 +1283,7 @@ class TestObserverEdges(_CycleDriver, unittest.IsolatedAsyncioTestCase):
 
     def test_an_empty_breakdown_has_nothing_to_print(self):
         """A breakdown with no contributions formats as nothing at all."""
-        self.assertEqual(LatencyBreakdown().contribution_lines(), [])
+        self.assertEqual(LatencyBreakdown().turn_contribution_lines(), [])
 
     async def test_upstream_frames_are_ignored(self):
         """Only what flows towards the user shapes the timeline."""
