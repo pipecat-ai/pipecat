@@ -13,12 +13,18 @@ reply across its segments, the any-order matching of a turn's function calls,
 and the inverted ``absent:`` check.
 """
 
+import time
+
 from loguru import logger
 
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
+
+# How long a judge's "no" waits for more of the reply once the bot has stopped
+# speaking: the transcription of its last sentence lands after the stop.
+JUDGE_NO_GRACE_S = 2.0
 
 
 class ExpectationMatcher:
@@ -143,13 +149,17 @@ class ExpectationMatcher:
         aggregate = ""
         last_reason = ""
         seen_any = False
+        pending: dict | None = None
         while True:
-            try:
-                event = await self._stream.next_event(expectation.event, deadline)
-            except TimeoutError:
-                if not seen_any:
-                    raise  # no response at all: the caller reports the missing event
-                return self._unsatisfied(expectation, turn_idx, exp_idx, budget_ms, last_reason)
+            if pending is not None:
+                event, pending = pending, None
+            else:
+                try:
+                    event = await self._stream.next_event(expectation.event, deadline)
+                except TimeoutError:
+                    if not seen_any:
+                        raise  # no response at all: the caller reports the missing event
+                    return self._unsatisfied(expectation, turn_idx, exp_idx, budget_ms, last_reason)
 
             seen_any = True
             delta = self._event_text(event)
@@ -165,12 +175,34 @@ class ExpectationMatcher:
                 self.last_match_text = aggregate
                 return None
             if status == "fail":
-                # Only the judge can affirmatively fail an aggregate.
-                return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no")
+                # Only the judge can affirmatively fail an aggregate, and only
+                # once the reply is complete: a "no" on a reply still being
+                # spoken, or whose last sentence is still being transcribed, is
+                # a "continue" that the next segment may turn into a "yes".
+                pending = await self._rest_of_reply(expectation.event, deadline)
+                if pending is None:
+                    return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no")
+                self._trace.log("eval: no, but the reply goes on: judging the rest")
             # "continue": wait for the next segment, separated by a space so
             # sentences don't run together (e.g. "...that. The weather...").
             aggregate += " "
             last_reason = reason
+
+    async def _rest_of_reply(self, event_type: str, deadline: float) -> dict | None:
+        """The next segment of a reply the judge rejected, or ``None`` when the reply is over.
+
+        While the bot is speaking the next segment is awaited within the turn's
+        budget; once it has stopped, only for the grace its last sentence's
+        transcription needs.
+        """
+        if self._stream.bot_speaking:
+            until = deadline
+        else:
+            until = min(deadline, time.monotonic() + JUDGE_NO_GRACE_S)
+        try:
+            return await self._stream.next_event(event_type, until)
+        except TimeoutError:
+            return None
 
     def _unsatisfied(
         self,

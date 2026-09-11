@@ -414,6 +414,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             results = await _end_call(llm, success=True, reason="I got my answer")
             self.assertEqual(results[0][0], {"status": "call ended"})
             self.assertFalse(results[0][1].run_llm)
+            # The bot's reply to the persona's last line closes the conversation.
+            await stream.append({"type": "llm_response", "text": "You're welcome!"})
 
         task = asyncio.create_task(conversation())
         failures = await driver.run()
@@ -430,6 +432,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"role": "user", "content": "What is the capital of Germany?"},
                 {"role": "assistant", "content": "Berlin."},
                 {"role": "user", "content": "Thanks!"},
+                {"role": "assistant", "content": "You're welcome!"},
             ],
         )
         self.assertEqual(
@@ -446,10 +449,10 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
-        self.assertEqual([m.score for m in result.metrics], [1.0, 0.5])
+        self.assertEqual([m.score for m in result.metrics], [1.0, 2 / 3])
         # brevity scored 0.5 but gates nothing, so the run still passes.
         self.assertEqual([m.passed for m in result.metrics], [True, True])
-        self.assertEqual(result.metrics[0].reason, "all 2 turn(s)")
+        self.assertEqual(result.metrics[0].reason, "all 3 turn(s)")
         self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
         self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
         self.assertIsNone(result.failure)
@@ -466,6 +469,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             await stream.append({"type": "llm_response", "text": "What do you want."})
             await stream.append({"type": PERSONA_TURN_EVENT, "text": "The capital of Germany?"})
             await _end_call(llm, success=True, reason="rude but answered")
+            await stream.append({"type": "llm_response", "text": "Berlin. Anything else."})
 
         task = asyncio.create_task(conversation())
         await driver.run()
@@ -476,7 +480,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
         self.assertEqual(
-            result.failure, "politeness 0.00 below 1.00: turn 1: because stayed polite"
+            result.failure, "politeness 0.50 below 1.00: turn 1: because stayed polite"
         )
         self.assertEqual(
             [(r.status, r.text, r.turn) for r in records if r.status != "bot"],
@@ -800,6 +804,65 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.ended_by, "error")
         self.assertEqual(result.reason, "refused")
+
+
+class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
+    """A persona that hangs up on its own last line leaves the bot its reply to it."""
+
+    async def test_the_bots_reply_to_the_last_line_closes_the_run(self):
+        driver, stream, llm, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, all correct."})
+            await _end_call(llm, success=True, reason="done")
+            await asyncio.sleep(0.1)
+            # The persona is silent by now, and the bot's reply still counts.
+            self.assertTrue(client.hung_up)
+            await stream.append({"type": "llm_response", "text": "Great, you're all set."})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Great, you're all set."}
+        )
+
+    async def test_a_hang_up_with_no_reply_coming_still_ends_as_end_call(self):
+        driver, stream, llm, _ = _driver(
+            _simulation(max_duration_s=0.3), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, bye."})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "user", "content": "Yes, bye."})
+
+    async def test_a_hang_up_on_the_bots_line_ends_at_once(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Hello?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Wrong number."})
+            await stream.append({"type": "llm_response", "text": "No problem, goodbye."})
+            await _end_call(llm, success=False, reason="wrong number")
+
+        started = asyncio.get_running_loop().time()
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        self.assertLess(asyncio.get_running_loop().time() - started, 1.0)
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
 
 
 class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):

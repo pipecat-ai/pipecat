@@ -15,7 +15,6 @@ file relative to the including one, so scenarios can share ``user:`` and
 
 import re
 from pathlib import Path
-from typing import Any
 
 import yaml
 

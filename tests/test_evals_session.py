@@ -23,10 +23,12 @@ import base64
 import json
 import socket
 import tempfile
+import time
 import unittest
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import websockets
 
@@ -48,6 +50,7 @@ from pipecat.evals.script_session import EvalScriptSession
 from pipecat.frames.frames import (
     AggregationType,
     BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
@@ -300,6 +303,131 @@ class _FakeJudge:
         self.calls.append(criterion)
         v = self._verdicts.pop(0)
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
+
+
+class TestBotSpeaking(unittest.IsolatedAsyncioTestCase):
+    """The stream follows the bot's own report of whether it is speaking."""
+
+    async def test_the_bots_speaking_frames_become_events_and_a_wait(self):
+        stream = _stream()
+        self.assertFalse(stream.bot_speaking)
+        self.assertTrue(await stream.wait_bot_quiet(0.01))
+
+        self.assertEqual(
+            stream.frame_to_event(BotStartedSpeakingFrame()), {"type": "bot_started_speaking"}
+        )
+        self.assertTrue(stream.bot_speaking)
+        self.assertFalse(await stream.wait_bot_quiet(0.05))
+
+        self.assertEqual(
+            stream.frame_to_event(BotStoppedSpeakingFrame()), {"type": "bot_stopped_speaking"}
+        )
+        self.assertFalse(stream.bot_speaking)
+        self.assertTrue(await stream.wait_bot_quiet(0.01))
+
+    async def test_an_interruption_counts_as_the_bot_going_quiet(self):
+        stream = _stream()
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream._interrupted()
+        self.assertFalse(stream.bot_speaking)
+
+
+class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
+    """A turn is not sent over a speaking bot."""
+
+    async def test_the_send_waits_until_the_bot_stops_speaking(self):
+        session = _session()
+        driver, stream = session._driver, session._stream
+        stream.frame_to_event(BotStartedSpeakingFrame())
+
+        async def stop_soon():
+            await asyncio.sleep(0.15)
+            stream.frame_to_event(BotStoppedSpeakingFrame())
+
+        task = asyncio.create_task(stop_soon())
+        started = asyncio.get_running_loop().time()
+        await driver._await_bot_quiet()
+        await task
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
+
+    async def test_an_observing_turn_lets_the_previous_reply_end_first(self):
+        # The bot is still speaking turn 1's reply when turn 2, which only
+        # listens for the bot's next move, begins: the rest of that reply,
+        # however late its transcription lands, is not turn 2's response.
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.bot_turn_started()
+        await stream.append({"type": "response", "text": "Spring in Japan is gorgeous."})
+
+        async def finish_reply():
+            await asyncio.sleep(0.1)
+            stream.frame_to_event(BotStoppedSpeakingFrame())
+
+        task = asyncio.create_task(finish_reply())
+        await driver._await_previous_reply()
+        await task
+        # The queued tail is gone, and one transcribed after the wait is stale.
+        with self.assertRaises(TimeoutError):
+            await stream.next_event("response", time.monotonic() + 0.05)
+        await stream.bot_turn_stopped("Do you have cities in mind?")
+        with self.assertRaises(TimeoutError):
+            await stream.next_event("response", time.monotonic() + 0.05)
+
+    async def test_a_quiet_bot_holds_nothing_up(self):
+        session = _session()
+        started = asyncio.get_running_loop().time()
+        await session._driver._await_bot_quiet()
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.05)
+
+
+class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
+    """A judge's "no" fails the reply only once the reply is over."""
+
+    def setUp(self):
+        self.exp = EvalExpectation(event="response", eval="gives the weather")
+
+    async def _match(self, s: ExpectationMatcher, budget_ms: int = 5000):
+        return await s.match(self.exp, time.monotonic(), budget_ms, 0, 0)
+
+    async def test_a_no_while_the_bot_speaks_waits_for_the_rest(self):
+        judge = _FakeJudge(["no", "yes"])
+        s = _matcher(judge, bot_audio=True)
+        s._stream.frame_to_event(BotStartedSpeakingFrame())
+        await s._stream.append({"type": "response", "text": "Sure. Why don't skeletons fight?"})
+
+        async def rest():
+            await asyncio.sleep(0.1)
+            await s._stream.append({"type": "response", "text": "The weather is 75 degrees."})
+
+        task = asyncio.create_task(rest())
+        self.assertIsNone(await self._match(s))
+        await task
+        self.assertEqual(judge.calls, ["gives the weather"] * 2)
+
+    async def test_a_no_after_the_bot_stopped_waits_out_the_transcription(self):
+        judge = _FakeJudge(["no", "yes"])
+        s = _matcher(judge, bot_audio=True)
+        await s._stream.append({"type": "response", "text": "Transferring you now."})
+
+        async def late_sentence():
+            await asyncio.sleep(0.1)
+            await s._stream.append({"type": "response", "text": "The boots cost $299."})
+
+        task = asyncio.create_task(late_sentence())
+        self.assertIsNone(await self._match(s))
+        await task
+
+    async def test_a_no_on_a_finished_reply_fails(self):
+        from pipecat.evals import matcher as matcher_module
+
+        judge = _FakeJudge(["no"])
+        s = _matcher(judge, bot_audio=True)
+        await s._stream.append({"type": "response", "text": "I like turtles."})
+        with patch.object(matcher_module, "JUDGE_NO_GRACE_S", 0.1):
+            failure = await self._match(s)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no")
 
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):
