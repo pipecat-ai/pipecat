@@ -9,7 +9,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from openai import APITimeoutError
 from openai.types.responses import (
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.tests.utils import run_test
+from tests.openai_http_helpers import http
 
 
 def _make_service(**kwargs):
@@ -607,7 +607,7 @@ class TestHttpRetryOnTimeout:
             nonlocal attempts
             attempts += 1
             if attempts == 1:
-                raise APITimeoutError(request=httpx.Request("POST", "https://api.openai.com"))
+                raise APITimeoutError(request=http.Request("POST", "https://api.openai.com"))
             return stream
 
         service._client.responses.create = AsyncMock(side_effect=create)
