@@ -36,6 +36,10 @@ from pipecat.services.llm_service import FunctionCallParams
 
 # The event the driver appends when the persona calls end_call.
 END_CALL_EVENT = "end_call"
+# How long the run waits, after the persona hangs up on its own last line, for
+# the bot's reply to it. A flow makes its final tool calls in that turn, and a
+# caller who hangs up mid-sentence is not what the simulation tests.
+CLOSING_REPLY_WAIT_S = 15.0
 
 
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
@@ -124,21 +128,38 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
         )
+        # Set when the persona hangs up on its own last line: the run then
+        # waits for the bot's reply to it, or this long, before ending.
+        closing_ends: float | None = None
         while self._ended_by is None:
             lull_ends = self._stream.last_activity + simulation.max_silence_s
+            waits = [deadline, lull_ends] + ([closing_ends] if closing_ends is not None else [])
             try:
-                event = await self._stream.next_any(min(deadline, lull_ends))
+                event = await self._stream.next_any(min(waits))
             except TimeoutError:
-                if time.monotonic() >= deadline:
+                now = time.monotonic()
+                if closing_ends is not None:
+                    # The persona already hung up; the bot's reply was a courtesy.
+                    self._trace.log("persona: no closing reply from the bot; ending the call")
+                    self._ended_by = "end_call"
+                    break
+                if now >= deadline:
                     self._ended_by = "max_duration"
                     break
-                if self._stream.last_activity + simulation.max_silence_s > time.monotonic():
+                if self._stream.last_activity + simulation.max_silence_s > now:
                     continue
                 self._ended_by = "silence"
                 break
             self._observe_new_events()
             if event["type"] == END_CALL_EVENT:
-                self._ended_by = "end_call"
+                # The persona says nothing more from here. The bot still gets
+                # its turn if the persona hung up on its own last line.
+                await self._client.hang_up()
+                if self._pending or not self._lines or self._lines[-1]["role"] != "user":
+                    self._ended_by = "end_call"
+                else:
+                    self._trace.log("persona: hung up; waiting for the bot's closing turn")
+                    closing_ends = time.monotonic() + CLOSING_REPLY_WAIT_S
             elif event["type"] == BOT_ENDED_EVENT:
                 self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
@@ -151,6 +172,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     self._ended_by = "max_turns"
             elif event["type"] == self._bot_said and event.get("text"):
                 await self._report("bot", event["text"])
+                if closing_ends is not None:
+                    self._ended_by = "end_call"
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()

@@ -26,6 +26,11 @@ from pipecat.evals.results import (
 from pipecat.evals.script import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
 
 SEND_AFTER_MAX_WAIT_S = 30.0
+# How long a turn waits for the bot to finish speaking before it is sent. A
+# reply is still spoken after its first sentence satisfied the previous turn;
+# a turn sent over it would have that tail transcribed as its own reply, or
+# discarded together with the answer that followed it in the same breath.
+BOT_QUIET_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 
 
@@ -144,12 +149,40 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             failure = await self._await_send_after(turn.send_after, turn_idx)
             if failure is not None:
                 return [failure]
+        elif turn.user is not None or turn.dtmf is not None:
+            # A caller waits for the bot to finish; a turn that means to talk
+            # over it says so with ``send_after``.
+            await self._await_bot_quiet()
+        elif turn_idx > 0:
+            await self._await_previous_reply()
 
         await self._send_turn(turn)
         await self._progress(
             EvalScriptTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn")
         )
         return await self._match_expectations(turn, turn_idx)
+
+    async def _await_bot_quiet(self) -> None:
+        """Hold the send while the bot is speaking, up to ``BOT_QUIET_MAX_WAIT_S``."""
+        if not self._stream.bot_speaking:
+            return
+        self._trace.log("send: waiting for the bot to finish speaking")
+        if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
+            self._trace.log(f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending")
+
+    async def _await_previous_reply(self) -> None:
+        """Let a reply the bot is still speaking end before an observing turn starts.
+
+        A turn that sends nothing waits for what the bot says next, so what
+        the bot is still saying belongs to the turn before it, however late its
+        transcription lands. The first turn keeps the bot's greeting.
+        """
+        if not self._stream.bot_speaking:
+            return
+        self._trace.log("observe: waiting for the bot to finish the previous reply")
+        await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
+        self._stream.drop_pending_bot_output("the previous reply")
+        self._stream.turn_boundary()
 
     async def _await_send_after(
         self, send_after: EvalSendAfter, turn_idx: int

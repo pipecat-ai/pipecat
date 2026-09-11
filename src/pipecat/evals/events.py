@@ -41,6 +41,8 @@ import time
 
 from pipecat.evals.results import EvalTrace
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -105,6 +107,32 @@ class EvalEventStream:
         # harness's turn analyzer finalizes it.
         self._input_sent_at: float = 0.0
         self._bot_turn_started_at: float | None = None
+        # Whether the bot is speaking, by its own report: cleared when it
+        # starts, set when it stops or is interrupted. An event, so a driver
+        # that must not talk over the bot can wait for it without polling.
+        self._bot_quiet = asyncio.Event()
+        self._bot_quiet.set()
+
+    @property
+    def bot_speaking(self) -> bool:
+        """Whether the bot reports itself speaking right now."""
+        return not self._bot_quiet.is_set()
+
+    async def wait_bot_quiet(self, timeout: float) -> bool:
+        """Wait for the bot to stop speaking.
+
+        Args:
+            timeout: Seconds to wait at most.
+
+        Returns:
+            Whether the bot is quiet, or False if it was still speaking at the
+            timeout.
+        """
+        try:
+            await asyncio.wait_for(self._bot_quiet.wait(), timeout)
+        except TimeoutError:
+            return False
+        return True
 
     async def append(self, event: dict) -> None:
         """Queue an event for the drivers.
@@ -243,6 +271,12 @@ class EvalEventStream:
             if self._bot_audio:
                 return self._segment_event("tts_response", frame.text)
             return None
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_quiet.clear()
+            return {"type": "bot_started_speaking"}
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_quiet.set()
+            return {"type": "bot_stopped_speaking"}
         elif isinstance(frame, FunctionCallInProgressFrame):
             return {
                 "type": "function_call",
@@ -288,6 +322,14 @@ class EvalEventStream:
 
     def input_sent(self) -> None:
         """Mark the user's input as sent: the bot's reply is what it says from now on."""
+        self.turn_boundary()
+
+    def turn_boundary(self) -> None:
+        """Start a new turn: only what the bot says from now on belongs to it.
+
+        A spoken turn that began before this point, however late its
+        transcription lands, is the previous turn's and is discarded.
+        """
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
 
@@ -295,6 +337,7 @@ class EvalEventStream:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
         self.drop_pending_bot_output("on interruption")
         self._awaiting_reply = True
+        self._bot_quiet.set()
 
     def _message_to_event(self, message) -> dict | None:
         """Map one of the bot's reports about the harness to its event, if any."""

@@ -23,8 +23,9 @@ simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
-``vad_user_stopped_speaking``, ``user_transcription``, ``llm_started``, ``response``,
-``llm_response``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
+``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
+``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
+``tts_response``, ``function_call``, ``function_call_stopped``. The
 ``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
@@ -107,7 +108,10 @@ regardless of the scenario's user/judge modality. A bot running a
 ``DTMFAggregator`` accumulates them and flushes — on the ``#`` terminator or its
 idle timeout — into a ``DTMF: ...`` transcription it reacts to.
 
-A turn may also include ``send_after:`` to schedule its ``user``/``dtmf`` send
+A turn is sent once the bot has finished speaking, like a caller who waits for
+the end of the sentence, so a reply the previous turn was satisfied with early
+is never talked over. A turn may also include ``send_after:`` to schedule its
+``user``/``dtmf`` send
 relative to a prior event (used for interruption / barge-in tests), or
 ``image:`` (a path, relative to the scenario file) to register an image for the
 turn — when a function-calling-video bot requests a user image, the eval
