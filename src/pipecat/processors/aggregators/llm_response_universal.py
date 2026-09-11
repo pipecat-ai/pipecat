@@ -280,6 +280,26 @@ class LLMAssistantAggregatorParams:
             self.context_summarization_config = None
 
 
+class TurnStoppedSequence:
+    """Monotonic sequence assigned to turn-stopped messages across a pair.
+
+    ``LLMContextAggregatorPair`` shares one instance between the user and
+    assistant aggregators so ``on_user_turn_stopped`` /
+    ``on_assistant_turn_stopped`` messages can be ordered by emission even
+    when their async handlers finish out of order.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the counter at 1."""
+        self._next = 1
+
+    def next(self) -> int:
+        """Return the next sequence value and advance the counter."""
+        value = self._next
+        self._next += 1
+        return value
+
+
 @dataclass
 class UserTurnStoppedMessage:
     """A user turn stopped message containing a user transcript update.
@@ -296,12 +316,16 @@ class UserTurnStoppedMessage:
             the finalized text should listen to ``on_user_turn_message_added``
             instead.
         timestamp: When the user turn started.
+        sequence: Monotonic emission order across the aggregator pair's
+            turn-stopped messages. Assigned when the event is fired, so
+            handlers can reorder transcript appends even if they await.
         user_id: Optional identifier for the user.
 
     """
 
     content: str | None
     timestamp: str
+    sequence: int
     user_id: str | None = None
 
 
@@ -340,12 +364,16 @@ class AssistantTurnStoppedMessage:
             were received or pushed)
         interrupted: Whether the assistant turn was interrupted.
         timestamp: When the assistant turn started.
+        sequence: Monotonic emission order across the aggregator pair's
+            turn-stopped messages. Assigned when the event is fired, so
+            handlers can reorder transcript appends even if they await.
 
     """
 
     content: str
     interrupted: bool
     timestamp: str
+    sequence: int
 
 
 @dataclass
@@ -630,6 +658,7 @@ class LLMUserAggregator(LLMContextAggregator):
         *,
         params: LLMUserAggregatorParams | None = None,
         _realtime_service_mode: bool | None = None,
+        _turn_stopped_sequence: TurnStoppedSequence | None = None,
         **kwargs,
     ):
         """Initialize the user context aggregator.
@@ -641,6 +670,8 @@ class LLMUserAggregator(LLMContextAggregator):
                 propagated from ``LLMContextAggregatorPair`` (``None`` =
                 auto-configure from service metadata). Not intended for
                 direct use — construct the aggregators via the pair.
+            _turn_stopped_sequence: Pair-internal. Shared monotonic
+                counter for turn-stopped message ``sequence`` values.
             **kwargs: Additional arguments.
         """
         params = params or LLMUserAggregatorParams()
@@ -651,6 +682,7 @@ class LLMUserAggregator(LLMContextAggregator):
             **kwargs,
         )
         self._params = params
+        self._turn_stopped_sequence = _turn_stopped_sequence or TurnStoppedSequence()
 
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
@@ -1418,7 +1450,9 @@ class LLMUserAggregator(LLMContextAggregator):
             # written then. Content is None here; subscribers wanting
             # the finalized text use on_user_turn_message_added instead.
             message = UserTurnStoppedMessage(
-                content=None, timestamp=self._user_turn_start_timestamp
+                content=None,
+                timestamp=self._user_turn_start_timestamp,
+                sequence=self._turn_stopped_sequence.next(),
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             return
@@ -1471,7 +1505,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if not on_session_end or content:
             message = UserTurnStoppedMessage(
-                content=content, timestamp=self._user_turn_start_timestamp
+                content=content,
+                timestamp=self._user_turn_start_timestamp,
+                sequence=self._turn_stopped_sequence.next(),
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
@@ -1525,6 +1561,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         params: LLMAssistantAggregatorParams | None = None,
         _realtime_service_mode: bool | None = None,
         _paired_user_aggregator: "LLMUserAggregator | None" = None,
+        _turn_stopped_sequence: TurnStoppedSequence | None = None,
         **kwargs,
     ):
         """Initialize the assistant context aggregator.
@@ -1540,6 +1577,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 the paired ``LLMUserAggregator``. The assistant flushes
                 it on ``LLMFullResponseStartFrame`` so the user message
                 lands in context before the assistant turn starts.
+            _turn_stopped_sequence: Pair-internal. Shared monotonic
+                counter for turn-stopped message ``sequence`` values.
             **kwargs: Additional arguments.
         """
         params = params or LLMAssistantAggregatorParams()
@@ -1555,6 +1594,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # metadata, mirroring the user half (see LLMUserAggregator.__init__).
         self._realtime_service_mode = _realtime_service_mode
         self._paired_user_aggregator = _paired_user_aggregator
+        self._turn_stopped_sequence = _turn_stopped_sequence or TurnStoppedSequence()
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
@@ -2294,6 +2334,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             content=aggregation,
             interrupted=interrupted,
             timestamp=self._assistant_turn_start_timestamp,
+            sequence=self._turn_stopped_sequence.next(),
         )
         await self._call_event_handler("on_assistant_turn_stopped", message)
         if aggregation:
@@ -2404,10 +2445,13 @@ class LLMContextAggregatorPair:
             user_params.add_tool_change_messages = add_tool_change_messages
             assistant_params.add_tool_change_messages = add_tool_change_messages
 
+        turn_stopped_sequence = TurnStoppedSequence()
+
         self._user = LLMUserAggregator(
             context,
             params=user_params,
             _realtime_service_mode=realtime_service_mode,
+            _turn_stopped_sequence=turn_stopped_sequence,
         )
         # Wire the assistant→user back-reference unconditionally: realtime mode
         # may be auto-configured later (realtime_service_mode=None), so the
@@ -2422,6 +2466,7 @@ class LLMContextAggregatorPair:
             params=assistant_params,
             _realtime_service_mode=realtime_service_mode,
             _paired_user_aggregator=self._user,
+            _turn_stopped_sequence=turn_stopped_sequence,
         )
 
     def user(self) -> LLMUserAggregator:
