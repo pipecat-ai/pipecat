@@ -1558,6 +1558,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
+        # The response count when each async call's "started" message was
+        # written, keyed by tool_call_id, so _is_deferred can tell whether the
+        # model has run since.
+        self._async_calls_started: dict[str, int] = {}
+        self._response_count = 0
         # Markers seen on LLMMarkerFrames, so a service configured with markers
         # other than the defaults still gets them stripped from transcripts.
         self._seen_turn_markers: set[str] = set()
@@ -1834,6 +1839,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         for task in list(self._context_updated_tasks):
             await self.cancel_task(task)
         self._context_updated_tasks.clear()
+        self._async_calls_started.clear()
         if self._summarizer:
             await self._summarizer.cleanup()
 
@@ -1868,6 +1874,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         is_async = not frame.cancel_on_interruption
         if is_async:
             self._context.add_message(async_tool_messages.build_started_message(frame.tool_call_id))
+            self._async_calls_started[frame.tool_call_id] = self._response_count
         else:
             self._context.add_message(
                 {
@@ -1999,6 +2006,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             logger.warning(f"{self} result_callback called with is_final=False but no result!")
             return
 
+        # An update is a deferred delivery in itself, so the call can no longer
+        # settle in place.
+        self._async_calls_started.pop(frame.tool_call_id, None)
         result = json.dumps(frame.result, ensure_ascii=False)
         self._context.add_message(
             async_tool_messages.build_intermediate_result_message(frame.tool_call_id, result)
@@ -2012,15 +2022,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Removes the call from the in-progress map, updates the context, and
         triggers LLM inference when appropriate.
         """
-        is_async = not in_progress_frame.cancel_on_interruption
+        deferred = self._is_deferred(in_progress_frame)
         del self._function_calls_in_progress[frame.tool_call_id]
 
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
 
-        if is_async:
-            # For async function calls inject a developer message so the LLM is
-            # notified of the completed result instead of updating the IN_PROGRESS
-            # tool message.
+        if deferred:
+            # The conversation moved on while the call ran, so the LLM is told
+            # about the result in a developer message rather than in the tool
+            # message it has already seen.
             self._context.add_message(
                 async_tool_messages.build_final_result_message(frame.tool_call_id, result)
             )
@@ -2035,9 +2045,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not function_call:
             return
 
-        # Update context with the function call cancellation. Async calls are
-        # settled with a developer message, the same channel their results
-        # arrive on.
+        # Update context with the function call cancellation. An async call is
+        # settled with a developer message, the same channel its results use,
+        # whether or not the conversation moved on, since the notice says the
+        # call did not complete and asks for the user to be told.
+        self._async_calls_started.pop(frame.tool_call_id, None)
         if function_call.cancel_on_interruption:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
         else:
@@ -2103,6 +2115,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
+        self._response_count += 1
         # Realtime mode treats LLMFullResponseStartFrame as the user
         # turn's end signal for context-writing purposes — see
         # _realtime_handle_llm_start.
@@ -2262,6 +2275,53 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
         return True
+
+    def _is_deferred(self, in_progress_frame: FunctionCallInProgressFrame) -> bool:
+        """Whether a call's final result must be delivered as a deferred message.
+
+        An async call (``cancel_on_interruption=False``) whose result arrives
+        before the conversation moved on is indistinguishable from a synchronous
+        one, and settles in place: its "started" placeholder becomes the tool
+        result, and the LLM sees an ordinary call. The result is deferred when a
+        model response has started since the placeholder was written, a user or
+        assistant message has landed after it, the call sent an intermediate
+        update, or the placeholder is no longer in the context because the
+        context was rebuilt while the call ran. Messages the protocol writes for
+        other calls in flight do not count as the conversation moving on.
+
+        Args:
+            in_progress_frame: The call's in-progress frame.
+
+        Returns:
+            True when the result goes into a developer message.
+        """
+        if in_progress_frame.cancel_on_interruption:
+            return False
+        # No bookmark: the call sent an intermediate update, which already put
+        # it on the deferred channel. A changed count: the model has responded
+        # since the placeholder was written, so it may have seen "still running".
+        response_count = self._async_calls_started.pop(in_progress_frame.tool_call_id, None)
+        if response_count is None or response_count != self._response_count:
+            return True
+        # Otherwise look at what landed after the placeholder. A user turn or
+        # assistant text means the conversation moved on; other calls'
+        # placeholders and results are the protocol's own bookkeeping.
+        after_placeholder = False
+        for message in self._context.messages:
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            if not after_placeholder:
+                after_placeholder = (
+                    message.get("role") == "tool"
+                    and message.get("tool_call_id") == in_progress_frame.tool_call_id
+                )
+                continue
+            role = message.get("role")
+            if role == "user" or (role == "assistant" and message.get("content")):
+                return True
+        # No placeholder at all: the context was rebuilt while the call ran, so
+        # there is nothing to settle into.
+        return not after_placeholder
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
         for message in self._context.get_messages():

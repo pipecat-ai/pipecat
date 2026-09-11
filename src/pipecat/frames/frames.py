@@ -2255,9 +2255,11 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
-            When ``False`` the call is treated as asynchronous: the LLM
-            continues the conversation immediately without waiting for the
-            result, and the result is injected later via a developer message.
+            When ``False`` the call is treated as asynchronous: the
+            conversation is not held while it runs, and a result that arrives
+            after the conversation has moved on is injected via a developer
+            message. A result that arrives before then settles in place like
+            a synchronous call's.
         group_id: Identifier shared by all function calls originating from the
             same LLM response batch. Used to determine when the last call in a
             group completes so the LLM can be triggered exactly once.

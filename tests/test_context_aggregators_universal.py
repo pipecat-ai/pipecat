@@ -1443,6 +1443,147 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert context.messages[-1]["content"] == "CANCELLED"
         assert not aggregator.has_function_calls_in_progress
 
+    async def test_fast_async_function_call_settles_in_place(self):
+        """An async call whose result lands before anything else settles like a sync one."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="book_table",
+                tool_call_id="1",
+                arguments={"size": 2},
+                result={"status": "booked"},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        assert tool_messages[0]["tool_call_id"] == "1"
+        assert tool_messages[0]["content"] == '{"status": "booked"}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_async_function_call_after_user_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Any news?"}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_async_function_call_after_model_response_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+
+    async def test_async_function_call_after_context_rebuild_is_deferred(self):
+        """A placeholder the context no longer holds cannot take the result in place."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesUpdateFrame(messages=[{"role": "developer", "content": "Fresh start."}]),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None and payload.kind == "final"
+        assert payload.tool_call_id == "1"
+
+    async def test_intermediate_update_keeps_the_call_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"progress": "halfway"},
+                run_llm=False,
+                properties=FunctionCallResultProperties(is_final=False),
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        kinds = [
+            p.kind for p in (async_tool_messages.parse_message(m) for m in context.messages) if p
+        ]
+        assert kinds == ["started", "intermediate", "final"]
+
     async def test_async_function_call_cancel(self):
         """A cancelled async call settles on the same channel its results use."""
         context = LLMContext()
