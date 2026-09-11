@@ -658,3 +658,61 @@ class TestLiveKitAudioTrackSubscribedHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
+class TestLiveKitAudioOutQueueSize(unittest.IsolatedAsyncioTestCase):
+    """``audio_out_queue_size_ms`` sizes the outgoing ``rtc.AudioSource`` buffer."""
+
+    def _create_client(self, params: LiveKitParams) -> LiveKitTransportClient:
+        callbacks = LiveKitCallbacks(
+            on_connected=AsyncMock(),
+            on_disconnected=AsyncMock(),
+            on_before_disconnect=AsyncMock(),
+            on_participant_connected=AsyncMock(),
+            on_participant_disconnected=AsyncMock(),
+            on_audio_track_subscribed=AsyncMock(),
+            on_audio_track_unsubscribed=AsyncMock(),
+            on_video_track_subscribed=AsyncMock(),
+            on_video_track_unsubscribed=AsyncMock(),
+            on_data_received=AsyncMock(),
+            on_first_participant_joined=AsyncMock(),
+            on_dtmf_event=AsyncMock(),
+        )
+        client = LiveKitTransportClient(
+            url="wss://test.livekit.cloud",
+            token="test-token",
+            room_name="test-room",
+            params=params,
+            callbacks=callbacks,
+            transport_name="test-transport",
+        )
+        client._task_manager = MagicMock()
+        client._out_sample_rate = 16000
+        room = MagicMock()
+        room.connect = AsyncMock()
+        room.local_participant.identity = "bot"
+        room.local_participant.publish_track = AsyncMock()
+        room.remote_participants = {}
+        client._room = room
+        return client
+
+    async def _connect_and_get_audio_source_call(self, params: LiveKitParams):
+        client = self._create_client(params)
+        with (
+            patch.object(rtc, "AudioSource") as audio_source,
+            patch.object(rtc.LocalAudioTrack, "create_audio_track"),
+        ):
+            await client.connect()
+        return audio_source.call_args
+
+    async def test_default_matches_livekit_default(self):
+        call = await self._connect_and_get_audio_source_call(LiveKitParams())
+        self.assertEqual(call.kwargs["queue_size_ms"], 1000)
+
+    async def test_queue_size_is_passed_to_the_audio_source(self):
+        call = await self._connect_and_get_audio_source_call(
+            LiveKitParams(audio_out_queue_size_ms=200)
+        )
+        self.assertEqual(call.args, (16000, 1))
+        self.assertEqual(call.kwargs["queue_size_ms"], 200)
