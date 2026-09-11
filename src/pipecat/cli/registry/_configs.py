@@ -484,14 +484,6 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "lmnt_tts": (
-        "LmntTTSService(\n"
-        '        api_key=os.getenv("LMNT_API_KEY"),\n'
-        "        settings=LmntTTSService.Settings(\n"
-        '            voice=os.getenv("LMNT_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "minimax_tts": (
         "MiniMaxHttpTTSService(\n"
         '        api_key=os.getenv("MINIMAX_API_KEY"),\n'
