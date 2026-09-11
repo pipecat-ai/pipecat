@@ -15,7 +15,7 @@ source should break the test.
 """
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from speechmatics.agent_stt import AudioEncoding, Model
@@ -477,6 +477,36 @@ async def test_connect_reconnects_after_transient_failure():
     await service._connect()
 
     service._request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_server_error_rejecting_the_request_is_permanent():
+    """A server Error that rejects the request (bad config, no authorisation) would fail
+    a fresh session the same way, so it must be reported as permanent, not reconnected."""
+    service = _service()
+    service.push_error = AsyncMock()
+    service._schedule_reconnect = Mock()
+
+    await service._handle_error({"message": "Error", "type": "not_authorised", "reason": "no"})
+
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+    assert service._closed is True
+    service._schedule_reconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_server_error_ending_the_session_reconnects():
+    """A server Error that only ends the session (a timeout, an internal error) must be
+    reported as recoverable and followed by a background reconnect."""
+    service = _service()
+    service.push_error = AsyncMock()
+    service._schedule_reconnect = Mock()
+
+    await service._handle_error({"message": "Error", "type": "session_timeout"})
+
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is not True
+    assert service._closed is False
+    service._schedule_reconnect.assert_called_once()
 
 
 @pytest.mark.asyncio

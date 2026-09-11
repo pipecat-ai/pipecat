@@ -84,6 +84,24 @@ _PERMANENT_CONNECT_ERRORS = (
 # HTTP statuses a WebSocket handshake returns when the credentials are rejected.
 _AUTH_REJECTION_STATUSES = frozenset({401, 403})
 
+# Server ``Error`` types that reject the request or the account, so a fresh session with
+# the same configuration would fail the same way. Every other type (idle/session timeouts,
+# buffer, data, and internal errors) ends the session, but a new one can succeed.
+_PERMANENT_SERVER_ERROR_TYPES = frozenset(
+    {
+        "invalid_message",
+        "invalid_model",
+        "invalid_config",
+        "invalid_audio_type",
+        "invalid_output_format",
+        "not_authorised",
+        "insufficient_funds",
+        "not_allowed",
+        "protocol_error",
+        "quota_exceeded",
+    }
+)
+
 
 def _is_auth_rejection(exc: BaseException) -> bool:
     """Whether ``exc`` is a WebSocket handshake rejected for authentication (HTTP 401/403).
@@ -470,6 +488,9 @@ class SpeechmaticsSTTService(STTService):
         # or rejected outright.
         self._closed: bool = False
 
+        # A reconnect running in the background (see _schedule_reconnect).
+        self._reconnect_task: asyncio.Task | None = None
+
         # Registered unconditionally: diarization can be turned on at runtime, and a
         # handler added while it was off would otherwise be dropped.
         self._register_event_handler("on_speakers_result")
@@ -581,6 +602,7 @@ class SpeechmaticsSTTService(STTService):
             # base class just restored.
             self._config = self._build_config(self._settings)
             self._closed = False
+            await self._cancel_reconnect_task()
             await self._request_reconnect()
         else:
             # Only local (formatting) fields changed — effective immediately.
@@ -592,18 +614,21 @@ class SpeechmaticsSTTService(STTService):
         """Called when the session ends."""
         await super().stop(frame)
         self._closed = True
+        await self._cancel_reconnect_task()
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
         await super().cancel(frame)
         self._closed = True
+        await self._cancel_reconnect_task()
         await self._disconnect()
 
     async def cleanup(self):
         """Release Speechmatics resources at pipeline teardown."""
         await super().cleanup()
         self._closed = True
+        await self._cancel_reconnect_task()
         await self._disconnect()
 
     async def _connect(self) -> None:
@@ -747,6 +772,23 @@ class SpeechmaticsSTTService(STTService):
         await self._fail_permanently(
             f"Speechmatics STT failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts"
         )
+
+    def _schedule_reconnect(self) -> None:
+        """Run a reconnect in the background, unless one is already in flight.
+
+        For paths that cannot run the reconnect inline: the message pump, which the
+        reconnect tears down, and the initial connect, where the backoff loop would
+        otherwise hold up the rest of the pipeline's start.
+        """
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self.create_task(self._request_reconnect(), name="reconnect")
+
+    async def _cancel_reconnect_task(self) -> None:
+        """Cancel a background reconnect, if one is still running."""
+        task, self._reconnect_task = self._reconnect_task, None
+        if task and not task.done() and task is not asyncio.current_task():
+            await self.cancel_task(task)
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
@@ -948,11 +990,18 @@ class SpeechmaticsSTTService(STTService):
     async def _handle_error(self, message: dict[str, Any]) -> None:
         """Handle Error events.
 
-        A server Error ends the session and will not clear on retry, so it is permanent:
-        surface it upstream and stop reconnecting, instead of letting the session die
-        silently or spin.
+        A server Error always ends the session. One that rejects the request or account
+        is permanent: it is surfaced upstream and the service stops reconnecting. Any
+        other (a timeout, a buffer or internal error) is reported and a new session is
+        opened in the background, since this handler runs on the message pump the
+        reconnect tears down.
         """
-        await self._fail_permanently(f"Speechmatics STT error: {self._describe_status(message)}")
+        error_msg = f"Speechmatics STT error: {self._describe_status(message)}"
+        if message.get("type") in _PERMANENT_SERVER_ERROR_TYPES:
+            await self._fail_permanently(error_msg)
+            return
+        await self.push_error(error_msg=error_msg)
+        self._schedule_reconnect()
 
     def _handle_warning(self, message: dict[str, Any]) -> None:
         """Handle Warning events.
