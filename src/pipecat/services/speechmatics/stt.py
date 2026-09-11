@@ -9,10 +9,10 @@
 import asyncio
 import os
 import warnings
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, ClassVar
+from enum import StrEnum
+from typing import Any, ClassVar, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -48,8 +48,8 @@ try:
         DEFAULT_MODEL,
         AdditionalVocabEntry,
         AgentSttAsyncClient,
-        AudioFormat,
         AudioEncoding,
+        AudioFormat,
         AuthenticationError,
         ConfigurationError,
         Model,
@@ -107,14 +107,18 @@ def _is_auth_rejection(exc: BaseException) -> bool:
     return any(f"HTTP {status}" in text for status in _AUTH_REJECTION_STATUSES)
 
 
-def _resolve_model(model: Model | str | None, operating_point: Model | str | None) -> str:
-    """Resolve the transcription model, preferring `model` over the deprecated
-    `operating_point` alias.
+def _resolve_model(
+    model: Model | str | None | NotGiven, operating_point: Model | str | None | NotGiven
+) -> str:
+    """Resolve the transcription model from `model` and the deprecated `operating_point`.
 
-    Both accept a `Model` enum member or its wire string. If both are given they must
-    match; if only one is given it wins; if neither, the default model is used.
-    (`Model` is a `str` enum, so string/enum values compare equal.)
+    Both accept a `Model` enum member or its wire string; an unset (`NOT_GIVEN`) value
+    counts as `None`. If both are given they must match; if only one is given it wins;
+    if neither, the default model is used. (`Model` is a `str` enum, so string/enum
+    values compare equal.)
     """
+    model = model if is_given(model) else None
+    operating_point = operating_point if is_given(operating_point) else None
     if model is not None and operating_point is not None and model != operating_point:
         raise ValueError(
             f"`model` ({model!r}) and `operating_point` ({operating_point!r}) differ. "
@@ -130,7 +134,7 @@ def _resolve_model(model: Model | str | None, operating_point: Model | str | Non
     return resolved.value if isinstance(resolved, Model) else resolved
 
 
-class TurnDetectionMode(str, Enum):
+class TurnDetectionMode(StrEnum):
     """How turn boundaries (end of speech) are detected.
 
     `VAD`: the STT service runs its own VAD and closes turns itself.
@@ -385,16 +389,19 @@ class SpeechmaticsSTTService(STTService):
             **kwargs: Additional arguments passed to STTService.
         """
         # Service parameters
-        self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
-        self._base_url: str = (
+        api_key = api_key or os.getenv("SPEECHMATICS_API_KEY")
+        base_url = (
             base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2/agent"
         )
 
         # Check we have required attributes
-        if not self._api_key:
+        if not api_key:
             raise ValueError("Missing Speechmatics API key")
-        if not self._base_url:
+        if not base_url:
             raise ValueError("Missing Speechmatics base URL")
+
+        self._api_key: str = api_key
+        self._base_url: str = base_url
 
         self._should_interrupt = should_interrupt
 
@@ -560,13 +567,9 @@ class SpeechmaticsSTTService(STTService):
         # just the fields that actually changed so a new `operating_point` wins on its own
         # instead of clashing with the already-resolved `model` (which would raise).
         if "model" in changed or "operating_point" in changed:
-            new_model = self._settings.model if "model" in changed else NOT_GIVEN
-            new_operating_point = (
-                self._settings.operating_point if "operating_point" in changed else NOT_GIVEN
-            )
             self._settings.model = _resolve_model(
-                new_model if is_given(new_model) else None,
-                new_operating_point if is_given(new_operating_point) else None,
+                self._settings.model if "model" in changed else NOT_GIVEN,
+                self._settings.operating_point if "operating_point" in changed else NOT_GIVEN,
             )
 
         if changed.keys() - self.Settings.LOCAL_FIELDS:
@@ -646,20 +649,24 @@ class SpeechmaticsSTTService(STTService):
         def add_message(message: dict[str, Any]):
             self._stt_msg_queue.put_nowait(message)
 
+        # Casting to broaden what message types `on` accepts (the SDK annotates it
+        # with the RT message enum, not the Agent STT one it also dispatches).
+        on = cast(Callable[[AgentServerMessageType, Callable], Any], self._client.on)
+
         # Segment + status listeners.
-        self._client.on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
-        self._client.on(AgentServerMessageType.ADD_SEGMENT, add_message)
-        self._client.on(AgentServerMessageType.ERROR, add_message)
-        self._client.on(AgentServerMessageType.WARNING, add_message)
+        on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
+        on(AgentServerMessageType.ADD_SEGMENT, add_message)
+        on(AgentServerMessageType.ERROR, add_message)
+        on(AgentServerMessageType.WARNING, add_message)
 
         # Service-side turn events (only emitted when the service closes turns).
         if self._service_closes_turns:
-            self._client.on(AgentServerMessageType.START_OF_TURN, add_message)
-            self._client.on(AgentServerMessageType.END_OF_TURN, add_message)
+            on(AgentServerMessageType.START_OF_TURN, add_message)
+            on(AgentServerMessageType.END_OF_TURN, add_message)
 
         # Speaker diarization results.
         if self._settings.enable_diarization:
-            self._client.on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
+            on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
 
         # Connect. Errors reach the pipeline via push_error instead of dying silently, and are
         # split by recoverability: an unrecoverable rejection (auth / bad config / rejected
@@ -780,18 +787,23 @@ class SpeechmaticsSTTService(STTService):
         ``TurnConfig`` (a top-level ``turn_config`` sibling of ``transcription_config``).
         """
         s = settings
-        language = assert_given(s.language)
+
+        # The stored language may be a plain code rather than a Language, but the
+        # mapping keys compare equal either way.
+        language = cast(Language, assert_given(s.language))
         sm_language = self._language_to_speechmatics_language(language)
 
         return TranscriptionConfig(
             language=sm_language,
-            model=assert_given(s.model),
+            # The SDK annotates `model` with its enum but forwards any name; the
+            # service resolves names the SDK has no member for.
+            model=cast(Model, assert_given(s.model)),
             diarization="speaker" if s.enable_diarization else None,
             speaker_diarization_config=_build_diarization_config(s),
-            additional_vocab=s.additional_vocab or None,
+            additional_vocab=[*s.additional_vocab] if s.additional_vocab else None,
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
-            enable_partials=s.enable_partials,
+            enable_partials=assert_given(s.enable_partials),
         )
 
     # ============================================================================
@@ -965,7 +977,9 @@ class SpeechmaticsSTTService(STTService):
         type. ``language`` has no wire field, so it comes from the configured setting;
         ``result`` has no wire field and is left unset.
         """
-        language = assert_given(self._settings.language)
+        # The stored language may be a plain code rather than a Language; the frame
+        # carries it as-is.
+        language = cast(Language, assert_given(self._settings.language))
         active_format = assert_given(self._settings.speaker_active_format)
         text = active_format.format(
             speaker_id=segment.speaker or "UU",
@@ -1208,15 +1222,15 @@ class SpeechmaticsSTTService(STTService):
 
         # Show deprecation warnings
         def _deprecation_warning(old: str, new: str | None = None) -> None:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 if new:
                     message = f"`{old}` is deprecated, use `InputParams.{new}`"
                 else:
                     message = f"`{old}` is deprecated and not used"
-                warnings.warn(message, DeprecationWarning)
+                # 3 frames out of this nested helper is the caller constructing
+                # the service, which is the code that has to change.
+                warnings.warn(message, DeprecationWarning, stacklevel=3)
 
         # List of deprecated arguments and their new location
         deprecated_args = [
