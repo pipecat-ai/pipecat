@@ -784,7 +784,7 @@ class FunctionCallResultProperties:
         on_context_updated: Callback to execute when context is updated.
         is_final: Whether this is the final result for the function call. When
             ``False`` the result is treated as an intermediate update. Defaults to ``True``.
-            Only meaningful for async function calls (``cancel_on_interruption=False``).
+            Only meaningful for async tools.
             Note: realtime LLM services do not support streamed intermediate
             results; they deliver only the final result to the provider. An
             intermediate result reported to a realtime service is dropped
@@ -2255,9 +2255,10 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
-            When ``False`` the call is treated as asynchronous: the LLM
-            continues the conversation immediately without waiting for the
-            result, and the result is injected later via a developer message.
+        async_tool: Whether this is an async tool: the LLM continues the
+            conversation without waiting for the result, which is injected
+            later via a developer message. ``None`` means the call is async
+            exactly when ``cancel_on_interruption`` is ``False``.
         group_id: Identifier shared by all function calls originating from the
             same LLM response batch. Used to determine when the last call in a
             group completes so the LLM can be triggered exactly once.
@@ -2267,7 +2268,15 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
     tool_call_id: str
     arguments: Any
     cancel_on_interruption: bool = False
+    async_tool: bool | None = None
     group_id: str | None = None
+
+    @property
+    def is_async_tool(self) -> bool:
+        """Whether the call is an async tool, resolving the default."""
+        if self.async_tool is not None:
+            return self.async_tool
+        return not self.cancel_on_interruption
 
 
 @dataclass

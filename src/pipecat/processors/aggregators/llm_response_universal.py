@@ -1865,8 +1865,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             }
         )
 
-        is_async = not frame.cancel_on_interruption
-        if is_async:
+        if frame.is_async_tool:
             self._context.add_message(async_tool_messages.build_started_message(frame.tool_call_id))
         else:
             self._context.add_message(
@@ -2012,12 +2011,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Removes the call from the in-progress map, updates the context, and
         triggers LLM inference when appropriate.
         """
-        is_async = not in_progress_frame.cancel_on_interruption
         del self._function_calls_in_progress[frame.tool_call_id]
 
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
 
-        if is_async:
+        if in_progress_frame.is_async_tool:
             # For async function calls inject a developer message so the LLM is
             # notified of the completed result instead of updating the IN_PROGRESS
             # tool message.
@@ -2038,7 +2036,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Update context with the function call cancellation. Async calls are
         # settled with a developer message, the same channel their results
         # arrive on.
-        if function_call.cancel_on_interruption:
+        if not function_call.is_async_tool:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
         else:
             self._context.add_message(

@@ -293,6 +293,7 @@ def tool_options(
     cancel_on_interruption: bool = True,
     timeout_secs: float | None = None,
     cancellable_by_llm: bool = False,
+    async_tool: bool | None = None,
 ):
     """Configure a handler's call options.
 
@@ -324,13 +325,20 @@ def tool_options(
             it is cancelled. Defaults to None (uses the LLM service default).
         cancellable_by_llm: Whether the LLM may cancel this call once it is running,
             by calling the ``cancel_<name>`` tool advertised alongside it. Only
-            meaningful together with ``cancel_on_interruption=False``: a
-            synchronous call blocks the LLM until it returns, so there is no
-            moment at which it could ask for the call to stop. What decides it is
-            duration: the LLM reaches the cancel tool a few seconds in at best, so
-            work that finishes before then can't be stopped whatever it costs.
-            Every tool that opts in also adds a tool for the LLM to weigh.
-            Defaults to False.
+            meaningful on an async tool: a synchronous call blocks the LLM until
+            it returns, so there is no moment at which it could ask for the call
+            to stop. What decides it is duration: the LLM reaches the cancel tool
+            a few seconds in at best, so work that finishes before then can't be
+            stopped whatever it costs. Every tool that opts in also adds a tool
+            for the LLM to weigh. Defaults to False.
+        async_tool: Whether this is an async tool: the LLM carries on with the
+            conversation while the call runs and is handed the result later, in
+            a message of its own, instead of waiting for it. ``None`` (the
+            default) makes a call async exactly when it survives interruptions,
+            ``cancel_on_interruption=False``. Set it explicitly to separate the
+            two: ``False`` with ``cancel_on_interruption=False`` is a call the
+            LLM waits for that an interruption must not cancel, which is what
+            a Pipecat Flows transition needs.
 
     Returns:
         The decorated function, unchanged except for pipecat call-option metadata
@@ -342,6 +350,7 @@ def tool_options(
         fn._pipecat_cancel_on_interruption = cancel_on_interruption
         fn._pipecat_timeout_secs = timeout_secs
         fn._pipecat_cancellable_by_llm = cancellable_by_llm
+        fn._pipecat_async_tool = async_tool
         return fn
 
     if fn is not None:

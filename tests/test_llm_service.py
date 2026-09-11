@@ -14,6 +14,7 @@ import httpx
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
@@ -1289,6 +1290,45 @@ class TestAsyncToolInstructions(unittest.IsolatedAsyncioTestCase):
         service.register_function("weather", self._handler)
         service._sync_registered_tool_handlers(NOT_GIVEN)
         self.assertNotIn("ASYNC TOOLS:", self._composed(service))
+        self.assertEqual(self._composed(service), "BASE")
+
+    def test_absent_for_an_uncancellable_synchronous_tool(self):
+        # A call the LLM waits for but an interruption must not cancel is not an
+        # async tool, so it brings no async guidance with it.
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function(
+            "book", self._handler, cancel_on_interruption=False, async_tool=False
+        )
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertFalse(service._functions["book"].async_tool)
+        self.assertFalse(service._function_is_async("book"))
+        self.assertEqual(self._composed(service), "BASE")
+
+    def test_async_tool_cancelled_on_interruption_warns(self):
+        # Allowed, but almost never meant: the next user turn cancels the call.
+        service = MockLLMService(system_instruction="BASE")
+        records = []
+        sink = logger.add(lambda m: records.append(m.record["message"]), level="WARNING")
+        try:
+            service.register_function(
+                "lookup", self._handler, cancel_on_interruption=True, async_tool=True
+            )
+        finally:
+            logger.remove(sink)
+        self.assertTrue(any("cancelled the next time the user speaks" in r for r in records))
+        self.assertTrue(service._functions["lookup"].async_tool)
+        self.assertTrue(service._functions["lookup"].cancel_on_interruption)
+
+    def test_async_tool_option_from_the_decorator(self):
+        @tool_options(cancel_on_interruption=False, async_tool=False)
+        async def book(params):
+            pass
+
+        service = MockLLMService(system_instruction="BASE")
+        service.register_function("book", book)
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        self.assertFalse(service._functions["book"].async_tool)
+        self.assertFalse(service._functions["book"].cancel_on_interruption)
         self.assertEqual(self._composed(service), "BASE")
 
     def test_absent_for_a_cancel_tool_alone(self):

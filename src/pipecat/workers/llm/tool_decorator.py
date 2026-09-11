@@ -11,7 +11,7 @@ import warnings
 from pipecat.adapters.schemas.direct_function import tool_options
 
 
-def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=None):
+def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, async_tool=None, timeout=None):
     """Mark a method as a tool.
 
     On ``LLMWorker`` subclasses, decorated methods are automatically
@@ -19,8 +19,9 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
     included in ``build_tools()``.
 
     This is the worker-flavored variant of ``@tool_options``: it attaches the
-    same ``cancel_on_interruption`` / ``timeout_secs`` call options and additionally
-    marks the method (with ``_pipecat_is_llm_tool``) so the worker collects it from the MRO.
+    same ``cancel_on_interruption`` / ``timeout_secs`` / ``async_tool`` call options
+    and additionally marks the method (with ``_pipecat_is_llm_tool``) so the worker
+    collects it from the MRO.
 
     Can be used with or without arguments::
 
@@ -40,6 +41,10 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
         timeout_secs: Optional timeout in seconds for this tool call. A call
             that runs past it is cancelled. Defaults to None (uses the LLM
             service default). Only applies to ``LLMWorker`` tools.
+        async_tool: Whether this is an async tool: the LLM carries on while
+            the call runs and is handed the result later. Defaults to None,
+            which makes the call async exactly when ``cancel_on_interruption``
+            is False; set it explicitly to separate the two.
         timeout: Deprecated alias for ``timeout_secs``.
 
             .. deprecated:: 1.4.0
@@ -59,9 +64,11 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, timeout=Non
             timeout_secs = timeout
 
     def decorator(fn):
-        fn = tool_options(cancel_on_interruption=cancel_on_interruption, timeout_secs=timeout_secs)(
-            fn
-        )
+        fn = tool_options(
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+            async_tool=async_tool,
+        )(fn)
         fn._pipecat_is_llm_tool = True
         return fn
 

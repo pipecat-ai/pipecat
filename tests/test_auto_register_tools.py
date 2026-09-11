@@ -570,6 +570,22 @@ class TestToolDecoratorSharesAnnotation(unittest.TestCase):
         self.assertTrue(my_tool._pipecat_is_llm_tool)
         self.assertFalse(my_tool._pipecat_cancel_on_interruption)
         self.assertEqual(my_tool._pipecat_timeout_secs, 30)
+        self.assertIsNone(my_tool._pipecat_async_tool)
+
+    def test_tool_async_option_is_passed_through(self):
+        from pipecat.workers.llm.tool_decorator import tool
+
+        @tool(cancel_on_interruption=False, async_tool=False)
+        async def my_tool(self, params: FunctionCallParams, arg: str):
+            """A tool.
+
+            Args:
+                arg: An argument.
+            """
+            await params.result_callback({})
+
+        self.assertFalse(my_tool._pipecat_cancel_on_interruption)
+        self.assertFalse(my_tool._pipecat_async_tool)
 
     def test_tool_timeout_alias_is_deprecated_but_works(self):
         from pipecat.workers.llm.tool_decorator import tool

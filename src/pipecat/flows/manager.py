@@ -599,6 +599,7 @@ class FlowManager:
         transition_func = tool_options(
             cancel_on_interruption=tool.cancel_on_interruption,
             timeout_secs=tool.timeout_secs,
+            async_tool=tool.async_tool,
         )(await self._create_transition_func(tool.name, handler))
         base = tool.to_function_schema()
         return FunctionSchema(

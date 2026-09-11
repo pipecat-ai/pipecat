@@ -382,7 +382,12 @@ class FlowsFunctionSchema:
         required: List of required parameter names.
         handler: Function handler to process the function call.
         cancel_on_interruption: Whether to cancel this function call when an
-            interruption occurs. Defaults to False.
+            interruption occurs. Defaults to False, so an interruption cannot
+            skip the transition the call carries.
+        async_tool: Whether the LLM carries on without waiting for the result,
+            which is handed to it later in a message of its own. Defaults to
+            False: the LLM waits for the call, and the transition happens
+            before it speaks again.
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
     """
@@ -393,6 +398,7 @@ class FlowsFunctionSchema:
     required: list[str]
     handler: FunctionHandler
     cancel_on_interruption: bool = False
+    async_tool: bool = False
     timeout_secs: float | None = None
 
     def to_function_schema(self) -> FunctionSchema:
@@ -410,7 +416,10 @@ class FlowsFunctionSchema:
 
 
 def flows_tool_options(
-    *, cancel_on_interruption: bool = False, timeout_secs: float | None = None
+    *,
+    cancel_on_interruption: bool = False,
+    timeout_secs: float | None = None,
+    async_tool: bool = False,
 ) -> Callable[[Callable], Callable]:
     """Configure a Flows direct function's call options.
 
@@ -419,9 +428,14 @@ def flows_tool_options(
 
     Args:
         cancel_on_interruption: Whether to cancel the function call when the user
-            interrupts. Defaults to False.
+            interrupts. Defaults to False, so an interruption cannot skip the
+            transition the call carries.
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
+        async_tool: Whether the LLM carries on without waiting for the result,
+            which is handed to it later in a message of its own. Defaults to
+            False: the LLM waits for the call, and the transition happens
+            before it speaks again.
 
     Returns:
         A decorator that attaches the metadata to the function.
@@ -434,7 +448,11 @@ def flows_tool_options(
             # ... implementation
             return {"status": "complete"}, None
     """
-    return tool_options(cancel_on_interruption=cancel_on_interruption, timeout_secs=timeout_secs)
+    return tool_options(
+        cancel_on_interruption=cancel_on_interruption,
+        timeout_secs=timeout_secs,
+        async_tool=async_tool,
+    )
 
 
 @deprecated(
@@ -508,6 +526,7 @@ class FlowsDirectFunctionWrapper(BaseDirectFunctionWrapper):
         self.cancel_on_interruption = getattr(
             self.function, "_pipecat_cancel_on_interruption", False
         )
+        self.async_tool = getattr(self.function, "_pipecat_async_tool", None) or False
         self.timeout_secs = getattr(self.function, "_pipecat_timeout_secs", None)
 
     async def invoke(self, args: Mapping[str, Any], flow_manager: "FlowManager"):

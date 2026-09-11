@@ -204,6 +204,7 @@ class Flow:
             required=schema.required,
             handler=self._make_handler(ref, wrapper, where),
             cancel_on_interruption=wrapper.cancel_on_interruption,
+            async_tool=wrapper.async_tool,
             timeout_secs=wrapper.timeout_secs,
         )
 

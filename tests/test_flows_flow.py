@@ -27,7 +27,11 @@ from pipecat.flows import (
 )
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from tests.flows_test_helpers import get_advertised_tool_handlers, make_mock_worker
+from tests.flows_test_helpers import (
+    get_advertised_tool_handlers,
+    get_advertised_tools,
+    make_mock_worker,
+)
 
 # --- A handlers module, as an application would write it ---
 
@@ -281,6 +285,20 @@ class TestConstruction(unittest.TestCase):
         with self.assertRaises(FlowError) as cm:
             make_flow(single_node({"name": "no_such_tool"}), handlers=[{}, SimpleNamespace()])
         self.assertIn("references tool 'no_such_tool'", str(cm.exception))
+
+    def test_call_options_carry_over_from_the_handler(self):
+        @flows_tool_options(async_tool=True, timeout_secs=45)
+        async def slow_lookup(flow_manager):
+            """Look something up slowly."""
+            return {"ok": True}, TRANSITION_IN_YAML
+
+        flow = make_flow(
+            single_node({"name": "slow_lookup"}), handlers={"slow_lookup": slow_lookup}
+        )
+        schema = flow.node("a")["functions"][0]
+        self.assertFalse(schema.cancel_on_interruption)
+        self.assertTrue(schema.async_tool)
+        self.assertEqual(schema.timeout_secs, 45)
 
     def test_transition_only_function_needs_no_tool(self):
         cfg = single_node(
@@ -744,6 +762,21 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FlowError) as cm:
             await flow_manager.initialize(flow.initial_node)
         self.assertIn("uses '{{ caller }}', which is not in state", str(cm.exception))
+
+    async def test_flows_functions_are_synchronous_and_survive_interruptions(self):
+        flow = make_flow(config())
+        flow_manager = self.make_manager(flow)
+        await flow_manager.initialize(flow.initial_node)
+        # The manager advertises the node's tools in an LLMSetToolsFrame; the LLM
+        # service registers their handlers when it receives it.
+        self.llm._sync_registered_tool_handlers(get_advertised_tools(self.mock_worker))
+
+        for name in ("choose_pizza", "get_delivery_estimate"):
+            item = self.llm._functions[name]
+            self.assertFalse(item.cancel_on_interruption)
+            self.assertFalse(item.async_tool)
+        self.assertFalse(self.llm._has_async_tools())
+        self.assertNotIn("ASYNC TOOLS", self.llm._settings.system_instruction or "")
 
     async def test_contract_violation_reaches_llm_as_error(self):
         flow = make_flow(single_node({"name": "returns_bare"}))
