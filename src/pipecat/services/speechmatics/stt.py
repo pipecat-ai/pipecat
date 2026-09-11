@@ -632,12 +632,15 @@ class SpeechmaticsSTTService(STTService):
         await self._disconnect()
 
     async def _connect(self) -> None:
-        """Connect to the STT service, retrying if the attempt fails transiently.
+        """Connect to the STT service, retrying in the background if the attempt fails.
 
-        A rejected session marks the service closed, and retrying cannot clear that.
+        Runs from ``start()``, ahead of the ``StartFrame`` reaching the rest of the
+        pipeline, so the backoff loop must not hold that up: audio is buffered while the
+        retry runs. A rejected session marks the service closed, and retrying cannot
+        clear that.
         """
         if not await self._open_connection() and not self._closed:
-            await self._request_reconnect()
+            self._schedule_reconnect()
 
     async def _open_connection(self, *, report_error: bool = True) -> bool:
         """Build the client, register handlers, and open the connection.

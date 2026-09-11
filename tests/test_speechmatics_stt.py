@@ -454,7 +454,7 @@ async def test_connect_does_not_reconnect_after_rejection():
     """A rejected session on the initial connect is permanent; _connect must not
     request the reconnect loop, which would attempt (and fail) the handshake again."""
     service = _service()
-    service._request_reconnect = AsyncMock()
+    service._schedule_reconnect = Mock()
 
     async def rejected(report_error=True):
         service._closed = True  # what _fail_permanently does
@@ -464,19 +464,20 @@ async def test_connect_does_not_reconnect_after_rejection():
 
     await service._connect()
 
-    service._request_reconnect.assert_not_awaited()
+    service._schedule_reconnect.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_connect_reconnects_after_transient_failure():
-    """A transient failure on the initial connect must enter the reconnect loop."""
+async def test_connect_retries_a_transient_failure_in_the_background():
+    """A transient failure on the initial connect must enter the reconnect loop without
+    blocking start(), or the StartFrame would wait out the whole backoff sequence."""
     service = _service()
-    service._request_reconnect = AsyncMock()
+    service._schedule_reconnect = Mock()
     service._open_connection = AsyncMock(return_value=False)
 
     await service._connect()
 
-    service._request_reconnect.assert_awaited_once()
+    service._schedule_reconnect.assert_called_once()
 
 
 @pytest.mark.asyncio
