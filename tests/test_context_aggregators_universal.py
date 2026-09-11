@@ -1060,6 +1060,50 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_function_result_while_user_speaks_is_deferred_not_dropped(self):
+        """A result settling mid-user-speech must be deferred, then pushed.
+
+        The context frame pushed after a function call settles is the only
+        signal that re-invokes the LLM with the tool result in scope. Pushing it
+        while the user is still speaking is wrong, but so is discarding it: if
+        the user then falls silent, no inference ever runs and the bot never
+        speaks again.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        # The user is speaking when the result arrives.
+        await aggregator.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await aggregator.process_frame(
+            FunctionCallInProgressFrame(
+                function_name="fn_1", tool_call_id="1", arguments={}, cancel_on_interruption=True
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        await aggregator.process_frame(
+            FunctionCallResultFrame(
+                function_name="fn_1", tool_call_id="1", arguments={}, result={"ok": True}
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        # Deferred rather than pushed or dropped.
+        self.assertTrue(aggregator._push_context_on_user_stopped_speaking)
+
+        pushed = []
+        original = aggregator.push_context_frame
+
+        async def record(direction=FrameDirection.DOWNSTREAM):
+            pushed.append(direction)
+            await original(direction)
+
+        aggregator.push_context_frame = record
+
+        await aggregator.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertEqual(pushed, [FrameDirection.UPSTREAM])
+        self.assertFalse(aggregator._push_context_on_user_stopped_speaking)
+
     async def test_empty(self):
         context = LLMContext()
 
