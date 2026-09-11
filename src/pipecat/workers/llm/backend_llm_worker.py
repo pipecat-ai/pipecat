@@ -59,6 +59,14 @@ BACKEND_JOB_NAME = "run"
 #: outputs.
 OUTPUT_UPDATE_TYPE = "output"
 
+#: Appended to the backend LLM's system instruction: its output is relayed to
+#: a listener by the frontend, whatever the app's prompt says the backend does.
+BACKEND_OUTPUT_INSTRUCTIONS = (
+    "Your replies are relayed to a user by a voice assistant. Reply in concise, "
+    "conversational plain text it can say aloud: no Markdown, no raw JSON. Never claim "
+    "an action completed without a tool result confirming it."
+)
+
 
 @dataclass
 class BackendOutput:
@@ -292,6 +300,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._run: _BackendRun | None = None
         self._transform_output = transform_output
+        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
 
         # A delegation takes one or more LLM runs: the first for the request
         # itself, then one per round of tool results (the assistant aggregator
