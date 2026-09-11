@@ -602,8 +602,11 @@ class SpeechmaticsSTTService(STTService):
         await self._disconnect()
 
     async def _connect(self) -> None:
-        """Connect to the STT service, retrying if the attempt fails."""
-        if not await self._open_connection():
+        """Connect to the STT service, retrying if the attempt fails transiently.
+
+        A rejected session marks the service closed, and retrying cannot clear that.
+        """
+        if not await self._open_connection() and not self._closed:
             await self._request_reconnect()
 
     async def _open_connection(self, *, report_error: bool = True) -> bool:
@@ -722,13 +725,17 @@ class SpeechmaticsSTTService(STTService):
         """
         await self._disconnect()
         for attempt in range(1, self.RECONNECT_MAX_ATTEMPTS + 1):
+            # A rejected session, or a stop/cancel that landed during the backoff,
+            # marks the service closed: nothing may reopen it.
+            if self._closed:
+                return
             if await self._open_connection(report_error=False):
                 logger.debug(f"{self} reconnected to Speechmatics STT")
                 return
-            # A rejected session marks the service closed; retrying cannot clear it.
-            if self._closed:
-                return
-            await asyncio.sleep(exponential_backoff_time(attempt))
+            if attempt < self.RECONNECT_MAX_ATTEMPTS and not self._closed:
+                await asyncio.sleep(exponential_backoff_time(attempt))
+        if self._closed:
+            return
         raise ConnectionError(f"failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts")
 
     async def _disconnect(self) -> None:

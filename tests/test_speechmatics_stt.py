@@ -421,6 +421,62 @@ async def test_do_reconnect_stops_when_session_is_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_do_reconnect_makes_no_attempt_once_closed(monkeypatch):
+    """A cancel that lands during the backoff sleep closes the service; the next loop
+    iteration must not reopen a connection (and its message task) after that."""
+    service = _service()
+    attempts = _stub_reconnect_attempts(service, monkeypatch, [True])
+    service._closed = True
+
+    await service._do_reconnect()
+
+    assert attempts["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_do_reconnect_does_not_sleep_after_final_attempt(monkeypatch):
+    """The backoff sleeps between attempts, never after the last one, so exhaustion is
+    reported as soon as it is known."""
+    service = _service()
+    _stub_reconnect_attempts(service, monkeypatch, [False] * service.RECONNECT_MAX_ATTEMPTS)
+
+    with pytest.raises(ConnectionError):
+        await service._do_reconnect()
+
+    assert asyncio.sleep.await_count == service.RECONNECT_MAX_ATTEMPTS - 1
+
+
+@pytest.mark.asyncio
+async def test_connect_does_not_reconnect_after_rejection():
+    """A rejected session on the initial connect is permanent; _connect must not
+    request the reconnect loop, which would attempt (and fail) the handshake again."""
+    service = _service()
+    service._request_reconnect = AsyncMock()
+
+    async def rejected(report_error=True):
+        service._closed = True  # what _fail_fatally does
+        return False
+
+    service._open_connection = rejected
+
+    await service._connect()
+
+    service._request_reconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_connect_reconnects_after_transient_failure():
+    """A transient failure on the initial connect must enter the reconnect loop."""
+    service = _service()
+    service._request_reconnect = AsyncMock()
+    service._open_connection = AsyncMock(return_value=False)
+
+    await service._connect()
+
+    service._request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_drains_message_queue():
     """Messages buffered from one session must not survive into the next. The consumer
     task is cancelled on disconnect, so anything left queued would be replayed by the
