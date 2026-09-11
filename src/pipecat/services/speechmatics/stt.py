@@ -1045,11 +1045,13 @@ class SpeechmaticsSTTService(STTService):
         # Forward to parent
         await super().process_frame(frame, direction)
 
-        # Force finalization — only when the caller drives turns (EXTERNAL).
+        # Force finalization — only when the caller drives turns (EXTERNAL). When the
+        # service closes turns itself, a pipeline VAD still feeds the base class's TTFB
+        # metrics and reconnect gating, so its frames are expected here and not forwarded.
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._service_closes_turns:
-                logger.warning(
-                    f"{self} VADUserStoppedSpeakingFrame received but the service VAD is in use"
+                logger.debug(
+                    f"{self} VADUserStoppedSpeakingFrame received; the service closes turns itself"
                 )
             elif self._client is not None:
                 self.request_finalize()
