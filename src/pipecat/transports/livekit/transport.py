@@ -110,10 +110,12 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
 
-    Inherits all parameters from TransportParams without additional configuration.
+    Parameters:
+        audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
+            (LiveKit's default is 1000).
     """
 
-    pass
+    audio_out_queue_size_ms: int = 1000
 
 
 class LiveKitCallbacks(BaseModel):
@@ -275,7 +277,9 @@ class LiveKitTransportClient:
 
                 # Set up audio source and track
                 self._audio_source = rtc.AudioSource(
-                    self._out_sample_rate, self._params.audio_out_channels
+                    self._out_sample_rate,
+                    self._params.audio_out_channels,
+                    queue_size_ms=self._params.audio_out_queue_size_ms,
                 )
                 self._audio_track = rtc.LocalAudioTrack.create_audio_track(
                     "pipecat-audio", self._audio_source
