@@ -1152,6 +1152,7 @@ class OpenAIResponsesLLMService(
                 if usage:
                     input_details = usage.get("input_tokens_details") or {}
                     output_details = usage.get("output_tokens_details") or {}
+                    service_tier = response.get("service_tier")
                     tokens = LLMTokenUsage(
                         prompt_tokens=usage.get("input_tokens", 0),
                         completion_tokens=usage.get("output_tokens", 0),
@@ -1159,6 +1160,7 @@ class OpenAIResponsesLLMService(
                         cache_read_input_tokens=input_details.get("cached_tokens", 0),
                         cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
                         reasoning_tokens=output_details.get("reasoning_tokens", 0),
+                        service_tier=service_tier if isinstance(service_tier, str) else None,
                     )
                     await self.start_llm_usage_metrics(tokens)
 
@@ -1395,6 +1397,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                         # leak None into metrics.
                         input_details = usage.input_tokens_details
                         output_details = usage.output_tokens_details
+                        service_tier = getattr(response, "service_tier", None)
                         tokens = LLMTokenUsage(
                             prompt_tokens=usage.input_tokens or 0,
                             completion_tokens=usage.output_tokens or 0,
@@ -1410,6 +1413,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                             reasoning_tokens=(output_details.reasoning_tokens or 0)
                             if output_details
                             else 0,
+                            service_tier=service_tier if isinstance(service_tier, str) else None,
                         )
                         await self.start_llm_usage_metrics(tokens)
 
