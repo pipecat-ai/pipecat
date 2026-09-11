@@ -71,9 +71,10 @@ except ModuleNotFoundError as e:
 
 
 # Connect-time failures that will never clear on retry (auth, bad config, rejected session).
-# These are surfaced as fatal and never trigger a reconnect; every other connect exception is
-# treated as a transient drop and retried with backoff.
-_FATAL_CONNECT_ERRORS = (
+# These are reported as permanent, leaving the service unusable, and never trigger a
+# reconnect; every other connect exception is treated as a transient drop and retried with
+# backoff.
+_PERMANENT_CONNECT_ERRORS = (
     AuthenticationError,
     ConfigurationError,
     TranscriptionError,
@@ -574,8 +575,12 @@ class SpeechmaticsSTTService(STTService):
 
         if changed.keys() - self.Settings.LOCAL_FIELDS:
             logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
-            # Connection-level fields changed — rebuild the config, then reconnect.
+            # Connection-level fields changed — rebuild the config, then reconnect. The
+            # new settings may be what a rejected session needed (a supported language,
+            # say), so a closed service gets another chance, matching the usability the
+            # base class just restored.
             self._config = self._build_config(self._settings)
+            self._closed = False
             await self._request_reconnect()
         else:
             # Only local (formatting) fields changed — effective immediately.
@@ -673,23 +678,23 @@ class SpeechmaticsSTTService(STTService):
 
         # Connect. Errors reach the pipeline via push_error instead of dying silently, and are
         # split by recoverability: an unrecoverable rejection (auth / bad config / rejected
-        # session) is fatal and stops the session, while any other failure is a transient drop the
-        # caller retries with backoff.
+        # session) is permanent and stops the session, while any other failure is a transient
+        # drop the caller retries with backoff.
         try:
             await self._client.connect()
             logger.debug(f"{self} connected")
-        except _FATAL_CONNECT_ERRORS as e:
+        except _PERMANENT_CONNECT_ERRORS as e:
             self._client = None
-            await self._fail_fatally(
+            await self._fail_permanently(
                 error_msg=f"Speechmatics STT rejected the session: {e}", exception=e
             )
             return False
         except Exception as e:
             self._client = None
-            # A rejected credential arrives as a ConnectionError; surface it as fatal
+            # A rejected credential arrives as a ConnectionError; report it as permanent
             # (like the other unrecoverable rejections) instead of retrying.
             if _is_auth_rejection(e):
-                await self._fail_fatally(
+                await self._fail_permanently(
                     error_msg=f"Speechmatics STT rejected the credentials: {e}", exception=e
                 )
                 return False
@@ -706,22 +711,25 @@ class SpeechmaticsSTTService(STTService):
             self._stt_msg_task = self.create_task(self._process_stt_messages())
         return True
 
-    async def _fail_fatally(self, error_msg: str, exception: Exception | None = None) -> None:
-        """Surface an unrecoverable error and stop the session from reconnecting.
+    async def _fail_permanently(self, error_msg: str, exception: Exception | None = None) -> None:
+        """Report an error that will not clear on retry and stop the session reconnecting.
 
-        Auth/config/rejected-session failures and server ``Error`` messages will not clear on
-        retry, so they go out as a fatal ``ErrorFrame`` and mark the session closed, which
-        stops ``_do_reconnect`` retrying against a permanent error.
+        The error is pushed as permanent, which marks the service unusable so it is given
+        no more audio and the pipeline worker applies its ``ProcessorUnusablePolicy``. The
+        session is also marked closed, which stops ``_do_reconnect`` retrying against it.
+        A later settings update reopens the service (see ``_update_settings``).
         """
         self._closed = True
-        await self.push_error(error_msg=error_msg, exception=exception, fatal=True)
+        await self.push_error(
+            error_msg=error_msg, exception=exception, force_treat_as_permanent=True
+        )
 
     async def _do_reconnect(self) -> None:
         """Re-establish the session, retrying with exponential backoff.
 
         Called by ``STTService._reconnect()`` inside the reconnecting guard, which holds
         for the whole call — so audio arriving during the retries is buffered and replayed
-        rather than dropped. Raising on exhaustion hands the failure to that guard.
+        rather than dropped. Exhausting the attempts is reported as a permanent error.
         """
         await self._disconnect()
         for attempt in range(1, self.RECONNECT_MAX_ATTEMPTS + 1):
@@ -736,7 +744,9 @@ class SpeechmaticsSTTService(STTService):
                 await asyncio.sleep(exponential_backoff_time(attempt))
         if self._closed:
             return
-        raise ConnectionError(f"failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts")
+        await self._fail_permanently(
+            f"Speechmatics STT failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts"
+        )
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
@@ -938,10 +948,11 @@ class SpeechmaticsSTTService(STTService):
     async def _handle_error(self, message: dict[str, Any]) -> None:
         """Handle Error events.
 
-        A server Error ends the session and will not clear on retry, so it is fatal: surface it
-        upstream and stop reconnecting, instead of letting the session die silently or spin.
+        A server Error ends the session and will not clear on retry, so it is permanent:
+        surface it upstream and stop reconnecting, instead of letting the session die
+        silently or spin.
         """
-        await self._fail_fatally(f"Speechmatics STT error: {self._describe_status(message)}")
+        await self._fail_permanently(f"Speechmatics STT error: {self._describe_status(message)}")
 
     def _handle_warning(self, message: dict[str, Any]) -> None:
         """Handle Warning events.
@@ -1084,7 +1095,7 @@ class SpeechmaticsSTTService(STTService):
                 # send_audio swallows transport errors and shuts its own audio gate, so a
                 # dropped socket is only visible as the gate being closed. A gate closed
                 # with no session_error is a broken stream; when the service ended the
-                # session itself, _handle_error has already failed it fatally.
+                # session itself, _handle_error has already reported it.
                 if not self._client.is_ready_for_audio and self._client.session_error is None:
                     logger.warning(f"{self} audio stream closed, reconnecting")
                     await self._request_reconnect()

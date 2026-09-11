@@ -387,18 +387,21 @@ async def test_do_reconnect_retries_until_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_do_reconnect_raises_once_attempts_are_exhausted(monkeypatch):
-    """Retries are bounded, and exhausting them must raise so STTService._reconnect
-    reports the failure instead of leaving the session silently dead."""
+async def test_do_reconnect_reports_permanent_error_once_attempts_are_exhausted(monkeypatch):
+    """Retries are bounded, and exhausting them must be reported as a permanent error so
+    the service is marked unusable instead of silently dropping audio into no client."""
     service = _service()
+    service.push_error = AsyncMock()
     attempts = _stub_reconnect_attempts(
         service, monkeypatch, [False] * service.RECONNECT_MAX_ATTEMPTS
     )
 
-    with pytest.raises(ConnectionError):
-        await service._do_reconnect()
+    await service._do_reconnect()
 
     assert attempts["n"] == service.RECONNECT_MAX_ATTEMPTS
+    service.push_error.assert_awaited_once()
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+    assert service._closed is True
 
 
 @pytest.mark.asyncio
@@ -410,7 +413,7 @@ async def test_do_reconnect_stops_when_session_is_rejected(monkeypatch):
     open_connection = service._open_connection
 
     async def reject(report_error=True):
-        service._closed = True  # what _fail_fatally does
+        service._closed = True  # what _fail_permanently does
         return await open_connection(report_error=report_error)
 
     service._open_connection = reject
@@ -438,10 +441,10 @@ async def test_do_reconnect_does_not_sleep_after_final_attempt(monkeypatch):
     """The backoff sleeps between attempts, never after the last one, so exhaustion is
     reported as soon as it is known."""
     service = _service()
+    service.push_error = AsyncMock()
     _stub_reconnect_attempts(service, monkeypatch, [False] * service.RECONNECT_MAX_ATTEMPTS)
 
-    with pytest.raises(ConnectionError):
-        await service._do_reconnect()
+    await service._do_reconnect()
 
     assert asyncio.sleep.await_count == service.RECONNECT_MAX_ATTEMPTS - 1
 
@@ -454,7 +457,7 @@ async def test_connect_does_not_reconnect_after_rejection():
     service._request_reconnect = AsyncMock()
 
     async def rejected(report_error=True):
-        service._closed = True  # what _fail_fatally does
+        service._closed = True  # what _fail_permanently does
         return False
 
     service._open_connection = rejected
@@ -590,9 +593,9 @@ def _connection_error_with_status(status: int) -> ConnectionError:
 
 
 @pytest.mark.asyncio
-async def test_open_connection_auth_rejection_is_fatal(monkeypatch):
-    """A 401 handshake rejection must stop the session (fatal error, no reconnect), not
-    fall into the retryable branch that reconnects forever."""
+async def test_open_connection_auth_rejection_is_permanent(monkeypatch):
+    """A 401 handshake rejection must stop the session (permanent error, no reconnect),
+    not fall into the retryable branch that reconnects forever."""
     service = _service()
     service.push_error = AsyncMock()
     monkeypatch.setattr(
@@ -603,9 +606,10 @@ async def test_open_connection_auth_rejection_is_fatal(monkeypatch):
     ok = await service._open_connection(report_error=True)
 
     assert ok is False
-    assert service._closed is True  # _fail_fatally ran → no reconnect
+    assert service._closed is True  # _fail_permanently ran → no reconnect
     service.push_error.assert_awaited_once()
-    assert service.push_error.call_args.kwargs.get("fatal") is True
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+    assert service.push_error.call_args.kwargs.get("fatal") is None
 
 
 @pytest.mark.asyncio
@@ -624,7 +628,7 @@ async def test_open_connection_transient_drop_stays_retryable(monkeypatch):
     assert ok is False
     assert service._closed is False  # still retryable
     service.push_error.assert_awaited_once()
-    assert service.push_error.call_args.kwargs.get("fatal") is not True
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is not True
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +690,20 @@ async def test_update_settings_model_reresolves_into_model():
 
     assert service._settings.model == "linden-2"
     assert service._config.model == "linden-2"
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reopens_a_closed_service():
+    """A rejected session leaves the service closed; a settings update that needs a
+    reconnect must clear that so the new settings get a chance to connect."""
+    service = _service()
+    _stub_reconnect(service)
+    service._closed = True
+
+    await service._update_settings(SpeechmaticsSTTService.Settings(language=Language.ES))
+
+    assert service._closed is False
+    service._request_reconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
