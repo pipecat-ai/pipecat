@@ -9,6 +9,7 @@
 import contextlib
 import io
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from pipecat.cli.commands.eval import (
     _EvalDashboard,
     _expand_scenario_paths,
     _finalize_evals,
+    _fmt_duration,
     _group_outcome,
     _print_progress,
     _turn_tally,
@@ -206,31 +208,221 @@ class TestSimulationVerdicts(unittest.TestCase):
             self.assertIn("goal not met", out.getvalue())
 
 
+class TestDurations(unittest.TestCase):
+    def test_tenths_then_minutes_with_no_sixty_seconds_in_between(self):
+        self.assertEqual(_fmt_duration(5.04), "5.0s")
+        self.assertEqual(_fmt_duration(59.94), "59.9s")
+        self.assertEqual(_fmt_duration(59.96), "1m 00s")
+        self.assertEqual(_fmt_duration(124.4), "2m 04s")
+
+
+class TestDashboard(unittest.TestCase):
+    """A plain run's dashboard: one row per run, the tally last, sized to the terminal."""
+
+    def test_rows_and_the_tally_render(self):
+        runs = [_simulation_run(True, attempt=1, attempts=1) for _ in range(3)]
+        for i, run in enumerate(runs):
+            run.scenario = f"scenario_{i}"
+            run.duration_ms = 1234
+        console = Console(width=100, height=24, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0))
+        lines = console.export_text().rstrip("\n").splitlines()
+        self.assertEqual(len([line for line in lines if "scenario_" in line]), 3)
+        self.assertIn("1234ms", lines[0])
+        self.assertIn("3/3 passed", lines[-1])
+
+    def test_a_long_run_is_windowed_to_the_terminal(self):
+        runs = []
+        for i in range(30):
+            run = _simulation_run(True, attempt=1, attempts=1)
+            run.scenario = f"scenario_{i:02d}"
+            if i > 20:
+                run.status = "pending"
+                run.result = None
+            runs.append(run)
+        runs[21].status = "running"
+        console = Console(width=100, height=12, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0))
+        lines = console.export_text().rstrip("\n").splitlines()
+        self.assertLessEqual(len(lines), 12)
+        self.assertIn("↑", lines[0])
+        self.assertIn("scenario_21", "".join(lines))
+        self.assertIn("passed", lines[-1])
+
+
+class TestDashboardSpinner(unittest.TestCase):
+    """A running row's spinner advances from frame to frame."""
+
+    @staticmethod
+    def _status_glyph(dashboard: _EvalDashboard, at: float) -> str:
+        console = Console(
+            width=100, height=24, record=True, force_terminal=False, get_time=lambda: at
+        )
+        console.print(dashboard)
+        row = next(line for line in console.export_text().splitlines() if "scenario_1" in line)
+        return row[0]
+
+    def test_the_spinner_animates_across_frames(self):
+        for grouped in (False, True):
+            with self.subTest(grouped=grouped):
+                runs = [_simulation_run(True, attempt=1, attempts=1) for _ in range(2)]
+                for i, run in enumerate(runs):
+                    run.scenario = f"scenario_{i}"
+                runs[1].status = "running"
+                runs[1].result = None
+                dashboard = _EvalDashboard(runs, 0.0, grouped=grouped)
+                first = self._status_glyph(dashboard, 0.0)
+                later = self._status_glyph(dashboard, 0.3)
+                self.assertNotEqual(first, later)
+
+
 class TestGroupedDashboard(unittest.TestCase):
     """A repeated row reads passed over its total while attempts remain, and a rate once they are in."""
 
     @staticmethod
-    def _render(runs: list[EvalRun]) -> str:
-        console = Console(width=120, record=True, force_terminal=False)
+    def _render(runs: list[EvalRun], *, width: int = 120, height: int = 24) -> str:
+        console = Console(width=width, height=height, record=True, force_terminal=False)
         console.print(_EvalDashboard(runs, 0.0, grouped=True))
         return console.export_text()
 
-    def test_a_row_still_running_shows_passed_over_the_total(self):
+    def test_a_row_still_running_shows_what_is_left(self):
         pending = _simulation_run(True, attempt=3, attempts=3)
         pending.status = "pending"
         pending.result = None
         text = self._render(
             [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), pending]
         )
-        self.assertIn("2/3", text)
         self.assertIn("1 left", text)
         self.assertNotIn("%", text)
+        self.assertNotIn("—", text)
 
-    def test_a_finished_row_shows_the_rate_and_the_pace(self):
+    def test_a_running_row_shows_the_attempts_clock(self):
+        running = _simulation_run(True, attempt=3, attempts=3)
+        running.status = "running"
+        running.result = None
+        running.started_at = time.monotonic() - 5
+        text = self._render(
+            [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), running]
+        )
+        # The row's clock runs from its first attempt's start; the finished
+        # attempts here carry no start time, so it is the running one's.
+        self.assertRegex(text, r"1 left\s+5\.\ds")
+
+    def test_what_is_left_and_the_clock_keep_their_columns(self):
+        # A waiting row's "left" lines up with a running row's, not with its clock.
+        running = _simulation_run(True, attempt=3, attempts=3)
+        running.status = "running"
+        running.result = None
+        running.started_at = time.monotonic() - 5
+        waiting = _simulation_run(True, attempt=1, attempts=3)
+        waiting.status = "pending"
+        waiting.result = None
+        waiting.scenario = "other"
+        text = self._render(
+            [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), running, waiting]
+        )
+        lines = [line for line in text.splitlines() if "left" in line]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0].index("left"), lines[1].index("left"))
+
+    def test_the_progress_column_is_as_wide_as_a_rate_from_the_start(self):
+        # Every row still running: the column already leaves room for
+        # "3/3 (100%)", so the rows do not shift when the first one finishes.
+        rows = []
+        for i in range(2):
+            run = _simulation_run(True, attempt=1, attempts=3)
+            run.status = "running"
+            run.result = None
+            run.scenario = f"scenario_{i}"
+            run.started_at = time.monotonic()
+            rows.append(run)
+        before = self._render(rows)
+        rows[0].status = "done"
+        rows[0].duration_ms = 1000
+        for attempt in (2, 3):
+            more = _simulation_run(True, attempt=attempt, attempts=3)
+            more.scenario = "scenario_0"
+            more.duration_ms = 1000
+            rows.append(more)
+        after = self._render(rows)
+        line_before = next(l for l in before.splitlines() if "scenario_1" in l)
+        line_after = next(l for l in after.splitlines() if "scenario_1" in l)
+        self.assertEqual(line_before.index("left"), line_after.index("left"))
+
+    def test_a_finished_rows_rate_takes_the_place_of_what_was_left(self):
+        finished = [_simulation_run(True, attempt=n) for n in (1, 2, 3)]
+        running = _simulation_run(True, attempt=1, attempts=3)
+        running.status = "running"
+        running.result = None
+        running.scenario = "other"
+        running.started_at = time.monotonic()
+        text = self._render([*finished, running])
+        rate_line = next(line for line in text.splitlines() if "100%" in line)
+        left_line = next(line for line in text.splitlines() if "left" in line)
+        self.assertEqual(
+            rate_line.index("100%)") + len("100%)"), left_line.index("left") + len("left")
+        )
+
+    def test_a_finished_row_shows_the_rate_and_how_long_it_took(self):
+        # Three attempts, each 30 s, run one after another: the row took 90 s
+        # from the first start to the last end.
         runs = [_simulation_run(True, attempt=n) for n in (1, 2, 3)]
-        for run in runs:
+        now = time.monotonic()
+        for i, run in enumerate(runs):
             run.duration_ms = 30000
+            run.started_at = now - 90 + 30 * i
         text = self._render(runs)
         self.assertIn("3/3 (100%)", text)
-        self.assertIn("each", text)
+        self.assertIn("1m 30s", text)
         self.assertNotIn("left", text)
+
+    def test_a_row_that_ran_once_shows_its_duration(self):
+        run = _simulation_run(True, attempt=1, attempts=1)
+        run.duration_ms = 12300
+        text = self._render([run])
+        self.assertIn("12.3s", text)
+
+    def test_a_long_sweep_is_windowed_with_the_tally_kept_on_screen(self):
+        # More rows than a terminal shows: the window follows the active row,
+        # the rest is counted on scroll markers, and the tally stays below.
+        runs = []
+        for i in range(40):
+            for attempt in (1, 2, 3):
+                run = _simulation_run(True, attempt=attempt)
+                run.scenario = f"scenario_{i:02d}"
+                if i > 25:
+                    run.status = "pending"
+                    run.result = None
+                runs.append(run)
+        runs[26 * 3].status = "running"
+        text = self._render(runs)
+        lines = [line for line in text.splitlines() if line.strip()]
+        self.assertLess(len(lines), 30)
+        self.assertIn("↑", text)
+        self.assertIn("↓", text)
+        self.assertIn("scenario_26", text)
+        self.assertNotIn("scenario_00", text)
+        self.assertNotIn("scenario_39", text)
+        self.assertIn("passed", lines[-1])
+
+    def test_the_window_follows_the_terminal_height_and_rows_never_wrap(self):
+        # A short, narrow pane: fewer rows fit, and a bot path too long for the
+        # width is cut rather than wrapped, so the tally is the last line and
+        # Rich never has to crop the dashboard with an ellipsis.
+        runs = []
+        for i in range(12):
+            run = _simulation_run(True, attempt=1, attempts=1)
+            run.bot = f"function-calling/function-calling-openai-responses-async-{i:02d}.py"
+            run.scenario = f"async_tool_deferred_delivery_audio_{i:02d}"
+            runs.append(run)
+        text = self._render(runs, width=60, height=12)
+        lines = text.rstrip("\n").splitlines()
+        self.assertLessEqual(len(lines), 12)
+        self.assertIn("passed", lines[-1])
+        self.assertTrue(all(len(line) <= 60 for line in lines))
+        self.assertIn("↑", text)
+        # The path is what gets shortened; the glyph and the rate survive.
+        row = next(line for line in lines if "function-calling" in line)
+        self.assertTrue(row.startswith("✓"))
+        self.assertIn("…", row)
+        self.assertIn("100%", row)
