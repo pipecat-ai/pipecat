@@ -787,12 +787,17 @@ class GoogleSTTService(STTService):
             return denoiser_config
         return cloud_speech.DenoiserConfig(denoiser_config)
 
-    async def _reconnect_if_needed(self):
-        """Reconnect the stream if it's currently active."""
-        if self._streaming_task:
-            logger.debug("Reconnecting stream due to configuration changes")
-            await self._disconnect()
-            await self._connect()
+    async def _do_reconnect(self):
+        """Disconnect and reconnect the recognition stream.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        Reconnecting a stream that is already gone would leave a streaming task
+        running past teardown.
+        """
+        if not self._streaming_task:
+            return
+        await self._disconnect()
+        await self._connect()
 
     @deprecated(
         "`GoogleSTTService.set_languages` is deprecated since 0.0.104 and will be removed in "
@@ -817,7 +822,8 @@ class GoogleSTTService(STTService):
         Handles ``language`` from base ``set_language`` by converting it to
         ``languages``. Emits a deprecation warning if ``language_codes`` is
         used. All other fields (model, boolean flags) are applied directly.
-        Reconnects the stream on any change.
+        Any change reconnects the stream, waiting for the end of the user's
+        turn if one is in progress.
 
         Args:
             delta: A settings delta.
@@ -848,7 +854,7 @@ class GoogleSTTService(STTService):
         changed = await super()._update_settings(delta)
 
         if changed:
-            await self._reconnect_if_needed()
+            await self._request_reconnect()
 
         return changed
 
@@ -968,13 +974,17 @@ class GoogleSTTService(STTService):
         self._stream_start_time = int(time.time() * 1000)
         self._new_stream = True
 
+        # A settings change applies before the reconnect that carries it, so
+        # results still arriving from this stream are labelled with its own codes.
+        self._stream_language_codes = self._get_language_codes()
+
         recognition_config = cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=self.sample_rate,
                 audio_channel_count=1,
             ),
-            language_codes=self._get_language_codes(),
+            language_codes=self._stream_language_codes,
             model=self._settings.model,
             features=cloud_speech.RecognitionFeatures(
                 enable_automatic_punctuation=self._settings.enable_automatic_punctuation,
@@ -1134,7 +1144,7 @@ class GoogleSTTService(STTService):
                         continue
 
                     # Google's language codes are the values Language is built from.
-                    primary_language = cast(Language, self._get_language_codes()[0])
+                    primary_language = cast(Language, self._stream_language_codes[0])
 
                     if result.is_final:
                         self._last_transcript_was_final = True
