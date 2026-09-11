@@ -459,6 +459,9 @@ def run(
 
     runs = _build_scenario_runs(_expand_scenario_paths(scenarios), bot_url)
     _print_scenario_configs(runs)
+    # Printed only under -a, to say which of the runs will actually record.
+    if audio:
+        _print_run_settings(runs, None, audio)
 
     params = EvalSessionParams(
         default_timeout_ms=timeout * 1000,
@@ -856,15 +859,49 @@ def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _print_run_settings(runs: list[EvalRun], concurrency: int, record: bool) -> None:
+def _audio_runs(runs: list[EvalRun]) -> int:
+    """How many of ``runs`` are audio-mode, the only kind the harness records.
+
+    A run whose scenario fails to load counts as text: it fails before it could
+    record anyway.
+    """
+    bot_audio: dict[Path, bool] = {}
+    for r in runs:
+        if r.scenario_path not in bot_audio:
+            try:
+                bot_audio[r.scenario_path] = load_scenario_file(r.scenario_path).bot_audio
+            except Exception:  # noqa: BLE001
+                bot_audio[r.scenario_path] = False
+    return sum(bot_audio[r.scenario_path] for r in runs)
+
+
+def _recording_setting(runs: list[EvalRun], record: bool) -> str:
+    """The ``recording`` settings value: whether the selected runs will produce audio.
+
+    Only an audio-mode run records: a text-mode bot skips TTS and the user's
+    turns go over as text, so there is nothing to record. The note names the
+    text-mode runs recording skips.
+    """
+    if not record:
+        return "off"
+    audio, total = _audio_runs(runs), len(runs)
+    if audio == total:
+        return "on"
+    if audio == 0:
+        return f"off {_color('(all runs text mode)', '33')}"
+    return f"on {_color(f'({audio} of {total} runs; text mode skipped)', '33')}"
+
+
+def _print_run_settings(runs: list[EvalRun], concurrency: int | None, record: bool) -> None:
     """Print how the suite will execute, in the shape of the configs above it.
 
     Only what the terminal doesn't otherwise show while the run is going, and that
     a manifest can turn on without it appearing on the command line: the run count
     (arithmetic, and the difference between 8 runs and several thousand), the
     concurrency, and whether audio is being recorded — a few MB per run, so it
-    grows with the sweep. What the caller just typed stays out; it's already in
-    their scrollback.
+    grows with the sweep, and only for audio-mode runs. What the caller just typed
+    stays out; it's already in their scrollback. ``concurrency`` is ``None`` when
+    the runs go one at a time against a fixed bot.
     """
     total = len(runs)
     counts = str(total)
@@ -877,12 +914,12 @@ def _print_run_settings(runs: list[EvalRun], concurrency: int, record: bool) -> 
             counts = (
                 f"{total} ({_plural(evals, 'eval')}, {attempts[0]}-{attempts[-1]} attempts each)"
             )
+    settings = [("runs", counts)]
+    if concurrency is not None:
+        settings.append(("concurrency", str(concurrency)))
+    settings.append(("recording", _recording_setting(runs, record)))
     print("Settings:")
-    for label, value in (
-        ("runs", counts),
-        ("concurrency", str(concurrency)),
-        ("recording", "on" if record else "off"),
-    ):
+    for label, value in settings:
         print(f"  {_color(f'{label:11s}', '1')} -> {value}")
     print()
 
