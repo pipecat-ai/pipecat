@@ -28,6 +28,7 @@ from pipecat.services.speechmatics.stt import (
     _resolve_model,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 try:
     from speechmatics.agent_stt import Segment
@@ -268,6 +269,22 @@ def test_service_closes_turns_false_for_external():
         settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.EXTERNAL)
     )
     assert service._service_closes_turns is False
+
+
+def test_metadata_frame_routes_should_interrupt_to_external_strategies():
+    """When the service closes turns it proposes the boundaries, and the strategies it
+    recommends own the interruption, so `should_interrupt` must reach them."""
+    frame = _service(should_interrupt=False).service_metadata_frame()
+    assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
+    assert frame.user_turn_strategies.enable_interruptions is False
+
+
+def test_metadata_frame_recommends_no_strategies_in_external_mode():
+    """In EXTERNAL mode Pipecat owns endpointing, so no strategies are recommended."""
+    frame = _service(
+        settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.EXTERNAL)
+    ).service_metadata_frame()
+    assert frame.user_turn_strategies is None
 
 
 # ---------------------------------------------------------------------------

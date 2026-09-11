@@ -24,11 +24,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -400,7 +400,11 @@ class SpeechmaticsSTTService(STTService):
                     Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead.
                     Will be removed in 2.0.0.
 
-            should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
+            should_interrupt: Determine whether the bot should be interrupted when
+                Speechmatics turn_detection_mode is configured to detect user speech.
+                Passed along to the user turn strategies this service recommends,
+                which own the interruption; a user-supplied ``user_turn_strategies``
+                overrides the recommendation and this setting with it.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -541,13 +545,15 @@ class SpeechmaticsSTTService(STTService):
         """Request external turn strategies when Speechmatics endpoints server-side.
 
         Every mode other than ``EXTERNAL`` (which uses Pipecat's own endpointing) has
-        Speechmatics detect turns and emit the turn frames, so the user aggregator
-        defers to those. Applied unless the user passed their own
+        Speechmatics detect turns and propose the boundaries, so the user aggregator
+        resolves those. Applied unless the user passed their own
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
         if self._service_closes_turns:
-            frame.user_turn_strategies = ExternalUserTurnStrategies()
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
         return frame
 
     @property
@@ -931,13 +937,9 @@ class SpeechmaticsSTTService(STTService):
         """Handle StartOfTurn events.
 
         When Speechmatics STT detects the start of a new speaking turn, a StartOfTurn
-        event is triggered. This triggers bot interruption to stop any ongoing speech
-        synthesis and signals the start of user speech detection.
-
-        The service will:
-        - Start the processing-metrics span for the turn
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
+        event is triggered. The service opens the turn's processing-metrics span and
+        proposes a turn start, which the user turn strategies resolve into a
+        UserStartedSpeakingFrame and, when ``should_interrupt`` is set, an interruption.
 
         Only reached when the service closes turns; EXTERNAL mode never subscribes to
         StartOfTurn, so the span is never opened there.
@@ -947,9 +949,7 @@ class SpeechmaticsSTTService(STTService):
         """
         logger.debug(f"{self} StartOfTurn received")
         await self.start_processing_metrics()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
@@ -957,16 +957,14 @@ class SpeechmaticsSTTService(STTService):
         EndOfTurn events are triggered by Speechmatics STT when it concludes a
         speaking turn. This occurs either due to silence or reaching the
         end-of-turn confidence thresholds. These events provide the final
-        transcript for the completed turn.
-
-        The service will:
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        transcript for the completed turn. The service proposes a turn stop, which
+        the user turn strategies resolve into a UserStoppedSpeakingFrame.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} EndOfTurn received")
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:
         """Handle SpeakersResult events.
