@@ -40,9 +40,6 @@ CALLER_HEADERS = {
     "X-Pipecat-Version": pipecat_version(),
 }
 
-# PCM rates Speechify can synthesize, as the `pcm_<rate>` output formats.
-SPEECHIFY_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
-
 SPEECHIFY_DEFAULT_SAMPLE_RATE = 24000
 
 
@@ -68,23 +65,25 @@ def language_to_speechify_language(language: Language) -> str | None:
 
 
 def _output_format_from_sample_rate(sample_rate: int) -> tuple[str, int]:
-    """Pick the Speechify PCM output format for a sample rate.
+    """Return Speechify's reliable native PCM format and sample rate.
 
     Args:
-        sample_rate: The desired audio sample rate in Hz.
+        sample_rate: The downstream desired sample rate in Hz.
 
     Returns:
-        Tuple of (output_format, sample_rate), where the returned sample rate is the one
-        Speechify will actually synthesize at. It differs from the requested rate when
-        Speechify has no matching PCM format (e.g. 32000 Hz), so callers must stamp the
-        returned rate onto their audio frames and let the output transport resample.
+        Tuple of (output_format, sample_rate) for Speechify's native 24 kHz PCM.
+
+    Speechify returns 24 kHz PCM from the timestamped streaming endpoint even when
+    ``pcm_16000`` is requested and the response header says 16 kHz. Using the native
+    rate explicitly keeps frame metadata truthful; Pipecat's output transport performs
+    any required resampling to the downstream transport rate.
     """
-    if sample_rate in SPEECHIFY_PCM_SAMPLE_RATES:
-        return f"pcm_{sample_rate}", sample_rate
-    logger.warning(
-        f"Speechify has no PCM output format for {sample_rate} Hz, "
-        f"synthesizing at {SPEECHIFY_DEFAULT_SAMPLE_RATE} Hz instead"
-    )
+    if sample_rate != SPEECHIFY_DEFAULT_SAMPLE_RATE:
+        logger.debug(
+            "Speechify synthesizes timestamped PCM at {} Hz; Pipecat will resample to {} Hz",
+            SPEECHIFY_DEFAULT_SAMPLE_RATE,
+            sample_rate,
+        )
     return f"pcm_{SPEECHIFY_DEFAULT_SAMPLE_RATE}", SPEECHIFY_DEFAULT_SAMPLE_RATE
 
 
