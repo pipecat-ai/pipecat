@@ -257,7 +257,8 @@ class BaseOutputTransport(FrameProcessor):
             frame: The output audio frame to write.
 
         Returns:
-            True if the audio frame was written successfully, False otherwise.
+            Whether the transport took the frame. A serializer that emits no
+            payload has still taken it; see :meth:`FrameSerializer.serialize`.
         """
         return False
 

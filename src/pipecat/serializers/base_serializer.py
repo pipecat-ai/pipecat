@@ -89,7 +89,9 @@ class FrameSerializer(BaseObject):
             frame: The frame to serialize.
 
         Returns:
-            Serialized frame data as string, bytes, or None if serialization fails.
+            Serialized frame data as string or bytes, or None when there is
+            nothing to send for this frame: it isn't handled, or the serializer
+            is buffering it and will emit it on a later call.
         """
         pass
 
