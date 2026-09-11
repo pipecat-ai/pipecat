@@ -579,16 +579,14 @@ def _pass_rate(passed: int, done: int) -> str:
 
 
 # Rate colors, as a rich style and the matching ANSI code for the non-TTY path.
-_RATE_ANSI = {"green": "32", "yellow": "33", "red": "31", "dim": "2"}
+_RATE_ANSI = {"green": "32", "red": "31", "dim": "2"}
 
 
 def _rate_level(passed: int, done: int) -> str:
-    """Color for a pass rate: green when perfect, red below half, yellow between."""
+    """Color for a pass rate: green when every finished attempt passed, red once one has not, dim before any finished."""
     if not done:
         return "dim"
-    if passed == done:
-        return "green"
-    return "red" if (100 * passed // done) < 50 else "yellow"
+    return "green" if passed == done else "red"
 
 
 def _row_seconds(group: list[EvalRun]) -> float | None:
@@ -781,17 +779,18 @@ class _EvalDashboard:
                 "done"
                 if all(r.status == "done" for r in group)
                 else "running"
-                if any(r.status == "running" for r in group)
+                if any(r.status == "running" or r.stopping for r in group)
                 else "pending"
                 for _, group in groups
             ],
             height,
         )
 
-        # The progress column is as wide as the widest rate any row can reach,
-        # "3/3 (100%)", from the first frame, so nothing moves when a row's
-        # "N left" becomes its rate.
-        progress_width = max((len(_pass_rate(len(g), len(g))) for _, g in groups), default=0)
+        # The progress columns are as wide as the widest text any row can reach,
+        # "10 left" and "3/3 (100%)", from the first frame, so nothing moves as
+        # the counts change.
+        left_width = max((len(f"{len(g)} left") for _, g in groups), default=0)
+        rate_width = max((len(_pass_rate(len(g), len(g))) for _, g in groups), default=0)
 
         cells = []
         for (bot, scenario), group in groups[start:end]:
@@ -799,28 +798,30 @@ class _EvalDashboard:
             passed, _, _ = _group_outcome(group)
             # Three states, and only the last is a verdict: spinning while a slot is
             # held, a still dot while waiting for one, and ✓/✗ once every attempt is
-            # in. Motion is reserved for the runs actually in flight — most rows of a
-            # long sweep are waiting, and animating those too would leave nothing for
-            # movement to mean.
+            # in. A slot stays held while a finished attempt's bot is stopped, so
+            # the row keeps spinning through that tail rather than looking idle.
+            # Motion is reserved for the runs actually in flight — most rows of a
+            # long sweep are waiting, and animating those too would leave nothing
+            # for movement to mean.
             if len(done) == len(group):
                 glyph, style, _ = _EVAL_GLYPH["passed" if passed == len(group) else "failed"]
                 status = Text(glyph, style=style)
-            elif any(r.status == "running" for r in group):
+            elif any(r.status == "running" or r.stopping for r in group):
                 status = self._spinner
             else:
                 status = Text("·", style="dim")
-            # One column says where the row is: what is left while attempts
-            # remain, then its pass rate once every attempt is in. Beside it the
-            # row's clock, running from its first attempt's start and stopped at
-            # its last one's end.
+            # Two columns say where the row is: what is left while attempts
+            # remain, and how many of the row's attempts have passed. The rate
+            # is over every attempt, so it climbs as they come in, and its color
+            # is a verdict on the ones that finished. Beside them the row's
+            # clock, running from its first attempt's start and stopped at its
+            # last one's end.
             remaining = len(group) - len(done)
-            if remaining:
-                progress = Text(f"{remaining} left".rjust(progress_width), style="dim")
-            else:
-                progress = Text(
-                    _pass_rate(passed, len(group)).rjust(progress_width),
-                    style=_rate_level(passed, len(done)),
-                )
+            left = Text(f"{remaining} left".rjust(left_width) if remaining else "", style="dim")
+            rate = Text(
+                _pass_rate(passed, len(group)).rjust(rate_width),
+                style=_rate_level(passed, len(done)),
+            )
             seconds = _row_seconds(group)
             clock = "" if seconds is None else _clock(seconds)
             cells.append(
@@ -828,12 +829,13 @@ class _EvalDashboard:
                     status,
                     Text(bot),
                     Text(scenario, style="cyan"),
-                    progress,
+                    left,
+                    rate,
                     Text(clock, style="dim"),
                 )
             )
 
-        return self._framed(self._table(cells, 5, width), start, end, n)
+        return self._framed(self._table(cells, 6, width), start, end, n)
 
 
 def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:

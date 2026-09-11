@@ -347,6 +347,8 @@ class EvalRun:
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
+        stopping: True while the bot is being stopped after the run is done.
+            The run still holds its concurrency slot, so the next one waits.
         result: The outcome, once the run is done.
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
@@ -364,6 +366,7 @@ class EvalRun:
     sweep: bool = False
     attempt: int = 1
     status: str = "pending"
+    stopping: bool = False
     result: EvalScriptResult | EvalSimulationResult | None = None
     error: str | None = None
     started_at: float | None = None
@@ -938,6 +941,7 @@ class EvalSuite(BaseObject):
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
         run.status = "done"
         await self._call_event_handler("on_update", run)
+        run.stopping = True
         # A cancelled suite (Ctrl+C) may leave the worker running; it must not outlive the suite.
         if worker is not None and worker.returncode is None:
             worker.kill()
@@ -945,6 +949,7 @@ class EvalSuite(BaseObject):
                 await worker.wait()
         if bot is not None:
             await self._stop_bot(bot)
+        run.stopping = False
         # The worker's stdout is only the import banner on success; it is kept
         # when no result came back, since it then holds the traceback.
         if run.result is not None:

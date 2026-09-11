@@ -23,6 +23,7 @@ from pipecat.cli.commands.eval import (
     _fmt_duration,
     _group_outcome,
     _print_progress,
+    _rate_level,
     _turn_tally,
 )
 from pipecat.evals.results import (
@@ -250,6 +251,16 @@ class TestDashboard(unittest.TestCase):
         self.assertIn("passed", lines[-1])
 
 
+class TestRateLevel(unittest.TestCase):
+    """A rate's color is a verdict on the attempts that finished."""
+
+    def test_levels(self):
+        self.assertEqual(_rate_level(0, 0), "dim")
+        self.assertEqual(_rate_level(3, 3), "green")
+        self.assertEqual(_rate_level(2, 3), "red")
+        self.assertEqual(_rate_level(0, 3), "red")
+
+
 class TestDashboardSpinner(unittest.TestCase):
     """A running row's spinner advances from frame to frame."""
 
@@ -275,26 +286,62 @@ class TestDashboardSpinner(unittest.TestCase):
                 later = self._status_glyph(dashboard, 0.3)
                 self.assertNotEqual(first, later)
 
+    def test_a_row_keeps_spinning_while_a_finished_attempts_bot_is_stopped(self):
+        # The finished attempt holds the row's slot until its bot has stopped,
+        # so the row is still busy rather than waiting for a slot.
+        stopping = _simulation_run(True, attempt=1, attempts=2)
+        pending = _simulation_run(True, attempt=2, attempts=2)
+        pending.status = "pending"
+        pending.result = None
+        for run in (stopping, pending):
+            run.scenario = "scenario_1"
+        dashboard = _EvalDashboard([stopping, pending], 0.0, grouped=True)
+        self.assertEqual(self._status_glyph(dashboard, 0.0), "·")
+        stopping.stopping = True
+        first = self._status_glyph(dashboard, 0.0)
+        later = self._status_glyph(dashboard, 0.3)
+        self.assertNotIn("·", (first, later))
+        self.assertNotEqual(first, later)
+
 
 class TestGroupedDashboard(unittest.TestCase):
-    """A repeated row reads passed over its total while attempts remain, and a rate once they are in."""
+    """A repeated row reads what is left beside passed over its total, and only the rate once every attempt is in."""
 
     @staticmethod
-    def _render(runs: list[EvalRun], *, width: int = 120, height: int = 24) -> str:
-        console = Console(width=width, height=height, record=True, force_terminal=False)
+    def _render(
+        runs: list[EvalRun], *, width: int = 120, height: int = 24, styles: bool = False
+    ) -> str:
+        console = Console(width=width, height=height, record=True, force_terminal=styles)
         console.print(_EvalDashboard(runs, 0.0, grouped=True))
-        return console.export_text()
+        return console.export_text(styles=styles)
 
-    def test_a_row_still_running_shows_what_is_left(self):
+    def test_a_row_still_running_shows_what_is_left_and_its_rate_so_far(self):
         pending = _simulation_run(True, attempt=3, attempts=3)
         pending.status = "pending"
         pending.result = None
         text = self._render(
             [_simulation_run(True, attempt=1), _simulation_run(True, attempt=2), pending]
         )
-        self.assertIn("1 left", text)
-        self.assertNotIn("%", text)
+        self.assertRegex(text, r"1 left\s+2/3 \(66%\)")
         self.assertNotIn("—", text)
+
+    def test_a_running_rows_rate_is_a_verdict_on_the_finished_attempts(self):
+        # Green while every finished attempt passed, red once one has not, and
+        # dim before the first is in.
+        for succeeded, code in ((True, "32"), (False, "31")):
+            with self.subTest(succeeded=succeeded):
+                pending = _simulation_run(True, attempt=2, attempts=2)
+                pending.status = "pending"
+                pending.result = None
+                text = self._render(
+                    [_simulation_run(succeeded, attempt=1, attempts=2), pending], styles=True
+                )
+                self.assertRegex(text, rf"\x1b\[{code}m\s*{int(succeeded)}/2 \({50 * succeeded}%\)")
+        waiting = [_simulation_run(True, attempt=n, attempts=2) for n in (1, 2)]
+        for run in waiting:
+            run.status = "pending"
+            run.result = None
+        self.assertRegex(self._render(waiting, styles=True), r"\x1b\[2m\s*0/2 \(0%\)")
 
     def test_a_running_row_shows_the_attempts_clock(self):
         running = _simulation_run(True, attempt=3, attempts=3)
@@ -306,7 +353,7 @@ class TestGroupedDashboard(unittest.TestCase):
         )
         # The row's clock runs from its first attempt's start; the finished
         # attempts here carry no start time, so it is the running one's.
-        self.assertRegex(text, r"1 left\s+5\.\ds")
+        self.assertRegex(text, r"1 left\s+2/3 \(66%\)\s+5\.\ds")
 
     def test_what_is_left_and_the_clock_keep_their_columns(self):
         # A waiting row's "left" lines up with a running row's, not with its clock.
@@ -349,7 +396,7 @@ class TestGroupedDashboard(unittest.TestCase):
         line_after = next(l for l in after.splitlines() if "scenario_1" in l)
         self.assertEqual(line_before.index("left"), line_after.index("left"))
 
-    def test_a_finished_rows_rate_takes_the_place_of_what_was_left(self):
+    def test_a_finished_row_drops_what_was_left_and_keeps_its_rate_in_place(self):
         finished = [_simulation_run(True, attempt=n) for n in (1, 2, 3)]
         running = _simulation_run(True, attempt=1, attempts=3)
         running.status = "running"
@@ -359,8 +406,9 @@ class TestGroupedDashboard(unittest.TestCase):
         text = self._render([*finished, running])
         rate_line = next(line for line in text.splitlines() if "100%" in line)
         left_line = next(line for line in text.splitlines() if "left" in line)
+        self.assertNotIn("left", rate_line)
         self.assertEqual(
-            rate_line.index("100%)") + len("100%)"), left_line.index("left") + len("left")
+            rate_line.index("100%)") + len("100%)"), left_line.index("(0%)") + len("(0%)")
         )
 
     def test_a_finished_row_shows_the_rate_and_how_long_it_took(self):
