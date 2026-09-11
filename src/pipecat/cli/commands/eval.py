@@ -23,7 +23,7 @@ from pathlib import Path
 import typer
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
-from rich.console import Console, Group
+from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.table import Table
@@ -537,19 +537,36 @@ def _turn_tally(r: EvalRun) -> str:
 
 
 def _fmt_duration(seconds: float) -> str:
-    """Human-friendly elapsed time, e.g. ``12.3s`` or ``2m 04s``."""
-    if seconds < 60:
-        return f"{seconds:.1f}s"
+    """Human-friendly elapsed time, e.g. ``12.3s`` or ``2m 04s``.
+
+    Tenths under a minute, then minutes and seconds, deciding on the rounded
+    value so nothing ever reads ``60.0s``.
+    """
+    tenths = round(seconds, 1)
+    if tenths < 60:
+        return f"{tenths:.1f}s"
     m, s = divmod(int(round(seconds)), 60)
     return f"{m}m {s:02d}s"
 
 
-def _eval_status_cell(r: EvalRun):
-    """A rich renderable for the status column (spinner while running)."""
+def _clock(seconds: float) -> str:
+    """A running clock, padded to the width of ``2m 04s`` so what sits beside it never moves."""
+    return f"{_fmt_duration(seconds):>6}"
+
+
+def _eval_status_cell(r: EvalRun, spinner: Spinner):
+    """A rich renderable for the status column.
+
+    Args:
+        r: The run the cell is for.
+        spinner: The spinner shown while it runs. One instance outlives the
+            frames: a spinner animates from the time it was first drawn, so a
+            fresh one per frame would sit on its first glyph forever.
+    """
     if r.status == "pending":
         return Text("·", style="dim")
     if r.status == "running":
-        return Spinner("dots", style="cyan")
+        return spinner
     glyph, style, _ = _EVAL_GLYPH[_eval_verdict(r)]
     return Text(glyph, style=style)
 
@@ -574,12 +591,24 @@ def _rate_level(passed: int, done: int) -> str:
     return "red" if (100 * passed // done) < 50 else "yellow"
 
 
-def _mean_duration(runs: list[EvalRun]) -> str:
-    """Mean wall-clock of the finished runs, e.g. ``~53.2s each``."""
-    times = [r.duration_ms for r in runs if r.duration_ms is not None]
-    if not times:
-        return ""
-    return f"~{_fmt_duration(sum(times) / len(times) / 1000)} each"
+def _row_seconds(group: list[EvalRun]) -> float | None:
+    """How long a row has been going: from its first attempt's start to now, or to its last attempt's end.
+
+    ``None`` before any attempt has started. An attempt without a start time,
+    one loaded rather than run, counts for its duration alone.
+    """
+    started = [r.started_at for r in group if r.started_at is not None]
+    if not started:
+        durations = [r.duration_ms for r in group if r.duration_ms is not None]
+        return sum(durations) / 1000 if durations else None
+    if any(r.status != "done" for r in group):
+        return time.monotonic() - min(started)
+    ended = [
+        r.started_at + r.duration_ms / 1000
+        for r in group
+        if r.started_at is not None and r.duration_ms is not None
+    ]
+    return (max(ended) if ended else time.monotonic()) - min(started)
 
 
 def _group_key(r: EvalRun) -> tuple[str, str]:
@@ -606,55 +635,118 @@ class _EvalDashboard:
         self.runs = runs
         self.started_at = started_at
         self.grouped = grouped
+        # Shared by every running row and kept across frames, so it animates.
+        self._spinner = Spinner("dots", style="cyan")
 
-    def __rich__(self) -> Group:
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        # Rendered against the height Rich hands over at draw time, which is the
+        # terminal's as it is now (a tmux pane, a resized window), rather than
+        # the size the module's console measured at import.
+        height, width = options.max_height, options.max_width
         if self.grouped:
-            return self._render_grouped()
+            yield self._render_grouped(height, width)
+            return
         rows = self.runs
         n = len(rows)
+        start, end = self._window([r.status for r in rows], height)
 
-        # Show only as many scenario rows as fit above the pinned tally, and slide
-        # the window to follow the active runs. Otherwise, once the first screenful
-        # finishes, Rich crops the bottom — hiding the still running/pending rows and
-        # the tally itself — and there's no way to see the rest make progress.
-        term_h = _console.size.height if _console.is_terminal else 24
-        avail = max(3, term_h - 3)  # leave room for a blank line + the tally (+1 slack)
-        if n <= avail:
-            start, end = 0, n
-        else:
-            # Anchor on the active frontier (the last running run, or the first
-            # pending one) and keep a couple of upcoming rows in view below it, so
-            # completed runs scroll off the top as new ones start.
-            running = [i for i, r in enumerate(rows) if r.status == "running"]
-            done_n = sum(1 for r in rows if r.status == "done")
-            anchor = max(running) if running else min(done_n, n - 1)
-            body = max(1, avail - 2)  # 2 lines reserved for the ↑/↓ "more" markers
-            end = min(n, anchor + 1 + min(2, body - 1))
-            start = max(0, end - body)
-            end = min(n, start + body)
-
-        table = Table.grid(padding=(0, 2))
-        table.add_column()  # status
-        table.add_column()  # bot
-        table.add_column()  # scenario
-        table.add_column(justify="right")  # timing
+        cells = []
         for r in rows[start:end]:
             if r.status == "running" and r.started_at is not None:
-                detail = f"{int(time.monotonic() - r.started_at)}s"
+                detail = _clock(time.monotonic() - r.started_at)
             elif r.status == "done" and r.duration_ms is not None:
                 detail = f"{r.duration_ms}ms"
             else:
                 detail = ""
-            table.add_row(
-                _eval_status_cell(r),
-                Text(r.bot),
-                Text(r.scenario, style="cyan"),
-                Text(detail, style="dim"),
+            cells.append(
+                (
+                    _eval_status_cell(r, self._spinner),
+                    Text(r.bot),
+                    Text(r.scenario, style="cyan"),
+                    Text(detail, style="dim"),
+                )
             )
 
-        total = n
-        done = sum(1 for r in rows if r.status == "done")
-        passed = sum(1 for r in rows if _eval_verdict(r) == "passed")
+        yield self._framed(self._table(cells, 4, width), start, end, n)
+
+    @staticmethod
+    def _table(cells: list[tuple], columns: int, width: int) -> Table:
+        """A grid of ``cells`` that fits ``width`` with every row on one line.
+
+        The window counts rows as lines, so a row that wrapped would push the
+        tally off the bottom of the screen. The status glyph and the numbers
+        are as wide as their widest cell, and the bot and scenario columns get
+        what is left, cut with an ellipsis only when the row would not fit. A
+        narrow pane thus shortens a path rather than dropping the glyph or the
+        numbers, and a wide one keeps the columns together at the left, the
+        timing next to its row.
+
+        Args:
+            cells: One tuple of renderables per row: status, bot, scenario,
+                then the numbers, right-justified.
+            columns: How many cells a row has, for an empty window.
+            width: The terminal's width.
+        """
+        widths = [
+            max((1 if isinstance(row[i], Spinner) else row[i].cell_len for row in cells), default=1)
+            for i in range(columns)
+        ]
+        fixed = sum(w for i, w in enumerate(widths) if i not in (1, 2)) + 2 * (columns - 1)
+        budget = max(20, width - fixed - 1)
+        paths = widths[1] + widths[2]
+        if paths > budget:
+            # Cut the cells rather than cap the columns: a grid whose natural
+            # width fits is one Rich never shrinks, so the numbers stay whole.
+            bot_width = max(10, budget * widths[1] // paths)
+            scenario_width = max(10, budget - bot_width)
+            for row in cells:
+                row[1].truncate(bot_width, overflow="ellipsis")
+                row[2].truncate(scenario_width, overflow="ellipsis")
+
+        table = Table.grid(padding=(0, 2))
+        for i in range(columns):
+            table.add_column(no_wrap=True, justify="right" if i >= 3 else "left")
+        for row in cells:
+            table.add_row(*row)
+        return table
+
+    def _window(self, statuses: list[str], height: int) -> tuple[int, int]:
+        """The slice of rows to show, sized to the terminal and sliding with the active runs.
+
+        Only as many rows as fit above the pinned tally are shown. Otherwise,
+        once the first screenful finishes, Rich crops the bottom, hiding the
+        still running and pending rows and the tally itself, and there is no
+        way to see the rest make progress.
+
+        Args:
+            statuses: Each row's status, ``running``, ``done`` or pending, in
+                display order.
+            height: The lines available to the whole dashboard.
+
+        Returns:
+            The ``(start, end)`` of the rows to render.
+        """
+        n = len(statuses)
+        avail = max(3, height - 3)  # leave room for a blank line + the tally (+1 slack)
+        if n <= avail:
+            return 0, n
+        # Anchor on the active frontier (the last running row, or the first
+        # pending one) and keep a couple of upcoming rows in view below it, so
+        # completed rows scroll off the top as new ones start.
+        running = [i for i, status in enumerate(statuses) if status == "running"]
+        done_n = sum(1 for status in statuses if status == "done")
+        anchor = max(running) if running else min(done_n, n - 1)
+        body = max(1, avail - 2)  # 2 lines reserved for the ↑/↓ "more" markers
+        end = min(n, anchor + 1 + min(2, body - 1))
+        start = max(0, end - body)
+        end = min(n, start + body)
+        return start, end
+
+    def _framed(self, table: Table, start: int, end: int, n: int) -> Group:
+        """The table between its scroll markers, with the tally pinned below."""
+        total = len(self.runs)
+        done = sum(1 for r in self.runs if r.status == "done")
+        passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
         # The total time ticks live next to the tally, so it doubles as the
         # "still working" signal (no spinner needed); it keeps advancing through
         # the bot-teardown tail (see _stop_bot) until Live exits, leaving the
@@ -680,16 +772,29 @@ class _EvalDashboard:
             parts.append(Text(f"   ↓ {n - end} more", style="dim"))
         return Group(*parts, Text(""), summary)
 
-    def _render_grouped(self) -> Group:
+    def _render_grouped(self, height: int, width: int) -> Group:
         """One row per (bot, scenario), showing that pair's pass rate and pace."""
-        table = Table.grid(padding=(0, 2))
-        table.add_column()  # status
-        table.add_column()  # bot
-        table.add_column()  # scenario
-        table.add_column(justify="right")  # pass rate
-        table.add_column(justify="right")  # remaining, then the mean run time
+        groups = list(_grouped_runs(self.runs).items())
+        n = len(groups)
+        start, end = self._window(
+            [
+                "done"
+                if all(r.status == "done" for r in group)
+                else "running"
+                if any(r.status == "running" for r in group)
+                else "pending"
+                for _, group in groups
+            ],
+            height,
+        )
 
-        for (bot, scenario), group in _grouped_runs(self.runs).items():
+        # The progress column is as wide as the widest rate any row can reach,
+        # "3/3 (100%)", from the first frame, so nothing moves when a row's
+        # "N left" becomes its rate.
+        progress_width = max((len(_pass_rate(len(g), len(g))) for _, g in groups), default=0)
+
+        cells = []
+        for (bot, scenario), group in groups[start:end]:
             done = [r for r in group if r.status == "done"]
             passed, _, _ = _group_outcome(group)
             # Three states, and only the last is a verdict: spinning while a slot is
@@ -701,40 +806,34 @@ class _EvalDashboard:
                 glyph, style, _ = _EVAL_GLYPH["passed" if passed == len(group) else "failed"]
                 status = Text(glyph, style=style)
             elif any(r.status == "running" for r in group):
-                status = Spinner("dots", style="cyan")
+                status = self._spinner
             else:
                 status = Text("·", style="dim")
-            # While attempts remain the cell reads passed over the group's total,
-            # "2/3", next to what is left; the percentage and the pace appear once
-            # every attempt is in. The color follows the finished attempts, so a
-            # row with only passes so far stays green.
+            # One column says where the row is: what is left while attempts
+            # remain, then its pass rate once every attempt is in. Beside it the
+            # row's clock, running from its first attempt's start and stopped at
+            # its last one's end.
             remaining = len(group) - len(done)
-            if not done:
-                rate = "—"
-            elif remaining:
-                rate = f"{passed}/{len(group)}"
+            if remaining:
+                progress = Text(f"{remaining} left".rjust(progress_width), style="dim")
             else:
-                rate = _pass_rate(passed, len(group))
-            table.add_row(
-                status,
-                Text(bot),
-                Text(scenario, style="cyan"),
-                Text(rate, style=_rate_level(passed, len(done))),
-                Text(f"{remaining} left" if remaining else _mean_duration(done), style="dim"),
+                progress = Text(
+                    _pass_rate(passed, len(group)).rjust(progress_width),
+                    style=_rate_level(passed, len(done)),
+                )
+            seconds = _row_seconds(group)
+            clock = "" if seconds is None else _clock(seconds)
+            cells.append(
+                (
+                    status,
+                    Text(bot),
+                    Text(scenario, style="cyan"),
+                    progress,
+                    Text(clock, style="dim"),
+                )
             )
 
-        total = len(self.runs)
-        done = sum(1 for r in self.runs if r.status == "done")
-        passed = sum(1 for r in self.runs if _eval_verdict(r) == "passed")
-        elapsed = _fmt_duration(time.monotonic() - self.started_at)
-        summary = Table.grid(padding=(0, 1))
-        summary.add_column()
-        summary.add_column()
-        summary.add_row(
-            Text(" "),
-            Text(f"{passed}/{total} passed  ·  {done}/{total} done  ·  {elapsed}", "bold"),
-        )
-        return Group(table, Text(""), summary)
+        return self._framed(self._table(cells, 5, width), start, end, n)
 
 
 def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
@@ -838,6 +937,7 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
         return
     print()
     print(f"  {_color(f'Failures ({len(failed)} of {total}):', '1;31')}")
+    print()
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
@@ -901,7 +1001,9 @@ def _print_repeat_summary(runs: list[EvalRun], failed: list[EvalRun], *, show_ra
             extra = []
             if errored:
                 extra.append(f"{errored} errored")
-            extra.append(_mean_duration(group))
+            seconds = _row_seconds(group)
+            if seconds is not None:
+                extra.append(_fmt_duration(seconds))
             mark = ""
             if not group[0].sweep:
                 mark = f"  {_green('✓') if passed == len(group) else _red('✗')}"
