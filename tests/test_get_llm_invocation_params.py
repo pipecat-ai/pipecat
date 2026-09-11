@@ -92,6 +92,7 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
@@ -928,6 +929,125 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
     def test_merge_empty_messages(self):
         """An empty message list returns empty."""
         self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
+
+    # --- _ensure_function_call_is_anchored ---
+
+    def _assert_anchor(self, params):
+        """Assert the messages open with the synthetic anchoring user turn."""
+        anchor = params["messages"][0]
+        self.assertEqual(anchor.role, "user")
+        self.assertEqual(len(anchor.parts), 1)
+        self.assertEqual(anchor.parts[0].text, ".")
+        self.assertIsNotNone(params["messages"][1].parts[-1].function_call)
+
+    def test_leading_function_call_is_anchored(self):
+        """A tool result reached with no user-authored message leads with a user turn.
+
+        The model's first act after a context reset can be a tool call, which
+        leaves the converted messages opening with a function call.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "Call get_question, then speak it."},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "get_question", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": '{"question": "2 + 2?"}'},
+        ]
+        context = LLMContext(messages=messages)
+        before = list(context.get_messages())
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Anchor, call, result: the system instruction is carried in
+        # system_instruction rather than replayed as the newest user turn.
+        self.assertEqual(len(params["messages"]), 3)
+        self._assert_anchor(params)
+        self.assertEqual(params["system_instruction"], "Call get_question, then speak it.")
+        # The anchor is synthesized per request; persisting it would add a turn
+        # per inference for the rest of the conversation.
+        self.assertEqual(context.get_messages(), before)
+
+    def test_leading_function_call_is_anchored_with_async_tool_messages(self):
+        """An async call's messages are anchored too.
+
+        An async call settles with a developer-role message, which converts to
+        a user text turn *after* the call, leaving it unanchored at the front.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "Call get_question, then speak it."},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "get_question", "arguments": "{}"},
+                    }
+                ],
+            },
+            async_tool_messages.build_started_message("call-1"),
+            async_tool_messages.build_final_result_message("call-1", '{"question": "2 + 2?"}'),
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 4)
+        self._assert_anchor(params)
+
+    def test_leading_function_call_is_anchored_with_service_system_instruction(self):
+        """The anchor is added when the prompt lives on the service, not in the context."""
+        messages: list[LLMStandardMessage] = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "get_question", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": '{"question": "2 + 2?"}'},
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context, system_instruction="Ask it.")
+
+        self.assertEqual(len(params["messages"]), 3)
+        self._assert_anchor(params)
+        self.assertEqual(params["system_instruction"], "Ask it.")
+
+    def test_anchor_considers_every_part_of_the_first_message(self):
+        """A function call anywhere in the first message's parts is anchored.
+
+        A thinking-mode response arrives as one model turn whose function call
+        need not be its first part.
+        """
+        messages = [
+            self.adapter.create_llm_specific_message(
+                Content(
+                    role="model",
+                    parts=[
+                        Part(text="Let me check."),
+                        Part(function_call=FunctionCall(id="call-1", name="get_question", args={})),
+                    ],
+                )
+            ),
+        ]
+        context = LLMContext(messages=messages)
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self._assert_anchor(params)
 
 
 class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
