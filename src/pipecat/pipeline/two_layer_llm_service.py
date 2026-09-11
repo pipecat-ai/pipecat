@@ -567,7 +567,7 @@ class TwoLayerLLMService(Pipeline):
     def __init__(
         self,
         *,
-        frontend: LLMService,
+        frontend: LLMService[Any],
         backend: BackendLLMWorker | str,
         connector: BackendConnector | None = None,
     ):
@@ -597,7 +597,7 @@ class TwoLayerLLMService(Pipeline):
         super().__init__([frontend, self._filter])
 
     @property
-    def frontend(self) -> LLMService:
+    def frontend(self) -> LLMService[Any]:
         """The frontend LLM service."""
         return self._frontend
 
@@ -628,9 +628,12 @@ class TwoLayerLLMService(Pipeline):
             self._context = frame.context
             self._advertise_in(frame.context)
         elif isinstance(frame, LLMSetToolsFrame):
-            # The aggregator upstream has already set these on the context; a
-            # speech-to-speech frontend syncs its handlers from the frame and
-            # its session from the context, so the tool goes in both.
+            # An app changing tools mid-session must not drop the delegate
+            # tool. The aggregator upstream has already set the new tools on
+            # the context; a frontend that takes tool changes at runtime reads
+            # the frame, so the tool goes in both. Nothing here asks a
+            # frontend to take runtime changes it does not already take: the
+            # tool reaches every frontend through the first context frame.
             tools = _with_tool(LLMContext._normalize_and_validate_tools(frame.tools), self.tool)
             if tools is not None:
                 frame.tools = tools

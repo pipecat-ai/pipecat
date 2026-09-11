@@ -4,21 +4,26 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A two-tier voice agent: a speech-to-speech frontend delegating to a backend LLM.
+"""A two-layer voice agent: a speech-to-speech frontend delegating to a backend LLM.
 
-The frontend is OpenAI Realtime, holding the spoken conversation with no tools
-of its own. Anything that needs tools or careful reasoning it hands to a
-``BackendLLMWorker`` running Claude, through the ``delegate`` tool, and relays
-its answer.
+The frontend is OpenAI Realtime, holding the spoken conversation with no
+tools of its own. Anything that needs tools or careful reasoning it hands to
+a backend running Claude, and relays the answer. ``TwoLayerLLMService`` wires
+the two together: it installs the ``delegate`` tool on the frontend and runs
+the backend as a worker of its own.
 
-The split does not depend on what the frontend is: ``backend-llm-cascade-frontend.py``
-puts a cascade pipeline in this role, against the same backend and the same job
-contract, and ``OpenAILiveLLMService`` builds client delegation on it too.
+With a speech-to-speech frontend the defaults have the model word the
+request itself (its context can lag the audio, so the backend cannot read the
+conversation) and deliver the backend's answer only, since a realtime
+function call takes one result. ``cascade-frontend.py`` puts a cascade
+pipeline in the frontend's place, against the same backend and the same
+prompts.
 
 Architecture::
 
-    Main worker (transport + realtime model, ``delegate`` tool)
-      └── job → BackendLLMWorker (Claude + tools)
+    Main worker (transport + TwoLayerLLMService)
+      ├── frontend: realtime model, ``delegate`` tool
+      └── backend: BackendLLMWorker (Claude + tools), delegated to over a job
 
 Requirements:
 
@@ -32,11 +37,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.two_layer_llm_service import BackendConnector, TwoLayerLLMService
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
@@ -58,31 +62,18 @@ from pipecat.services.openai.realtime.events import (
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.workers.llm import BackendLLMWorker, delegate_to_backend
+from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-BACKEND_NAME = "backend"
-
 FRONTEND_INSTRUCTIONS = """You are a friendly, concise voice assistant. Your responses are spoken
-aloud, so keep them to one or two natural sentences without any formatting.
+aloud, so keep them to one or two natural sentences without any formatting."""
 
-Answer simple conversational questions yourself. Whenever the user asks for
-current information, such as the weather or a restaurant recommendation, or
-asks you to look something up, call the delegate tool with a self-contained
-request: the user's goal, the exact details they gave (places, dates, names)
-and their latest correction. While it runs, keep the conversation going;
-when the result comes back, relay it in your own words."""
+BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Use the available tools to
+answer questions about the weather and restaurants."""
 
-BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Each message you receive
-is a request the assistant has handed you from a live voice conversation. It
-may contain transcription errors; use the most likely intent.
-
-Use the available tools to answer questions about the weather and
-restaurants. Reply with the verified result in concise, conversational plain
-text that the assistant can say to the user — no Markdown, no raw JSON — and
-never claim an action completed without a tool result confirming it."""
+BACKEND_DESCRIPTION = "current information such as the weather or a restaurant recommendation"
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -130,52 +121,41 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    llm = OpenAIRealtimeLLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAIRealtimeLLMService.Settings(
-            system_instruction=FRONTEND_INSTRUCTIONS,
-            session_properties=SessionProperties(
-                audio=AudioConfiguration(
-                    input=AudioInput(
-                        transcription=InputAudioTranscription(),
-                        turn_detection=SemanticTurnDetection(),
-                    )
+    llm = TwoLayerLLMService(
+        frontend=OpenAIRealtimeLLMService(
+            api_key=os.environ["OPENAI_API_KEY"],
+            settings=OpenAIRealtimeLLMService.Settings(
+                system_instruction=FRONTEND_INSTRUCTIONS,
+                session_properties=SessionProperties(
+                    audio=AudioConfiguration(
+                        input=AudioInput(
+                            transcription=InputAudioTranscription(),
+                            turn_detection=SemanticTurnDetection(),
+                        )
+                    ),
                 ),
             ),
         ),
+        backend=BackendLLMWorker(
+            name="backend",
+            llm=AnthropicLLMService(
+                api_key=os.environ["ANTHROPIC_API_KEY"],
+                settings=AnthropicLLMService.Settings(
+                    system_instruction=BACKEND_INSTRUCTIONS,
+                    thinking=AnthropicLLMService.ThinkingConfig(
+                        type="adaptive", display="summarized"
+                    ),
+                ),
+            ),
+            context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+        ),
+        connector=BackendConnector(backend_description=BACKEND_DESCRIPTION),
     )
 
-    # When using a speech-to-speech model for the frontend, we can't rely on the
-    # context to be up-to-date at delegation time (see realtime_service_mode
-    # for background on that). So instead of asking the backend to extract the
-    # user's intent from the conversation, like we would with a cascade
-    # frontend, we have the frontend pass a specific request to the backend.
-    @tool_options(cancel_on_interruption=False)
-    async def delegate(params: FunctionCallParams, task: str):
-        """Hand work to the backend, for anything needing tools, current information or careful reasoning.
-
-        Args:
-            task: What the backend should do, self-contained: the user's goal,
-                the details they gave and their latest correction.
-        """
-        logger.info(f"Delegating to the backend: {task!r}")
-
-        # No on_update here: realtime models don't accept intermediate tool
-        # results — they take one result, when the call completes. So the
-        # backend's progress, which a cascade frontend can use, is ignored.
-        text = await delegate_to_backend(
-            params.pipeline_worker,
-            BACKEND_NAME,
-            request=task,
-            timeout_secs=120,
-        )
-        logger.info(f"Backend result: {text!r}")
-        await params.result_callback(text)
-
-    # The frontend's only tool is the handoff; the real tools live in the backend.
+    # The frontend's only tool, ``delegate``, is installed by the service;
+    # the real tools live in the backend.
     context = LLMContext(
         [{"role": "developer", "content": "Greet the user and ask how you can help."}],
-        tools=ToolsSchema(standard_tools=[delegate]),
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
@@ -207,21 +187,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
-    backend = BackendLLMWorker(
-        name=BACKEND_NAME,
-        llm=AnthropicLLMService(
-            api_key=os.environ["ANTHROPIC_API_KEY"],
-            settings=AnthropicLLMService.Settings(
-                system_instruction=BACKEND_INSTRUCTIONS,
-                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
-            ),
-        ),
-        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
-    )
-
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(worker, backend)
+    await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
