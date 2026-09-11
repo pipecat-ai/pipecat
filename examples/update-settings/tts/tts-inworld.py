@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -113,6 +114,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 delta=InworldTTSService.Settings(speaking_rate=1.5, temperature=0.8)
             )
         )
+
+    turn_observer = worker.turn_tracking_observer
+    if turn_observer:
+
+        @turn_observer.event_handler("on_turn_ended")
+        async def on_turn_ended(observer, turn_number, duration, was_interrupted):
+            if turn_number == 1:
+                logger.info("Switching Inworld TTS language to Spanish after the opening turn")
+                context.add_message(
+                    {"role": "developer", "content": "From now on, reply only in Spanish."}
+                )
+                await worker.queue_frame(
+                    TTSUpdateSettingsFrame(delta=InworldTTSService.Settings(language=Language.ES))
+                )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
