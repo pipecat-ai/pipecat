@@ -2223,5 +2223,51 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seq._slots, [])
 
 
+class TestForceCompleteWordStream(unittest.IsolatedAsyncioTestCase):
+    """What a context ending has to account for: text no word arrived for, which the
+    progress view has to reach, and a buffered word no slot ever matched, which is
+    dropped where sentence mode would have dropped it on arrival.
+    """
+
+    async def _streamed_slot(self, *tokens: str) -> AggregatedFrameSequencer:
+        seq = _seq(streaming=True)
+        for t in tokens:
+            await seq.register_spoken(_spoken_frame(t, raw_text=t), "ctx1", t, True)
+        return seq
+
+    async def test_buffered_word_is_dropped_at_context_end(self):
+        # "。" is taken by "好" as trailing punctuation, so the slot is already
+        # complete when the provider reports the mark on its own, so it is buffered.
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+        words = [f for f in seq.force_complete("ctx1", 30) if isinstance(f, TTSTextFrame)]
+        self.assertEqual(words, [])
+        self.assertEqual(seq._buffered_words, [])
+
+    async def test_buffered_word_for_another_context_is_left_alone(self):
+        seq = await self._streamed_slot("您好", "。", "谢谢")
+        for i, ch in enumerate(["您", "好", "。"]):
+            seq.process_word(ch, pts=(i + 1) * 10, context_id="ctx1")
+        seq._buffered_words[0].context_id = "ctx2"
+        seq.force_complete("ctx1", 30)
+        self.assertEqual([w.word for w in seq._buffered_words], ["。"])
+
+    async def test_forced_tail_reports_progress_to_the_end(self):
+        seq = _seq()
+        text = "Hello there friend"
+        await seq.register_spoken(_spoken_frame(text, raw_text=text), "ctx1", text, True)
+        seq.process_word("Hello", pts=10, context_id="ctx1")
+
+        frames = seq.force_complete("ctx1", 20)
+        words = [f for f in frames if isinstance(f, TTSTextFrame)]
+        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual([f.text for f in words], ["there friend"])
+        self.assertEqual(progress[-1].accumulated_text, text)
+        self.assertEqual(progress[-1].remaining_text, "")
+
+
 if __name__ == "__main__":
     unittest.main()

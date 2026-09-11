@@ -223,6 +223,16 @@ class WordCompletionTracker:
         self._overflow_word = word
         return True
 
+    def take_remaining_as_spoken(self) -> None:
+        """Move the cursors to the end, for a caller that emits the remainder itself.
+
+        The accumulated and remaining views then agree with the text that went out.
+        """
+        self._user_facing_pos = len(self._user_facing_text)
+        if self._llm_text is not None:
+            self._llm_pos = len(self._llm_text)
+            self._llm_spoken_pos = len(self._llm_text)
+
     def _record_llm_span(self, word: str, llm_pos_before: int, spoken_before: int) -> None:
         """Record which part of ``llm_text`` the word just added stands for.
 
