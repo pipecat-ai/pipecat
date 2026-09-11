@@ -47,6 +47,7 @@ jobs:
             --extra runner \
             --extra sagemaker \
             --extra sarvam \
+            --extra speechmatics \
             --extra tracing \
             --extra websocket
 

@@ -18,22 +18,20 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from speechmatics.agent_stt import AudioEncoding, Model
 
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
-from pipecat.services.speechmatics.stt import (
+pytest.importorskip("speechmatics.agent_stt")
+
+from speechmatics.agent_stt import AudioEncoding, Model, Segment  # noqa: E402
+
+from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame  # noqa: E402
+from pipecat.services.speechmatics.stt import (  # noqa: E402
     SpeechmaticsSTTService,
     TurnDetectionMode,
     _is_auth_rejection,
     _resolve_model,
 )
-from pipecat.transcriptions.language import Language
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-
-try:
-    from speechmatics.agent_stt import Segment
-except ImportError:  # pragma: no cover - the service import above would already fail
-    Segment = None
+from pipecat.transcriptions.language import Language  # noqa: E402
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
