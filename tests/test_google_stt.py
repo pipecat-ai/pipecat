@@ -45,10 +45,10 @@ def result(*, transcript: str, is_final: bool):
     )
 
 
-@pytest.mark.asyncio
-async def test_google_final_result_emits_finalized_transcription_frame():
+def stt_service(*, elapsed_ms: int = 0):
+    """A service whose stream started ``elapsed_ms`` ago."""
     service = object.__new__(GoogleSTTService)
-    service._stream_start_time = int(time.time() * 1000)
+    service._stream_start_time = int(time.time() * 1000) - elapsed_ms
     service._user_id = "user"
     service._last_transcript_was_final = False
     service._get_language_codes = lambda: ["en-US"]
@@ -66,6 +66,12 @@ async def test_google_final_result_emits_finalized_transcription_frame():
 
     service.push_frame = push_frame
     service._handle_transcription = handle_transcription
+    return service, frames, transcriptions
+
+
+@pytest.mark.asyncio
+async def test_google_final_result_emits_finalized_transcription_frame():
+    service, frames, transcriptions = stt_service()
 
     responses = AsyncResponses(
         [
@@ -80,6 +86,28 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     assert isinstance(frames[1], TranscriptionFrame)
     assert frames[1].finalized is True
     assert transcriptions == [("hello", True, "en-US")]
+
+
+@pytest.mark.asyncio
+async def test_google_results_past_the_streaming_limit_reach_the_pipeline():
+    """Everything Google delivers is pushed, including past the streaming limit.
+
+    The final is produced by the request stream half-closing at the limit, so it
+    arrives after the limit and behind any interim still in flight.
+    """
+    service, frames, _ = stt_service(elapsed_ms=GoogleSTTService.STREAMING_LIMIT + 1)
+
+    responses = AsyncResponses(
+        [
+            SimpleNamespace(results=[result(transcript="hel", is_final=False)]),
+            SimpleNamespace(results=[result(transcript="hello there", is_final=True)]),
+        ]
+    )
+
+    await service._process_responses(responses)
+
+    assert [f.text for f in frames] == ["hel", "hello there"]
+    assert frames[1].finalized is True
 
 
 def test_normalize_speech_adaptation_accepts_native_message():
