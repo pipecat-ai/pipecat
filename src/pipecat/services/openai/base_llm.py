@@ -44,6 +44,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.alnum_utils import has_alnum
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -448,10 +449,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         tool_call_id = ""
 
         # Reset pending node-transition calls when processing a new context.
+        if self._pending_node_transition_function_calls:
+            logger.warning(
+                f"{self}: discarding "
+                f"{len(self._pending_node_transition_function_calls)} deferred "
+                "node-transition calls never released by TTS"
+            )
         self._pending_node_transition_function_calls = []
 
-        # Flag to store whether some text was generated in the current generation
-        text_generated_signal = False
+        # Content generated in the current completion, accumulated so the
+        # deferral decision below can ask whether any of it is speakable.
+        generated_content = ""
 
         await self.start_ttfb_metrics()
 
@@ -550,7 +558,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             # Keep iterating through the response to collect all the argument fragments
                             arguments += tool_call.function.arguments
                     elif chunk.choices[0].delta.content:
-                        text_generated_signal = True
+                        generated_content += chunk.choices[0].delta.content
                         await self._push_llm_text(chunk.choices[0].delta.content)
 
                     # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
@@ -603,9 +611,18 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 direction=FrameDirection.DOWNSTREAM,
             )
 
+            # Unspeakable content (whitespace, punctuation, markup) never
+            # produces the BotStoppedSpeakingFrame that releases a deferred
+            # transition, so it must not count as generated text.
+            text_generated = has_alnum(generated_content)
+            if generated_content and not text_generated:
+                logger.info(
+                    f"{self}: no speakable content ({generated_content[:120]!r}); "
+                    "running function calls without waiting for TTS"
+                )
             await self._run_or_defer_function_calls(
                 function_calls,
-                text_generated=text_generated_signal,
+                text_generated=text_generated,
             )
 
     async def _run_or_defer_function_calls(

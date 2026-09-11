@@ -46,6 +46,7 @@ from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.alnum_utils import has_alnum
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
@@ -676,9 +677,12 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         grounding_metadata = None
         accumulated_text = ""
 
-        text_generated_signal = False
-
         # Reset pending function calls when processing a new context
+        if self._pending_function_calls:
+            logger.warning(
+                f"{self}: discarding {len(self._pending_function_calls)} "
+                "deferred calls never released by TTS"
+            )
         self._pending_function_calls = []
 
         try:
@@ -735,7 +739,6 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                     await self.push_frame(LLMThoughtTextFrame(part.text))
                                     await self.push_frame(LLMThoughtEndFrame())
                                 else:
-                                    text_generated_signal = True
                                     accumulated_text += part.text
                                     await self._push_llm_text(part.text)
                             elif part.function_call:
@@ -866,9 +869,17 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                     direction=FrameDirection.DOWNSTREAM,
                 )
 
-                # If text was generated, defer function calls until after TTS plays
-                # Otherwise, execute them immediately
-                if text_generated_signal:
+                # Defer function calls until after TTS only for speakable text.
+                # Unspeakable content (whitespace, punctuation, markup) never
+                # produces the BotStoppedSpeakingFrame that releases the
+                # deferral, so it must not count as generated text.
+                text_generated = has_alnum(accumulated_text)
+                if accumulated_text and not text_generated:
+                    logger.info(
+                        f"{self}: no speakable content ({accumulated_text[:120]!r}); "
+                        "running function calls without waiting for TTS"
+                    )
+                if text_generated:
                     self._pending_function_calls = function_calls
                     logger.debug(
                         f"{self}: Deferring {len(function_calls)} function calls until after TTS"
