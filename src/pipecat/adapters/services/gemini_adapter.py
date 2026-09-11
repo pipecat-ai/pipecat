@@ -516,6 +516,23 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
                     parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
+                elif c["type"] == "file_base64":
+                    f_data = c["file"]
+                    mime_type = f_data["mime_type"]
+                    file_data_url = f_data["file_data"]
+                    parts.append(
+                        Part(
+                            inline_data=Blob(
+                                mime_type=mime_type,
+                                data=base64.b64decode(file_data_url.split(",")[1]),
+                            )
+                        )
+                    )
+                elif c["type"] == "file_url":
+                    f_data = c["file"]
+                    parts.append(
+                        Part.from_uri(file_uri=f_data["url"], mime_type=f_data["mime_type"])
+                    )
                 elif c["type"] == "file_data":
                     file_data = c["file_data"]
                     parts.append(

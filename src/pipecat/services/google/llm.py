@@ -53,6 +53,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 try:
     import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
+    from google.genai.errors import ClientError
     from google.genai.types import (
         FinishReason,
         GenerateContentConfig,
@@ -837,8 +838,22 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             await self.push_error(error_msg="LLM completion timeout", exception=e)
         except LLMContextConversionError as e:
             await self.push_error(error_msg=str(e), exception=e)
+            # A conversion failure (e.g. corrupt base64 data) can't reach the
+            # API at all, but is just as much evidence of an invalid file as a
+            # rejection from Gemini itself, so it gets the same best-effort
+            # cleanup.
+            context.remove_invalid_file_message()
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Gemini doesn't say which field was invalid, but ClientError.status
+            # carries the gRPC-style code, and INVALID_ARGUMENT (unsupported MIME
+            # type, corrupt bytes, etc.) is grounds to remove a pending file
+            # message on a best-effort basis. The rest of the 4xx range —
+            # UNAUTHENTICATED, PERMISSION_DENIED, NOT_FOUND, RESOURCE_EXHAUSTED —
+            # says nothing about whether our request (or its file) was bad, and
+            # removing the file there would discard it for no benefit.
+            if isinstance(e, ClientError) and e.status == "INVALID_ARGUMENT":
+                context.remove_invalid_file_message()
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(
