@@ -3820,14 +3820,14 @@
       "location": "pipecat/services/soniox/stt.py"
     },
     {
-      "subject": "SpeechmaticsSTTService.UpdateParams",
+      "subject": "SpeechmaticsSTTService.InputParams.operating_point",
       "module": "pipecat.services.speechmatics.stt",
-      "kind": "class",
-      "deprecated_in": "0.0.104",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "SpeechmaticsSTTService.Settings",
-      "message": "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `SpeechmaticsSTTService.Settings` instead.",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
@@ -3842,14 +3842,14 @@
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
-      "subject": "SpeechmaticsSTTService.update_params",
+      "subject": "SpeechmaticsSTTSettings.operating_point",
       "module": "pipecat.services.speechmatics.stt",
-      "kind": "method",
-      "deprecated_in": "0.0.104",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "STTUpdateSettingsFrame",
-      "message": "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `STTUpdateSettingsFrame` instead.",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {

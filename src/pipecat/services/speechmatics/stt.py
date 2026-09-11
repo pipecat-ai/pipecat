@@ -8,19 +8,17 @@
 
 import asyncio
 import os
+import warnings
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, cast
 
-from dotenv import load_dotenv
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -28,61 +26,159 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    StartFrame,
     STTMetadataFrame,
-    TextFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.network import exponential_backoff_time
+from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
-    from speechmatics.voice import (
+    from speechmatics.agent_stt import (
+        DEFAULT_CHUNK_SIZE,
+        DEFAULT_MODEL,
         AdditionalVocabEntry,
-        AgentClientMessageType,
-        AgentServerMessageType,
+        AgentSttAsyncClient,
         AudioEncoding,
-        EndOfUtteranceMode,
-        OperatingPoint,
-        SpeakerFocusConfig,
-        SpeakerFocusMode,
+        AudioFormat,
+        AuthenticationError,
+        ConfigurationError,
+        Model,
+        Segment,
+        SessionError,
+        SpeakerDiarizationConfig,
         SpeakerIdentifier,
-        SpeechSegmentConfig,
-        VoiceAgentClient,
-        VoiceAgentConfig,
-        VoiceAgentConfigPreset,
+        TranscriptionConfig,
+        TranscriptionError,
+        TurnConfig,
     )
+    from speechmatics.agent_stt import ClientMessageType as AgentClientMessageType
+    from speechmatics.agent_stt import ServerMessageType as AgentServerMessageType
+    from speechmatics.agent_stt import TurnDetectionMode as AgentTurnDetectionMode
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
-load_dotenv()
+# Connect-time failures that will never clear on retry (auth, bad config, rejected session).
+# These are reported as permanent, leaving the service unusable, and never trigger a
+# reconnect; every other connect exception is treated as a transient drop and retried with
+# backoff.
+_PERMANENT_CONNECT_ERRORS = (
+    AuthenticationError,
+    ConfigurationError,
+    TranscriptionError,
+    SessionError,
+)
+
+# HTTP statuses a WebSocket handshake returns when the credentials are rejected.
+_AUTH_REJECTION_STATUSES = frozenset({401, 403})
+
+# Server ``Error`` types that reject the request or the account, so a fresh session with
+# the same configuration would fail the same way. Every other type (idle/session timeouts,
+# buffer, data, and internal errors) ends the session, but a new one can succeed.
+_PERMANENT_SERVER_ERROR_TYPES = frozenset(
+    {
+        "invalid_message",
+        "invalid_model",
+        "invalid_config",
+        "invalid_audio_type",
+        "invalid_output_format",
+        "not_authorised",
+        "insufficient_funds",
+        "not_allowed",
+        "protocol_error",
+        "quota_exceeded",
+    }
+)
+
+
+def _is_auth_rejection(exc: BaseException) -> bool:
+    """Whether ``exc`` is a WebSocket handshake rejected for authentication (HTTP 401/403).
+
+    A rejected credential surfaces as a ``ConnectionError`` carrying the underlying
+    ``websockets`` handshake error in its exception chain. The status is read from that error
+    (``InvalidStatus.response.status_code``, or the legacy ``InvalidStatusCode.status_code``),
+    with the status in the message text as a fallback.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is None:
+            status = getattr(current, "status_code", None)
+        if status in _AUTH_REJECTION_STATUSES:
+            return True
+        current = current.__cause__ or current.__context__
+    text = str(exc)
+    return any(f"HTTP {status}" in text for status in _AUTH_REJECTION_STATUSES)
+
+
+def _resolve_model(
+    model: Model | str | None | NotGiven, operating_point: Model | str | None | NotGiven
+) -> str:
+    """Resolve the transcription model from `model` and the deprecated `operating_point`.
+
+    Both accept a `Model` enum member or its wire string; an unset (`NOT_GIVEN`) value
+    counts as `None`. If both are given they must match; if only one is given it wins;
+    if neither, the default model is used. (`Model` is a `str` enum, so string/enum
+    values compare equal.)
+    """
+    model = model if is_given(model) else None
+    operating_point = operating_point if is_given(operating_point) else None
+    if model is not None and operating_point is not None and model != operating_point:
+        raise ValueError(
+            f"`model` ({model!r}) and `operating_point` ({operating_point!r}) differ. "
+            "Pass only `model` (`operating_point` is deprecated)."
+        )
+    if model is None and operating_point is not None:
+        warnings.warn(
+            "`operating_point` is deprecated since 1.10.0 and will be removed in 2.0.0. "
+            "Use `model` instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+    resolved = model or operating_point or DEFAULT_MODEL
+    return resolved.value if isinstance(resolved, Model) else resolved
 
 
 class TurnDetectionMode(StrEnum):
-    """Endpoint and turn detection handling mode.
+    """How turn boundaries (end of speech) are detected.
 
-    How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
-    then use `TurnDetectionMode.EXTERNAL` (default).
+    `VAD`: the STT service runs its own VAD and closes turns itself.
 
-    To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
-    voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
-    endpointing.
+    `EXTERNAL`: turn boundaries are controlled by the caller — the service does not
+    endpoint on its own, and the caller drives turns by calling `finalize()` (for
+    example from Pipecat's own VAD).
+
+    The values mirror the Agent STT SDK's own turn-detection modes so the two never
+    drift.
     """
 
-    FIXED = "fixed"
-    EXTERNAL = "external"
-    ADAPTIVE = "adaptive"
-    SMART_TURN = "smart_turn"
+    VAD = AgentTurnDetectionMode.VAD.value
+    EXTERNAL = AgentTurnDetectionMode.EXTERNAL.value
+
+
+def _handle_turn_detection_mode(mode: TurnDetectionMode) -> AgentTurnDetectionMode:
+    """Map the service's turn detection mode onto the SDK's.
+
+    The values match, so this is a direct lookup — but it's still required:
+    ``TranscriptionConfig.to_dict()`` compares by identity and lifts the mode into the
+    top-level ``turn_config``, so the config must carry the SDK's own enum member.
+    """
+    return AgentTurnDetectionMode(mode.value)
 
 
 @dataclass
@@ -94,75 +190,65 @@ class SpeechmaticsSTTSettings(STTSettings):
     Parameters:
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
-        speaker_active_format: Formatter for active speaker ID.
-        speaker_passive_format: Formatter for passive speaker ID.
-        focus_speakers: List of speaker IDs to focus on.
-        ignore_speakers: List of speaker IDs to ignore.
-        focus_mode: Speaker focus mode for diarization.
+        speaker_active_format: Formatter for speaker ID.
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
-        operating_point: Operating point for accuracy vs. latency.
-        max_delay: Maximum delay in seconds for transcription.
-        end_of_utterance_silence_trigger: Maximum delay for end of utterance trigger.
-        end_of_utterance_max_delay: Maximum delay for end of utterance.
+        model: Resolved transcription model (operating point). See ``_resolve_model``.
+        operating_point: Alias for ``model``.
+
+            .. deprecated:: 1.10.0
+                Use ``model`` instead. Will be removed in 2.0.0.
+
+        enable_partials: Include partial segment fragments.
         punctuation_overrides: Punctuation overrides.
-        include_partials: Include partial segment fragments.
-        include_results: Include word-level results in transcript messages.
-        split_sentences: Emit finalized sentences mid-turn.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
         prefer_current_speaker: Prefer current speaker ID.
-        extra_params: Extra parameters for the STT engine.
     """
 
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_detection_mode: TurnDetectionMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_active_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_passive_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    focus_speakers: list[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    ignore_speakers: list[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    focus_mode: SpeakerFocusMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     known_speakers: list[SpeakerIdentifier] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_vocab: list[AdditionalVocabEntry] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    operating_point: OperatingPoint | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_delay: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_silence_trigger: float | None | NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
-    end_of_utterance_max_delay: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuation_overrides: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    include_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_results: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    split_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prefer_current_speaker: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    extra_params: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    #: Fields that can be updated on a live connection via the Speechmatics
-    #: diarization-config API — no reconnect needed.
-    HOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "focus_speakers",
-            "ignore_speakers",
-            "focus_mode",
-        }
-    )
 
     #: Fields that are purely local (formatting templates) — no reconnect
     #: and no API call needed.
-    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "speaker_active_format",
-            "speaker_passive_format",
-        }
-    )
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_active_format"})
+
+
+def _build_diarization_config(s: SpeechmaticsSTTSettings) -> SpeakerDiarizationConfig | None:
+    """Build the wire ``speaker_diarization_config`` from the diarization settings.
+
+    Returns ``None`` when diarization is off or no diarization knob is set, so an empty
+    config is never sent. Only the fields that were actually set are included.
+    """
+    if not s.enable_diarization:
+        return None
+
+    fields: dict[str, Any] = {}
+    if s.max_speakers is not None:
+        fields["max_speakers"] = s.max_speakers
+    if s.speaker_sensitivity is not None:
+        fields["speaker_sensitivity"] = s.speaker_sensitivity
+    if s.prefer_current_speaker is not None:
+        fields["prefer_current_speaker"] = s.prefer_current_speaker
+    if s.known_speakers:
+        fields["speakers"] = s.known_speakers
+
+    return SpeakerDiarizationConfig(**fields) if fields else None
 
 
 class SpeechmaticsSTTService(STTService):
@@ -189,11 +275,13 @@ class SpeechmaticsSTTService(STTService):
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
     AudioEncoding = AudioEncoding
-    OperatingPoint = OperatingPoint
-    SpeakerFocusMode = SpeakerFocusMode
-    SpeakerFocusConfig = SpeakerFocusConfig
+    Model = Model
     SpeakerIdentifier = SpeakerIdentifier
     AdditionalVocabEntry = AdditionalVocabEntry
+
+    # Attempts a single reconnect makes before giving up. Audio is buffered for the
+    # whole sequence, so the bound also caps how much is held and replayed at once.
+    RECONNECT_MAX_ATTEMPTS: ClassVar[int] = 3
 
     class InputParams(BaseModel):
         """Configuration parameters for Speechmatics STT service.
@@ -203,40 +291,17 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.FIXED`,
-                `TurnDetectionMode.EXTERNAL`, `TurnDetectionMode.ADAPTIVE` and
-                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.EXTERNAL`.
+            turn_detection_mode: How turns are closed. `TurnDetectionMode.VAD` lets the
+                STT service run its own VAD and close turns itself; `TurnDetectionMode.EXTERNAL`
+                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD).
+                Defaults to `TurnDetectionMode.VAD`.
 
-            speaker_active_format: Formatter for active speaker ID. This formatter is used to format
+            speaker_active_format: Formatter for the speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
                 language models further down the pipeline. The attributes `text` and `speaker_id` are
                 available. The system instructions for the language model may need to include any
                 necessary instructions to handle the formatting.
                 Example: `@{speaker_id}: {text}`. Defaults to None.
-
-            speaker_passive_format: Formatter for passive speaker ID. As with the
-                speaker_active_format, the attributes `text` and `speaker_id` are available.
-                Example: `@{speaker_id} [background]: {text}`. Defaults to None.
-
-            focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
-                emitted as finalized frames and other speakers are considered passive. Words from
-                other speakers are still processed, but only emitted when a focussed speaker has
-                also said new words. A list of labels (e.g. `S1`, `S2`) or identifiers of known
-                speakers (e.g. `speaker_1`, `speaker_2`) can be used.
-                Defaults to [].
-
-            ignore_speakers: List of speaker IDs to ignore. When enabled, these speakers are
-                excluded from the transcription and their words are not processed. Their speech
-                will not trigger any VAD or end of utterance detection. By default, any speaker
-                with a label starting and ending with double underscores will be excluded (e.g.
-                `__ASSISTANT__`).
-                Defaults to [].
-
-            focus_mode: Speaker focus mode for diarization. When set to `SpeakerFocusMode.RETAIN`,
-                the STT engine will retain words spoken by other speakers (not listed in `ignore_speakers`)
-                and process them as passive speaker frames. When set to `SpeakerFocusMode.IGNORE`,
-                the STT engine will ignore words spoken by other speakers and they will not be processed.
-                Defaults to `SpeakerFocusMode.RETAIN`.
 
             known_speakers: List of known speaker labels and identifiers. If you supply a list of
                 labels and identifiers for speakers, then the STT engine will use them to attribute
@@ -254,33 +319,24 @@ class SpeechmaticsSTTService(STTService):
 
             audio_encoding: Audio encoding format. Defaults to AudioEncoding.PCM_S16LE.
 
-            operating_point: Operating point for transcription accuracy vs. latency tradeoff. It is
-                recommended to use OperatingPoint.ENHANCED for most use cases. Default to enhanced.
+            model: The transcription model (operating point) to use, e.g. `"linden-1"`.
+                Defaults to `Model.LINDEN_1`, the SDK's default model. Preferred over
+                `operating_point`.
 
-            max_delay: Maximum delay in seconds for transcription. This forces the STT engine to
-                speed up the processing of transcribed words and reduces the interval between partial
-                and final results. Lower values can have an impact on accuracy.
+            operating_point: Alias for `model`. If both are given they must name the same
+                value, otherwise a `ValueError` is raised. Optional.
 
-            end_of_utterance_silence_trigger: Maximum delay in seconds for end of utterance trigger.
-                The delay is used to wait for any further transcribed words before emitting the final
-                word frames. The value must be lower than max_delay.
+                .. deprecated:: 1.10.0
+                    Use ``model`` instead. Will be removed in 2.0.0.
 
-            end_of_utterance_max_delay: Maximum delay in seconds for end of utterance delay.
-                The delay is used to wait for any further transcribed words before emitting the final
-                word frames. The value must be greater than end_of_utterance_silence_trigger.
-
-            punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
-                in the STT engine. This is useful for languages that use different punctuation
-                than English. See documentation for more information.
-
-            include_partials: Include partial segment fragments (words) in the output of
+            enable_partials: Include partial segment fragments (words) in the output of
                 AddPartialSegment messages. Partial fragments from the STT will always be used for
                 speaker activity detection. This setting is used only for the formatted text output
                 of individual segments.
 
-            split_sentences: Emit finalized sentences mid-turn. When enabled, as soon as a sentence
-                is finalized, it will be emitted as a final segment. This is useful for applications
-                that need to process sentences as they are finalized. Defaults to False.
+            punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
+                in the STT engine. This is useful for languages that use different punctuation
+                than English. See documentation for more information.
 
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
@@ -296,10 +352,6 @@ class SpeechmaticsSTTService(STTService):
             prefer_current_speaker: Prefer current speaker ID. When set to true, groups of words close
                 together are given extra weight to be identified as the same speaker.
 
-            extra_params: Extra parameters to pass to the STT engine. This is a dictionary of
-                additional parameters that can be used to configure the STT engine.
-                Default to None.
-
         """
 
         # Service configuration
@@ -307,16 +359,12 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.VAD
 
         # Output formatting
         speaker_active_format: str | None = None
-        speaker_passive_format: str | None = None
 
         # Speakers
-        focus_speakers: list[str] = []
-        ignore_speakers: list[str] = []
-        focus_mode: SpeakerFocusMode = SpeakerFocusMode.RETAIN
         known_speakers: list[SpeakerIdentifier] = []
 
         # Custom dictionary
@@ -330,59 +378,16 @@ class SpeechmaticsSTTService(STTService):
         # -------------------
 
         # Features
-        operating_point: OperatingPoint | None = None
-        max_delay: float | None = None
-        end_of_utterance_silence_trigger: float | None = None
-        end_of_utterance_max_delay: float | None = None
+        model: Model | str | None = None
+        operating_point: Model | str | None = None
+        enable_partials: bool | None = None
         punctuation_overrides: dict | None = None
-        include_partials: bool | None = None
-        split_sentences: bool | None = None
 
         # Diarization
         enable_diarization: bool | None = None
         speaker_sensitivity: float | None = None
         max_speakers: int | None = None
         prefer_current_speaker: bool | None = None
-
-        # Extra parameters
-        extra_params: dict | None = None
-
-    @deprecated(
-        "`SpeechmaticsSTTService.UpdateParams` is deprecated since 0.0.104 and will be removed in "
-        "2.0.0. Use `SpeechmaticsSTTService.Settings` instead."
-    )
-    class UpdateParams(BaseModel):
-        """Update parameters for Speechmatics STT service.
-
-        .. deprecated:: 0.0.104
-            Use ``SpeechmaticsSTTService.Settings`` with :class:`STTUpdateSettingsFrame` instead.
-            Will be removed in 2.0.0.
-
-        Parameters:
-            focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
-                emitted as finalized frames and other speakers are considered passive. Words from
-                other speakers are still processed, but only emitted when a focussed speaker has
-                also said new words. A list of labels (e.g. `S1`, `S2`) or identifiers of known
-                speakers (e.g. `speaker_1`, `speaker_2`) can be used.
-                Defaults to [].
-
-            ignore_speakers: List of speaker IDs to ignore. When enabled, these speakers are
-                excluded from the transcription and their words are not processed. Their speech
-                will not trigger any VAD or end of utterance detection. By default, any speaker
-                with a label starting and ending with double underscores will be excluded (e.g.
-                `__ASSISTANT__`).
-                Defaults to [].
-
-            focus_mode: Speaker focus mode for diarization. When set to `SpeakerFocusMode.RETAIN`,
-                the STT engine will retain words spoken by other speakers (not listed in `ignore_speakers`)
-                and process them as passive speaker frames. When set to `SpeakerFocusMode.IGNORE`,
-                the STT engine will ignore words spoken by other speakers and they will not be processed.
-                Defaults to `SpeakerFocusMode.RETAIN`.
-        """
-
-        focus_speakers: list[str] = []
-        ignore_speakers: list[str] = []
-        focus_mode: SpeakerFocusMode = SpeakerFocusMode.RETAIN
 
     def __init__(
         self,
@@ -403,7 +408,7 @@ class SpeechmaticsSTTService(STTService):
             api_key: Speechmatics API key for authentication. Uses environment variable
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
-                or defaults to `wss://eu2.rt.speechmatics.com/v2`.
+                or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
             sample_rate: Optional audio sample rate in Hz.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
@@ -426,7 +431,7 @@ class SpeechmaticsSTTService(STTService):
         # Service parameters
         api_key = api_key or os.getenv("SPEECHMATICS_API_KEY")
         base_url = (
-            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2"
+            base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2/agent"
         )
 
         # Check we have required attributes
@@ -442,34 +447,24 @@ class SpeechmaticsSTTService(STTService):
 
         # Deprecation check (mutates params in-place for legacy kwargs migration)
         _params = params or SpeechmaticsSTTService.InputParams()
-        self._check_deprecated_args(kwargs, _params)
+        _legacy_kwargs = self._check_deprecated_args(kwargs, _params)
 
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model=None,  # Will be resolved from operating_point after config is built
+            model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
-            turn_detection_mode=TurnDetectionMode.EXTERNAL,
+            turn_detection_mode=TurnDetectionMode.VAD,
             speaker_active_format="{text}",
-            speaker_passive_format="{text}",
-            focus_speakers=[],
-            ignore_speakers=[],
-            focus_mode=SpeakerFocusMode.RETAIN,
             known_speakers=[],
             additional_vocab=[],
             operating_point=None,
-            max_delay=None,
-            end_of_utterance_silence_trigger=None,
-            end_of_utterance_max_delay=None,
+            enable_partials=None,
             punctuation_overrides=None,
-            include_partials=None,
-            include_results=None,
-            split_sentences=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
             prefer_current_speaker=None,
-            extra_params=None,
         )
 
         # --- 2. No direct init arg overrides ---
@@ -477,50 +472,28 @@ class SpeechmaticsSTTService(STTService):
         # --- 3. Deprecated params overrides ---
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
-            if not settings:
-                default_settings.language = _params.language
-                default_settings.domain = _params.domain
-                default_settings.turn_detection_mode = _params.turn_detection_mode
-                # Output formatting defaults
-                speaker_active_format = _params.speaker_active_format
-                if speaker_active_format is None:
-                    speaker_active_format = (
-                        "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
-                    )
-                default_settings.speaker_active_format = speaker_active_format
-                default_settings.speaker_passive_format = (
-                    _params.speaker_passive_format or speaker_active_format
-                )
-                default_settings.focus_speakers = _params.focus_speakers
-                default_settings.ignore_speakers = _params.ignore_speakers
-                default_settings.focus_mode = _params.focus_mode
-                default_settings.known_speakers = _params.known_speakers
-                default_settings.additional_vocab = _params.additional_vocab
-                encoding = _params.audio_encoding
-                default_settings.operating_point = _params.operating_point
-                default_settings.max_delay = _params.max_delay
-                default_settings.end_of_utterance_silence_trigger = (
-                    _params.end_of_utterance_silence_trigger
-                )
-                default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
-                default_settings.punctuation_overrides = _params.punctuation_overrides
-                default_settings.include_partials = _params.include_partials
-                default_settings.split_sentences = _params.split_sentences
-                default_settings.enable_diarization = _params.enable_diarization
-                default_settings.speaker_sensitivity = _params.speaker_sensitivity
-                default_settings.max_speakers = _params.max_speakers
-                default_settings.prefer_current_speaker = _params.prefer_current_speaker
-                default_settings.extra_params = _params.extra_params
+        # Apply the migrated params whenever the legacy path was used — either an
+        # explicit `params=` or deprecated kwargs migrated into `_params`.
+        if (params is not None or _legacy_kwargs) and not settings:
+            legacy_encoding = self._apply_legacy_params(default_settings, _params)
+            if legacy_encoding is not None:
+                encoding = legacy_encoding
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # Build SDK config from settings, set model name before calling super
-        self._client: VoiceAgentClient | None = None
+        # Reconcile the preferred `model` with the deprecated `operating_point` alias
+        # (model preferred, both-differ raises, default = DEFAULT_MODEL) before building
+        # the SDK config from settings.
+        default_settings.model = _resolve_model(
+            default_settings.model, default_settings.operating_point
+        )
+
+        # Build SDK config from settings before calling super.
+        self._client: AgentSttAsyncClient | None = None
         self._audio_encoding = encoding
-        self._config: VoiceAgentConfig = self._build_config(default_settings)
-        default_settings.model = self._config.operating_point.value
+        self._config: TranscriptionConfig = self._build_config(default_settings)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -529,59 +502,100 @@ class SpeechmaticsSTTService(STTService):
             **kwargs,
         )
 
-        # Outbound frame queue
-        self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()
-
-        # Framework options
-        self._enable_vad: bool = self._config.end_of_utterance_mode not in [
-            EndOfUtteranceMode.FIXED,
-            EndOfUtteranceMode.EXTERNAL,
-        ]
-
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
 
-        # Speaking states
-        self._is_speaking: bool = False
-        self._bot_speaking: bool = False
+        # Stops reconnect attempts once the session is torn down (stop/cancel/cleanup)
+        # or rejected outright.
+        self._closed: bool = False
 
-        # Event handlers
-        if default_settings.enable_diarization:
-            self._register_event_handler("on_speakers_result")
+        # A reconnect running in the background (see _schedule_reconnect).
+        self._reconnect_task: asyncio.Task | None = None
+
+        # Registered unconditionally: diarization can be turned on at runtime, and a
+        # handler added while it was off would otherwise be dropped.
+        self._register_event_handler("on_speakers_result")
+
+    @staticmethod
+    def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding | None:
+        """Fold the deprecated ``InputParams`` into canonical ``Settings``.
+
+        Every field the two shapes share by name is copied straight across. Two are
+        special-cased and excluded from the generic copy: ``speaker_active_format`` has a
+        diarization-aware default, and ``audio_encoding`` has no ``Settings`` field (it
+        reaches the client via the separate ``encoding`` argument).
+
+        Args:
+            settings: The canonical settings to populate in place.
+            params: The deprecated input params to migrate from.
+
+        Returns:
+            The audio encoding the caller set on ``params``, or None if they left it
+            unset — the field carries a default that would otherwise silently override
+            the ``encoding`` argument.
+        """
+        shared = type(settings).__dataclass_fields__.keys() & type(params).model_fields.keys()
+        for name in shared - {"speaker_active_format"}:
+            setattr(settings, name, getattr(params, name))
+
+        # Output formatting default — prefix the speaker when diarizing.
+        fmt = params.speaker_active_format
+        if fmt is None:
+            fmt = "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
+        settings.speaker_active_format = fmt
+
+        return params.audio_encoding if "audio_encoding" in params.model_fields_set else None
+
+    @property
+    def _service_closes_turns(self) -> bool:
+        """True when Speechmatics detects turns itself and emits Start/EndOfTurn.
+
+        Every turn-detection mode except ``EXTERNAL`` (where the caller drives turns via
+        ``finalize()``) has the service close turns. This gates the turn-scoped behavior
+        — turn frames, turn-event subscriptions, and processing metrics — off in EXTERNAL
+        mode, where Pipecat owns endpointing.
+        """
+        mode = self._settings.turn_detection_mode
+        return is_given(mode) and mode != TurnDetectionMode.EXTERNAL
 
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when Speechmatics endpoints server-side.
 
-        Every mode other than the default ``EXTERNAL`` (which uses Pipecat's own
-        endpointing) has Speechmatics detect turns and propose the boundaries, so
-        the user aggregator resolves those. Applied unless the user passed their
-        own ``user_turn_strategies``.
+        Every mode other than ``EXTERNAL`` (which uses Pipecat's own endpointing) has
+        Speechmatics detect turns and propose the boundaries, so the user aggregator
+        resolves those. Applied unless the user passed their own
+        ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        mode = self._settings.turn_detection_mode
-        if is_given(mode) and mode != TurnDetectionMode.EXTERNAL:
+        if self._service_closes_turns:
             frame.user_turn_strategies = ExternalUserTurnStrategies(
                 enable_interruptions=self._should_interrupt,
             )
         return frame
 
+    @property
+    def session_id(self) -> str | None:
+        """The Agent STT session id, set once ``RecognitionStarted`` arrives (else None)."""
+        info = self._client.session_info if self._client else None
+        return getattr(info, "session_id", None) if info is not None else None
+
     # ============================================================================
     # LIFE-CYCLE / SESSION MANAGEMENT
     # ============================================================================
 
+    async def start(self, frame: StartFrame):
+        """Called when the new session starts."""
+        await super().start(frame)
+        self._closed = False
+        await self._connect()
+
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
-        """Apply settings delta, reconnecting only when necessary.
+        """Apply a settings delta, reconnecting only when necessary.
 
-        Fields are classified into three categories (see
-        ``SpeechmaticsSTTService.Settings``):
-
-        * **HOT_FIELDS** – diarization speaker settings that can be pushed
-          to a live Speechmatics connection without reconnecting.
-        * **LOCAL_FIELDS** – formatting templates evaluated locally; no
-          reconnect or API call needed.
-        * Everything else – baked into ``VoiceAgentConfig`` at connection
-          time and therefore require a full disconnect / reconnect.
+        LOCAL_FIELDS (formatting templates) take effect immediately with no reconnect.
+        Every other field is baked into the ``TranscriptionConfig`` at connect time, so
+        changing one requires a full disconnect / reconnect.
 
         Args:
             delta: A settings delta.
@@ -594,129 +608,214 @@ class SpeechmaticsSTTService(STTService):
         if not changed:
             return changed
 
-        no_reconnect = self.Settings.HOT_FIELDS | self.Settings.LOCAL_FIELDS
-        needs_reconnect = bool(changed.keys() - no_reconnect)
-
-        if needs_reconnect:
-            logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
-            # Connection-level fields changed — rebuild the SDK config
-            # from the now-updated self._settings, then reconnect.
-            self._config = self._build_config(self._settings)
-            await self._disconnect()
-            await self._connect()
-        elif changed.keys() & self.Settings.HOT_FIELDS:
-            logger.debug(f"{self} applying hot settings update: {changed.keys()}")
-            if self._config.enable_diarization:
-                # Only hot-updatable fields changed — push to the live session.
-                self._config.speaker_config.focus_speakers = assert_given(
-                    self._settings.focus_speakers
-                )
-                self._config.speaker_config.ignore_speakers = assert_given(
-                    self._settings.ignore_speakers
-                )
-                self._config.speaker_config.focus_mode = assert_given(self._settings.focus_mode)
-                if self._client:
-                    self._client.update_diarization_config(self._config.speaker_config)
-            else:
-                logger.debug(
-                    f"{self} hot settings updated but diarization not enabled: {changed.keys()}. ignoring."
-                )
-                # Diarization not enabled — the new settings will take effect
-                # if/when diarization is enabled, which does require a reconnect.
-        elif changed.keys() & self.Settings.LOCAL_FIELDS:
-            logger.debug(
-                f"{self} local settings update, no special action required: {changed.keys()}"
+        # A runtime change to `model` or the deprecated `operating_point` alias must be
+        # re-reconciled into `model` (the only field `_build_config` reads); resolve from
+        # just the fields that actually changed so a new `operating_point` wins on its own
+        # instead of clashing with the already-resolved `model` (which would raise).
+        if "model" in changed or "operating_point" in changed:
+            self._settings.model = _resolve_model(
+                self._settings.model if "model" in changed else NOT_GIVEN,
+                self._settings.operating_point if "operating_point" in changed else NOT_GIVEN,
             )
-            # Only local fields changed — no need to push to the STT engine,
-            # the new settings will take effect immediately.
+
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
+            logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
+            # Connection-level fields changed — rebuild the config, then reconnect. The
+            # new settings may be what a rejected session needed (a supported language,
+            # say), so a closed service gets another chance, matching the usability the
+            # base class just restored.
+            self._config = self._build_config(self._settings)
+            self._closed = False
+            await self._cancel_reconnect_task()
+            await self._request_reconnect()
+        else:
+            # Only local (formatting) fields changed — effective immediately.
+            logger.debug(f"{self} local settings update, no reconnect: {changed.keys()}")
 
         return changed
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the service and connect.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        await super().setup(setup)
-        await self._connect()
-
-    async def cleanup(self):
-        """Release Speechmatics resources at pipeline teardown."""
-        await super().cleanup()
-        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
         await super().stop(frame)
+        self._closed = True
+        await self._cancel_reconnect_task()
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
         await super().cancel(frame)
+        self._closed = True
+        await self._cancel_reconnect_task()
+        await self._disconnect()
+
+    async def cleanup(self):
+        """Release Speechmatics resources at pipeline teardown."""
+        await super().cleanup()
+        self._closed = True
+        await self._cancel_reconnect_task()
         await self._disconnect()
 
     async def _connect(self) -> None:
-        """Connect to the STT service.
+        """Connect to the STT service, retrying in the background if the attempt fails.
+
+        Runs from ``start()``, ahead of the ``StartFrame`` reaching the rest of the
+        pipeline, so the backoff loop must not hold that up: audio is buffered while the
+        retry runs. A rejected session marks the service closed, and retrying cannot
+        clear that.
+        """
+        if not await self._open_connection() and not self._closed:
+            self._schedule_reconnect()
+
+    async def _open_connection(self, *, report_error: bool = True) -> bool:
+        """Build the client, register handlers, and open the connection.
 
         - Create STT client
         - Register handlers for messages
         - Connect to the client
         - Start message processing task
+
+        Args:
+            report_error: Whether to surface a connect failure via ``push_error``. The
+                reconnect loop passes False so retries only log instead of spamming the
+                pipeline with an error per attempt.
+
+        Returns:
+            True if the connection is live, False if the attempt failed (the caller
+            decides whether to retry).
         """
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
-        # Update the audio sample rate
-        self._config.sample_rate = self.sample_rate
-
-        # STT client
-        self._client = VoiceAgentClient(
+        # Agent STT client. Turn detection is a top-level turn_config (sibling of the
+        # transcription config); audio encoding / sample rate go via AudioFormat.
+        self._client = AgentSttAsyncClient(
             api_key=self._api_key,
             url=self._base_url,
             app=f"pipecat/{pipecat_version()}",
-            config=self._config,
+            transcription_config=self._config,
+            turn_config=TurnConfig(
+                turn_detection_mode=_handle_turn_detection_mode(
+                    assert_given(self._settings.turn_detection_mode)
+                )
+            ),
+            audio_format=AudioFormat(
+                encoding=self._audio_encoding,
+                sample_rate=self.sample_rate,
+                chunk_size=DEFAULT_CHUNK_SIZE,
+            ),
         )
 
-        # Add message queue
+        # Message pump — feeds handler callbacks into the ordered processing queue.
         def add_message(message: dict[str, Any]):
             self._stt_msg_queue.put_nowait(message)
 
-        # Casting to broaden what message types `on` accepts (narrower in the SDK
-        # definition than we need)
+        # Casting to broaden what message types `on` accepts (the SDK annotates it
+        # with the RT message enum, not the Agent STT one it also dispatches).
         on = cast(Callable[[AgentServerMessageType, Callable], Any], self._client.on)
 
-        # Add listeners
+        # Segment + status listeners.
         on(AgentServerMessageType.ADD_PARTIAL_SEGMENT, add_message)
         on(AgentServerMessageType.ADD_SEGMENT, add_message)
+        on(AgentServerMessageType.ERROR, add_message)
+        on(AgentServerMessageType.WARNING, add_message)
 
-        # Add listeners for VAD
-        if self._enable_vad:
+        # Service-side turn events (only emitted when the service closes turns).
+        if self._service_closes_turns:
             on(AgentServerMessageType.START_OF_TURN, add_message)
             on(AgentServerMessageType.END_OF_TURN, add_message)
 
-        # Speaker result listener
-        if self._config.enable_diarization:
+        # Speaker diarization results.
+        if self._settings.enable_diarization:
             on(AgentServerMessageType.SPEAKERS_RESULT, add_message)
 
-        # Other messages for debugging
-        on(AgentServerMessageType.ERROR, add_message)
-        on(AgentServerMessageType.WARNING, add_message)
-        on(AgentServerMessageType.INFO, add_message)
-        on(AgentServerMessageType.END_OF_TURN_PREDICTION, add_message)
-        on(AgentServerMessageType.END_OF_UTTERANCE, add_message)
-
-        # Connect to the client
+        # Connect. Errors reach the pipeline via push_error instead of dying silently, and are
+        # split by recoverability: an unrecoverable rejection (auth / bad config / rejected
+        # session) is permanent and stops the session, while any other failure is a transient
+        # drop the caller retries with backoff.
         try:
             await self._client.connect()
             logger.debug(f"{self} connected")
+        except _PERMANENT_CONNECT_ERRORS as e:
+            self._client = None
+            await self._fail_permanently(
+                error_msg=f"Speechmatics STT rejected the session: {e}", exception=e
+            )
+            return False
         except Exception as e:
             self._client = None
-            await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
+            # A rejected credential arrives as a ConnectionError; report it as permanent
+            # (like the other unrecoverable rejections) instead of retrying.
+            if _is_auth_rejection(e):
+                await self._fail_permanently(
+                    error_msg=f"Speechmatics STT rejected the credentials: {e}", exception=e
+                )
+                return False
+            if report_error:
+                await self.push_error(
+                    error_msg=f"Error connecting to STT service: {e}", exception=e
+                )
+            else:
+                logger.warning(f"{self} reconnect attempt failed: {e}")
+            return False
 
         # Start message processing task
         if not self._stt_msg_task:
             self._stt_msg_task = self.create_task(self._process_stt_messages())
+        return True
+
+    async def _fail_permanently(self, error_msg: str, exception: Exception | None = None) -> None:
+        """Report an error that will not clear on retry and stop the session reconnecting.
+
+        The error is pushed as permanent, which marks the service unusable so it is given
+        no more audio and the pipeline worker applies its ``ProcessorUnusablePolicy``. The
+        session is also marked closed, which stops ``_do_reconnect`` retrying against it.
+        A later settings update reopens the service (see ``_update_settings``).
+        """
+        self._closed = True
+        await self.push_error(
+            error_msg=error_msg, exception=exception, force_treat_as_permanent=True
+        )
+
+    async def _do_reconnect(self) -> None:
+        """Re-establish the session, retrying with exponential backoff.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard, which holds
+        for the whole call — so audio arriving during the retries is buffered and replayed
+        rather than dropped. Exhausting the attempts is reported as a permanent error.
+        """
+        await self._disconnect()
+        for attempt in range(1, self.RECONNECT_MAX_ATTEMPTS + 1):
+            # A rejected session, or a stop/cancel that landed during the backoff,
+            # marks the service closed: nothing may reopen it.
+            if self._closed:
+                return
+            if await self._open_connection(report_error=False):
+                logger.debug(f"{self} reconnected to Speechmatics STT")
+                return
+            if attempt < self.RECONNECT_MAX_ATTEMPTS and not self._closed:
+                await asyncio.sleep(exponential_backoff_time(attempt))
+        if self._closed:
+            return
+        await self._fail_permanently(
+            f"Speechmatics STT failed to reconnect after {self.RECONNECT_MAX_ATTEMPTS} attempts"
+        )
+
+    def _schedule_reconnect(self) -> None:
+        """Run a reconnect in the background, unless one is already in flight.
+
+        For paths that cannot run the reconnect inline: the message pump, which the
+        reconnect tears down, and the initial connect, where the backoff loop would
+        otherwise hold up the rest of the pipeline's start.
+        """
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self.create_task(self._request_reconnect(), name="reconnect")
+
+    async def _cancel_reconnect_task(self) -> None:
+        """Cancel a background reconnect, if one is still running."""
+        task, self._reconnect_task = self._reconnect_task, None
+        if task and not task.done() and task is not asyncio.current_task():
+            await self.cancel_task(task)
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
@@ -729,6 +828,12 @@ class SpeechmaticsSTTService(STTService):
         if self._stt_msg_task:
             await self.cancel_task(self._stt_msg_task)
             self._stt_msg_task = None
+
+        # Drain any messages buffered from this session. The consumer task is cancelled
+        # above, so anything still queued would otherwise be replayed into the next
+        # session by the fresh consumer started on reconnect (the queue is reused).
+        while not self._stt_msg_queue.empty():
+            self._stt_msg_queue.get_nowait()
 
         # Disconnect the client
         logger.debug(f"{self} disconnecting from Speechmatics STT service")
@@ -760,110 +865,33 @@ class SpeechmaticsSTTService(STTService):
     # CONFIGURATION
     # ============================================================================
 
-    def _build_config(self, settings: Settings) -> VoiceAgentConfig:
-        """Build a ``VoiceAgentConfig`` from the given settings.
+    def _build_config(self, settings: Settings) -> TranscriptionConfig:
+        """Build an Agent STT ``TranscriptionConfig`` from the given settings.
 
-        Used both at init time (with explicit settings, before
-        ``super().__init__`` has run) and before reconnecting so the
-        connection always reflects the latest settings.
-
-        Args:
-            settings: Settings to build from.
+        Only fields Agent STT accepts on the wire are set. Audio encoding / sample rate are
+        passed to the client via ``AudioFormat``; turn detection is passed to the client via
+        ``TurnConfig`` (a top-level ``turn_config`` sibling of ``transcription_config``).
         """
         s = settings
 
-        # Preset from turn detection mode
-        turn_detection_mode = assert_given(s.turn_detection_mode)
-        config = VoiceAgentConfigPreset.load(turn_detection_mode.value)
-
-        # Audio encoding (init-only, stored as instance attribute)
-        config.audio_encoding = self._audio_encoding
-
-        # Language + domain. The stored language may be a plain code rather than a
-        # Language, but the mapping keys compare equal either way.
+        # The stored language may be a plain code rather than a Language, but the
+        # mapping keys compare equal either way.
         language = cast(Language, assert_given(s.language))
-        config.language = self._language_to_speechmatics_language(language)
-        config.domain = assert_given(s.domain)
-        config.output_locale = self._locale_to_speechmatics_locale(config.language, language)
+        sm_language = self._language_to_speechmatics_language(language)
 
-        # Speaker config
-        config.speaker_config = SpeakerFocusConfig(
-            focus_speakers=assert_given(s.focus_speakers),
-            ignore_speakers=assert_given(s.ignore_speakers),
-            focus_mode=assert_given(s.focus_mode),
+        return TranscriptionConfig(
+            language=sm_language,
+            # The SDK annotates `model` with its enum but forwards any name; the
+            # service resolves names the SDK has no member for.
+            model=cast(Model, assert_given(s.model)),
+            diarization="speaker" if s.enable_diarization else None,
+            speaker_diarization_config=_build_diarization_config(s),
+            additional_vocab=[*s.additional_vocab] if s.additional_vocab else None,
+            output_locale=self._locale_to_speechmatics_locale(sm_language, language),
+            domain=s.domain or None,
+            enable_partials=assert_given(s.enable_partials),
+            punctuation_overrides=assert_given(s.punctuation_overrides),
         )
-        config.known_speakers = assert_given(s.known_speakers)
-
-        # Custom dictionary
-        config.additional_vocab = assert_given(s.additional_vocab)
-
-        # Advanced parameters — only set if not None
-        for param in [
-            "operating_point",
-            "max_delay",
-            "end_of_utterance_silence_trigger",
-            "end_of_utterance_max_delay",
-            "punctuation_overrides",
-            "include_partials",
-            "include_results",
-            "enable_diarization",
-            "speaker_sensitivity",
-            "max_speakers",
-            "prefer_current_speaker",
-        ]:
-            val = getattr(s, param)
-            if val is not None:
-                setattr(config, param, val)
-
-        # Extra parameters
-        if isinstance(s.extra_params, dict):
-            for key, value in s.extra_params.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-
-        # Enable sentences
-        split_sentences = assert_given(s.split_sentences)
-        split = split_sentences if split_sentences is not None else False
-        config.speech_segment_config = SpeechSegmentConfig(emit_sentences=split or False)
-
-        return config
-
-    @deprecated(
-        "`SpeechmaticsSTTService.update_params` is deprecated since 0.0.104 and will be removed in "
-        "2.0.0. Use `STTUpdateSettingsFrame` instead."
-    )
-    def update_params(
-        self,
-        params: UpdateParams,
-    ) -> None:
-        """Updates the speaker configuration.
-
-        .. deprecated:: 0.0.104
-            Use :class:`STTUpdateSettingsFrame` with
-            ``SpeechmaticsSTTService.Settings(...)`` instead.
-            Will be removed in 2.0.0.
-
-        This can update the speakers to listen to or ignore during an in-flight
-        transcription. Only available if diarization is enabled.
-
-        Args:
-            params: Update parameters for the service.
-        """
-        # Check possible
-        if not self._config.enable_diarization:
-            raise ValueError("Diarization is not enabled")
-
-        # Update the existing diarization configuration
-        if params.focus_speakers is not None:
-            self._config.speaker_config.focus_speakers = params.focus_speakers
-        if params.ignore_speakers is not None:
-            self._config.speaker_config.ignore_speakers = params.ignore_speakers
-        if params.focus_mode is not None:
-            self._config.speaker_config.focus_mode = params.focus_mode
-
-        # Send the update
-        if self._client:
-            self._client.update_diarization_config(self._config.speaker_config)
 
     # ============================================================================
     # HANDLE ENGINE MESSAGES
@@ -885,50 +913,61 @@ class SpeechmaticsSTTService(STTService):
                 await self._handle_end_of_turn(message)
             case AgentServerMessageType.SPEAKERS_RESULT:
                 await self._handle_speakers_result(message)
+            case AgentServerMessageType.ERROR:
+                await self._handle_error(message)
+            case AgentServerMessageType.WARNING:
+                self._handle_warning(message)
             case _:
                 logger.debug(f"{self} {event} -> {message}")
 
     async def _handle_partial_segment(self, message: dict[str, Any]) -> None:
         """Handle AddPartialSegment events.
 
-        AddPartialSegment events are triggered by Speechmatics STT when it detects a
-        partial segment of speech. These events provide the partial transcript for
-        the current speaking turn.
+        Agent STT sends a single ``segment`` object (``transcript``/``speaker``) plus
+        message-level ``metadata``; ``Segment.from_message`` reads that singular shape.
 
         Args:
             message: the message payload.
         """
-        # Handle segments
-        segments: list[dict[str, Any]] = message.get("segments", [])
-        if segments:
-            await self._send_frames(segments)
+        segment = Segment.from_message(message)
+        if segment.transcript:
+            await self._send_frame(segment, finalized=False)
 
     async def _handle_segment(self, message: dict[str, Any]) -> None:
         """Handle AddSegment events.
 
-        AddSegment events are triggered by Speechmatics STT when it detects a
-        final segment of speech. These events provide the final transcript for
-        the current speaking turn.
+        Agent STT sends a single final ``segment`` object plus message-level ``metadata``.
 
         Args:
             message: the message payload.
         """
-        # Handle segments
-        segments: list[dict[str, Any]] = message.get("segments", [])
-        if segments:
-            await self._send_frames(segments, finalized=True)
+        segment = Segment.from_message(message)
+        if not segment.transcript:
+            return
+
+        # If a finalize() was requested, confirm it before pushing so this final frame is
+        # tagged as the one that was asked for.
+        if self._finalize_requested:
+            self.confirm_finalize()
+
+        await self._send_frame(segment, finalized=True)
 
     async def _handle_start_of_turn(self, message: dict[str, Any]) -> None:
         """Handle StartOfTurn events.
 
         When Speechmatics STT detects the start of a new speaking turn, a StartOfTurn
-        event is triggered. The service proposes a turn start, which the user turn
-        strategies resolve into a UserStartedSpeakingFrame and an interruption.
+        event is triggered. The service opens the turn's processing-metrics span and
+        proposes a turn start, which the user turn strategies resolve into a
+        UserStartedSpeakingFrame and, when ``should_interrupt`` is set, an interruption.
+
+        Only reached when the service closes turns; EXTERNAL mode never subscribes to
+        StartOfTurn, so the span is never opened there.
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
+        await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
@@ -958,6 +997,40 @@ class SpeechmaticsSTTService(STTService):
         logger.debug(f"{self} speakers result received from STT")
         await self._call_event_handler("on_speakers_result", message)
 
+    @staticmethod
+    def _describe_status(message: dict[str, Any]) -> str:
+        """Build a human-readable string from a server status message.
+
+        Error/Warning/Info messages carry a ``type`` and ``reason`` (and sometimes a
+        numeric ``code``); any may be absent, so fall back to the raw payload.
+        """
+        parts = [str(message[k]) for k in ("type", "code", "reason") if message.get(k) is not None]
+        return " ".join(parts) if parts else str(message)
+
+    async def _handle_error(self, message: dict[str, Any]) -> None:
+        """Handle Error events.
+
+        A server Error always ends the session. One that rejects the request or account
+        is permanent: it is surfaced upstream and the service stops reconnecting. Any
+        other (a timeout, a buffer or internal error) is reported and a new session is
+        opened in the background, since this handler runs on the message pump the
+        reconnect tears down.
+        """
+        error_msg = f"Speechmatics STT error: {self._describe_status(message)}"
+        if message.get("type") in _PERMANENT_SERVER_ERROR_TYPES:
+            await self._fail_permanently(error_msg)
+            return
+        await self.push_error(error_msg=error_msg)
+        self._schedule_reconnect()
+
+    def _handle_warning(self, message: dict[str, Any]) -> None:
+        """Handle Warning events.
+
+        The session continues (possibly with adjusted config), so log without
+        interrupting the pipeline.
+        """
+        logger.warning(f"{self} Speechmatics STT warning: {self._describe_status(message)}")
+
     # ============================================================================
     # SEND FRAMES TO PIPELINE
     # ============================================================================
@@ -972,97 +1045,72 @@ class SpeechmaticsSTTService(STTService):
         # Forward to parent
         await super().process_frame(frame, direction)
 
-        # Track the bot
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-
-        # Force finalization
+        # Force finalization — only when the caller drives turns (EXTERNAL). When the
+        # service closes turns itself, a pipeline VAD still feeds the base class's TTFB
+        # metrics and reconnect gating, so its frames are expected here and not forwarded.
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if self._enable_vad:
-                logger.warning(
-                    f"{self} VADUserStoppedSpeakingFrame received but internal VAD is being used"
+            if self._service_closes_turns:
+                logger.debug(
+                    f"{self} VADUserStoppedSpeakingFrame received; the service closes turns itself"
                 )
-            elif not self._enable_vad and self._client is not None:
+            elif self._client is not None:
                 self.request_finalize()
                 self._client.finalize()
 
-    async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
-        """Send frames to the pipeline.
+    def _segment_to_frame(
+        self, segment: Segment, *, finalized: bool
+    ) -> TranscriptionFrame | InterimTranscriptionFrame:
+        """Transform an Agent STT ``Segment`` into a Pipecat transcription frame.
+
+        Pure mapping with no side effects. ``finalized`` picks the frame type.
+        ``language`` has no wire field, so it comes from the configured setting;
+        ``result`` has no wire field and is left unset.
+        """
+        # The stored language may be a plain code rather than a Language; the frame
+        # carries it as-is.
+        language = cast(Language, assert_given(self._settings.language))
+        active_format = assert_given(self._settings.speaker_active_format)
+        text = active_format.format(
+            speaker_id=segment.speaker or "UU",
+            text=segment.transcript,
+            ts=segment.start_time,
+            lang=language,
+        )
+
+        frame_cls = TranscriptionFrame if finalized else InterimTranscriptionFrame
+        return frame_cls(
+            text=text,
+            user_id=segment.speaker or "",
+            timestamp=time_now_iso8601(),
+            language=language,
+        )
+
+    async def _send_frame(self, segment: Segment, *, finalized: bool) -> None:
+        """Emit one transcription frame for a segment, with final-only metrics.
 
         Args:
-            segments: The segments to send.
-            finalized: Whether the data is final or partial.
+            segment: The segment to emit.
+            finalized: Whether this is a final (True) or interim (False) transcript.
         """
-        # Skip if no frames
-        if not segments:
-            return
+        frame = self._segment_to_frame(segment, finalized=finalized)
 
-        # Frames to send
-        frames: list[TextFrame] = []
-
-        # Create frame from segment
-        def attr_from_segment(segment: dict[str, Any]) -> dict[str, Any]:
-            # Formats the output text based on the speaker and defined formats from the config.
-            active_format = assert_given(self._settings.speaker_active_format)
-            passive_format = assert_given(self._settings.speaker_passive_format)
-            text = (active_format if segment.get("is_active", True) else passive_format).format(
-                **{
-                    "speaker_id": segment.get("speaker_id", "UU"),
-                    "text": segment.get("text", ""),
-                    "ts": segment.get("timestamp"),
-                    "lang": segment.get("language"),
-                }
-            )
-
-            # Return the attributes for the frame
-            return {
-                "text": text,
-                "user_id": segment.get("speaker_id") or "",
-                "timestamp": segment.get("timestamp"),
-                "language": segment.get("language"),
-                "result": segment.get("results", []),
-            }
-
-        # If final, then re-parse into TranscriptionFrame
         if finalized:
-            # Do any segments have `is_eou` set to True?
-            if (
-                any(segment.get("is_eou", False) for segment in segments)
-                and self._finalize_requested
-            ):
-                self.confirm_finalize()
-
-            # Add the finalized frames
-            frames += [TranscriptionFrame(**attr_from_segment(segment)) for segment in segments]
-
-            # Handle the text (for metrics reporting)
-            finalized_text = "|".join([s["text"] for s in segments])
             await self._handle_transcription(
-                finalized_text, is_final=True, language=segments[0]["language"]
+                segment.transcript, is_final=True, language=assert_given(self._settings.language)
             )
-
-            # Log the frames
-            logger.debug(f"{self} finalized transcript: {[f.text for f in frames]}")
-
-        # Return as interim results (unformatted)
-        else:
-            # Add the interim frames
-            frames += [
-                InterimTranscriptionFrame(**attr_from_segment(segment)) for segment in segments
-            ]
-
-            # Log the frames
-            logger.debug(f"{self} interim transcript: {[f.text for f in frames]}")
-
-        # Send the frames
-        if finalized:
-            # Report usage before the transcription frames so tracing can
-            # attach it to the STT span they close.
+            # Report usage before the transcription frame so tracing can attach it to the
+            # STT span the frame closes.
             await self.emit_stt_usage_metrics()
-        for frame in frames:
-            await self.push_frame(frame)
+            logger.debug(f"{self} finalized transcript: {frame.text!r}")
+        else:
+            logger.debug(f"{self} interim transcript: {frame.text!r}")
+
+        await self.push_frame(frame)
+
+        # Close the turn's processing-metrics span on the final transcript. Gated so
+        # EXTERNAL mode — which never opens the span (no StartOfTurn) — emits nothing.
+        if finalized and self._service_closes_turns:
+            await self.stop_processing_metrics()
 
     # ============================================================================
     # PUBLIC FUNCTIONS
@@ -1078,16 +1126,20 @@ class SpeechmaticsSTTService(STTService):
         Args:
             message: Message to send to the STT service.
             **kwargs: Additional arguments passed to the underlying transport.
+
+        Raises:
+            RuntimeError: If the session is not connected, or the message could not be
+                sent (e.g. a malformed payload).
         """
+        if self._client is None:
+            raise RuntimeError(f"{self} cannot send message: STT session is not connected")
+
+        payload = {"message": message, **kwargs}
+        logger.debug(f"{self} sending message to STT: {payload}")
         try:
-            if not self._client:
-                raise RuntimeError("session is not running")
-            payload = {"message": message}
-            payload.update(kwargs)
-            logger.debug(f"{self} sending message to STT: {payload}")
-            self.create_task(self._client.send_message(payload))
+            await self._client.send_message(payload)
         except Exception as e:
-            raise RuntimeError(f"{self} error sending message to STT: {e}")
+            raise RuntimeError(f"{self} error sending message to STT: {e}") from e
 
     # ============================================================================
     # METRICS
@@ -1111,10 +1163,17 @@ class SpeechmaticsSTTService(STTService):
         try:
             if self._client:
                 await self._client.send_audio(audio)
+                # send_audio swallows transport errors and shuts its own audio gate, so a
+                # dropped socket is only visible as the gate being closed. A gate closed
+                # with no session_error is a broken stream; when the service ended the
+                # session itself, _handle_error has already reported it.
+                if not self._client.is_ready_for_audio and self._client.session_error is None:
+                    logger.warning(f"{self} audio stream closed, reconnecting")
+                    await self._request_reconnect()
             yield None
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
-            await self._disconnect()
+            await self._request_reconnect()
 
     # ============================================================================
     # HELPERS
@@ -1233,22 +1292,25 @@ class SpeechmaticsSTTService(STTService):
         # Return the locale code
         return result
 
-    def _check_deprecated_args(self, kwargs: dict, params: InputParams) -> None:
+    def _check_deprecated_args(self, kwargs: dict, params: InputParams) -> bool:
         """Check arguments for deprecation and update params if necessary.
 
         This function will show deprecation warnings for deprecated arguments and
         migrate them to the new location in the params object. If the new location
-        is None, the argument is not used.
+        is None, the argument is not used. Recognized deprecated arguments are
+        popped from ``kwargs`` so they are not forwarded to the parent constructor.
 
         Args:
             kwargs: Keyword arguments passed to the constructor.
             params: Input parameters for the service.
+
+        Returns:
+            True if any deprecated argument was present, so the caller knows to
+            apply the migrated ``params`` to its settings.
         """
 
         # Show deprecation warnings
         def _deprecation_warning(old: str, new: str | None = None) -> None:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 if new:
@@ -1266,12 +1328,12 @@ class SpeechmaticsSTTService(STTService):
             ("domain", "domain"),
             ("output_locale", None),
             ("output_locale_code", None),
-            ("enable_partials", None),
-            ("max_delay", "max_delay"),
+            ("include_partials", "enable_partials"),
+            ("max_delay", None),
             ("chunk_size", None),
             ("audio_encoding", "audio_encoding"),
-            ("end_of_utterance_silence_trigger", "end_of_utterance_silence_trigger"),
-            {"enable_speaker_diarization", "enable_diarization"},
+            ("end_of_utterance_silence_trigger", None),
+            ("enable_speaker_diarization", "enable_diarization"),
             ("text_format", "speaker_active_format"),
             ("max_speakers", "max_speakers"),
             ("transcription_config", None),
@@ -1279,9 +1341,14 @@ class SpeechmaticsSTTService(STTService):
             ("end_of_utterance_mode", None),
         ]
 
-        # Show warnings + migrate the arguments
+        # Show warnings + migrate the arguments. Recognized deprecated kwargs are
+        # popped so they are not forwarded to the parent constructor.
+        found = False
         for old, new in deprecated_args:
             if old in kwargs:
+                found = True
+                value = kwargs.pop(old)
                 _deprecation_warning(old, new)
-                if kwargs.get(old, None) is not None:
-                    params.__setattr__(new, kwargs[old])
+                if new is not None and value is not None:
+                    setattr(params, new, value)
+        return found
