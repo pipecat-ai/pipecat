@@ -612,6 +612,7 @@ class InworldTTSService(WebsocketTTSService):
         aggregate_sentences: bool | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         append_trailing_space: bool = True,
+        push_full_text_on_interruption_without_timestamps: bool = True,
         **kwargs: Any,
     ):
         """Initialize the Inworld WebSocket TTS service.
@@ -655,6 +656,8 @@ class InworldTTSService(WebsocketTTSService):
 
             text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
+            push_full_text_on_interruption_without_timestamps: Whether to push the full text
+                when interrupted before any timestamps are received. Defaults to True.
             **kwargs: Additional arguments passed to the parent class.
         """
         # Derive auto_mode from aggregate_sentences if not explicitly set
@@ -751,6 +754,9 @@ class InworldTTSService(WebsocketTTSService):
         self._auto_mode = auto_mode
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
+        self._push_full_text_on_interruption_without_timestamps = (
+            push_full_text_on_interruption_without_timestamps
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -870,17 +876,16 @@ class InworldTTSService(WebsocketTTSService):
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
-        await self._maybe_push_fallback_text(context_id)
+        await self._maybe_push_fallback_text(context_id, is_interruption=True)
         await self._close_context(context_id)
         await super().on_audio_context_interrupted(context_id)
 
-    async def _maybe_push_fallback_text(self, context_id: str):
+    async def _maybe_push_fallback_text(self, context_id: str, *, is_interruption: bool = False):
         """Push the full text as fallback when no timestamps were received.
 
-        so that the LLM conversation context still reflects what the agent spoke.
-        Without timestamps, the full text is always committed — even on
-        interruption — since there is no timing information to determine which
-        portion was actually spoken.
+        This keeps the LLM conversation context aligned with completed speech.
+        Interrupted speech follows the configured fallback policy because no
+        timing information is available to determine which portion was spoken.
         """
         if not context_id:
             return
@@ -888,6 +893,8 @@ class InworldTTSService(WebsocketTTSService):
         text = self._context_texts.pop(context_id, "").strip()
         self._contexts_with_timestamps.discard(context_id)
         if had_timestamps or not text:
+            return
+        if is_interruption and not self._push_full_text_on_interruption_without_timestamps:
             return
         logger.debug(f"{self}: No timestamps for context {context_id}, pushing fallback: [{text}]")
         fallback = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
