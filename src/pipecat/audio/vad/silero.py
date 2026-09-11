@@ -11,6 +11,7 @@ which can detect voice activity in audio streams with high accuracy.
 Supports 8kHz and 16kHz sample rates.
 """
 
+import threading
 import time
 from typing import cast
 
@@ -31,6 +32,31 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module(s): {e}") from e
 
 
+# ONNX sessions are read-only and thread-safe, so every analyzer can share one
+# per model file. Only the per-instance state below needs to stay separate.
+_SESSIONS: dict = {}
+_SESSIONS_LOCK = threading.Lock()
+
+
+def _shared_session(path, force_onnx_cpu: bool):
+    """Return a process-wide InferenceSession for this model file."""
+    key = (str(path), force_onnx_cpu)
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(key)
+        if session is None:
+            opts = onnxruntime.SessionOptions()
+            opts.inter_op_num_threads = 1
+            opts.intra_op_num_threads = 1
+            if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
+                session = onnxruntime.InferenceSession(
+                    path, providers=["CPUExecutionProvider"], sess_options=opts
+                )
+            else:
+                session = onnxruntime.InferenceSession(path, sess_options=opts)
+            _SESSIONS[key] = session
+    return session
+
+
 class SileroOnnxModel:
     """ONNX runtime wrapper for the Silero VAD model.
 
@@ -46,16 +72,7 @@ class SileroOnnxModel:
             path: Path to the ONNX model file.
             force_onnx_cpu: Whether to force CPU execution provider.
         """
-        opts = onnxruntime.SessionOptions()
-        opts.inter_op_num_threads = 1
-        opts.intra_op_num_threads = 1
-
-        if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
-            self.session = onnxruntime.InferenceSession(
-                path, providers=["CPUExecutionProvider"], sess_options=opts
-            )
-        else:
-            self.session = onnxruntime.InferenceSession(path, sess_options=opts)
+        self.session = _shared_session(path, force_onnx_cpu)
 
         self.reset_states()
         self.sample_rates = [8000, 16000]
