@@ -200,6 +200,7 @@ class SpeechmaticsSTTSettings(STTSettings):
                 Use ``model`` instead. Will be removed in 2.0.0.
 
         enable_partials: Include partial segment fragments.
+        punctuation_overrides: Punctuation overrides.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
@@ -215,6 +216,9 @@ class SpeechmaticsSTTSettings(STTSettings):
     )
     operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuation_overrides: dict[str, Any] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_sensitivity: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -330,6 +334,10 @@ class SpeechmaticsSTTService(STTService):
                 speaker activity detection. This setting is used only for the formatted text output
                 of individual segments.
 
+            punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
+                in the STT engine. This is useful for languages that use different punctuation
+                than English. See documentation for more information.
+
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
@@ -373,6 +381,7 @@ class SpeechmaticsSTTService(STTService):
         model: Model | str | None = None
         operating_point: Model | str | None = None
         enable_partials: bool | None = None
+        punctuation_overrides: dict | None = None
 
         # Diarization
         enable_diarization: bool | None = None
@@ -451,6 +460,7 @@ class SpeechmaticsSTTService(STTService):
             additional_vocab=[],
             operating_point=None,
             enable_partials=None,
+            punctuation_overrides=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
@@ -880,6 +890,7 @@ class SpeechmaticsSTTService(STTService):
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
             enable_partials=assert_given(s.enable_partials),
+            punctuation_overrides=assert_given(s.punctuation_overrides),
         )
 
     # ============================================================================

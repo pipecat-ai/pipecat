@@ -241,6 +241,15 @@ def test_diarization_config_built_when_enabled():
     assert service._config.speaker_diarization_config.max_speakers == 2
 
 
+def test_punctuation_overrides_reach_the_wire_config():
+    """Agent STT accepts punctuation_overrides as in the RT API, so a configured value
+    must be sent."""
+    overrides = {"permitted_marks": [".", ","]}
+    service = _service(settings=SpeechmaticsSTTService.Settings(punctuation_overrides=overrides))
+    assert service._config.punctuation_overrides == overrides
+    assert _service()._config.punctuation_overrides is None
+
+
 def test_no_diarization_leaves_config_empty():
     """With diarization off, neither the diarization flag nor a speaker config may be
     sent — otherwise the engine would attempt attribution it was not asked for."""
