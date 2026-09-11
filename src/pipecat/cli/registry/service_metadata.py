@@ -888,15 +888,6 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
-            value="lmnt_tts",
-            label="LMNT",
-            package="pipecat-ai[lmnt]",
-            class_name=["LmntTTSService"],
-            env_prefix="LMNT",
-            include_params=["api_key"],
-            settings_params=["voice"],
-        ),
-        ServiceDefinition(
             value="minimax_tts",
             label="MiniMax",
             package="pipecat-ai",

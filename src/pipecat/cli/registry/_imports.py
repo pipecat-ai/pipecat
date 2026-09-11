@@ -141,7 +141,6 @@ IMPORTS = {
     "hume_tts": ["from pipecat.services.hume.tts import HumeTTSService"],
     "inworld_tts": ["from pipecat.services.inworld.tts import InworldTTSService"],
     "kokoro_tts": ["from pipecat.services.kokoro.tts import KokoroTTSService"],
-    "lmnt_tts": ["from pipecat.services.lmnt.tts import LmntTTSService"],
     "minimax_tts": ["from pipecat.services.minimax.tts import MiniMaxHttpTTSService"],
     "mistral_tts": ["from pipecat.services.mistral.tts import MistralTTSService"],
     "neuphonic_tts": ["from pipecat.services.neuphonic.tts import NeuphonicTTSService"],

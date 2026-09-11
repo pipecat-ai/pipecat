@@ -2797,39 +2797,6 @@
       "location": "pipecat/services/llm_service.py"
     },
     {
-      "subject": "LmntTTSService.language",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.106",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(language=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
-      "subject": "LmntTTSService.model",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(model=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(model=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
-      "subject": "LmntTTSService.voice_id",
-      "module": "pipecat.services.lmnt.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=LmntTTSService.Settings(voice=...)",
-      "message": "Use ``settings=LmntTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/lmnt/tts.py"
-    },
-    {
       "subject": "MCPClient.get_tools_schema",
       "module": "pipecat.services.mcp_service",
       "kind": "method",

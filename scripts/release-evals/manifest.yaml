@@ -104,8 +104,6 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-langchain.py
     scenarios: [scripted/capital_question]
-  - bot: voice/voice-lmnt.py
-    scenarios: [scripted/capital_question]
   - bot: voice/voice-meta.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-minimax.py
