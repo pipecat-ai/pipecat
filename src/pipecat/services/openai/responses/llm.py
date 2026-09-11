@@ -377,6 +377,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         if tools is not None and not isinstance(tools, type(OPENAI_NOT_GIVEN)):
             params["tools"] = tools
 
+        # tool_choice (set by the adapter when the context provides one)
+        if "tool_choice" in invocation_params:
+            params["tool_choice"] = invocation_params["tool_choice"]
+
         # Reasoning
         reasoning = assert_given(self._settings.reasoning)
         reasoning_params = reasoning.model_dump(exclude_none=True) if reasoning else {}

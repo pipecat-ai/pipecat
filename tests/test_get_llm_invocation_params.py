@@ -64,6 +64,7 @@ For OpenAI Responses adapter:
 6. Tools schema flattening (nested function dict -> flat format)
 7. system_instruction sets instructions (or becomes developer message if input is empty)
 8. Developer messages pass through as developer role without triggering warnings
+9. tool_choice is flattened to Responses format, and omitted when the context has none
 
 For BaseLLMAdapter helpers:
 1. _extract_initial_system: system extraction and conversion logic
@@ -93,6 +94,7 @@ from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLM
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
+    NOT_GIVEN,
     LLMContext,
     LLMSpecificMessage,
     LLMStandardMessage,
@@ -2600,6 +2602,94 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertIsInstance(params["tools"], OpenAINotGiven)
+
+    def test_tool_choice_absent_omits_key(self):
+        """A context without a usable tool choice leaves the key out of the params."""
+        for tool_choice in (NOT_GIVEN, None):
+            with self.subTest(tool_choice=tool_choice):
+                context = LLMContext(
+                    messages=[{"role": "user", "content": "Hello"}], tool_choice=tool_choice
+                )
+                params = self.adapter.get_llm_invocation_params(context)
+
+                self.assertNotIn("tool_choice", params)
+
+    def test_tool_choice_options_pass_through(self):
+        """The string options mean the same thing in both APIs, so they're unchanged."""
+        for option in ("none", "auto", "required"):
+            with self.subTest(option=option):
+                context = LLMContext(
+                    messages=[{"role": "user", "content": "Hello"}], tool_choice=option
+                )
+                params = self.adapter.get_llm_invocation_params(context)
+
+                self.assertEqual(params["tool_choice"], option)
+
+    def test_tool_choice_named_function_is_flattened(self):
+        """A named function loses Chat Completions' extra nesting level."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+            tool_choice={"type": "function", "function": {"name": "get_weather"}},
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["tool_choice"], {"type": "function", "name": "get_weather"})
+
+    def test_tool_choice_named_custom_tool_is_flattened(self):
+        """A named custom tool is flattened the same way a named function is."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+            tool_choice={"type": "custom", "custom": {"name": "run_query"}},
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["tool_choice"], {"type": "custom", "name": "run_query"})
+
+    def test_tool_choice_allowed_tools_is_flattened(self):
+        """Allowed tools lose their wrapper, and the tools they list are flattened too."""
+        # The listed tools are typed as an iterable, so a tuple behaves like a list.
+        for tools in (
+            [{"type": "function", "function": {"name": "get_weather"}}],
+            ({"type": "function", "function": {"name": "get_weather"}},),
+        ):
+            with self.subTest(tools=type(tools).__name__):
+                context = LLMContext(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    tool_choice={
+                        "type": "allowed_tools",
+                        "allowed_tools": {"mode": "required", "tools": tools},
+                    },
+                )
+                params = self.adapter.get_llm_invocation_params(context)
+
+                self.assertEqual(
+                    params["tool_choice"],
+                    {
+                        "type": "allowed_tools",
+                        "mode": "required",
+                        "tools": [{"type": "function", "name": "get_weather"}],
+                    },
+                )
+
+    def test_tool_choice_unreshapeable_passes_through_untouched(self):
+        """A value with no Responses equivalent goes to the API as-is rather than raising."""
+        unreshapeable = [
+            {"type": "web_search_preview"},  # Responses-only, already in its own shape
+            {},
+            {"type": "function"},
+            {"type": "function", "function": {}},
+            {"type": "allowed_tools", "allowed_tools": {"mode": "auto"}},
+            {"type": "allowed_tools", "allowed_tools": {"mode": "auto", "tools": "not-a-list"}},
+            {"no_type": "at all"},
+        ]
+        for tool_choice in unreshapeable:
+            with self.subTest(tool_choice=tool_choice):
+                context = LLMContext(
+                    messages=[{"role": "user", "content": "Hello"}], tool_choice=tool_choice
+                )
+                params = self.adapter.get_llm_invocation_params(context)
+
+                self.assertEqual(params["tool_choice"], tool_choice)
 
     def test_empty_messages(self):
         """Empty messages list produces empty input list."""

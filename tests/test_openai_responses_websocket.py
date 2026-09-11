@@ -844,6 +844,27 @@ class TestReasoningParams:
         assert "include" not in params
 
 
+# ---------------------------------------------------------------------------
+# Tool choice: param building
+# ---------------------------------------------------------------------------
+
+
+class TestToolChoiceParams:
+    def test_tool_choice_forwarded_when_the_adapter_sets_it(self):
+        """A tool choice from the context reaches the request."""
+        service = _make_service()
+        params = service._build_response_params({"input": [], "tool_choice": "required"})
+        assert params["tool_choice"] == "required"
+
+    def test_extra_still_overrides_tool_choice(self):
+        """`settings.extra` is applied last, so it keeps overriding the context."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(extra={"tool_choice": "none"})
+        )
+        params = service._build_response_params({"input": [], "tool_choice": "required"})
+        assert params["tool_choice"] == "none"
+
+
 class TestModelSupportsReasoning:
     def test_reasoning_capable_models(self):
         """The o-series and the mainline gpt series from gpt-5 onward reason."""
