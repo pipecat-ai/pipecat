@@ -40,3 +40,24 @@ class BaseAudioResampler(ABC):
             The resampled audio data as raw bytes.
         """
         pass
+
+    async def flush(self) -> bytes:
+        """Emit any audio still held internally and reset the resampler.
+
+        Streaming resamplers keep recently seen input in their filter, so the
+        tail of a stream is only emitted once more audio arrives. Call this at
+        the end of a continuous stream to collect that tail and start clean.
+
+        Returns:
+            The remaining resampled audio as raw bytes, empty if the resampler
+            holds nothing.
+        """
+        return b""
+
+    async def reset(self):
+        """Discard any audio still held internally and reset the resampler.
+
+        Use this when a stream is abandoned rather than finished (e.g. after an
+        interruption), so its leftover tail doesn't leak into the next stream.
+        """
+        pass
