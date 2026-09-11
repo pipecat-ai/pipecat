@@ -145,7 +145,8 @@ def _resolve_model(
         )
     if model is None and operating_point is not None:
         warnings.warn(
-            "`operating_point` is deprecated; use `model` instead.",
+            "`operating_point` is deprecated since 1.10.0 and will be removed in 2.0.0. "
+            "Use `model` instead.",
             DeprecationWarning,
             stacklevel=3,
         )
@@ -193,7 +194,11 @@ class SpeechmaticsSTTSettings(STTSettings):
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
         model: Resolved transcription model (operating point). See ``_resolve_model``.
-        operating_point: Deprecated alias for ``model``.
+        operating_point: Alias for ``model``.
+
+            .. deprecated:: 1.10.0
+                Use ``model`` instead. Will be removed in 2.0.0.
+
         enable_partials: Include partial segment fragments.
         enable_diarization: Enable speaker diarization.
         speaker_sensitivity: Diarization sensitivity.
@@ -314,8 +319,11 @@ class SpeechmaticsSTTService(STTService):
                 Defaults to `Model.LINDEN_1`, the SDK's default model. Preferred over
                 `operating_point`.
 
-            operating_point: Deprecated alias for `model`. If both are given they must name the
-                same value, otherwise a `ValueError` is raised. Optional.
+            operating_point: Alias for `model`. If both are given they must name the same
+                value, otherwise a `ValueError` is raised. Optional.
+
+                .. deprecated:: 1.10.0
+                    Use ``model`` instead. Will be removed in 2.0.0.
 
             enable_partials: Include partial segment fragments (words) in the output of
                 AddPartialSegment messages. Partial fragments from the STT will always be used for

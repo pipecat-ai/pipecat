@@ -3534,6 +3534,17 @@
       "location": "pipecat/services/soniox/stt.py"
     },
     {
+      "subject": "SpeechmaticsSTTService.InputParams.operating_point",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/speechmatics/stt.py"
+    },
+    {
       "subject": "SpeechmaticsSTTService.params",
       "module": "pipecat.services.speechmatics.stt",
       "kind": "parameter",
@@ -3542,6 +3553,17 @@
       "relation": "use_existing",
       "replacement": "settings=SpeechmaticsSTTService.Settings(...)",
       "message": "Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/speechmatics/stt.py"
+    },
+    {
+      "subject": "SpeechmaticsSTTSettings.operating_point",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.10.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "model",
+      "message": "Use ``model`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
