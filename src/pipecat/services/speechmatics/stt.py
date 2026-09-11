@@ -1177,11 +1177,14 @@ class SpeechmaticsSTTService(STTService):
             return None
 
         # Get the locale code
-        result = LOCALES.get(base_code).get(locale, None)
+        result = LOCALES[base_code].get(locale, None)
 
-        # Fail if locale is not supported
+        # Fail if locale is not supported. No `{self}` prefix here: `_build_config`
+        # also runs from __init__, before the base class has named this processor.
         if not result:
-            logger.warning(f"{self} Unsupported output locale: {locale}, defaulting to {base_code}")
+            logger.warning(
+                f"Unsupported Speechmatics output locale: {locale}, defaulting to {base_code}"
+            )
 
         # Return the locale code
         return result

@@ -346,6 +346,14 @@ def test_locale_none_without_regional_variant():
     assert _service()._locale_to_speechmatics_locale("en", Language.EN) is None
 
 
+def test_unsupported_regional_variant_constructs_and_falls_back():
+    """An English variant with no Speechmatics output locale is built from __init__,
+    before the processor has a name, so the fallback path must not touch `self`."""
+    service = _service(settings=SpeechmaticsSTTService.Settings(language=Language.EN_IN))
+    assert service._config.language == "en"
+    assert service._config.output_locale is None
+
+
 # ---------------------------------------------------------------------------
 # Reconnect — the self-healing for connect/send failures. It runs inside
 # STTService._reconnect(), which buffers and replays audio for the whole call.
