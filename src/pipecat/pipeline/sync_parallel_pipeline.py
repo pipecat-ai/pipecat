@@ -20,6 +20,7 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
+from weakref import WeakValueDictionary
 
 from loguru import logger
 
@@ -75,6 +76,12 @@ class SyncParallelPipelineSource(FrameProcessor):
         """
         super().__init__(enable_direct_mode=True)
         self._up_queue = upstream_queue
+        # A branch may swallow a frame, so tracking it must not keep it alive.
+        self._bypassed_system_frames: WeakValueDictionary[int, SystemFrame] = WeakValueDictionary()
+
+    def _register_bypassed_system_frame(self, frame: SystemFrame):
+        """Mark a fanned-out system frame so its branch copy is not retained."""
+        self._bypassed_system_frames[id(frame)] = frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and route them based on direction.
@@ -87,6 +94,8 @@ class SyncParallelPipelineSource(FrameProcessor):
 
         match direction:
             case FrameDirection.UPSTREAM:
+                if self._bypassed_system_frames.get(id(frame)) is frame:
+                    return
                 await self._up_queue.put(frame)
             case FrameDirection.DOWNSTREAM:
                 await self.push_frame(frame, direction)
@@ -108,6 +117,12 @@ class SyncParallelPipelineSink(FrameProcessor):
         """
         super().__init__(enable_direct_mode=True)
         self._down_queue = downstream_queue
+        # A branch may swallow a frame, so tracking it must not keep it alive.
+        self._bypassed_system_frames: WeakValueDictionary[int, SystemFrame] = WeakValueDictionary()
+
+    def _register_bypassed_system_frame(self, frame: SystemFrame):
+        """Mark a fanned-out system frame so its branch copy is not retained."""
+        self._bypassed_system_frames[id(frame)] = frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and route them based on direction.
@@ -122,6 +137,8 @@ class SyncParallelPipelineSink(FrameProcessor):
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
             case FrameDirection.DOWNSTREAM:
+                if self._bypassed_system_frames.get(id(frame)) is frame:
+                    return
                 await self._down_queue.put(frame)
 
 
@@ -171,6 +188,8 @@ class SyncParallelPipeline(BasePipeline):
         self._sinks = []
         self._sources = []
         self._pipelines = []
+        self._upstream_bookends: list[SyncParallelPipelineSource] = []
+        self._downstream_bookends: list[SyncParallelPipelineSink] = []
 
         self._up_queue = asyncio.Queue()
         self._down_queue = asyncio.Queue()
@@ -190,6 +209,8 @@ class SyncParallelPipeline(BasePipeline):
             # the source and the sinks so we can use it later.
             self._sources.append({"processor": source, "queue": down_queue})
             self._sinks.append({"processor": sink, "queue": up_queue})
+            self._upstream_bookends.append(source)
+            self._downstream_bookends.append(sink)
 
             # Create pipeline
             pipeline = Pipeline(processors, source=source, sink=sink)
@@ -262,15 +283,18 @@ class SyncParallelPipeline(BasePipeline):
         """
         await super().process_frame(frame, direction)
 
-        # SystemFrames are simply passed through all internal pipelines without
-        # draining queued output. This avoids the race condition where a
-        # SystemFrame's wait_for_sync steals frames from a concurrent
-        # non-SystemFrame's wait_for_sync.
+        # SystemFrames pass through every internal pipeline, while the receiving
+        # bookends suppress only the original fanned-out copies. The parent then
+        # pushes the original once without draining other queued output.
         if isinstance(frame, SystemFrame):
             if direction == FrameDirection.UPSTREAM:
+                for source in self._upstream_bookends:
+                    source._register_bypassed_system_frame(frame)
                 for s in self._sinks:
                     await s["processor"].process_frame(frame, direction)
             elif direction == FrameDirection.DOWNSTREAM:
+                for sink in self._downstream_bookends:
+                    sink._register_bypassed_system_frame(frame)
                 for s in self._sources:
                     await s["processor"].process_frame(frame, direction)
             await self.push_frame(frame, direction)
