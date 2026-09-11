@@ -1060,8 +1060,8 @@ class SpeechmaticsSTTService(STTService):
     ) -> TranscriptionFrame | InterimTranscriptionFrame:
         """Transform an Agent STT ``Segment`` into a Pipecat transcription frame.
 
-        Pure mapping (the Gap 1 seam) — no side effects. ``finalized`` picks the frame
-        type. ``language`` has no wire field, so it comes from the configured setting;
+        Pure mapping with no side effects. ``finalized`` picks the frame type.
+        ``language`` has no wire field, so it comes from the configured setting;
         ``result`` has no wire field and is left unset.
         """
         # The stored language may be a plain code rather than a Language; the frame

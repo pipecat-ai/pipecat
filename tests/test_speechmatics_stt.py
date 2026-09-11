@@ -92,8 +92,7 @@ def test_resolve_model_returns_wire_string_for_enum_input():
 
 
 def test_apply_legacy_params_copies_shared_fields():
-    """Every field shared by InputParams and Settings must migrate; this guards the
-    intersection-copy that replaced the hand-written per-field assignments."""
+    """Every field shared by name between InputParams and Settings must migrate."""
     settings = SpeechmaticsSTTService.Settings()
     params = SpeechmaticsSTTService.InputParams(domain="acme", max_speakers=3)
 
@@ -168,8 +167,8 @@ def test_check_deprecated_args_pops_recognized_kwargs():
 
 
 def test_check_deprecated_args_no_replacement_kwarg_does_not_crash():
-    """A deprecated kwarg with no replacement (new=None) must warn and be dropped —
-    never attempt setattr(params, None, ...), which used to raise TypeError."""
+    """A deprecated kwarg with no replacement (new=None) must warn and be dropped,
+    never applied to params."""
     service = _service()
     kwargs = {"max_delay": 5.0}
     params = SpeechmaticsSTTService.InputParams()
@@ -312,9 +311,8 @@ async def test_send_message_without_connection_raises():
 
 @pytest.mark.asyncio
 async def test_send_message_propagates_send_failure():
-    """A failure from a live client must reach the caller. This locks the fix that
-    awaits the send instead of firing it off in an untracked task (where the error
-    would be swallowed) — a passing no-connection test alone cannot catch that."""
+    """A failure from a live client must reach the caller: send_message awaits the
+    underlying send, so its errors propagate instead of being swallowed in a task."""
 
     class _FailingClient:
         async def send_message(self, payload):
