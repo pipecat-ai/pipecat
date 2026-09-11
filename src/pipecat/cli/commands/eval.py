@@ -579,16 +579,14 @@ def _pass_rate(passed: int, done: int) -> str:
 
 
 # Rate colors, as a rich style and the matching ANSI code for the non-TTY path.
-_RATE_ANSI = {"green": "32", "yellow": "33", "red": "31", "dim": "2"}
+_RATE_ANSI = {"green": "32", "red": "31", "dim": "2"}
 
 
 def _rate_level(passed: int, done: int) -> str:
-    """Color for a pass rate: green when perfect, red below half, yellow between."""
+    """Color for a pass rate: green when every finished attempt passed, red once one has not, dim before any finished."""
     if not done:
         return "dim"
-    if passed == done:
-        return "green"
-    return "red" if (100 * passed // done) < 50 else "yellow"
+    return "green" if passed == done else "red"
 
 
 def _row_seconds(group: list[EvalRun]) -> float | None:
@@ -815,19 +813,15 @@ class _EvalDashboard:
             # Two columns say where the row is: what is left while attempts
             # remain, and how many of the row's attempts have passed. The rate
             # is over every attempt, so it climbs as they come in, and its color
-            # is a verdict on the ones that finished: green while all of them
-            # passed, red once one has not, dim until the first is in. Beside
-            # them the row's clock, running from its first attempt's start and
-            # stopped at its last one's end.
+            # is a verdict on the ones that finished. Beside them the row's
+            # clock, running from its first attempt's start and stopped at its
+            # last one's end.
             remaining = len(group) - len(done)
             left = Text(f"{remaining} left".rjust(left_width) if remaining else "", style="dim")
-            if not done:
-                level = "dim"
-            elif passed == len(done):
-                level = "green"
-            else:
-                level = "red"
-            rate = Text(_pass_rate(passed, len(group)).rjust(rate_width), style=level)
+            rate = Text(
+                _pass_rate(passed, len(group)).rjust(rate_width),
+                style=_rate_level(passed, len(done)),
+            )
             seconds = _row_seconds(group)
             clock = "" if seconds is None else _clock(seconds)
             cells.append(
