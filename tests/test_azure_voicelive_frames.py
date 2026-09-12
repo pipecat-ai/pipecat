@@ -355,3 +355,39 @@ async def test_an_assistant_item_opens_the_response_only_once():
 
     assert len(recorder.of_types(LLMFullResponseStartFrame)) == 1
     assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
+
+
+@pytest.mark.asyncio
+async def test_interruption_closes_the_turn_only_once():
+    """A cancelled response still reports done after the turn was closed."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    item = {
+        "id": ITEM_ID,
+        "object": "realtime.item",
+        "type": "message",
+        "status": "incomplete",
+        "role": "assistant",
+        "content": [],
+    }
+    await _drive(
+        service,
+        [
+            {
+                "type": "response.output_item.added",
+                "event_id": "e1",
+                "response_id": RESPONSE_ID,
+                "output_index": 0,
+                "item": item,
+            },
+            _audio_delta(),
+        ],
+    )
+
+    await service._handle_interruption()
+    await _drive(service, [_response_done(status="cancelled")])
+
+    assert len(recorder.of_types(LLMFullResponseStartFrame)) == 1
+    assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1

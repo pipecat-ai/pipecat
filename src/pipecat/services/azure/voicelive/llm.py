@@ -453,6 +453,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self.stop_all_metrics()
 
         if self._current_assistant_response:
+            # The cancelled response still reports response.done, so clear the
+            # tracked item to keep that from closing the turn a second time.
+            self._current_assistant_response = None
             await self.push_frame(LLMFullResponseEndFrame())
             await self.push_frame(TTSStoppedFrame())
 
@@ -913,8 +916,12 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self.start_llm_usage_metrics(tokens)
 
         await self.stop_processing_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
-        self._current_assistant_response = None
+
+        # An interruption closes the turn before the cancelled response reports
+        # done, so only close a turn that is still open.
+        if self._current_assistant_response:
+            self._current_assistant_response = None
+            await self.push_frame(LLMFullResponseEndFrame())
 
         if evt.status == "failed":
             details = evt.response.get("status_details")
