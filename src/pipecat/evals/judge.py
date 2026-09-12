@@ -48,6 +48,10 @@ JUDGE_SYSTEM_INSTRUCTION = (
     "arrived as several consecutive 'assistant' messages — against the given "
     "criterion, using the earlier turns only as context. The reply may still be "
     "streaming in. "
+    "An 'assistant' message of the form '[tool call] name(arguments)' is a function the "
+    "bot called at that point, with the arguments it passed; it is part of the bot's "
+    "reply, and a completed call is stronger evidence of an action (a booking, a "
+    "lookup) than the bot saying it did it. "
     "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
     "transcription, so it may contain homophones, misspellings, split or merged words, and "
     "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
@@ -76,6 +80,17 @@ JUDGE_ASK_TEMPLATE = (
     "Does the bot's most recent reply satisfy this criterion?\n\n"
     "Criterion: {criterion}\n\n"
     "Answer yes, no, or continue."
+)
+
+# The ask for an ``eval:`` on a function call. It names the call and gives its
+# arguments as JSON, so the verdict is about that call rather than about what
+# the bot said around it; the call is also in the conversation as a
+# '[tool call]' line (see :meth:`EvalJudge.add_tool_call`).
+JUDGE_CALL_ASK_TEMPLATE = (
+    "The bot called the function `{name}` with arguments `{args}`. "
+    "Does this call satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
 )
 
 
@@ -225,6 +240,23 @@ class EvalJudge:
         if text and text.strip():
             self._context.add_message({"role": "assistant", "content": text})
 
+    def add_tool_call(self, name: str, args: dict | None) -> None:
+        """Record a function call the bot made, as part of its current reply.
+
+        The call goes into the conversation as an assistant message
+        ``[tool call] name(args)``, the line the simulation judge's transcript
+        uses, so a later ``eval:`` can check the bot's words against what it
+        actually did.
+
+        Args:
+            name: The function's name.
+            args: The call's arguments, written as compact JSON; ``None`` or
+                empty gives ``name()``.
+        """
+        self._context.add_message(
+            {"role": "assistant", "content": f"[tool call] {format_tool_call(name, args)}"}
+        )
+
     async def evaluate(self, criterion: str) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
 
@@ -237,6 +269,27 @@ class EvalJudge:
             assertion over the same conversation hits the judge only once.
         """
         ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+
+    async def evaluate_call(self, name: str, args: dict | None, criterion: str) -> JudgeVerdict:
+        """Judge whether a function call the bot made satisfies ``criterion``, in the conversation so far.
+
+        The ask names the call and its arguments, so the verdict is about that
+        call. A ``continue`` makes no sense for a call — it is not a partial
+        reply — and callers treat it as a ``no``.
+
+        Args:
+            name: The function's name.
+            args: The call's arguments, shown to the judge as compact JSON.
+            criterion: Natural-language description of what the call should be.
+
+        Returns:
+            A :class:`JudgeVerdict`, cached by ``(call, criterion, conversation)``
+            like :meth:`evaluate`.
+        """
+        ask = JUDGE_CALL_ASK_TEMPLATE.format(
+            name=name, args=_compact_json(args), criterion=criterion
+        )
         return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
 
     async def evaluate_run(
@@ -349,6 +402,24 @@ class EvalJudge:
             return "\0judge returned empty response"
 
         return response
+
+
+def format_tool_call(name: str, args: dict | None) -> str:
+    """A function call as one line: ``name({"k":"v"})``, or ``name()`` without arguments.
+
+    Args:
+        name: The function's name.
+        args: The call's arguments, or ``None``.
+
+    Returns:
+        The call with its arguments as compact JSON.
+    """
+    return f"{name}({_compact_json(args) if args else ''})"
+
+
+def _compact_json(args: dict | None) -> str:
+    """``args`` as JSON without the whitespace, non-ASCII text left readable."""
+    return json.dumps(args or {}, separators=(",", ":"), ensure_ascii=False)
 
 
 # The reason a verdict carries when the judge gave none.

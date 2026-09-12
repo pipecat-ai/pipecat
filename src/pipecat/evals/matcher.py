@@ -34,7 +34,9 @@ class ExpectationMatcher:
     between. A reply with a content check aggregates its segments and
     re-checks on each, so an interim "Let me check" is rolled past rather
     than taken for the answer. A turn's function calls match by name in any
-    order.
+    order, and each one popped while matching is added to the judge's
+    conversation, so a reply's ``eval:`` can be checked against what the bot
+    actually did.
     """
 
     def __init__(self, *, stream: EvalEventStream, judge: EvalJudge | None, trace: EvalTrace):
@@ -258,7 +260,20 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match."""
+        """Match every call in the expectation, in any order, within the budget; else a failure naming the call that was missing or whose args did not match.
+
+        With ``eval:``, each matched call is also put to the judge, and the
+        first one it rejects fails the expectation.
+        """
+        if expectation.eval is not None and self._judge is None:
+            return self._failure(
+                expectation,
+                turn_idx,
+                exp_idx,
+                "scenario uses 'eval:' but no judge could be built",
+                "no_judge",
+            )
+
         matched: list[str] = []
         for spec in expectation.calls or []:
             want = spec.args or None
@@ -292,10 +307,46 @@ class ExpectationMatcher:
                     f"function call {missing!r} not seen (matched: {seen})",
                     "missing_function_call",
                 )
+            judge_failure = await self._check_call_judge(event, expectation, turn_idx, exp_idx)
+            if judge_failure:
+                return judge_failure
             matched.append(str(event.get("name")))
 
         self.last_match_text = ", ".join(matched) or "function call"
         return None
+
+    async def _check_call_judge(
+        self,
+        event: dict,
+        expectation: EvalExpectation,
+        turn_idx: int,
+        exp_idx: int,
+    ) -> EvalAssertionFailure | None:
+        """Put a matched call to the judge if ``eval:`` was set on the expectation.
+
+        The judge is asked about the call by name and arguments, over the
+        conversation so far. A call is not a partial reply, so a ``continue``
+        fails it like a ``no``.
+        """
+        if expectation.eval is None:
+            return None
+        # _match_function_calls fails before matching when there is no judge.
+        assert self._judge is not None
+        name = str(event.get("name") or "?")
+        args = event.get("args") or {}
+        with logger.contextualize(eval_pipeline="judge"):
+            verdict = await self._judge.evaluate_call(name, args, expectation.eval)
+        self._trace.log(f"eval: {verdict.verdict} ({self._match_summary(event)}) {verdict.reason}")
+        if verdict.passed:
+            return None
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"eval {expectation.eval!r} on {self._match_summary(event)}: "
+            f"judge said {verdict.verdict} — {verdict.reason}",
+            "judge_no",
+        )
 
     async def _next_function_call(
         self,
@@ -308,7 +359,10 @@ class ExpectationMatcher:
 
         Calls seen but not yet claimed are buffered, so a turn's calls can arrive
         in any order and a call the LLM corrects and repeats still satisfies it.
-        Raises TimeoutError at ``deadline``.
+        Every ``function_call`` popped from the stream, claimed or buffered, goes
+        into the judge's conversation once, as it arrives, so a later ``eval:``
+        sees what the bot did before it spoke. Raises TimeoutError at
+        ``deadline``.
         """
 
         def matches(ev: dict) -> bool:
@@ -329,6 +383,8 @@ class ExpectationMatcher:
             event = await self._stream.next_any(deadline)
             if event.get("type") not in FUNCTION_CALL_EVENTS:
                 continue
+            if event.get("type") == "function_call" and self._judge is not None:
+                self._judge.add_tool_call(str(event.get("name") or "?"), event.get("args"))
             if matches(event):
                 return event
             self._pending_function_calls.append(event)
