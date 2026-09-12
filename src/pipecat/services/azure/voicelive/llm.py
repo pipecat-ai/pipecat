@@ -996,7 +996,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self.push_error(error_msg=str(details) if details else "Response failed")
             return
 
-        for item in evt.response.get("output", []):
+        # `.get` returns None when the key is present and null, so the default
+        # alone does not keep a null output from reaching the loop.
+        for item in evt.response.get("output") or []:
             await self._call_event_handler("on_conversation_item_updated", item.get("id"), item)
 
         if self._run_llm_when_response_done:
