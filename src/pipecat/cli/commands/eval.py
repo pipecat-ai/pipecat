@@ -613,11 +613,15 @@ def _row_seconds(group: list[EvalRun]) -> float | None:
 
 
 def _group_key(r: EvalRun) -> tuple[str, str]:
-    return (r.bot, r.scenario)
+    return (r.label, r.scenario)
 
 
 def _grouped_runs(runs: list[EvalRun]) -> dict[tuple[str, str], list[EvalRun]]:
-    """Runs bucketed by (bot, scenario), in first-seen order."""
+    """Runs bucketed by (label, scenario), in first-seen order.
+
+    The label rather than the bot path, so one bot file listed under two
+    labels (two configurations) is two rows.
+    """
     groups: dict[tuple[str, str], list[EvalRun]] = {}
     for r in runs:
         groups.setdefault(_group_key(r), []).append(r)
@@ -662,7 +666,7 @@ class _EvalDashboard:
             cells.append(
                 (
                     _eval_status_cell(r, self._spinner),
-                    Text(r.bot),
+                    Text(r.label),
                     Text(r.scenario, style="cyan"),
                     Text(detail, style="dim"),
                 )
@@ -851,7 +855,7 @@ def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
     if tally:
         extra = f"{tally} {extra}"
     scenario = f"{r.scenario} #{r.attempt}" if show_attempt else r.scenario
-    print(f"  {_color(glyph, code)} {r.bot} {_color(scenario, '36')} {_dim(extra)}", flush=True)
+    print(f"  {_color(glyph, code)} {r.label} {_color(scenario, '36')} {_dim(extra)}", flush=True)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -980,7 +984,7 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
-        header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        header = f"  {_red('✗')} {r.label} {_color(r.scenario, '36')}{attempt}"
         if tally and isinstance(r.result, EvalScriptResult):
             header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
@@ -1135,7 +1139,7 @@ def suite(
         ..., help="Manifest YAML listing bots + their scenarios (scripted, or simulations)."
     ),
     pattern: str = typer.Option(
-        None, "-p", "--pattern", help="Only bots whose path contains this."
+        None, "-p", "--pattern", help="Only bots whose path or label contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     kind: EvalKind = typer.Option(None, "-k", "--kind", help="Only scenarios of this kind."),
@@ -1178,6 +1182,14 @@ def suite(
         help="Default per-expectation timeout in seconds (for expectations without their own "
         "within_ms).",
     ),
+    worker_timeout: float = typer.Option(
+        None,
+        "-w",
+        "--worker-timeout",
+        help="Override manifest worker_timeout: seconds a run's harness worker may take "
+        "before it is killed. Default: derived from each scenario's turn budgets or "
+        "max_duration_s, with a 600s floor, plus 60s.",
+    ),
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
@@ -1208,6 +1220,7 @@ def suite(
         base_port=base_port,
         record=audio or None,
         cache_dir=cache_dir,
+        worker_timeout=worker_timeout,
     )
 
     suite = EvalSuite(manifest)
