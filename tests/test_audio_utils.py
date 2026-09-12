@@ -8,7 +8,7 @@ import io
 import unittest
 import wave
 
-from pipecat.audio.utils import pcm_to_wav
+from pipecat.audio.utils import is_silence, pcm_to_wav
 
 
 class TestPcmToWav(unittest.TestCase):
@@ -61,3 +61,36 @@ class TestPcmToWav(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIsSilence(unittest.TestCase):
+    """An audio frame can arrive carrying no samples at all.
+
+    Services build SpeechOutputAudioRawFrame straight from a transport's audio
+    callback without checking the payload length, and the output transport calls
+    is_silence() on every one of them. numpy's max() raises on an empty array, so
+    a zero-length frame took down the speaking-detection path rather than being
+    read as what it is: no audio, therefore no speech.
+    """
+
+    def test_empty_audio_is_silence(self):
+        self.assertTrue(is_silence(b""))
+
+    def test_quiet_audio_is_silence(self):
+        pcm = (10).to_bytes(2, "little", signed=True) * 160
+        self.assertTrue(is_silence(pcm))
+
+    def test_loud_audio_is_not_silence(self):
+        pcm = (3000).to_bytes(2, "little", signed=True) * 160
+        self.assertFalse(is_silence(pcm))
+
+    def test_a_single_loud_sample_is_not_silence(self):
+        """max() is over the whole frame, so one loud sample is enough."""
+        pcm = (10).to_bytes(2, "little", signed=True) * 159 + (3000).to_bytes(
+            2, "little", signed=True
+        )
+        self.assertFalse(is_silence(pcm))
+
+    def test_negative_amplitude_is_measured_by_magnitude(self):
+        pcm = (-3000).to_bytes(2, "little", signed=True) * 160
+        self.assertFalse(is_silence(pcm))

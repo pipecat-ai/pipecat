@@ -305,7 +305,7 @@ def is_silence(pcm_bytes: bytes) -> bool:
 
     Returns:
         bool: True if the audio sample is considered silence (below threshold),
-              False otherwise.
+              False otherwise. A frame carrying no audio counts as silence.
 
     Note:
         Normal speech typically produces amplitude values between ±500 to ±5000,
@@ -315,6 +315,11 @@ def is_silence(pcm_bytes: bytes) -> bool:
     """
     # Convert raw audio bytes to a NumPy array of int16 samples
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
+
+    # No samples carry no speech. max() on an empty array raises, and audio
+    # frames arriving from a transport can be empty.
+    if audio_data.size == 0:
+        return True
 
     # Check the maximum absolute amplitude in the frame
     max_value = np.abs(audio_data).max()
