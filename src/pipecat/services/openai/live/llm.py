@@ -61,7 +61,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
-    BackendOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -957,24 +956,17 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._delegated_before = True
 
         answered = False
-
-        async def on_update(output: BackendOutput):
-            nonlocal answered
-            answered = True
-            await self._send_context_append(
-                delegation.id, output.text, spoken=output.prefers_spoken
-            )
-
         try:
-            # Every output, the final answer included, arrives through
-            # on_update, so the job's return value is not needed here.
-            await _delegate_to_backend(
+            async for output in _delegate_to_backend(
                 self.pipeline_worker,
                 config.backend.name,
                 request=request,
-                on_update=on_update,
                 timeout_secs=config.timeout_secs,
-            )
+            ):
+                answered = True
+                await self._send_context_append(
+                    delegation.id, output.text, spoken=output.prefers_spoken
+                )
             if not answered:
                 # The live model holds the conversation until the delegation
                 # says something, so a run that produced no text still gets a

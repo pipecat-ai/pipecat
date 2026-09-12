@@ -4,17 +4,26 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Backend LLM worker: the backend a conversational model delegates work to.
+"""Backend LLM worker for two-tier voice agents.
 
 A frontend holds the conversation and hands off requests that need tools or
-careful reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service,
-with its own context and multi-step tool calling, to do that work: over the
-worker job API it streams back everything it produces and returns its final
-answer. ``OpenAILiveLLMService`` client delegation puts requests to one.
+careful reasoning. What the frontend is does not matter to this contract: a
+speech-to-speech model delegating on its own, or a pipeline calling a tool.
+A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
+and multi-step tool calling, to do that work: over the worker job API it
+streams back everything it produces, its final answer last.
+:func:`_delegate_to_backend` is the caller side of that contract, an async
+iterator over that stream.
+
+A request is text, so how a frontend words one is its own business.
+:func:`_render_transcript_request` renders the conversation as a labelled
+transcript, which is what a frontend hands over when its model signals a
+handoff without wording a request; a frontend whose model does word one sends
+that instead.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +54,19 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
 
+#: The ``type`` of a job update that carries a :class:`BackendOutput`. Other
+#: update types may share the stream; :func:`_delegate_to_backend` yields only
+#: outputs.
+OUTPUT_UPDATE_TYPE = "output"
+
+#: Appended to the backend LLM's system instruction: its output is relayed to
+#: a listener by the frontend, whatever the app's prompt says the backend does.
+BACKEND_OUTPUT_INSTRUCTIONS = (
+    "Your replies are relayed to a user by a voice assistant. Reply in concise, "
+    "conversational plain text it can say aloud: no Markdown, no raw JSON. Never claim "
+    "an action completed without a tool result confirming it."
+)
+
 
 @dataclass
 class BackendOutput:
@@ -73,6 +95,7 @@ class BackendOutput:
             The payload.
         """
         return {
+            "type": OUTPUT_UPDATE_TYPE,
             "text": self.text,
             "is_thought": self.is_thought,
             "is_final": self.is_final,
@@ -99,9 +122,6 @@ class BackendOutput:
         }
         return cls(text=str(payload.get("text") or ""), **flags)
 
-
-#: Called with each piece of output a backend produces, as it is produced.
-BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
 
 #: Adjusts a backend output — its text, or whether the user may hear it —
 #: before it leaves the worker.
@@ -212,7 +232,11 @@ class BackendLLMWorker(LLMContextWorker):
     Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
-      composed by the frontend.
+      composed by the frontend. What that text says is the application's
+      business: :func:`_render_transcript_request` renders the conversation as
+      a transcript, which is what a frontend whose model hands off without
+      wording a request needs, but a frontend that has a worded request can
+      simply send it.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
       final answer.
@@ -222,9 +246,8 @@ class BackendLLMWorker(LLMContextWorker):
       happens.
 
     The final answer arrives twice, as the last update and as the response, so
-    a caller uses one or the other: a frontend relaying output as it arrives
-    reads the updates, while one that needs a return value reads the response
-    and skips updates marked ``is_final``.
+    a caller uses one or the other. :func:`_delegate_to_backend` wraps the
+    caller side and reads the updates.
 
     Example::
 
@@ -277,6 +300,7 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._run: _BackendRun | None = None
         self._transform_output = transform_output
+        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
 
         # A delegation takes one or more LLM runs: the first for the request
         # itself, then one per round of tool results (the assistant aggregator
@@ -394,26 +418,29 @@ async def _delegate_to_backend(
     backend_name: str,
     *,
     request: str,
-    on_update: BackendUpdateCallback | None = None,
     timeout_secs: float | None = None,
-) -> str:
-    """Put a request to a :class:`BackendLLMWorker` and return its final text.
+) -> AsyncIterator[BackendOutput]:
+    """Put a request to a :class:`BackendLLMWorker` and yield what it produces.
 
     Args:
-        worker: The worker making the request.
+        worker: The worker making the request (for a pipeline processor,
+            ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
             :func:`_render_transcript_request` composes one from a
-            conversation.
-        on_update: Called with each :class:`BackendOutput` the backend
-            produces, the final answer included. A caller using the return
-            value should skip outputs marked ``is_final`` to avoid handling
-            the answer twice.
+            conversation, which is what a frontend hands over when its model
+            signals a handoff without wording a request. A frontend whose
+            model does word one can send it as it stands::
+
+                async for output in _delegate_to_backend(worker, "backend", request=task):
+                    ...
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
 
-    Returns:
-        The backend's final response text (``""`` if it produced none).
+    Yields:
+        Each :class:`BackendOutput` as the backend produces it, the final
+        answer last with ``is_final`` set. A delegation that ends without an
+        answer yields no final output.
 
     Raises:
         JobError: If the backend fails, is cancelled, or times out.
@@ -425,9 +452,10 @@ async def _delegate_to_backend(
     )
     async with worker.job(backend_name, params=params) as backend_job:
         async for event in backend_job:
-            if event.type != JobEvent.UPDATE or not event.data or not on_update:
+            if event.type != JobEvent.UPDATE or not event.data:
+                continue
+            if event.data.get("type", OUTPUT_UPDATE_TYPE) != OUTPUT_UPDATE_TYPE:
                 continue
             output = BackendOutput.from_payload(event.data)
             if output.text:
-                await on_update(output)
-    return str(backend_job.response.get("text", ""))
+                yield output

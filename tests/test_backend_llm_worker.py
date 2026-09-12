@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
 )
 from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
@@ -36,6 +38,7 @@ from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
+    BACKEND_JOB_NAME,
     BackendOutput,
     _delegate_to_backend,
     _render_transcript_request,
@@ -161,21 +164,19 @@ async def _run_backend(
     await runner.add_workers(requester, backend)
 
     updates: list[BackendOutput] = []
-    result: dict[str, str] = {}
-
-    async def on_update(output: BackendOutput):
-        updates.append(output)
 
     async def body():
         try:
-            result["text"] = await _delegate_to_backend(
-                requester, "backend", request=request, on_update=on_update, timeout_secs=10
-            )
+            async for output in _delegate_to_backend(
+                requester, "backend", request=request, timeout_secs=10
+            ):
+                updates.append(output)
         finally:
             await runner.cancel()
 
     await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
-    return result["text"], updates, backend
+    final = [u for u in updates if u.is_final]
+    return (final[-1].text if final else ""), updates, backend
 
 
 @pytest.mark.asyncio
@@ -336,21 +337,17 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
 
+    async def delegate(request: str):
+        async for _ in _delegate_to_backend(requester, "backend", request=request):
+            pass
+
     async def body():
         try:
-            await _delegate_to_backend(
-                requester,
-                "backend",
-                request=_render_transcript_request(
-                    [{"role": "user", "content": "one"}], first=True
-                ),
+            await delegate(
+                _render_transcript_request([{"role": "user", "content": "one"}], first=True)
             )
-            await _delegate_to_backend(
-                requester,
-                "backend",
-                request=_render_transcript_request(
-                    [{"role": "user", "content": "two"}], first=False
-                ),
+            await delegate(
+                _render_transcript_request([{"role": "user", "content": "two"}], first=False)
             )
         finally:
             await runner.cancel()
@@ -429,6 +426,43 @@ async def test_the_response_carries_the_transformed_answer():
 
     assert [u.text for u in updates] == ["RAW ANSWER"]
     assert text == "RAW ANSWER"
+
+
+@pytest.mark.asyncio
+async def test_updates_of_another_type_are_not_outputs():
+    """The stream may carry other update types; only outputs are yielded.
+
+    The backend here is a plain worker speaking the job contract, which is
+    also what a backend registered by name may be.
+    """
+
+    class _ContractBackend(BaseWorker):
+        @job(name=BACKEND_JOB_NAME, sequential=True)
+        async def run_delegation(self, message: BusJobRequestMessage):
+            await self.send_job_update(message.job_id, {"type": "tool_call", "name": "lookup"})
+            await self.send_job_update(
+                message.job_id, BackendOutput(text="Done.", is_final=True).to_payload()
+            )
+            await self.send_job_response(message.job_id, {"text": "Done."})
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, _ContractBackend("backend"))
+    outputs: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for output in _delegate_to_backend(requester, "backend", request="Do it"):
+                outputs.append(output)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert outputs == [BackendOutput(text="Done.", is_final=True)]
+
+
+def test_a_payload_names_its_type():
+    assert BackendOutput(text="hello").to_payload()["type"] == "output"
 
 
 def test_a_payload_leaves_the_flags_it_omits_at_their_defaults():
