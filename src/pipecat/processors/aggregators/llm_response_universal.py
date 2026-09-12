@@ -218,6 +218,9 @@ class LLMAssistantAggregatorParams:
             summarization. Controls trigger thresholds, message preservation, and
             summarization prompts. If None, uses default
             ``LLMAutoContextSummarizationConfig`` values.
+        should_summarize_callback: Optional predicate for automatic context
+            summarization. When provided, it replaces the configured threshold
+            checks after automatic triggering and in-progress guards are checked.
         add_tool_change_messages: When True, on each ``LLMSetToolsFrame`` the
             aggregator computes the diff against the currently advertised tools
             and appends a developer-role message to the context describing
@@ -245,6 +248,7 @@ class LLMAssistantAggregatorParams:
 
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
+    should_summarize_callback: Callable[[LLMContext], bool] | None = None
     add_tool_change_messages: bool = False
 
     # Deprecated field names — kept for backward compatibility. See the
@@ -1587,6 +1591,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             context=self._context,
             config=self._params.auto_context_summarization_config,
             auto_trigger=self._params.enable_auto_context_summarization,
+            should_summarize_callback=self._params.should_summarize_callback,
         )
         self._summarizer.add_event_handler(
             "on_request_summarization", self._on_request_summarization
