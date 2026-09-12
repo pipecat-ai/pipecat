@@ -16,7 +16,8 @@ bot's real turn ends.
 
 The recording does not use the paced streams, whose jitter would make it
 stutter: :class:`EvalClientRecorder` is fed the raw audio on both edges and
-lays each side out on its own timeline.
+lays each side out on its own timeline, the user on the left channel and
+the bot on the right.
 """
 
 import asyncio
@@ -24,7 +25,7 @@ import time
 import wave
 from pathlib import Path
 
-from pipecat.audio.utils import create_stream_resampler, mix_audio
+from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -66,8 +67,10 @@ class EvalClientRecorder:
     Python cannot hold the 40 ms pacing tick precisely, and a recording of the
     paced streams stutters. So each side is recorded as it was produced or
     received, laid out on its own timeline with silence only where a real
-    pause was, and mixed to mono at :meth:`write`. Audio the bot sent past an
-    interruption is dropped, as a real client would drop it.
+    pause was, and written as stereo at :meth:`write`: the user on the left
+    channel, the bot on the right, so overlaps and onsets can be read off
+    the file. Audio the bot sent past an interruption is dropped, as a real
+    client would drop it.
     """
 
     # A chunk arriving later than its side's playout position by more than this
@@ -106,7 +109,10 @@ class EvalClientRecorder:
         return self._user.first is not None or self._bot.first is not None
 
     async def write(self, path: str) -> bool:
-        """Resample both sides to a common rate, align, mix to mono, and write a WAV.
+        """Resample both sides to a common rate, align, and write a stereo WAV.
+
+        The user is the left channel and the bot the right; the shorter side
+        is padded with silence to the longer.
 
         Returns:
             True if a file was written, False if nothing was recorded.
@@ -117,14 +123,15 @@ class EvalClientRecorder:
         start = min(firsts)
         user = await self._user.rendered(self._rate, start)
         bot = await self._bot.rendered(self._rate, start)
-        mixed = mix_audio(user, bot)
+        length = max(len(user), len(bot))
+        stereo = interleave_stereo_audio(user.ljust(length, b"\x00"), bot.ljust(length, b"\x00"))
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(out), "wb") as wf:
-            wf.setnchannels(1)
+            wf.setnchannels(2)
             wf.setsampwidth(2)
             wf.setframerate(self._rate)
-            wf.writeframes(mixed)
+            wf.writeframes(stereo)
         return True
 
 
@@ -196,6 +203,13 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
     A real-time task sends one 40 ms frame per tick: queued TTS audio when
     there is some, silence otherwise, so the bot's VAD and turn detection see
     the silence they need to end a turn. Runs only when audio output is on.
+
+    A write returns once the send task has sent its audio, the way a write to
+    a sound device returns once the device took it. The base transport's
+    ``BotStartedSpeakingFrame`` and ``BotStoppedSpeakingFrame`` (here: the
+    *user's* utterance going out) then bracket the audio as it was sent, and
+    the stop frame marks the end of the user's speech for whatever times the
+    turn.
     """
 
     def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
@@ -204,6 +218,11 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         self._pending = bytearray()
         self._send_task = None
         self._recorder = recorder
+        # Bytes queued for the send task and bytes it has consumed (sent, or
+        # dropped by an interruption); a write waits for its own to be consumed.
+        self._queued_bytes = 0
+        self._consumed_bytes = 0
+        self._consumed = asyncio.Event()
 
     async def start(self, frame: StartFrame):
         """Start the transport and, in audio mode, the real-time send stream."""
@@ -226,12 +245,14 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         if isinstance(frame, InterruptionFrame) and self._pending:
             if self._recorder is not None:
                 self._recorder.drop_user_tail(len(self._pending))
-            self._pending.clear()
+            self._drop_pending()
         await super().process_frame(frame, direction)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Queue the user audio for the send task.
+        """Queue the user audio for the send task, and wait until it has gone out.
 
+        The media sender writes one chunk at a time, so the wait is at most a
+        tick or two; an interruption or the transport stopping releases it.
         Returns False so the media sender does not push this un-paced frame
         downstream; the send task pushes the paced frames instead.
         """
@@ -242,6 +263,13 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         if self._recorder is not None:
             self._recorder.add_user(frame.audio, frame.sample_rate)
         self._pending.extend(frame.audio)
+        self._queued_bytes += len(frame.audio)
+        sent_by = self._queued_bytes
+        # With no send task (the transport stopping) nothing would send it, so
+        # nothing is waited for.
+        while self._send_task is not None and self._consumed_bytes < sent_by:
+            self._consumed.clear()
+            await self._consumed.wait()
         return False
 
     async def _send_task_handler(self):
@@ -265,6 +293,10 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
                 num_channels=self._params.audio_out_channels,
             )
             await self._send_frame(frame)
+            if pcm is not silence:
+                # The audio went out: the write that queued it may return.
+                self._consumed_bytes = self._queued_bytes - len(self._pending)
+                self._consumed.set()
             # Push every frame (audio and silence) downstream at this paced cadence:
             # the harness recorder aligns tracks by wall-clock, so a continuous
             # stream keeps the user turn at the right time (pushing only audio would
@@ -278,10 +310,18 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
             return
         await self._write_frame(frame)
 
+    def _drop_pending(self):
+        """Forget the queued audio, releasing the write waiting on it."""
+        self._pending.clear()
+        self._consumed_bytes = self._queued_bytes
+        self._consumed.set()
+
     async def _cancel_send_task(self):
         if self._send_task is not None:
             await self.cancel_task(self._send_task)
             self._send_task = None
+        # Nothing will send what is queued now; a write waiting on it returns.
+        self._drop_pending()
 
 
 class EvalClientInputTransport(WebsocketClientInputTransport):

@@ -50,8 +50,12 @@ Supported expectation fields (per event):
     required — event type name
 
 ``within_ms: <int>``
-    latency budget from the most recent anchor (optional; defaults to 60s when
-    omitted)
+    latency budget from the turn's send (optional; defaults to 60s when
+    omitted). The anchor is the send for every turn, spoken or not: for a
+    spoken turn the budget runs while the utterance is still streaming to the
+    bot. A turn's measured latencies, the ``timing`` on its result
+    (:class:`~pipecat.evals.results.EvalTurnTiming`), use a different anchor:
+    the end of the user's speech for a spoken turn, the send for a text one.
 
 ``text_contains: <str>``
     substring check on the event's text content, ignoring whitespace differences
@@ -259,7 +263,8 @@ class EvalExpectation:
             all of a turn's expectations share that one anchor, so a stalled turn
             fails within a single budget rather than one per expectation. For audio
             turns the anchor is when the utterance was *sent*, not when it finishes
-            streaming to the bot. Defaults to 60s when omitted, so timing isn't
+            streaming to the bot (the turn's measured ``timing`` is anchored
+            there instead). Defaults to 60s when omitted, so timing isn't
             asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
