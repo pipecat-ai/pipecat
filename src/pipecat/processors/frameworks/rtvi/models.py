@@ -538,14 +538,25 @@ class UserLLMTextMessage(BaseModel):
 
 
 class UserStartedSpeakingMessage(BaseModel):
-    """Message indicating user has started speaking."""
+    """Message indicating the user has started speaking.
+
+    Bidirectional. Server-to-client: the bot's turn strategy finalized a
+    start. Client-to-server: a cooperating client that ran VAD at the
+    microphone is proposing a turn start
+    (:class:`~pipecat.frames.frames.ProposedUserStartedSpeakingFrame`).
+    """
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["user-started-speaking"] = "user-started-speaking"
 
 
 class UserStoppedSpeakingMessage(BaseModel):
-    """Message indicating user has stopped speaking."""
+    """Message indicating the user has stopped speaking.
+
+    Bidirectional. Server-to-client: the bot's turn strategy finalized a
+    stop. Client-to-server: a cooperating client is proposing a turn stop
+    (:class:`~pipecat.frames.frames.ProposedUserStoppedSpeakingFrame`).
+    """
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
@@ -554,8 +565,10 @@ class UserStoppedSpeakingMessage(BaseModel):
 class VADUserStartedSpeakingMessage(BaseModel):
     """Message indicating VAD detected the user started speaking.
 
-    Raw VAD signal, emitted independently of turn finalization (unlike
+    Bidirectional raw VAD signal, independent of turn finalization (unlike
     ``user-started-speaking``, which a turn strategy may gate or defer).
+    Client-to-server, this becomes a
+    :class:`~pipecat.frames.frames.VADUserStartedSpeakingFrame`.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -565,8 +578,10 @@ class VADUserStartedSpeakingMessage(BaseModel):
 class VADUserStoppedSpeakingMessage(BaseModel):
     """Message indicating VAD detected the user stopped speaking.
 
-    Raw VAD signal, emitted independently of turn finalization (unlike
+    Bidirectional raw VAD signal, independent of turn finalization (unlike
     ``user-stopped-speaking``, which a turn strategy may gate or defer).
+    Client-to-server, this becomes a
+    :class:`~pipecat.frames.frames.VADUserStoppedSpeakingFrame`.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
