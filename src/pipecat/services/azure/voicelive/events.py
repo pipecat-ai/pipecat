@@ -15,6 +15,7 @@ Voice Live keeps the original Realtime event names (``response.audio.delta``,
 current OpenAI Realtime API uses.
 """
 
+import json
 import uuid
 from typing import Any, Literal, TypeAlias
 
@@ -685,3 +686,586 @@ class ResponseCancelEvent(ClientEvent):
 
 
 #
+# Server events (received from Voice Live)
+#
+
+
+class ServerEvent(BaseModel):
+    """Base class for server events received from the Voice Live API.
+
+    Parameters:
+        event_id: Unique identifier assigned by the service.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    event_id: str | None = None
+
+
+class SessionCreatedEvent(ServerEvent):
+    """Event reporting that the session is open.
+
+    Parameters:
+        type: Event type, always "session.created".
+        session: The session as created.
+    """
+
+    type: Literal["session.created"]
+    session: dict[str, Any]
+
+
+class SessionUpdatedEvent(ServerEvent):
+    """Event reporting that the session configuration was applied.
+
+    Parameters:
+        type: Event type, always "session.updated".
+        session: The session as updated.
+    """
+
+    type: Literal["session.updated"]
+    session: dict[str, Any]
+
+
+class ConversationItemCreated(ServerEvent):
+    """Event reporting that an item was added to the conversation.
+
+    Parameters:
+        type: Event type, always "conversation.item.created".
+        item: The item that was added.
+        previous_item_id: Item it was inserted after.
+    """
+
+    type: Literal["conversation.item.created"]
+    item: ConversationItem
+    previous_item_id: str | None = None
+
+
+class ConversationItemTruncated(ServerEvent):
+    """Event reporting that an assistant audio item was truncated.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncated".
+        item_id: Item that was truncated.
+        content_index: Content part that was truncated.
+        audio_end_ms: Point, in milliseconds, the audio was truncated at.
+    """
+
+    type: Literal["conversation.item.truncated"]
+    item_id: str
+    content_index: int = 0
+    audio_end_ms: int = 0
+
+
+class ConversationItemDeleted(ServerEvent):
+    """Event reporting that an item was removed from the conversation.
+
+    Parameters:
+        type: Event type, always "conversation.item.deleted".
+        item_id: Item that was removed.
+    """
+
+    type: Literal["conversation.item.deleted"]
+    item_id: str
+
+
+class ConversationItemInputAudioTranscriptionDelta(ServerEvent):
+    """Event carrying part of a caller transcript.
+
+    Parameters:
+        type: Event type, always
+            "conversation.item.input_audio_transcription.delta".
+        item_id: Item being transcribed.
+        content_index: Content part being transcribed.
+        delta: Transcript text for this update.
+    """
+
+    type: Literal["conversation.item.input_audio_transcription.delta"]
+    item_id: str
+    content_index: int = 0
+    delta: str | None = None
+
+
+class ConversationItemInputAudioTranscriptionCompleted(ServerEvent):
+    """Event carrying a finished caller transcript.
+
+    Parameters:
+        type: Event type, always
+            "conversation.item.input_audio_transcription.completed".
+        item_id: Item that was transcribed.
+        content_index: Content part that was transcribed.
+        transcript: The finished transcript.
+    """
+
+    type: Literal["conversation.item.input_audio_transcription.completed"]
+    item_id: str
+    content_index: int = 0
+    transcript: str = ""
+
+
+class ConversationItemInputAudioTranscriptionFailed(ServerEvent):
+    """Event reporting that a caller transcript could not be produced.
+
+    Parameters:
+        type: Event type, always
+            "conversation.item.input_audio_transcription.failed".
+        item_id: Item that failed to transcribe.
+        content_index: Content part that failed to transcribe.
+        error: Why transcription failed.
+    """
+
+    type: Literal["conversation.item.input_audio_transcription.failed"]
+    item_id: str
+    content_index: int = 0
+    error: RealtimeError | None = None
+
+
+class InputAudioBufferCommitted(ServerEvent):
+    """Event reporting that the input buffer became a conversation item.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.committed".
+        item_id: Item the buffer became.
+        previous_item_id: Item it was inserted after.
+    """
+
+    type: Literal["input_audio_buffer.committed"]
+    item_id: str | None = None
+    previous_item_id: str | None = None
+
+
+class InputAudioBufferCleared(ServerEvent):
+    """Event reporting that the input buffer was discarded.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.cleared".
+    """
+
+    type: Literal["input_audio_buffer.cleared"]
+
+
+class InputAudioBufferSpeechStarted(ServerEvent):
+    """Event reporting that the caller started speaking.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.speech_started".
+        audio_start_ms: Where in the buffered audio speech began.
+        item_id: Item the speech belongs to.
+    """
+
+    type: Literal["input_audio_buffer.speech_started"]
+    audio_start_ms: int | None = None
+    item_id: str | None = None
+
+
+class InputAudioBufferSpeechStopped(ServerEvent):
+    """Event reporting that the caller stopped speaking.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.speech_stopped".
+        audio_end_ms: Where in the buffered audio speech ended.
+        item_id: Item the speech belongs to.
+    """
+
+    type: Literal["input_audio_buffer.speech_stopped"]
+    audio_end_ms: int | None = None
+    item_id: str | None = None
+
+
+class ResponseCreated(ServerEvent):
+    """Event reporting that a response has begun.
+
+    Parameters:
+        type: Event type, always "response.created".
+        response: The response as created.
+    """
+
+    type: Literal["response.created"]
+    response: dict[str, Any]
+
+
+class ResponseDone(ServerEvent):
+    """Event reporting that a response has finished.
+
+    Parameters:
+        type: Event type, always "response.done".
+        response: The finished response, including status and token usage.
+    """
+
+    type: Literal["response.done"]
+    response: dict[str, Any]
+
+    @property
+    def status(self) -> str | None:
+        """Status the response finished with."""
+        return self.response.get("status")
+
+    @property
+    def usage(self) -> TokenUsage | None:
+        """Token usage reported for the response, when present."""
+        usage = self.response.get("usage")
+        return TokenUsage.model_validate(usage) if usage else None
+
+
+class ResponseOutputItemAdded(ServerEvent):
+    """Event reporting that an output item was added to a response.
+
+    Parameters:
+        type: Event type, always "response.output_item.added".
+        response_id: Response the item belongs to.
+        output_index: Position of the item in the output.
+        item: The item that was added.
+    """
+
+    type: Literal["response.output_item.added"]
+    response_id: str | None = None
+    output_index: int = 0
+    item: ConversationItem
+
+
+class ResponseOutputItemDone(ServerEvent):
+    """Event reporting that an output item is finished.
+
+    Parameters:
+        type: Event type, always "response.output_item.done".
+        response_id: Response the item belongs to.
+        output_index: Position of the item in the output.
+        item: The finished item.
+    """
+
+    type: Literal["response.output_item.done"]
+    response_id: str | None = None
+    output_index: int = 0
+    item: ConversationItem
+
+
+class ResponseContentPartAdded(ServerEvent):
+    """Event reporting that a content part was added to an output item.
+
+    Parameters:
+        type: Event type, always "response.content_part.added".
+        response_id: Response the part belongs to.
+        item_id: Item the part belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        part: The part that was added.
+    """
+
+    type: Literal["response.content_part.added"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    part: dict[str, Any] | None = None
+
+
+class ResponseContentPartDone(ServerEvent):
+    """Event reporting that a content part is finished.
+
+    Parameters:
+        type: Event type, always "response.content_part.done".
+        response_id: Response the part belongs to.
+        item_id: Item the part belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        part: The finished part.
+    """
+
+    type: Literal["response.content_part.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    part: dict[str, Any] | None = None
+
+
+class ResponseTextDelta(ServerEvent):
+    """Event carrying part of a text response.
+
+    Parameters:
+        type: Event type, always "response.text.delta".
+        response_id: Response the text belongs to.
+        item_id: Item the text belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        delta: Text for this update.
+    """
+
+    type: Literal["response.text.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    delta: str = ""
+
+
+class ResponseTextDone(ServerEvent):
+    """Event carrying a finished text response.
+
+    Parameters:
+        type: Event type, always "response.text.done".
+        response_id: Response the text belongs to.
+        item_id: Item the text belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        text: The finished text.
+    """
+
+    type: Literal["response.text.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    text: str = ""
+
+
+class ResponseAudioDelta(ServerEvent):
+    """Event carrying part of an audio response.
+
+    Parameters:
+        type: Event type, always "response.audio.delta".
+        response_id: Response the audio belongs to.
+        item_id: Item the audio belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        delta: Base64-encoded audio for this update.
+    """
+
+    type: Literal["response.audio.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    delta: str = ""
+
+
+class ResponseAudioDone(ServerEvent):
+    """Event reporting that an audio response is finished.
+
+    Parameters:
+        type: Event type, always "response.audio.done".
+        response_id: Response the audio belongs to.
+        item_id: Item the audio belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+    """
+
+    type: Literal["response.audio.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+
+
+class ResponseAudioTranscriptDelta(ServerEvent):
+    """Event carrying part of the transcript of an audio response.
+
+    Parameters:
+        type: Event type, always "response.audio_transcript.delta".
+        response_id: Response the transcript belongs to.
+        item_id: Item the transcript belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        delta: Transcript text for this update.
+    """
+
+    type: Literal["response.audio_transcript.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    delta: str = ""
+
+
+class ResponseAudioTranscriptDone(ServerEvent):
+    """Event carrying the finished transcript of an audio response.
+
+    Parameters:
+        type: Event type, always "response.audio_transcript.done".
+        response_id: Response the transcript belongs to.
+        item_id: Item the transcript belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        transcript: The finished transcript.
+    """
+
+    type: Literal["response.audio_transcript.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    transcript: str = ""
+
+
+class ResponseAudioTimestampDelta(ServerEvent):
+    """Event carrying the timing of one spoken word.
+
+    Emitted when ``output_audio_timestamp_types`` includes "word".
+
+    Parameters:
+        type: Event type, always "response.audio_timestamp.delta".
+        response_id: Response the word belongs to.
+        item_id: Item the word belongs to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+        audio_offset_ms: Where in the response audio the word begins.
+        audio_duration_ms: How long the word takes to speak.
+        text: The word itself.
+        timestamp_type: Granularity of the timestamp, always "word".
+    """
+
+    type: Literal["response.audio_timestamp.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+    audio_offset_ms: int = 0
+    audio_duration_ms: int = 0
+    text: str = ""
+    timestamp_type: Literal["word"] | None = None
+
+
+class ResponseAudioTimestampDone(ServerEvent):
+    """Event reporting that word timings for a response are finished.
+
+    Parameters:
+        type: Event type, always "response.audio_timestamp.done".
+        response_id: Response the timings belong to.
+        item_id: Item the timings belong to.
+        output_index: Position of the item in the output.
+        content_index: Position of the part within the item.
+    """
+
+    type: Literal["response.audio_timestamp.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    content_index: int = 0
+
+
+class ResponseFunctionCallArgumentsDelta(ServerEvent):
+    """Event carrying part of a function call's arguments.
+
+    Parameters:
+        type: Event type, always "response.function_call_arguments.delta".
+        response_id: Response the call belongs to.
+        item_id: Item the call belongs to.
+        output_index: Position of the item in the output.
+        call_id: Identifier tying the call to its output.
+        delta: Argument text for this update.
+    """
+
+    type: Literal["response.function_call_arguments.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    call_id: str | None = None
+    delta: str = ""
+
+
+class ResponseFunctionCallArgumentsDone(ServerEvent):
+    """Event carrying a function call's finished arguments.
+
+    Parameters:
+        type: Event type, always "response.function_call_arguments.done".
+        response_id: Response the call belongs to.
+        item_id: Item the call belongs to.
+        output_index: Position of the item in the output.
+        call_id: Identifier tying the call to its output.
+        name: Function being called.
+        arguments: JSON-encoded arguments.
+    """
+
+    type: Literal["response.function_call_arguments.done"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str = ""
+
+
+class RateLimitsUpdated(ServerEvent):
+    """Event reporting the caller's remaining rate limit allowance.
+
+    Parameters:
+        type: Event type, always "rate_limits.updated".
+        rate_limits: Remaining allowance per limit.
+    """
+
+    type: Literal["rate_limits.updated"]
+    rate_limits: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ErrorEvent(ServerEvent):
+    """Event reporting that an error occurred.
+
+    Parameters:
+        type: Event type, always "error".
+        error: Error details.
+    """
+
+    type: Literal["error"]
+    error: RealtimeError
+
+
+#
+# Event parsing
+#
+
+_server_event_types = {
+    "error": ErrorEvent,
+    "rate_limits.updated": RateLimitsUpdated,
+    "session.created": SessionCreatedEvent,
+    "session.updated": SessionUpdatedEvent,
+    "conversation.item.created": ConversationItemCreated,
+    "conversation.item.truncated": ConversationItemTruncated,
+    "conversation.item.deleted": ConversationItemDeleted,
+    "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
+    "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
+    "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
+    "input_audio_buffer.committed": InputAudioBufferCommitted,
+    "input_audio_buffer.cleared": InputAudioBufferCleared,
+    "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
+    "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
+    "response.created": ResponseCreated,
+    "response.done": ResponseDone,
+    "response.output_item.added": ResponseOutputItemAdded,
+    "response.output_item.done": ResponseOutputItemDone,
+    "response.content_part.added": ResponseContentPartAdded,
+    "response.content_part.done": ResponseContentPartDone,
+    "response.text.delta": ResponseTextDelta,
+    "response.text.done": ResponseTextDone,
+    "response.audio.delta": ResponseAudioDelta,
+    "response.audio.done": ResponseAudioDone,
+    "response.audio_transcript.delta": ResponseAudioTranscriptDelta,
+    "response.audio_transcript.done": ResponseAudioTranscriptDone,
+    "response.audio_timestamp.delta": ResponseAudioTimestampDelta,
+    "response.audio_timestamp.done": ResponseAudioTimestampDone,
+    "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
+    "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
+}
+
+
+def parse_server_event(data: str | bytes):
+    """Parse a server event from JSON.
+
+    Args:
+        data: JSON text containing the server event, as delivered by the
+            websocket.
+
+    Returns:
+        Parsed server event object of the appropriate type, or ``None`` if the
+        event type is not recognized (e.g. an avatar or animation event, or a
+        newer server event without a model).
+
+    Raises:
+        Exception: If a recognized event type fails to parse.
+    """
+    event = json.loads(data)
+    event_type = event["type"]
+    if event_type not in _server_event_types:
+        return None
+    try:
+        return _server_event_types[event_type].model_validate(event)
+    except Exception as e:
+        raise Exception(f"{e} \n\n{data}")
