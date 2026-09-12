@@ -13,6 +13,7 @@ https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live
 import base64
 import json
 import re
+import time
 import urllib.parse
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -26,20 +27,31 @@ from websockets.asyncio.client import connect as websocket_connect
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
+    LLMTextFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    TTSTextFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -660,6 +672,36 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":
                 await self._handle_evt_session_updated(evt)
+            elif evt.type == "response.created":
+                pass
+            elif evt.type == "response.audio.delta":
+                await self._handle_evt_audio_delta(evt)
+            elif evt.type == "response.audio.done":
+                await self._handle_evt_audio_done(evt)
+            elif evt.type in (
+                "response.content_part.added",
+                "response.content_part.done",
+                "response.audio_transcript.done",
+                "response.text.done",
+                "response.audio_timestamp.delta",
+                "response.audio_timestamp.done",
+                "rate_limits.updated",
+            ):
+                pass
+            elif evt.type == "response.output_item.added":
+                await self._handle_evt_conversation_item_added(evt)
+            elif evt.type == "response.output_item.done":
+                pass
+            elif evt.type == "conversation.item.created":
+                await self._handle_evt_conversation_item_added(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.delta":
+                await self._handle_evt_input_audio_transcription_delta(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.completed":
+                await self._handle_evt_input_audio_transcription_completed(evt)
+            elif evt.type == "response.done":
+                await self._handle_evt_response_done(evt)
+            elif evt.type == "response.audio_transcript.delta":
+                await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
                 if evt.error.code in _NON_FATAL_ERROR_CODES:
                     logger.debug(f"{self} {evt.error.message}")
@@ -679,6 +721,131 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if self._run_llm_when_api_session_ready:
             self._run_llm_when_api_session_ready = False
             await self._create_response()
+
+    async def _handle_evt_audio_delta(self, evt):
+        """Handle audio delta event — streaming audio from assistant."""
+        await self.stop_ttfb_metrics()
+
+        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
+            logger.warning(
+                "Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+            )
+            logger.debug("Forcing previous audio response to None")
+            self._current_audio_response = None
+
+        if not self._current_audio_response:
+            self._current_audio_response = CurrentAudioResponse(
+                item_id=evt.item_id,
+                content_index=evt.content_index,
+                start_time_ms=int(time.time() * 1000),
+            )
+            await self.push_frame(TTSStartedFrame())
+
+        audio = base64.b64decode(evt.delta)
+        self._current_audio_response.total_size += len(audio)
+
+        frame = TTSAudioRawFrame(
+            audio=audio,
+            sample_rate=self._get_output_sample_rate(),
+            num_channels=1,
+        )
+        await self.push_frame(frame)
+
+    async def _handle_evt_audio_done(self, evt):
+        """Handle audio done event."""
+        if self._current_audio_response:
+            await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_evt_conversation_item_added(self, evt):
+        """Handle conversation.item.created and response.output_item.added events."""
+        if evt.item.type == "function_call":
+            if evt.item.call_id not in self._pending_function_calls:
+                self._pending_function_calls[evt.item.call_id] = evt.item
+            else:
+                logger.debug(f"Function call {evt.item.call_id} already tracked, skipping")
+
+        await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
+
+        if self._messages_added_manually.get(evt.item.id):
+            del self._messages_added_manually[evt.item.id]
+            return
+
+        if evt.item.role == "assistant":
+            # An assistant item is announced twice, by conversation.item.created
+            # and by response.output_item.added, so open the response only the
+            # first time this item is seen.
+            already_open = (
+                self._current_assistant_response is not None
+                and self._current_assistant_response.id == evt.item.id
+            )
+            self._current_assistant_response = evt.item
+            if not already_open:
+                await self.push_frame(LLMFullResponseStartFrame())
+
+    async def _handle_evt_input_audio_transcription_delta(self, evt):
+        """Handle streaming input audio transcription delta.
+
+        Accumulates deltas per item and pushes the running text as an
+        InterimTranscriptionFrame so the UI shows the full partial transcript.
+        """
+        if evt.delta:
+            self._interim_transcription_text += evt.delta
+            await self.push_frame(
+                InterimTranscriptionFrame(self._interim_transcription_text, "", time_now_iso8601()),
+                FrameDirection.UPSTREAM,
+            )
+
+    async def _handle_evt_input_audio_transcription_completed(self, evt):
+        """Handle input audio transcription completed event."""
+        self._interim_transcription_text = ""
+        await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
+
+        transcript = evt.transcript.strip() if evt.transcript else ""
+        if transcript:
+            await self.push_frame(
+                TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
+                FrameDirection.UPSTREAM,
+            )
+
+    async def _handle_evt_response_done(self, evt):
+        """Handle response.done event."""
+        usage = evt.usage
+        if usage and usage.total_tokens:
+            tokens = LLMTokenUsage(
+                prompt_tokens=usage.input_tokens or 0,
+                completion_tokens=usage.output_tokens or 0,
+                total_tokens=usage.total_tokens or 0,
+            )
+            await self.start_llm_usage_metrics(tokens)
+
+        await self.stop_processing_metrics()
+        await self.push_frame(LLMFullResponseEndFrame())
+        self._current_assistant_response = None
+
+        if evt.status == "failed":
+            details = evt.response.get("status_details")
+            await self.push_error(error_msg=str(details) if details else "Response failed")
+            return
+
+        for item in evt.response.get("output", []):
+            await self._call_event_handler("on_conversation_item_updated", item.get("id"), item)
+
+    async def _handle_evt_audio_transcript_delta(self, evt):
+        """Handle audio transcript delta event."""
+        if evt.delta:
+            await self._push_output_transcript_text_frames(evt.delta)
+
+    async def _push_output_transcript_text_frames(self, text: str):
+        # Push LLMTextFrame for RTVI "bot-llm-text" events (not appended to context
+        # to avoid duplication since the realtime API manages its own context).
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame for output aggregation
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _handle_evt_error(self, evt):
         """Handle fatal error event."""
