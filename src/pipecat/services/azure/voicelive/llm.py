@@ -217,11 +217,12 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     recommended external user turn strategies resolve into
     ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``.
     ``LLMContextAggregatorPair`` auto-detects this realtime service and
-    decouples context writes from those frames. If you wire local VAD
-    (``LLMUserAggregatorParams.vad_analyzer``) on top of this service, disable
-    Voice Live's server-side turn detection first by passing
-    ``turn_detection=None`` in ``session_properties`` (manual mode); otherwise
-    both sources broadcast duplicate user-turn frames.
+    decouples context writes from those frames. To drive turns from local VAD
+    (``LLMUserAggregatorParams.vad_analyzer``) instead, disable Voice Live's
+    server-side turn detection by passing ``turn_detection=None`` in
+    ``session_properties`` (manual mode): while it stays on, the strategies this
+    service recommends replace the ones the analyzer installs, leaving the
+    analyzer with no say in turn-taking.
 
     Azure's own Realtime deployments are a different product served by
     :class:`~pipecat.services.azure.realtime.llm.AzureRealtimeLLMService`; the
@@ -428,11 +429,17 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         return self._output_sample_rate or 24000
 
     def _is_manual_turn_detection(self) -> bool:
-        """Whether the caller drives turn boundaries instead of Voice Live."""
+        """Whether the caller drives turn boundaries instead of Voice Live.
+
+        Leaving ``turn_detection`` unset keeps Voice Live's own defaults, which
+        run server-side VAD; only an explicit None or False opts out. That is
+        the same distinction :class:`~.events.SessionUpdateEvent` makes when it
+        decides whether to send the disabling null.
+        """
         props = self._settings.session_properties
         if not is_given(props):
             return False
-        return not props.turn_detection
+        return "turn_detection" in props.model_fields_set and not props.turn_detection
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Describe this service to the rest of the pipeline."""
@@ -965,6 +972,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
                 FrameDirection.UPSTREAM,
             )
+        else:
+            # Nothing from this turn reaches the context, so release the turn
+            # server VAD claimed rather than let it consume the next message.
+            self._server_vad_handled_turn = False
 
     async def _handle_evt_input_audio_transcription_failed(self, evt):
         """Handle input audio transcription failed event.
@@ -973,6 +984,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         into the next turn, since only a completed transcription clears it.
         """
         self._interim_transcription_text = ""
+        self._server_vad_handled_turn = False
         message = evt.error.message if evt.error else None
         await self.push_error(
             error_msg=f"Voice Live transcription failed: {message or 'no detail given'}"
@@ -1077,7 +1089,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         # Server VAD creates its own response for this turn; the flag keeps
         # _handle_context from sending a duplicate when the transcript lands.
-        self._server_vad_handled_turn = True
+        # Without transcription no transcript ever lands, so arming it would
+        # leave it to swallow whatever reaches the context next.
+        props = self._settings.session_properties
+        if is_given(props) and props.input_audio_transcription:
+            self._server_vad_handled_turn = True
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)

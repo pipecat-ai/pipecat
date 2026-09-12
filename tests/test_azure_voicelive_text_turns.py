@@ -123,6 +123,68 @@ async def test_a_text_turn_after_a_server_vad_turn_is_still_sent():
     assert recorder.user_texts() == ["typed turn"]
 
 
+async def _transcription_completed(service, transcript):
+    await service._handle_evt_input_audio_transcription_completed(
+        type("Evt", (), {"item_id": "item_1", "transcript": transcript})()
+    )
+
+
+async def _transcription_failed(service, _transcript):
+    await service._handle_evt_input_audio_transcription_failed(
+        type("Evt", (), {"error": type("Err", (), {"message": "no speech detected"})()})()
+    )
+
+
+@pytest.mark.parametrize(
+    "close_turn, transcript",
+    [
+        (_transcription_completed, "   "),
+        (_transcription_completed, None),
+        (_transcription_failed, None),
+    ],
+    ids=["blank-transcript", "null-transcript", "failed-transcription"],
+)
+@pytest.mark.asyncio
+async def test_a_vad_turn_without_a_transcript_does_not_swallow_the_next_turn(
+    close_turn, transcript
+):
+    """The skip belongs to a turn that reaches the context; one that doesn't owes nothing.
+
+    Server VAD fires on noise often enough that the claim has to be released
+    when no transcript follows it.
+    """
+    service, recorder = _make_service()
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+    await service._handle_context(context)
+
+    await service._handle_evt_speech_stopped(None)
+    await close_turn(service, transcript)
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "typed turn"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["typed turn"]
+    assert "ResponseCreateEvent" in recorder.kinds()
+
+
+@pytest.mark.asyncio
+async def test_no_turn_is_claimed_when_transcription_is_off():
+    """With transcription disabled no transcript ever arrives to consume the claim."""
+    service, recorder = _make_service()
+    service._settings.session_properties.input_audio_transcription = None
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+    await service._handle_context(context)
+
+    await service._handle_evt_speech_stopped(None)
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "typed turn"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["typed turn"]
+
+
 @pytest.mark.asyncio
 async def test_list_content_is_flattened_to_text():
     service, recorder = _make_service()

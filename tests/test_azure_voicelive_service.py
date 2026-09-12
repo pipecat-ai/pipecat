@@ -93,6 +93,37 @@ def test_turn_detection_none_selects_manual_mode():
 
 
 @pytest.mark.parametrize(
+    "session_kwargs, manual",
+    [
+        ({}, False),
+        ({"turn_detection": None}, True),
+        ({"turn_detection": False}, True),
+        ({"turn_detection": events.TurnDetection(type="azure_semantic_vad")}, False),
+    ],
+    ids=["unset", "none", "false", "configured"],
+)
+def test_manual_mode_matches_what_the_session_update_sends(session_kwargs, manual):
+    """The service and the wire have to agree on who is detecting turns.
+
+    An unset ``turn_detection`` is omitted from the session update, leaving the
+    service's own VAD running, so it is not manual mode.
+    """
+    service = _service(
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(**session_kwargs)
+        )
+    )
+    session = service._settings.session_properties
+    dump = events.SessionUpdateEvent(session=session.model_copy()).model_dump(exclude_none=True)
+    wire_disables_detection = (
+        "turn_detection" in dump["session"] and not (dump["session"]["turn_detection"])
+    )
+
+    assert service._is_manual_turn_detection() is manual
+    assert wire_disables_detection is manual
+
+
+@pytest.mark.parametrize(
     "output_rate, expected_format",
     [(8000, "pcm16_8000hz"), (16000, "pcm16_16000hz"), (24000, "pcm16")],
 )
