@@ -41,6 +41,10 @@ def _service(**kwargs) -> AzureVoiceLiveLLMService:
             "https://my-resource.cognitiveservices.azure.com",
             "wss://my-resource.cognitiveservices.azure.com/voice-live/realtime",
         ),
+        (
+            "ws://my-resource.services.ai.azure.com",
+            "wss://my-resource.services.ai.azure.com/voice-live/realtime",
+        ),
     ],
 )
 def test_endpoint_is_normalized_to_a_websocket_url(endpoint, expected):

@@ -404,7 +404,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     @staticmethod
     def _build_base_url(endpoint: str) -> str:
         """Normalize a portal endpoint or full URL into a Voice Live WebSocket URL."""
-        url = re.sub(r"^https?://", "wss://", endpoint.strip()).rstrip("/")
+        url = re.sub(r"^(?:https?|ws)://", "wss://", endpoint.strip()).rstrip("/")
         if not url.startswith("wss://"):
             url = f"wss://{url}"
         if "/voice-live/realtime" not in url:
