@@ -1056,6 +1056,18 @@ class ServiceRegistry:
             ],
         ),
         ServiceDefinition(
+            value="azure_voice_live",
+            label="Azure Voice Live",
+            package="pipecat-ai[azure]",
+            class_name=["AzureVoiceLiveLLMService"],
+            env_prefix="AZURE",
+            include_params=[],
+            manual_config=True,
+            additional_imports=[
+                "from pipecat.services.azure.voicelive.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection"
+            ],
+        ),
+        ServiceDefinition(
             value="gemini_live_realtime",
             label="Gemini Live",
             package="pipecat-ai[google]",
