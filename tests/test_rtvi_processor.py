@@ -16,6 +16,10 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InputTransportStartAudioStreamingFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
@@ -224,6 +228,53 @@ class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
     def test_dtmf_input_data_rejects_legacy_button_field(self):
         with self.assertRaises(ValidationError):
             RTVI.DTMFInputData.model_validate({"button": "1"})
+
+
+class TestRTVIInboundSpeaking(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        if hasattr(self, "processor"):
+            await self.processor.cleanup()
+
+    async def _pushed_from(self, message_type: str):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        await self.processor._handle_inbound_speaking(message_type)
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    async def test_user_started_speaking_is_a_turn_proposal(self):
+        # A proposal, not UserStartedSpeakingFrame: the aggregator's external
+        # start strategy owns the interruption instead of adopting a
+        # already-announced turn (which would skip barge-in).
+        pushed = await self._pushed_from("user-started-speaking")
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], ProposedUserStartedSpeakingFrame)
+
+    async def test_user_stopped_speaking_is_a_turn_proposal(self):
+        pushed = await self._pushed_from("user-stopped-speaking")
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], ProposedUserStoppedSpeakingFrame)
+
+    async def test_vad_user_started_speaking_is_a_vad_frame(self):
+        pushed = await self._pushed_from("vad-user-started-speaking")
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], VADUserStartedSpeakingFrame)
+
+    async def test_vad_user_stopped_speaking_is_a_vad_frame(self):
+        pushed = await self._pushed_from("vad-user-stopped-speaking")
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], VADUserStoppedSpeakingFrame)
+
+    async def test_handle_message_routes_inbound_speaking_types(self):
+        self.processor = RTVIProcessor()
+        self.processor.push_frame = AsyncMock()
+        self.processor._send_error_response = AsyncMock()
+        await self.processor._handle_message(
+            RTVI.Message(label="rtvi-ai", type="user-started-speaking", id="1")
+        )
+        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], ProposedUserStartedSpeakingFrame)
+        self.processor._send_error_response.assert_not_called()
 
 
 if __name__ == "__main__":
