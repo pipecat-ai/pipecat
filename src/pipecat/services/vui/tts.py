@@ -83,7 +83,7 @@ class VuiTTSService(TTSService):
                 (``"vui-nano-1.1"``, ``"vui-190k"``, ``"vui-nano"``), a file in
                 the ``fluxions/vui`` Hub repo, or a local path.
             gen_config: Optional ``vui.engine.GenConfig`` overriding the
-                sampling defaults (temperature, top_k, repetition penalty, ...).
+                sampling defaults (temperature 0.7, top_k, repetition penalty, ...).
             settings: Runtime-updatable settings. Defaults to the ``"maeve"``
                 voice.
             **kwargs: Additional arguments passed to the parent TTSService.
@@ -99,7 +99,9 @@ class VuiTTSService(TTSService):
             **kwargs,
         )
 
-        self._gen_config = gen_config if gen_config is not None else GenConfig()
+        # Temperature 0.7 rather than the engine default 0.9: over repeated
+        # renders 0.9 drops or swaps the odd word where 0.7 is clean.
+        self._gen_config = gen_config if gen_config is not None else GenConfig(temperature=0.7)
         # Everything that touches the engine — load, prefill, decode — runs on
         # this one thread: the CUDA graphs and MLX's streams are bound to the
         # thread that created them.
