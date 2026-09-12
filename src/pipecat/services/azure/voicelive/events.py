@@ -15,9 +15,10 @@ Voice Live keeps the original Realtime event names (``response.audio.delta``,
 current OpenAI Realtime API uses.
 """
 
+import uuid
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -558,6 +559,129 @@ class RealtimeError(BaseModel):
     message: str | None = None
     param: str | None = None
     event_id: str | None = None
+
+
+#
+# Client events (sent to Voice Live)
+#
+
+
+class ClientEvent(BaseModel):
+    """Base class for client events sent to the Voice Live API.
+
+    Parameters:
+        event_id: Unique identifier for the event, auto-generated if not provided.
+    """
+
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+
+class SessionUpdateEvent(ClientEvent):
+    """Event to update session properties.
+
+    Parameters:
+        type: Event type, always "session.update".
+        session: Updated session properties.
+    """
+
+    type: Literal["session.update"] = "session.update"
+    session: SessionProperties
+
+
+class InputAudioBufferAppendEvent(ClientEvent):
+    """Event to append audio to the input buffer.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.append".
+        audio: Base64-encoded audio to append.
+    """
+
+    type: Literal["input_audio_buffer.append"] = "input_audio_buffer.append"
+    audio: str
+
+
+class InputAudioBufferCommitEvent(ClientEvent):
+    """Event to commit the input buffer as a conversation item.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.commit".
+    """
+
+    type: Literal["input_audio_buffer.commit"] = "input_audio_buffer.commit"
+
+
+class InputAudioBufferClearEvent(ClientEvent):
+    """Event to discard the buffered input audio.
+
+    Parameters:
+        type: Event type, always "input_audio_buffer.clear".
+    """
+
+    type: Literal["input_audio_buffer.clear"] = "input_audio_buffer.clear"
+
+
+class ConversationItemCreateEvent(ClientEvent):
+    """Event to add an item to the conversation.
+
+    Parameters:
+        type: Event type, always "conversation.item.create".
+        item: The item to add.
+        previous_item_id: Item to insert after, or None to append.
+    """
+
+    type: Literal["conversation.item.create"] = "conversation.item.create"
+    item: ConversationItem
+    previous_item_id: str | None = None
+
+
+class ConversationItemTruncateEvent(ClientEvent):
+    """Event to truncate an assistant audio item the caller interrupted.
+
+    Parameters:
+        type: Event type, always "conversation.item.truncate".
+        item_id: Item to truncate.
+        content_index: Content part to truncate.
+        audio_end_ms: Point, in milliseconds, to truncate the audio at.
+    """
+
+    type: Literal["conversation.item.truncate"] = "conversation.item.truncate"
+    item_id: str
+    content_index: int = 0
+    audio_end_ms: int = 0
+
+
+class ConversationItemDeleteEvent(ClientEvent):
+    """Event to remove an item from the conversation.
+
+    Parameters:
+        type: Event type, always "conversation.item.delete".
+        item_id: Item to remove.
+    """
+
+    type: Literal["conversation.item.delete"] = "conversation.item.delete"
+    item_id: str
+
+
+class ResponseCreateEvent(ClientEvent):
+    """Event asking the model to respond.
+
+    Parameters:
+        type: Event type, always "response.create".
+        response: Overrides applied to this response.
+    """
+
+    type: Literal["response.create"] = "response.create"
+    response: ResponseProperties | None = None
+
+
+class ResponseCancelEvent(ClientEvent):
+    """Event to cancel the response in progress.
+
+    Parameters:
+        type: Event type, always "response.cancel".
+    """
+
+    type: Literal["response.cancel"] = "response.cancel"
 
 
 #
