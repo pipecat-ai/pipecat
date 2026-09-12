@@ -440,3 +440,124 @@ class SessionProperties(BaseModel):
 
 
 #
+# Conversation items
+#
+
+
+class ItemContent(BaseModel):
+    """A single piece of content within a conversation item.
+
+    Parameters:
+        type: Content type.
+        text: Text content, for text parts.
+        audio: Base64-encoded audio, for audio parts.
+        transcript: Transcript of the audio, for audio parts.
+    """
+
+    type: Literal["input_text", "input_audio", "text", "audio"]
+    text: str | None = None
+    audio: str | None = None
+    transcript: str | None = None
+
+
+class ConversationItem(BaseModel):
+    """An item in the conversation history.
+
+    Parameters:
+        id: Identifier of the item, assigned by the service when absent.
+        object: Object type, always "realtime.item".
+        type: Kind of item this is.
+        status: Whether the item is finished.
+        role: Who the item belongs to, for message items.
+        content: Content parts, for message items.
+        call_id: Identifier tying a call to its output.
+        name: Function name, for function call items.
+        arguments: JSON-encoded arguments, for function call items.
+        output: JSON-encoded result, for function call output items.
+    """
+
+    id: str | None = None
+    object: Literal["realtime.item"] | None = None
+    type: Literal["message", "function_call", "function_call_output"]
+    status: Literal["completed", "in_progress", "incomplete"] | None = None
+    role: Literal["user", "assistant", "system"] | None = None
+    content: list[ItemContent] | None = None
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
+
+
+class ResponseProperties(BaseModel):
+    """Overrides applied to a single response.
+
+    Parameters:
+        modalities: Modalities this response uses.
+        instructions: Instructions for this response only.
+        voice: Voice for this response only.
+        temperature: Sampling temperature for this response.
+        max_output_tokens: Output token ceiling for this response, or "inf".
+        tools: Tools available to this response.
+        tool_choice: How this response picks among tools.
+    """
+
+    modalities: list[Modality] | None = None
+    instructions: str | None = None
+    voice: Voice | None = None
+    temperature: float | None = None
+    max_output_tokens: int | Literal["inf"] | None = None
+    tools: list[VoiceLiveTool] | None = None
+    tool_choice: str | None = None
+
+
+class TokenUsageDetails(BaseModel):
+    """Per-modality breakdown of token usage.
+
+    Parameters:
+        cached_tokens: Tokens served from cache.
+        text_tokens: Tokens attributable to text.
+        audio_tokens: Tokens attributable to audio.
+    """
+
+    cached_tokens: int | None = None
+    text_tokens: int | None = None
+    audio_tokens: int | None = None
+
+
+class TokenUsage(BaseModel):
+    """Token usage reported for a response.
+
+    Parameters:
+        total_tokens: Tokens across input and output.
+        input_tokens: Tokens in the input.
+        output_tokens: Tokens in the output.
+        input_token_details: Per-modality breakdown of the input.
+        output_token_details: Per-modality breakdown of the output.
+    """
+
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    input_token_details: TokenUsageDetails | None = None
+    output_token_details: TokenUsageDetails | None = None
+
+
+class RealtimeError(BaseModel):
+    """An error reported by the service.
+
+    Parameters:
+        type: Error category.
+        code: Machine-readable error code.
+        message: Human-readable description.
+        param: Parameter the error relates to.
+        event_id: Client event that caused the error.
+    """
+
+    type: str | None = None
+    code: str | None = None
+    message: str | None = None
+    param: str | None = None
+    event_id: str | None = None
+
+
+#
