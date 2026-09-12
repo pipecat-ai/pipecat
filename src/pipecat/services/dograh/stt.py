@@ -17,11 +17,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -87,7 +87,8 @@ class DograhSTTService(WebsocketSTTService):
             correlation_id: Optional server-generated correlation ID for MPS billing v2.
             sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
-            vad_events: Whether to receive voice activity detection events.
+            vad_events: Whether to receive provider speech events and broadcast turn proposals
+                for the user aggregator to resolve.
             keyterms: Optional list of keyterms for speech recognition boosting.
             settings: STT settings including model and language.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -135,7 +136,7 @@ class DograhSTTService(WebsocketSTTService):
         return self._vad_events
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies when Dograh emits VAD events."""
+        """Recommend external turn strategies to resolve provider speech proposals."""
         frame = super().service_metadata_frame()
         if self._vad_events:
             frame.user_turn_strategies = ExternalUserTurnStrategies()
@@ -395,13 +396,13 @@ class DograhSTTService(WebsocketSTTService):
         """Handle speech started event."""
         logger.debug("Speech started detected")
         await self.start_ttfb_metrics()
-        await self.push_frame(UserStartedSpeakingFrame())
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_speech_started")
 
     async def _handle_speech_ended(self, msg: dict):
         """Handle speech ended event."""
         logger.debug("Speech ended detected")
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_speech_ended")
 
     async def start(self, frame: StartFrame):

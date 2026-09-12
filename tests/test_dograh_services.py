@@ -6,18 +6,39 @@
 
 """Tests for Dograh-managed AI services."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from websockets.protocol import State
 
-from pipecat.frames.frames import CancelFrame, EndFrame, TTSStoppedFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
+    InterruptionFrame,
+    LLMContextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
+    TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.dograh.flux.stt import DograhFluxSTTService
 from pipecat.services.dograh.llm import DograhLLMService
 from pipecat.services.dograh.stt import DograhSTTService
 from pipecat.services.dograh.tts import DograhTTSService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_mute import FirstSpeechUserMuteStrategy
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 
@@ -42,6 +63,63 @@ def test_stt_metadata_leaves_turn_strategies_unset_without_vad_events():
     frame = service.service_metadata_frame()
 
     assert frame.user_turn_strategies is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("muted", [False, True])
+async def test_stt_speech_proposals_leave_turns_and_interruptions_to_the_aggregator(muted):
+    service = DograhSTTService(api_key="test-key", vad_events=True)
+    messages = [
+        {"type": "speech_started"},
+        {"type": "transcription", "text": "Hello!", "is_final": True},
+        {"type": "speech_ended"},
+    ]
+
+    async def websocket_messages():
+        for message in messages:
+            yield json.dumps(message)
+
+    service._websocket = websocket_messages()
+    service.push_frame = AsyncMock()
+    service.broadcast_interruption = AsyncMock()
+
+    await service._receive_messages()
+
+    pushed = [
+        (call.args[0], call.args[1] if len(call.args) > 1 else FrameDirection.DOWNSTREAM)
+        for call in service.push_frame.await_args_list
+    ]
+    assert [(type(frame), direction) for frame, direction in pushed] == [
+        (ProposedUserStartedSpeakingFrame, FrameDirection.DOWNSTREAM),
+        (ProposedUserStartedSpeakingFrame, FrameDirection.UPSTREAM),
+        (TranscriptionFrame, FrameDirection.DOWNSTREAM),
+        (ProposedUserStoppedSpeakingFrame, FrameDirection.DOWNSTREAM),
+        (ProposedUserStoppedSpeakingFrame, FrameDirection.UPSTREAM),
+    ]
+    service.broadcast_interruption.assert_not_awaited()
+
+    aggregator = LLMUserAggregator(
+        LLMContext(),
+        params=LLMUserAggregatorParams(
+            user_mute_strategies=[FirstSpeechUserMuteStrategy()] if muted else [],
+        ),
+    )
+    frames = [service.service_metadata_frame()]
+    if muted:
+        frames.extend([BotStartedSpeakingFrame(), SleepFrame()])
+    frames.extend(frame for frame, direction in pushed if direction == FrameDirection.DOWNSTREAM)
+    frames.append(SleepFrame(sleep=1.0))
+
+    received_down, received_up = await run_test(
+        Pipeline([aggregator]),
+        frames_to_send=frames,
+    )
+    for received in (received_down, received_up):
+        types = [type(frame) for frame in received]
+        assert types.count(UserStartedSpeakingFrame) == (0 if muted else 1)
+        assert types.count(UserStoppedSpeakingFrame) == (0 if muted else 1)
+        assert types.count(InterruptionFrame) == (0 if muted else 1)
+    assert sum(isinstance(frame, LLMContextFrame) for frame in received_down) == (0 if muted else 1)
 
 
 @pytest.mark.asyncio
