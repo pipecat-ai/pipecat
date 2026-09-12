@@ -836,6 +836,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
                 await self._handle_evt_input_audio_transcription_completed(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.failed":
+                await self._handle_evt_input_audio_transcription_failed(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
             elif evt.type == "input_audio_buffer.speech_started":
@@ -956,6 +958,18 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
                 FrameDirection.UPSTREAM,
             )
+
+    async def _handle_evt_input_audio_transcription_failed(self, evt):
+        """Handle input audio transcription failed event.
+
+        The partial text accumulated for this item would otherwise be carried
+        into the next turn, since only a completed transcription clears it.
+        """
+        self._interim_transcription_text = ""
+        message = evt.error.message if evt.error else None
+        await self.push_error(
+            error_msg=f"Voice Live transcription failed: {message or 'no detail given'}"
+        )
 
     async def _handle_evt_response_done(self, evt):
         """Handle response.done event."""

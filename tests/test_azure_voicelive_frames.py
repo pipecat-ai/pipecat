@@ -445,3 +445,40 @@ async def test_an_interruption_drops_a_deferred_response():
 
     await _drive(service, [_response_done(status="cancelled")])
     assert "ResponseCreateEvent" not in sent
+
+
+@pytest.mark.asyncio
+async def test_a_failed_transcription_clears_the_interim_text():
+    """Only a completed transcription clears it, so a failure would carry over."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    errors: list[str] = []
+
+    async def record_error(error_msg, **kwargs):
+        errors.append(error_msg)
+
+    service.push_error = record_error
+
+    await _drive(
+        service,
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.delta",
+                "event_id": "e1",
+                "item_id": "item_u",
+                "content_index": 0,
+                "delta": "what's the ",
+            },
+            {
+                "type": "conversation.item.input_audio_transcription.failed",
+                "event_id": "e2",
+                "item_id": "item_u",
+                "content_index": 0,
+                "error": {"type": "server_error", "message": "audio was unintelligible"},
+            },
+        ],
+    )
+
+    assert service._interim_transcription_text == ""
+    assert len(errors) == 1
+    assert "unintelligible" in errors[0]
