@@ -68,9 +68,8 @@ class TestIsSilence(unittest.TestCase):
 
     Services build SpeechOutputAudioRawFrame straight from a transport's audio
     callback without checking the payload length, and the output transport calls
-    is_silence() on every one of them. numpy's max() raises on an empty array, so
-    a zero-length frame took down the speaking-detection path rather than being
-    read as what it is: no audio, therefore no speech.
+    is_silence() on every one of them, so a zero-length frame has to answer the
+    question rather than raise.
     """
 
     def test_empty_audio_is_silence(self):
