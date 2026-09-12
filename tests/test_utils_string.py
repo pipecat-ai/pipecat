@@ -54,7 +54,6 @@ class TestSentTokenizerLoad(unittest.TestCase):
         download.assert_not_called()
 
 
-
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
     async def test_endofsentence(self):
         assert match_endofsentence("This is a sentence.") == 19
