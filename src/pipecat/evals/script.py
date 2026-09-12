@@ -79,6 +79,20 @@ Supported expectation fields (per event):
     natural-language criterion the event's text content must satisfy, evaluated
     by a judge LLM (see :mod:`pipecat.evals.judge`).
 
+    On ``function_call`` and ``function_call_stopped`` the criterion is about
+    the call instead: each call ``calls:`` (or the ``name:``/``args:``
+    shorthand) matches is put to the judge by name and arguments, over the
+    conversation so far, which is how a scenario checks what ``args:`` cannot
+    match verbatim::
+
+        - event: function_call
+          calls: [{name: submit_session_suggestion}]
+          eval: "the suggestion is for a session about OpenTelemetry tracing, submitted for Jennifer Smith"
+
+    The judge also sees every call the harness matched as a ``[tool call]``
+    line in the bot's reply, so a later ``response`` criterion can check the
+    bot's words against what it actually submitted.
+
 ``absent: true``
     invert the expectation: assert that NO event of this type arrives before the
     ``within_ms`` budget expires (default 60s — set ``within_ms`` explicitly to
@@ -212,11 +226,11 @@ from pipecat.evals.scenario_loader import _load_mapping
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
-# evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
-# calls, interruption signals) produces a parser warning — the test controls
-# user input deterministically, so judging it adds cost without signal.
-# ``response`` is the modality-agnostic alias, resolved to one of the others
-# after parsing (see _resolve_response_events).
+# evaluate. Asserting ``eval:`` on anything else but a function call (user
+# transcripts, interruption signals) produces a parser warning — the test
+# controls user input deterministically, so judging it adds cost without
+# signal. ``response`` is the modality-agnostic alias, resolved to one of the
+# others after parsing (see _resolve_response_events).
 JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 
 # Events carrying a function call, matched by name and arguments rather than by
@@ -268,9 +282,10 @@ class EvalExpectation:
             only when all of them are found. Built from ``calls:`` in the YAML, or
             from the single ``name:``/``args:`` shorthand.
         eval: Optional natural-language criterion the event's text content
-            must satisfy. Evaluated by a judge LLM. Only meaningful on the
-            bot-generated text events: ``response``, ``llm_response``, and
-            ``tts_response``.
+            must satisfy. Evaluated by a judge LLM. Meaningful on the
+            bot-generated text events (``response``, ``llm_response``, and
+            ``tts_response``) and on the function-call events, where it is
+            about each matched call's name and arguments rather than text.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -531,12 +546,20 @@ class EvalScriptScenario:
         return any(exp.event == "response" for turn in self.turns for exp in turn.expect)
 
     def required_report_level(self) -> str | None:
-        """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``."""
+        """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``.
+
+        A judged scenario that asserts on calls needs ``full`` too: the judge
+        reads the calls the harness matches, with their arguments, whether the
+        ``eval:`` is on the call itself or on the reply after it.
+        """
         needs_name = False
+        judged = any(exp.eval is not None for turn in self.turns for exp in turn.expect)
         for turn in self.turns:
             for exp in turn.expect:
                 if exp.event not in FUNCTION_CALL_EVENTS:
                     continue
+                if judged:
+                    return "full"
                 # name/args live in exp.calls (the parser normalizes the single
                 # name:/args: shorthand into it too).
                 for call in exp.calls or []:
@@ -729,12 +752,17 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         )
 
     criterion = e.get("eval")
-    if criterion is not None and event not in JUDGEABLE_EVENTS:
+    if (
+        criterion is not None
+        and event not in JUDGEABLE_EVENTS
+        and event not in FUNCTION_CALL_EVENTS
+    ):
         logger.warning(
             f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'eval:' on "
             f"event {event!r} — judge only makes sense on bot-generated text "
-            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}). Will run but is "
-            "unlikely to be meaningful."
+            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}) and function calls "
+            f"({', '.join(FUNCTION_CALL_EVENTS)}). Will run but is unlikely to be "
+            "meaningful."
         )
 
     absent = e.get("absent", False)
