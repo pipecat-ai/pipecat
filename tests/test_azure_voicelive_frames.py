@@ -197,6 +197,59 @@ async def test_assistant_item_opens_and_response_done_closes_the_llm_response():
     assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
 
 
+@pytest.mark.parametrize(
+    "modalities, expect_tts_stop",
+    [(["text", "audio"], True), (["text"], False)],
+    ids=["audio", "text-only"],
+)
+@pytest.mark.asyncio
+async def test_an_interruption_reports_a_tts_stop_only_when_one_started(
+    modalities, expect_tts_stop
+):
+    """A text-only session never opens a TTS turn, so it has no stop to report."""
+    service = AzureVoiceLiveLLMService(
+        api_key="test-key",
+        endpoint="https://my-resource.services.ai.azure.com",
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(modalities=modalities)
+        ),
+    )
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    async def _sent(event):
+        return None
+
+    service.send_client_event = _sent
+
+    item = {
+        "id": ITEM_ID,
+        "object": "realtime.item",
+        "type": "message",
+        "status": "incomplete",
+        "role": "assistant",
+        "content": [],
+    }
+    script: list[dict[str, Any]] = [
+        {
+            "type": "response.output_item.added",
+            "event_id": "e1",
+            "response_id": RESPONSE_ID,
+            "output_index": 0,
+            "item": item,
+        }
+    ]
+    if expect_tts_stop:
+        script.append(_audio_delta())
+    await _drive(service, script)
+    recorder.frames.clear()
+
+    await service._handle_interruption()
+
+    assert bool(recorder.of_types(TTSStoppedFrame)) is expect_tts_stop
+    assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
+
+
 @pytest.mark.asyncio
 async def test_audio_transcript_delta_pushes_tts_text():
     service = _make_service()

@@ -462,6 +462,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if self._is_manual_turn_detection():
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
+
+        # Audio only opens a TTS turn once a delta arrives, and a text-only
+        # session never opens one, so the stop is owed only if a start went out.
+        tts_started = self._current_audio_response is not None
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
 
@@ -470,7 +474,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             # tracked item to keep that from closing the turn a second time.
             self._current_assistant_response = None
             await self.push_frame(LLMFullResponseEndFrame())
-            await self.push_frame(TTSStoppedFrame())
+            if tts_started:
+                await self.push_frame(TTSStoppedFrame())
         self._run_llm_when_response_done = False
 
     async def _handle_user_started_speaking(self, frame):
