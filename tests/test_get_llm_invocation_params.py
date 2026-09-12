@@ -85,6 +85,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
+from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
@@ -2288,6 +2289,103 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(params["messages"], [])
+
+
+class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
+    # DeepSeek doesn't support the "developer" role, so DeepSeekLLMService
+    # sets supports_developer_role = False. Tests below pass
+    # convert_developer_to_user=True to match production behavior.
+
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = DeepSeekLLMAdapter()
+
+    def _tool_call(self) -> dict:
+        return {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": '{"location": "LA"}'},
+        }
+
+    def test_tool_call_message_gets_empty_reasoning_content(self):
+        """An assistant tool-call message without reasoning_content gets an empty one."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA?"},
+            {"role": "assistant", "tool_calls": [self._tool_call()]},
+            {"role": "tool", "content": '{"temperature": "75"}', "tool_call_id": "call_1"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        assistant = params["messages"][1]
+        self.assertEqual(assistant["role"], "assistant")
+        self.assertEqual(assistant["reasoning_content"], "")
+        self.assertEqual(assistant["tool_calls"], [self._tool_call()])
+
+    def test_spoken_text_before_tool_call_also_stamped(self):
+        """Assistant text recorded before a tool call (e.g. spoken via TTS) is stamped too."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA?"},
+            {"role": "assistant", "content": "Let me check on that."},
+            {"role": "assistant", "tool_calls": [self._tool_call()]},
+            {"role": "tool", "content": '{"temperature": "75"}', "tool_call_id": "call_1"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(params["messages"][1]["content"], "Let me check on that.")
+        self.assertEqual(params["messages"][1]["reasoning_content"], "")
+        self.assertEqual(params["messages"][2]["reasoning_content"], "")
+
+    def test_existing_reasoning_content_preserved(self):
+        """An assistant message that already carries reasoning_content is left alone."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Weather in LA?"},
+            {
+                "role": "assistant",
+                "tool_calls": [self._tool_call()],
+                "reasoning_content": "Need the weather tool.",
+            },
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(params["messages"][1]["reasoning_content"], "Need the weather tool.")
+
+    def test_non_assistant_messages_untouched(self):
+        """System, user, and tool messages never get the field."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Weather in LA?"},
+            {"role": "assistant", "tool_calls": [self._tool_call()]},
+            {"role": "tool", "content": '{"temperature": "75"}', "tool_call_id": "call_1"},
+            {"role": "user", "content": "Thanks."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        for i in (0, 1, 3, 4):
+            self.assertNotIn("reasoning_content", params["messages"][i])
+        self.assertEqual(params["messages"][2]["reasoning_content"], "")
+
+    def test_context_messages_not_mutated(self):
+        """Stamping produces copies; the context's own message dicts are unchanged."""
+        assistant: LLMStandardMessage = {"role": "assistant", "content": "Hi!"}
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Hello"},
+            assistant,
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(params["messages"][1]["reasoning_content"], "")
+        self.assertNotIn("reasoning_content", assistant)
+        self.assertNotIn("reasoning_content", context.get_messages()[1])
 
 
 class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
