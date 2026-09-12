@@ -1056,6 +1056,18 @@ class ServiceRegistry:
             ],
         ),
         ServiceDefinition(
+            value="azure_voice_live",
+            label="Azure Voice Live",
+            package="pipecat-ai[azure]",
+            class_name=["AzureVoiceLiveLLMService"],
+            env_prefix="AZURE",
+            include_params=[],
+            manual_config=True,
+            additional_imports=[
+                "from pipecat.services.azure.voicelive.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection"
+            ],
+        ),
+        ServiceDefinition(
             value="gemini_live_realtime",
             label="Gemini Live",
             package="pipecat-ai[google]",
@@ -1184,6 +1196,23 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("AZURE_REALTIME_API_KEY"),\n'
         '    base_url=os.getenv("AZURE_REALTIME_BASE_URL"),\n'
         "    settings=AzureRealtimeLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        '    model="gpt-4o-mini",\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
