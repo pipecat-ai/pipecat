@@ -160,14 +160,39 @@ async def test_a_failed_disconnect_still_clears_the_disconnecting_flag():
 
 
 @pytest.mark.asyncio
-async def test_reset_conversation_before_any_context_does_not_raise():
+async def test_reset_conversation_before_any_context_is_a_no_op():
     service = _service()
-    service._connect = _noop
+    reconnected = []
+    service._connect = lambda: reconnected.append(True) or _noop()
     service._disconnect = _noop
 
     await service.reset_conversation()
 
-    assert service._llm_needs_conversation_setup is True
+    assert reconnected == []
+
+
+@pytest.mark.asyncio
+async def test_reset_conversation_sends_the_history_to_the_new_session():
+    """Conversation setup only runs when _handle_context has no context yet."""
+    from pipecat.processors.aggregators.llm_context import LLMContext
+
+    service = _service()
+    service._connect = _noop
+    service._disconnect = _noop
+    service._api_session_ready = True
+
+    created = []
+    service.send_client_event = lambda e: created.append(type(e).__name__) or _noop()
+
+    context = LLMContext([{"role": "user", "content": "remember this"}])
+    await service._handle_context(context)
+    service._llm_needs_conversation_setup = False
+    created.clear()
+
+    await service.reset_conversation()
+
+    assert service._llm_needs_conversation_setup is False
+    assert "ConversationItemCreateEvent" in created
 
 
 async def _noop(*args, **kwargs):

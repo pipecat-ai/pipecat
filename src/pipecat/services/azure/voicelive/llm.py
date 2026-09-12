@@ -708,9 +708,16 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._completed_tool_calls = set()
             self._async_tool_warning_logged = False
             self._audio_buffer = b""
+            self._audio_send_logged = False
             self._interim_transcription_text = ""
             self._response_in_flight = False
             self._run_llm_when_response_done = False
+            self._run_llm_when_api_session_ready = False
+            self._server_vad_handled_turn = False
+            self._current_assistant_response = None
+            self._current_audio_response = None
+            self._pending_function_calls = {}
+            self._messages_added_manually = {}
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
@@ -1089,14 +1096,24 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         This fully resets the server-side conversation state. Audio buffers,
         pending function calls, and conversation history are cleared.
         """
+        context = self._context
+        if context is None:
+            logger.warning(
+                "reset_conversation called before an initial context was received; nothing to reset"
+            )
+            return
+
         logger.debug("Resetting Voice Live conversation")
         await self._disconnect()
 
+        # Clearing the tracked context sends the history to the new session:
+        # _handle_context only runs conversation setup when it has none.
+        self._context = None
+        self._last_context_message_count = 0
         self._llm_needs_conversation_setup = True
-        if self._context:
-            await self._process_completed_function_calls(send_new_results=False)
 
         await self._connect()
+        await self._handle_context(context)
 
     async def _create_response(self):
         """Create an assistant response."""
