@@ -386,6 +386,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._disconnecting = False
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
+        self._response_in_flight = False
+        self._run_llm_when_response_done = False
 
         self._current_assistant_response = None
         self._current_audio_response: CurrentAudioResponse | None = None
@@ -460,6 +462,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._current_assistant_response = None
             await self.push_frame(LLMFullResponseEndFrame())
             await self.push_frame(TTSStoppedFrame())
+        self._run_llm_when_response_done = False
 
     async def _handle_user_started_speaking(self, frame):
         """Handle user started speaking event."""
@@ -706,6 +709,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._async_tool_warning_logged = False
             self._audio_buffer = b""
             self._interim_transcription_text = ""
+            self._response_in_flight = False
+            self._run_llm_when_response_done = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
@@ -806,7 +811,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             elif evt.type == "session.updated":
                 await self._handle_evt_session_updated(evt)
             elif evt.type == "response.created":
-                pass
+                await self._handle_evt_response_created(evt)
             elif evt.type == "response.audio.delta":
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "response.audio.done":
@@ -862,6 +867,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if self._run_llm_when_api_session_ready:
             self._run_llm_when_api_session_ready = False
             await self._create_response()
+
+    async def _handle_evt_response_created(self, evt):
+        """Handle response.created event."""
+        self._response_in_flight = True
 
     async def _handle_evt_audio_delta(self, evt):
         """Handle audio delta event — streaming audio from assistant."""
@@ -960,6 +969,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self.start_llm_usage_metrics(tokens)
 
         await self.stop_processing_metrics()
+        self._response_in_flight = False
 
         # An interruption closes the turn before the cancelled response reports
         # done, so only close a turn that is still open.
@@ -974,6 +984,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         for item in evt.response.get("output", []):
             await self._call_event_handler("on_conversation_item_updated", item.get("id"), item)
+
+        if self._run_llm_when_response_done:
+            self._run_llm_when_response_done = False
+            await self._create_response()
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
@@ -1072,6 +1086,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Create an assistant response."""
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True
+            return
+
+        # The service rejects a second response while one is running, so a
+        # response asked for mid-flight (a tool result landing before the
+        # calling response finished) waits for response.done instead.
+        if self._response_in_flight:
+            self._run_llm_when_response_done = True
             return
 
         assert self._context is not None

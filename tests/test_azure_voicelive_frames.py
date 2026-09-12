@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.voicelive import events
 from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
@@ -391,3 +392,56 @@ async def test_interruption_closes_the_turn_only_once():
 
     assert len(recorder.of_types(LLMFullResponseStartFrame)) == 1
     assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_response_asked_for_mid_flight_waits_for_response_done():
+    """The service rejects a second response while one is running."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._llm_needs_conversation_setup = False
+    service._context = LLMContext([{"role": "user", "content": "hi"}])
+
+    # A response is running.
+    await _drive(service, [{"type": "response.created", "event_id": "e1", "response": {}}])
+    assert service._response_in_flight is True
+
+    # A tool result asks for the follow-up before that response finished.
+    await service._create_response()
+    assert "ResponseCreateEvent" not in sent
+    assert service._run_llm_when_response_done is True
+
+    # It goes out once the running response reports done.
+    await _drive(service, [_response_done()])
+    assert "ResponseCreateEvent" in sent
+    assert service._run_llm_when_response_done is False
+
+
+@pytest.mark.asyncio
+async def test_an_interruption_drops_a_deferred_response():
+    """The interrupting turn asks for its own response."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._response_in_flight = True
+    service._run_llm_when_response_done = True
+
+    await service._handle_interruption()
+
+    assert service._run_llm_when_response_done is False
+
+    await _drive(service, [_response_done(status="cancelled")])
+    assert "ResponseCreateEvent" not in sent
