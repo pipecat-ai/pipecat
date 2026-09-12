@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -82,6 +83,10 @@ class _BroadcastRecorder:
 
     async def __call__(self, frame_type):
         self.types.append(frame_type)
+
+
+async def _noop_error(**kwargs) -> None:
+    """Stand-in for ``push_error``, which needs a linked processor."""
 
 
 async def _drive(service: AzureVoiceLiveLLMService, scripted: list[dict[str, Any]]) -> None:
@@ -422,6 +427,59 @@ async def test_a_response_asked_for_mid_flight_waits_for_response_done():
     await _drive(service, [_response_done()])
     assert "ResponseCreateEvent" in sent
     assert service._run_llm_when_response_done is False
+
+
+@pytest.mark.asyncio
+async def test_a_deferred_response_survives_a_failed_response():
+    """A tool result owed a response still gets one when the response it waited on fails."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    service.push_error = _noop_error
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._llm_needs_conversation_setup = False
+    service._context = LLMContext([{"role": "user", "content": "hi"}])
+
+    await _drive(service, [{"type": "response.created", "event_id": "e1", "response": {}}])
+    await service._create_response()
+    assert service._run_llm_when_response_done is True
+
+    sent.clear()
+    await _drive(service, [_response_done(status="failed")])
+
+    assert "ResponseCreateEvent" in sent
+    assert service._run_llm_when_response_done is False
+
+
+@pytest.mark.asyncio
+async def test_text_deltas_push_llm_text_when_audio_is_off():
+    """A text-only session reports its response through response.text.delta."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    await _drive(
+        service,
+        [
+            {
+                "type": "response.text.delta",
+                "event_id": "e1",
+                "response_id": RESPONSE_ID,
+                "item_id": ITEM_ID,
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "Hello",
+            },
+            _response_done(),
+        ],
+    )
+
+    assert [f.text for f in recorder.of_types(LLMTextFrame)] == ["Hello"]
 
 
 @pytest.mark.asyncio

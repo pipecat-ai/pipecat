@@ -6,7 +6,10 @@
 
 """Tests for Azure Voice Live service configuration."""
 
+import io
+
 import pytest
+from loguru import logger
 
 from pipecat.services.azure.voicelive import events
 from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
@@ -43,6 +46,14 @@ def _service(**kwargs) -> AzureVoiceLiveLLMService:
         ),
         (
             "ws://my-resource.services.ai.azure.com",
+            "wss://my-resource.services.ai.azure.com/voice-live/realtime",
+        ),
+        (
+            "HTTPS://my-resource.services.ai.azure.com",
+            "wss://my-resource.services.ai.azure.com/voice-live/realtime",
+        ),
+        (
+            "WSS://my-resource.services.ai.azure.com/voice-live/realtime",
             "wss://my-resource.services.ai.azure.com/voice-live/realtime",
         ),
     ],
@@ -121,6 +132,30 @@ def test_manual_mode_matches_what_the_session_update_sends(session_kwargs, manua
 
     assert service._is_manual_turn_detection() is manual
     assert wire_disables_detection is manual
+
+
+@pytest.mark.asyncio
+async def test_a_model_update_is_reported_as_unsupported():
+    """The model is fixed by the connection URL, so an update can't take effect."""
+    service = _service(model="gpt-4o-mini")
+    sent = []
+
+    async def _record(event):
+        sent.append(event)
+
+    service.send_client_event = _record
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        await service._update_settings(
+            AzureVoiceLiveLLMService.Settings.from_mapping({"model": "gpt-realtime"})
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert "model" in sink.getvalue()
+    assert sent == []
 
 
 @pytest.mark.parametrize(

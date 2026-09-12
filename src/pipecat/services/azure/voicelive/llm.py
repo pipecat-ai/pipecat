@@ -405,7 +405,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     @staticmethod
     def _build_base_url(endpoint: str) -> str:
         """Normalize a portal endpoint or full URL into a Voice Live WebSocket URL."""
-        url = re.sub(r"^(?:https?|ws)://", "wss://", endpoint.strip()).rstrip("/")
+        url = re.sub(
+            r"^(?:https?|wss?)://", "wss://", endpoint.strip(), flags=re.IGNORECASE
+        ).rstrip("/")
         if not url.startswith("wss://"):
             url = f"wss://{url}"
         if "/voice-live/realtime" not in url:
@@ -752,7 +754,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if "session_properties" in changed and input_rate and output_rate:
             self._ensure_audio_config(input_rate, output_rate)
 
-        handled = {"session_properties", "system_instruction", "model", "temperature"}
+        # `model` is selected by the connection URL and rejected in the session
+        # payload, so it stays unhandled and the base class reports the attempt.
+        handled = {"session_properties", "system_instruction", "temperature"}
         if changed.keys() & handled:
             await self._send_session_update()
         self._warn_unhandled_updated_settings(changed.keys() - handled)
@@ -860,6 +864,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_speech_stopped(evt)
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "response.text.delta":
+                await self._handle_evt_text_delta(evt)
             elif evt.type == "response.function_call_arguments.delta":
                 pass
             elif evt.type == "response.function_call_arguments.done":
@@ -1013,16 +1019,26 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if evt.status == "failed":
             details = evt.response.get("status_details")
             await self.push_error(error_msg=str(details) if details else "Response failed")
-            return
+        else:
+            # `.get` returns None when the key is present and null, so the default
+            # alone does not keep a null output from reaching the loop.
+            for item in evt.response.get("output") or []:
+                await self._call_event_handler("on_conversation_item_updated", item.get("id"), item)
 
-        # `.get` returns None when the key is present and null, so the default
-        # alone does not keep a null output from reaching the loop.
-        for item in evt.response.get("output") or []:
-            await self._call_event_handler("on_conversation_item_updated", item.get("id"), item)
-
+        # A response deferred behind this one is owed whichever way this one ended.
         if self._run_llm_when_response_done:
             self._run_llm_when_response_done = False
             await self._create_response()
+
+    async def _handle_evt_text_delta(self, evt):
+        """Handle a text delta, which carries the response when "text" is the only modality.
+
+        A session that also responds with audio reports its text through
+        ``response.audio_transcript.delta`` instead.
+        """
+        await self.stop_ttfb_metrics()
+        if evt.delta:
+            await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
