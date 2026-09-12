@@ -72,7 +72,8 @@ class EvalSessionParams(BaseModel):
             expectations without their own ``within_ms`` (the turn's expectations
             share one deadline anchored at the send). Defaults to 60s.
         record_path: Where to save the conversation audio, or ``None``. Only an
-            audio-mode run records.
+            audio-mode run records: a stereo WAV, the user on the left channel
+            and the bot on the right.
         cache_dir: Directory for cached synthesized user audio, or ``None`` for
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh

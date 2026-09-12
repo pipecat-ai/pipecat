@@ -24,6 +24,7 @@ from pipecat.evals.results import (
     EvalTrace,
 )
 from pipecat.evals.script import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
+from pipecat.evals.timing import EvalTimingObserver
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 # How long a turn waits for the bot to finish speaking before it is sent. A
@@ -52,6 +53,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         judge: EvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
+        timing: EvalTimingObserver | None = None,
     ):
         """Initialize the driver.
 
@@ -65,6 +67,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             trace: The run's trace.
             progress: Awaited with an :class:`~pipecat.evals.results.EvalProgress` as turns and
                 expectations resolve.
+            timing: The observer on the client's pipeline that times each
+                turn, told here when a turn's input went out; ``None`` leaves
+                the turns' ``timing`` unset.
         """
         super().__init__(
             client=client,
@@ -75,6 +80,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         )
         self._scenario = scenario
         self._default_timeout_ms = default_timeout_ms
+        self._timing = timing
         self._matcher = ExpectationMatcher(stream=stream, judge=judge, trace=trace)
         # One record per turn, filled in as the driver runs. They start as
         # not_run and stay that way on every path that ends the run early, so
@@ -157,10 +163,37 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             await self._await_previous_reply()
 
         await self._send_turn(turn)
+        # The turn's input is out (or, for a turn that only observes, the
+        # turn has begun): its reply is timed from here. A spoken turn is
+        # re-anchored by the observer once the utterance has gone out.
+        if self._timing is not None:
+            self.turns[turn_idx].timing = self._timing.begin_turn()
         await self._progress(
             EvalScriptTurnProgress(turn_idx, -1, turn.user or turn.dtmf or "", "turn")
         )
-        return await self._match_expectations(turn, turn_idx)
+        failures = await self._match_expectations(turn, turn_idx)
+        await self._report_timing(turn_idx)
+        return failures
+
+    async def _report_timing(self, turn_idx: int) -> None:
+        """Log and report the turn's latency once its expectations resolved.
+
+        The record's timing keeps filling in after this (the bot's reply may
+        still be ending); this is the summary the verbose output shows.
+        """
+        timing = self.turns[turn_idx].timing
+        if timing is None:
+            return
+        parts = []
+        if timing.first_token_ms is not None:
+            parts.append(f"ttfb {timing.first_token_ms}ms")
+        if timing.voice_to_voice_ms is not None:
+            parts.append(f"v2v {timing.voice_to_voice_ms}ms")
+        if not parts:
+            return
+        summary = "  ".join(parts)
+        self._trace.log(f"timing: {summary}")
+        await self._progress(EvalScriptTurnProgress(turn_idx, -1, "", "timing", summary))
 
     async def _await_bot_quiet(self) -> None:
         """Hold the send while the bot is speaking, up to ``BOT_QUIET_MAX_WAIT_S``."""
