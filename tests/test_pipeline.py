@@ -22,17 +22,19 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     StopFrame,
     TextFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
+from pipecat.pipeline.worker import PipelineParams, PipelineTask, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import (
@@ -646,6 +648,48 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
             idle_timeout_secs=0.3,
         )
         await worker.run(WorkerParams(task_manager=TaskManager()))
+
+    def test_an_llm_response_counts_as_activity_by_default(self):
+        """A pipeline streaming an LLM reply is not idle, whether or not anyone speaks.
+
+        A text-only conversation pushes none of the speaking or transcription
+        frames, so without these the idle timeout would cancel a healthy bot
+        mid-answer. The deprecated ``PipelineTask`` shim shares the default.
+        """
+        import inspect
+
+        default = (
+            inspect.signature(PipelineWorker.__init__).parameters["idle_timeout_frames"].default
+        )
+        for frame in (LLMFullResponseStartFrame, LLMTextFrame, TTSTextFrame):
+            self.assertIn(frame, default)
+        shim = inspect.signature(PipelineTask.__init__).parameters["idle_timeout_frames"].default
+        self.assertEqual(shim, default)
+
+    async def test_idle_timeout_does_not_fire_while_llm_text_streams(self):
+        """LLM text arriving within each idle period keeps the worker alive with no speech at all."""
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
+
+        idle_timeout = False
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle_timeout(worker: PipelineWorker):
+            nonlocal idle_timeout
+            idle_timeout = True
+
+        async def stream_reply():
+            # Three idle periods' worth of text, one chunk every half period.
+            await worker.queue_frame(LLMFullResponseStartFrame())
+            for _ in range(6):
+                await asyncio.sleep(0.1)
+                await worker.queue_frame(LLMTextFrame(text="word "))
+            await worker.queue_frame(LLMFullResponseEndFrame())
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), stream_reply())
+        assert not idle_timeout
 
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
