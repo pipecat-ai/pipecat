@@ -51,11 +51,11 @@ from pipecat.processors.frame_processor import (
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.utils.types import NotGiven, is_given
 from pipecat.workers.llm.backend_llm_worker import (
-    DEFAULT_TRANSCRIPT_INSTRUCTION,
+    _DEFAULT_TRANSCRIPT_INSTRUCTION,
     BackendLLMWorker,
     BackendOutput,
-    delegate_to_backend,
-    render_transcript_request,
+    _delegate_to_backend,
+    _render_transcript_request,
 )
 
 #: Name of the tool the frontend calls to delegate.
@@ -133,7 +133,7 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     The frontend model calls the tool with no arguments; the request is the
     transcript of what was said since the previous delegation (the whole
     conversation the first time), rendered by
-    :func:`~pipecat.workers.llm.backend_llm_worker.render_transcript_request`.
+    :func:`~pipecat.workers.llm.backend_llm_worker._render_transcript_request`.
     The default for a text frontend, whose context is current when the tool
     runs.
     """
@@ -145,7 +145,7 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         "own words."
     )
 
-    def __init__(self, *, instruction: str = DEFAULT_TRANSCRIPT_INSTRUCTION):
+    def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
         """Initialize the strategy.
 
         Args:
@@ -171,7 +171,7 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         conversation = messages[self._delegated_through :]
         first = self._delegated_through == 0
         self._delegated_through = len(messages)
-        return render_transcript_request(conversation, instruction=self._instruction, first=first)
+        return _render_transcript_request(conversation, instruction=self._instruction, first=first)
 
 
 class ExplicitBackendRequestStrategy(BackendRequestStrategy):
@@ -452,7 +452,7 @@ class BackendConnector:
         request = await self.request.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         answered = False
-        async for output in delegate_to_backend(
+        async for output in _delegate_to_backend(
             params.pipeline_worker,
             self._context.backend_name,
             request=request,

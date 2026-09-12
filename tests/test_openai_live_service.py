@@ -1075,13 +1075,13 @@ class _FakeBackend:
     name = "backend"
 
 
-async def _client_delegation_service(monkeypatch, delegate_to_backend):
+async def _client_delegation_service(monkeypatch, _delegate_to_backend):
     service = await _make_service_with_tasks(
         delegation=OpenAILiveLLMService.ClientDelegation(backend=_FakeBackend(), timeout_secs=5)
     )
     recorder = _EventRecorder()
     service.send_client_event = recorder
-    monkeypatch.setattr(live_llm, "delegate_to_backend", delegate_to_backend)
+    monkeypatch.setattr(live_llm, "_delegate_to_backend", _delegate_to_backend)
     monkeypatch.setattr(type(service), "pipeline_worker", property(lambda self: "worker"))
     return service, recorder
 
@@ -1239,11 +1239,11 @@ async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkey
 
 @pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
-    async def delegate_to_backend(*args, **kwargs):
+    async def _delegate_to_backend(*args, **kwargs):
         text = " ".join(f"Sentence number {i} is here." for i in range(120))
         yield BackendOutput(text=text, prefers_spoken=True)
 
-    service, recorder = await _client_delegation_service(monkeypatch, delegate_to_backend)
+    service, recorder = await _client_delegation_service(monkeypatch, _delegate_to_backend)
     await service._run_client_delegation(_client_delegation("item_d1"))
 
     appends = recorder.of_type("session.commentary.append")
