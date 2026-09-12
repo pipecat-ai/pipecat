@@ -2800,6 +2800,90 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
 
         self.assertNotIn("instructions", params)
 
+    def test_tool_choice_literal_passthrough(self):
+        """String literal tool_choice values pass through unchanged."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hi"}], tool_choice="required")
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["tool_choice"], "required")
+
+    def test_tool_choice_named_function_reshaped(self):
+        """A function tool_choice is flattened to the Responses API's shape."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hi"}],
+            tool_choice={"type": "function", "function": {"name": "get_weather"}},
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["tool_choice"], {"type": "function", "name": "get_weather"})
+
+    def test_tool_choice_named_custom_tool_reshaped(self):
+        """A custom tool_choice is flattened to the Responses API's shape."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hi"}],
+            tool_choice={"type": "custom", "custom": {"name": "run_query"}},
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["tool_choice"], {"type": "custom", "name": "run_query"})
+
+    def test_tool_choice_allowed_tools_reshaped(self):
+        """An allowed-tools tool_choice is flattened, along with the tools it names."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hi"}],
+            tool_choice={
+                "type": "allowed_tools",
+                "allowed_tools": {
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "function": {"name": "get_weather"}},
+                        {"type": "image_generation"},
+                    ],
+                },
+            },
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [
+                    {"type": "function", "name": "get_weather"},
+                    {"type": "image_generation"},
+                ],
+            },
+        )
+
+    def test_tool_choice_allowed_tools_already_flat_preserved(self):
+        """An allowed-tools tool_choice already in the Responses API's shape is preserved."""
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hi"}],
+            tool_choice={
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": [{"type": "function", "name": "get_weather"}],
+            },
+        )
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(
+            params["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": [{"type": "function", "name": "get_weather"}],
+            },
+        )
+
+    def test_tool_choice_absent_omits_key(self):
+        """When no tool_choice is set on the context, the key is absent from params."""
+        context = LLMContext(messages=[{"role": "user", "content": "Hi"}])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertNotIn("tool_choice", params)
+
 
 class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:

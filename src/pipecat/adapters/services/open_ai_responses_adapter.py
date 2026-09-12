@@ -7,10 +7,13 @@
 """OpenAI Responses API adapter for Pipecat."""
 
 import copy
+from collections.abc import Mapping
 from typing import Any, Required, TypedDict, cast
 
+from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
+from openai.types.responses.response_create_params import ToolChoice as OpenAIResponsesToolChoice
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -18,18 +21,88 @@ from pipecat.adapters.services.open_ai_adapter import openai_from_llm_context_to
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
+    NotGiven,
 )
+from pipecat.utils.types import is_given
 
 
 class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
     # `input` and `tools` are always populated by `get_llm_invocation_params`;
-    # `instructions` is only set when a system instruction is present.
+    # `instructions` and `tool_choice` are only set when present.
     input: Required[list[ResponseInputItemParam]]
     tools: Required[list[ToolParam] | OpenAINotGiven]
     instructions: str
+    tool_choice: OpenAIResponsesToolChoice
+
+
+def _flatten_named_tool_reference(tool: Mapping[str, Any]) -> dict[str, Any]:
+    """Flatten a Chat Completions reference to a named tool for the Responses API.
+
+    Chat Completions nests the name in an object keyed by the tool's type
+    (``{"type": "function", "function": {"name": ...}}``); the Responses API
+    carries it on the reference itself (``{"type": "function", "name": ...}``).
+    References that name nothing to unwrap — hosted tools such as
+    ``{"type": "image_generation"}`` — are shared between the two APIs and are
+    returned unchanged.
+
+    Args:
+        tool: A reference to a tool, in Chat Completions shape.
+
+    Returns:
+        The reference in Responses API shape.
+    """
+    tool_type = tool.get("type")
+    nested = tool.get(tool_type) if isinstance(tool_type, str) else None
+    if isinstance(nested, dict) and "name" in nested:
+        return {"type": tool_type, "name": nested["name"]}
+    return dict(tool)
+
+
+def openai_responses_from_llm_context_tool_choice(
+    tool_choice: LLMContextToolChoice | NotGiven,
+) -> OpenAIResponsesToolChoice | OpenAINotGiven:
+    """Reinterpret an LLMContext ``tool_choice`` as the Responses API's type.
+
+    ``LLMContextToolChoice`` is aliased to Chat Completions' tool choice type,
+    whose object forms nest their payload one level deeper than the Responses
+    API's: a choice naming a tool arrives as
+    ``{"type": "function", "function": {"name": ...}}``, and one restricting the
+    model to a subset wraps its ``mode`` and ``tools`` in an ``"allowed_tools"``
+    object. Both are flattened here, along with the tool references inside a
+    subset. The ``"none"`` / ``"auto"`` / ``"required"`` literals are shared
+    between the two APIs and pass through unchanged, as is the "not provided"
+    sentinel (translated to the SDK's own, the way
+    :func:`~pipecat.adapters.services.open_ai_adapter.openai_from_llm_context_tool_choice`
+    does for Chat Completions).
+
+    Args:
+        tool_choice: A context's tool choice, or its "not provided" sentinel.
+
+    Returns:
+        The tool choice reshaped for the Responses API, or the SDK's "not
+        provided" sentinel.
+    """
+    if not is_given(tool_choice):
+        return OPENAI_NOT_GIVEN
+    if not isinstance(tool_choice, dict):
+        return cast("OpenAIResponsesToolChoice", tool_choice)
+    if tool_choice.get("type") == "allowed_tools":
+        # A choice already in the Responses API's shape carries `mode` and
+        # `tools` itself, with nothing nested to lift.
+        allowed = tool_choice.get("allowed_tools") or tool_choice
+        return cast(
+            "OpenAIResponsesToolChoice",
+            {
+                **allowed,
+                "type": "allowed_tools",
+                "tools": [_flatten_named_tool_reference(t) for t in allowed.get("tools", [])],
+            },
+        )
+    return cast("OpenAIResponsesToolChoice", _flatten_named_tool_reference(tool_choice))
 
 
 class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParams]):
@@ -86,6 +159,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
         }
+
+        resolved_tool_choice = openai_responses_from_llm_context_tool_choice(context.tool_choice)
+        if not isinstance(resolved_tool_choice, OpenAINotGiven):
+            params["tool_choice"] = resolved_tool_choice
 
         if system_instruction:
             # Compatibility: The Responses API requires at least one input

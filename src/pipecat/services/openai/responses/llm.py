@@ -359,6 +359,10 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         if "instructions" in invocation_params:
             params["instructions"] = invocation_params["instructions"]
 
+        # tool_choice (set by the adapter when the context specifies one)
+        if "tool_choice" in invocation_params:
+            params["tool_choice"] = invocation_params["tool_choice"]
+
         # Optional parameters - only include if given
         if isinstance(self._settings.temperature, (int, float)):
             params["temperature"] = self._settings.temperature
