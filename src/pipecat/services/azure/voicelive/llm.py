@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
+    LLMSetToolsFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -52,9 +53,10 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
@@ -582,6 +584,12 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
+        elif isinstance(frame, LLMSetToolsFrame):
+            # Continuous session: no fresh context frame per turn, so sync the
+            # registered tool handlers to the new tool set here (the base service
+            # only does this on LLMContextFrame).
+            self._sync_registered_tool_handlers(frame.tools)
+            await self._send_session_update()
 
         await self.push_frame(frame, direction)
 
@@ -589,9 +597,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle LLM context updates."""
         if not self._context:
             self._context = context
+            await self._process_completed_function_calls(send_new_results=False)
             await self._create_response()
         else:
             self._context = context
+            await self._process_completed_function_calls(send_new_results=True)
 
     async def _handle_messages_append(self, frame):
         """Handle a request to append messages to the conversation."""
@@ -776,12 +786,16 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_input_audio_transcription_completed(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
-            elif evt.type == "response.audio_transcript.delta":
-                await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "input_audio_buffer.speech_started":
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
+            elif evt.type == "response.audio_transcript.delta":
+                await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "response.function_call_arguments.delta":
+                pass
+            elif evt.type == "response.function_call_arguments.done":
+                await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
                 if evt.error.code in _NON_FATAL_ERROR_CODES:
                     logger.debug(f"{self} {evt.error.message}")
@@ -927,6 +941,37 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 
+    async def _handle_evt_function_call_arguments_done(self, evt):
+        """Handle function call arguments done event."""
+        try:
+            args = json.loads(evt.arguments)
+
+            function_call_item = self._pending_function_calls.get(evt.call_id)
+            if function_call_item:
+                del self._pending_function_calls[evt.call_id]
+
+                function_name = evt.name or function_call_item.name
+                if not function_name:
+                    logger.warning(f"No function name for call_id: {evt.call_id}")
+                    return
+
+                function_calls = [
+                    FunctionCallFromLLM(
+                        context=self._context,
+                        tool_call_id=evt.call_id,
+                        function_name=function_name,
+                        arguments=args,
+                    )
+                ]
+
+                await self.run_function_calls(function_calls)
+                logger.debug(f"Processed function call: {function_name}")
+            else:
+                logger.warning(f"No tracked function call found for call_id: {evt.call_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to process function call arguments: {e}")
+
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from server-side VAD."""
         if self._is_manual_turn_detection():
@@ -953,6 +998,20 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     #
     # Response creation
     #
+
+    async def reset_conversation(self):
+        """Reset the conversation by disconnecting and reconnecting.
+
+        This fully resets the server-side conversation state. Audio buffers,
+        pending function calls, and conversation history are cleared.
+        """
+        logger.debug("Resetting Voice Live conversation")
+        await self._disconnect()
+
+        self._llm_needs_conversation_setup = True
+        await self._process_completed_function_calls(send_new_results=False)
+
+        await self._connect()
 
     async def _create_response(self):
         """Create an assistant response."""
@@ -997,6 +1056,97 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             events.ResponseCreateEvent(response=events.ResponseProperties(modalities=modalities))
         )
 
+    async def _process_completed_function_calls(self, send_new_results: bool):
+        """Process completed function calls and send results to the service."""
+        assert self._context is not None
+
+        # If the user registered a function with cancel_on_interruption=False,
+        # the aggregator emits async-tool-style messages into the context.
+        # Voice Live has no channel for streamed intermediate results, so
+        # surface a one-time warning where the expectation is set.
+        if not self._async_tool_warning_logged:
+            for message in self._context.get_messages():
+                if isinstance(message, LLMSpecificMessage):
+                    continue
+                if async_tool_messages.parse_message(message) is not None:
+                    logger.error(
+                        f"{self}: cancel_on_interruption=False is not reliably "
+                        f"supported by Voice Live as of this writing. "
+                        f"Use cancel_on_interruption=True (the default), or "
+                        f"consider another LLM service if your tool needs the "
+                        f"async semantics."
+                    )
+                    await self.push_error(
+                        error_msg=(
+                            "cancel_on_interruption=False is not reliably supported "
+                            "by Voice Live as of this writing."
+                        ),
+                    )
+                    self._async_tool_warning_logged = True
+                    break
+
+        sent_new_result = False
+
+        for message in self._context.get_messages():
+            # LLMSpecificMessages are opaque provider-specific payloads, not
+            # standard tool-result messages — skip them.
+            if isinstance(message, LLMSpecificMessage):
+                continue
+
+            # Async-tool messages live alongside regular tool messages in the
+            # context; detect and route them before the regular logic so we
+            # don't try to send the async-tool envelope JSON as a tool result.
+            async_payload = async_tool_messages.parse_message(message)
+            if async_payload is not None:
+                if async_payload.tool_call_id in self._completed_tool_calls:
+                    continue
+                if async_payload.kind == "started":
+                    # The provider already issued the tool call and natively
+                    # awaits a result; nothing to send for the started marker.
+                    continue
+                if async_payload.kind == "intermediate":
+                    logger.error(
+                        f"{self}: Voice Live does not support streamed async "
+                        f"tool results; dropping intermediate result for "
+                        f"tool_call_id={async_payload.tool_call_id}. Consider "
+                        f"another LLM service if your tool needs to stream "
+                        f"intermediate results."
+                    )
+                    await self.push_error(
+                        error_msg="Voice Live does not support streamed async tool results.",
+                    )
+                    continue
+                if async_payload.kind == "final":
+                    # Deliver via the formal tool-result channel — same path
+                    # as a synchronous tool result, just delayed.
+                    if send_new_results:
+                        sent_new_result = True
+                        await self._send_tool_result(
+                            async_payload.tool_call_id, async_payload.result
+                        )
+                    self._completed_tool_calls.add(async_payload.tool_call_id)
+                    continue
+                # Defensive: any async-tool message must not fall through
+                # to the regular tool-result block below, even if it
+                # carries a kind we don't recognize.
+                continue
+
+            # Look for newly-completed "regular" (as opposed to async-tool) results
+            if message.get("role") == "tool" and message.get("content") != "IN_PROGRESS":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                    if send_new_results:
+                        sent_new_result = True
+                        await self._send_tool_result(
+                            tool_call_id, cast(str | None, message.get("content"))
+                        )
+                    self._completed_tool_calls.add(tool_call_id)
+
+        # If we reported any new tool call results to the service, trigger
+        # another response
+        if sent_new_result:
+            await self._create_response()
+
     async def _send_user_audio(self, frame):
         """Send user audio to Voice Live, buffered to ~60ms chunks."""
         if self._llm_needs_conversation_setup:
@@ -1019,3 +1169,12 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._audio_buffer = self._audio_buffer[chunk_bytes:]
             payload = base64.b64encode(chunk).decode("utf-8")
             await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+
+    async def _send_tool_result(self, tool_call_id: str, result: str | None):
+        """Send a tool call result to Voice Live."""
+        item = events.ConversationItem(
+            type="function_call_output",
+            call_id=tool_call_id,
+            output=result,
+        )
+        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
