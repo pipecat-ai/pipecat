@@ -13,11 +13,36 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     TranscriptionFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator
 from pipecat.tests.utils import SleepFrame, run_test
 
 
 class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_transcription_overlap_survives_dtmf_interruption(self):
+        context = LLMContext()
+        pipeline = Pipeline([DTMFAggregator(), LLMUserAggregator(context)])
+
+        await run_test(
+            pipeline,
+            frames_to_send=[
+                TranscriptionFrame(text="what is my balance", user_id="user", timestamp="now"),
+                InputDTMFFrame(button=KeypadEntry.ONE),
+                InputDTMFFrame(button=KeypadEntry.POUND),
+            ],
+        )
+
+        user_messages = [
+            message["content"]
+            for message in context.get_messages()
+            if message.get("role") == "user"
+        ]
+        self.assertEqual(len(user_messages), 1)
+        self.assertIn("what is my balance", user_messages[0])
+        self.assertIn("DTMF: 1#", user_messages[0])
+
     async def test_basic_aggregation_with_pound(self):
         """Test basic DTMF aggregation ending with pound key."""
         aggregator = DTMFAggregator()

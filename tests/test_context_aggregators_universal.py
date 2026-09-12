@@ -98,6 +98,48 @@ TRANSCRIPTION_TIMEOUT = 0.1
 
 
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_queued_transcriptions_survive_turn_start_interruption(self):
+        async def committed_user_messages(frames: list[Frame], *, use_interim: bool) -> list[str]:
+            context = LLMContext()
+            user_aggregator = LLMUserAggregator(
+                context,
+                params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        start=[TranscriptionUserTurnStartStrategy(use_interim=use_interim)],
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    )
+                ),
+            )
+            await run_test(user_aggregator, frames_to_send=frames)
+            return [
+                message["content"]
+                for message in context.get_messages()
+                if message.get("role") == "user"
+            ]
+
+        timestamp = "2026-01-01T00:00:00Z"
+        interim_then_final = await committed_user_messages(
+            [
+                InterimTranscriptionFrame(text="what is", user_id="user", timestamp=timestamp),
+                TranscriptionFrame(text="what is my balance", user_id="user", timestamp=timestamp),
+            ],
+            use_interim=True,
+        )
+        consecutive_finals = await committed_user_messages(
+            [
+                TranscriptionFrame(text="one", user_id="user", timestamp=timestamp),
+                TranscriptionFrame(text="two", user_id="user", timestamp=timestamp),
+            ],
+            use_interim=False,
+        )
+
+        self.assertEqual(interim_then_final, ["what is my balance"])
+        self.assertEqual(consecutive_finals, ["one two"])
+
     async def test_llm_run(self):
         context = LLMContext()
 

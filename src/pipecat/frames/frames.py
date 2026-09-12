@@ -447,11 +447,13 @@ class AggregatedTextProgressFrame(DataFrame):
 
 
 @dataclass
-class TranscriptionFrame(TextFrame):
+class TranscriptionFrame(TextFrame, UninterruptibleFrame):
     """Text frame containing speech transcription data.
 
     A text frame with transcription-specific data. The `result` field
-    contains the result from the STT service if available.
+    contains the result from the STT service if available. Transcription
+    frames are uninterruptible so received user input is preserved when a
+    user turn interrupts queued pipeline work.
 
     Parameters:
         user_id: Identifier for the user who spoke.
