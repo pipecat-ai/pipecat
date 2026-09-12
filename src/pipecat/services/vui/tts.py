@@ -177,8 +177,17 @@ class VuiTTSService(TTSService):
         )
         text = prompt_transcript(path)
         if not text:
-            from vui.inference import asr  # openai-whisper: `vui-tts[server]`
-
+            # Transcribing the reference needs openai-whisper, which is part of
+            # the `vui-tts[server]` extra, not of `pipecat-ai[vui]`.
+            try:
+                from vui.inference import asr
+            except ImportError as e:
+                raise ValueError(
+                    f"{path}: no transcript found. Put the exact transcript in a sibling "
+                    f"{path.with_suffix('.txt').name}, bake a prompt .safetensors with Vui's "
+                    "scripts/build_prompts.py, or install `vui-tts[server]` for automatic "
+                    "transcription."
+                ) from e
             text = asr(wav_16k)
         dev = "cuda" if torch.cuda.is_available() else "cpu"
         enc = QwenCodecEncoder.from_pretrained().to(dev).float().eval()
