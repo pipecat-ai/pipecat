@@ -136,7 +136,7 @@ def _stream(monkeypatch, *outputs: BackendOutput) -> list[dict]:
         for output in outputs:
             yield output
 
-    monkeypatch.setattr(two_layer_llm_service, "delegate_to_backend", fake)
+    monkeypatch.setattr(two_layer_llm_service, "_delegate_to_backend", fake)
     return requests
 
 
