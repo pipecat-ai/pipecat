@@ -665,9 +665,12 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._async_tool_warning_logged = False
             self._audio_buffer = b""
             self._interim_transcription_text = ""
-            self._disconnecting = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
+        finally:
+            # Sends are dropped while this is set, so it has to be cleared even
+            # when closing failed partway through.
+            self._disconnecting = False
 
     async def _ws_send(self, realtime_message):
         """Send a message over the WebSocket connection."""
@@ -1016,7 +1019,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self._disconnect()
 
         self._llm_needs_conversation_setup = True
-        await self._process_completed_function_calls(send_new_results=False)
+        if self._context:
+            await self._process_completed_function_calls(send_new_results=False)
 
         await self._connect()
 

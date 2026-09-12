@@ -138,3 +138,33 @@ def test_turn_detection_false_also_selects_manual_mode():
     )
 
     assert service._is_manual_turn_detection() is True
+
+
+@pytest.mark.asyncio
+async def test_a_failed_disconnect_still_clears_the_disconnecting_flag():
+    """Sends are dropped while the flag is set, so a stuck flag mutes the service."""
+    service = _service()
+
+    class _FailingWebSocket:
+        async def close(self):
+            raise RuntimeError("close failed")
+
+    service._websocket = _FailingWebSocket()
+    await service._disconnect()
+
+    assert service._disconnecting is False
+
+
+@pytest.mark.asyncio
+async def test_reset_conversation_before_any_context_does_not_raise():
+    service = _service()
+    service._connect = _noop
+    service._disconnect = _noop
+
+    await service.reset_conversation()
+
+    assert service._llm_needs_conversation_setup is True
+
+
+async def _noop(*args, **kwargs):
+    return None
