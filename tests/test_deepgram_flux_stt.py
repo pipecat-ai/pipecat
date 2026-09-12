@@ -53,9 +53,15 @@ def _make_fake_flux_service():
             self._configure_sent_at = None
             self._configure_pending_fields = None
             self._active = True
+            # Flux confirms a connection separately from the transport opening.
+            self._connection_established_event = asyncio.Event()
+            self._connection_established_event.set()
+            self._reconnecting = False
             self.sent_messages = []
             self.errors = []
             self.reconnect_requests = 0
+            self.reconnects = 0
+            self.usable_calls = []
             self.connection_events = []
 
         async def _transport_send_audio(self, audio: bytes):
@@ -76,8 +82,11 @@ def _make_fake_flux_service():
         async def _request_reconnect(self):
             self.reconnect_requests += 1
 
+        async def _reconnect(self):
+            self.reconnects += 1
+
         async def set_usable(self, usable: bool):
-            pass
+            self.usable_calls.append(usable)
 
         async def run_stt(self, audio: bytes):
             yield None
@@ -254,6 +263,55 @@ async def test_update_settings_configures_without_reconnecting():
     await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
 
     assert service.sent_messages == [{"type": "Configure", "thresholds": {"eot_threshold": 0.9}}]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_without_a_connection():
+    """An update with no connection to carry it rebuilds one, which does carry it.
+
+    The update has already reported the service usable again, so without this it
+    would claim to have recovered while still having nowhere to send audio. The
+    reconnect is not a deferred one: that waits on a turn only a connected Flux
+    can report.
+    """
+    service = _make_fake_flux_service()
+    service._active = False
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+
+    assert service.sent_messages == []
+    assert service.reconnects == 1
+    assert service.reconnect_requests == 0
+    assert service.usable_calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_when_the_connection_was_never_confirmed():
+    """An unconfirmed connection can't carry a Configure, even while it reports itself open.
+
+    The SageMaker transport reports its stream active as soon as it opens, before
+    Flux has accepted the settings it was opened with.
+    """
+    service = _make_fake_flux_service()
+    service._connection_established_event.clear()
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+
+    assert service.sent_messages == []
+    assert service.reconnects == 1
+
+
+@pytest.mark.asyncio
+async def test_update_settings_does_not_stack_on_a_reconnect_in_flight():
+    """A reconnect already running will apply the new settings when it builds its URL."""
+    service = _make_fake_flux_service()
+    service._active = False
+    service._reconnecting = True
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+
+    assert service.reconnects == 0
     assert service.reconnect_requests == 0
 
 
