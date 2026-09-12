@@ -28,22 +28,28 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
     AggregationType,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -432,6 +438,68 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
         )
 
+    async def _handle_interruption(self):
+        """Handle user interruption of assistant speech.
+
+        Server-side VAD cancels the response and clears the buffer itself; in
+        manual mode the client must send the cancel and clear events.
+        """
+        if self._is_manual_turn_detection():
+            await self.send_client_event(events.InputAudioBufferClearEvent())
+            await self.send_client_event(events.ResponseCancelEvent())
+        await self._truncate_current_audio_response()
+        await self.stop_all_metrics()
+
+        if self._current_assistant_response:
+            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_user_started_speaking(self, frame):
+        """Handle user started speaking event."""
+        pass
+
+    async def _handle_user_stopped_speaking(self, frame):
+        """Handle user stopped speaking event.
+
+        Server-side VAD commits the buffer and creates the response itself; in
+        manual mode the client must send them. Metrics are started in
+        ``_handle_evt_speech_stopped`` in the server-VAD path.
+        """
+        if self._is_manual_turn_detection():
+            await self.start_ttfb_metrics()
+            await self.start_processing_metrics()
+            await self.send_client_event(events.InputAudioBufferCommitEvent())
+            await self.send_client_event(events.ResponseCreateEvent())
+
+    async def _handle_bot_stopped_speaking(self):
+        """Handle bot stopped speaking event."""
+        self._current_audio_response = None
+
+    async def _truncate_current_audio_response(self):
+        """Truncate the assistant audio the caller spoke over.
+
+        Tells Voice Live how much of the response was actually heard, so the
+        conversation history matches what the caller received.
+        """
+        if not self._current_audio_response:
+            return
+
+        current = self._current_audio_response
+        self._current_audio_response = None
+
+        elapsed_ms = int(time.time() * 1000) - current.start_time_ms
+        await self.send_client_event(
+            events.ConversationItemTruncateEvent(
+                item_id=current.item_id,
+                content_index=current.content_index,
+                audio_end_ms=max(elapsed_ms, 0),
+            )
+        )
+
+    #
+    # Standard AIService frame handling
+    #
+
     def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
         """Sync the session's audio formats with the transport's sample rates.
 
@@ -504,6 +572,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
+        elif isinstance(frame, InterruptionFrame):
+            await self._handle_interruption()
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
 
@@ -702,6 +778,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 await self._handle_evt_response_done(evt)
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "input_audio_buffer.speech_started":
+                await self._handle_evt_speech_started(evt)
+            elif evt.type == "input_audio_buffer.speech_stopped":
+                await self._handle_evt_speech_stopped(evt)
             elif evt.type == "error":
                 if evt.error.code in _NON_FATAL_ERROR_CODES:
                     logger.debug(f"{self} {evt.error.message}")
@@ -846,6 +926,25 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
+
+    async def _handle_evt_speech_started(self, evt):
+        """Handle speech started event from server-side VAD."""
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
+        await self._truncate_current_audio_response()
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+
+    async def _handle_evt_speech_stopped(self, evt):
+        """Handle speech stopped event from server-side VAD."""
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle fatal error event."""
