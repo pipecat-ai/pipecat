@@ -1,0 +1,642 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Azure Voice Live LLM service implementation with WebSocket support.
+
+Based on Azure's Voice Live API documentation:
+https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live
+"""
+
+import json
+import re
+import urllib.parse
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
+from typing import Any, Self, cast
+
+from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    LLMServiceMetadataFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+
+from . import events
+
+AzureTokenProvider = Callable[[], Awaitable[str]]
+"""Async callable supplying a Microsoft Entra ID bearer token.
+
+Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
+``https://ai.azure.com/.default`` scope.
+"""
+
+DEFAULT_API_VERSION = "2026-07-15"
+"""Voice Live API version this service speaks."""
+
+# Output sample rate implied by each PCM output format Voice Live offers.
+_OUTPUT_FORMAT_SAMPLE_RATES: dict[int, events.OutputAudioFormat] = {
+    8000: "pcm16_8000hz",
+    16000: "pcm16_16000hz",
+    24000: "pcm16",
+}
+
+
+@dataclass
+class CurrentAudioResponse:
+    """Tracks the current audio response from the assistant.
+
+    Parameters:
+        item_id: Unique identifier for the audio response item.
+        content_index: Index of the audio content within the item.
+        start_time_ms: Timestamp when the audio response started in milliseconds.
+        total_size: Total size of audio data received in bytes. Defaults to 0.
+    """
+
+    item_id: str
+    content_index: int
+    start_time_ms: int
+    total_size: int = 0
+
+
+@dataclass
+class AzureVoiceLiveLLMSettings(LLMSettings):
+    """Settings for AzureVoiceLiveLLMService.
+
+    Parameters:
+        session_properties: Voice Live session properties (voice, turn
+            detection, transcription, tools, etc.). ``model``,
+            ``instructions`` and ``temperature`` are synced bidirectionally
+            with the top-level ``model``, ``system_instruction`` and
+            ``temperature`` fields.
+    """
+
+    session_properties: events.SessionProperties | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    # -- Bidirectional sync helpers ------------------------------------------
+
+    @staticmethod
+    def _sync_top_level_to_sp(settings: "AzureVoiceLiveLLMService.Settings"):
+        """Push top-level ``model``/``system_instruction``/``temperature`` into SP."""
+        if not is_given(settings.session_properties):
+            return
+        sp = settings.session_properties
+        if is_given(settings.model) and settings.model is not None:
+            sp.model = settings.model
+        if is_given(settings.system_instruction):
+            sp.instructions = settings.system_instruction
+        if is_given(settings.temperature) and settings.temperature is not None:
+            sp.temperature = settings.temperature
+
+    # -- apply_update override -----------------------------------------------
+
+    def apply_update(self, delta: Self) -> dict[str, Any]:
+        """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
+
+        When the delta contains ``session_properties``, it **replaces** the
+        stored SP wholesale. Top-level field values always take precedence over
+        conflicting SP values.
+        """
+        changed = super().apply_update(delta)
+
+        if "session_properties" in changed and is_given(self.session_properties):
+            sp = self.session_properties
+            if "model" not in changed and sp.model is not None:
+                old_model = self.model
+                self.model = sp.model
+                if old_model != self.model:
+                    changed["model"] = old_model
+            if "system_instruction" not in changed and sp.instructions is not None:
+                old_si = self.system_instruction
+                self.system_instruction = sp.instructions
+                if old_si != self.system_instruction:
+                    changed["system_instruction"] = old_si
+
+        self._sync_top_level_to_sp(self)
+
+        return changed
+
+    # -- from_mapping override -----------------------------------------------
+
+    @classmethod
+    def from_mapping(
+        cls: type["AzureVoiceLiveLLMService.Settings"], settings: Mapping[str, Any]
+    ) -> "AzureVoiceLiveLLMService.Settings":
+        """Build a delta from a plain dict, routing SP keys into ``session_properties``.
+
+        Keys that correspond to ``SessionProperties`` fields are collected into
+        a nested ``session_properties`` value. ``model`` is always routed to the
+        top-level field. Unknown keys go to ``extra``.
+        """
+        own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
+
+        top: dict[str, Any] = {}
+        sp_dict: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
+
+        sp_keys = set(events.SessionProperties.model_fields.keys()) - {"model"}
+
+        for key, value in settings.items():
+            canonical = cls._aliases.get(key, key)
+            if canonical in own_field_names:
+                top[canonical] = value
+            elif canonical in sp_keys:
+                sp_dict[canonical] = value
+            else:
+                extra[key] = value
+
+        if sp_dict:
+            top["session_properties"] = events.SessionProperties(**sp_dict)
+
+        instance = cls(**top)
+        instance.extra = extra
+        return instance
+
+
+# Error codes that are non-fatal and should not exit the receive loop.
+_NON_FATAL_ERROR_CODES = {
+    "response_cancel_not_active",
+    "conversation_already_has_active_response",
+}
+
+
+class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
+    """Azure Voice Live LLM service for real-time audio and text communication.
+
+    Implements Azure's Voice Live API over WebSocket for low-latency
+    bidirectional audio. Voice Live combines speech recognition, a generative
+    model and Azure text to speech behind a single realtime session, and adds
+    noise suppression, echo cancellation and semantic end-of-turn detection.
+
+    Supports function calling, conversation management and real-time
+    transcription.
+
+    Proposes turn boundaries from Voice Live's server-side VAD events, which the
+    recommended external user turn strategies resolve into
+    ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``.
+    ``LLMContextAggregatorPair`` auto-detects this realtime service and
+    decouples context writes from those frames. If you wire local VAD
+    (``LLMUserAggregatorParams.vad_analyzer``) on top of this service, disable
+    Voice Live's server-side turn detection first by passing
+    ``turn_detection=None`` in ``session_properties`` (manual mode); otherwise
+    both sources broadcast duplicate user-turn frames.
+
+    Azure's own Realtime deployments are a different product served by
+    :class:`~pipecat.services.azure.realtime.llm.AzureRealtimeLLMService`; the
+    two speak different event names and are not interchangeable.
+
+    Example::
+
+        llm = AzureVoiceLiveLLMService(
+            api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),
+            endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),
+            model="gpt-4o-mini",
+            voice="en-US-Ava:DragonHDLatestNeural",
+        )
+
+    For full control over session properties (note: ``session_properties``
+    **replaces** all defaults, so provide a complete config)::
+
+        from pipecat.services.azure.voicelive.events import (
+            AzureStandardVoice,
+            InputAudioNoiseReduction,
+            InputAudioTranscription,
+            SessionProperties,
+            TurnDetection,
+        )
+
+        llm = AzureVoiceLiveLLMService(
+            api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),
+            endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),
+            settings=AzureVoiceLiveLLMService.Settings(
+                session_properties=SessionProperties(
+                    modalities=["text", "audio"],
+                    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),
+                    turn_detection=TurnDetection(
+                        type="azure_semantic_vad",
+                        silence_duration_ms=500,
+                        remove_filler_words=True,
+                    ),
+                    input_audio_transcription=InputAudioTranscription(model="azure-speech"),
+                    input_audio_noise_reduction=InputAudioNoiseReduction(),
+                ),
+            ),
+        )
+    """
+
+    Settings = AzureVoiceLiveLLMSettings
+    _settings: Settings
+
+    adapter_class = AzureVoiceLiveLLMAdapter
+
+    # Target ~60ms audio chunks when sending to Voice Live (16-bit mono).
+    _AUDIO_CHUNK_TARGET_MS = 60
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        api_key: str | None = None,
+        token_provider: AzureTokenProvider | None = None,
+        model: str = "gpt-4o-mini",
+        voice: str | None = None,
+        api_version: str = DEFAULT_API_VERSION,
+        settings: Settings | None = None,
+        start_audio_paused: bool = False,
+        **kwargs,
+    ):
+        """Initialize the Azure Voice Live LLM service.
+
+        Args:
+            endpoint: Voice Live endpoint for the Foundry resource. Accepts the
+                resource endpoint as shown in the Azure portal
+                (``https://<resource>.services.ai.azure.com``) or a full
+                WebSocket URL; the scheme and ``/voice-live/realtime`` path are
+                filled in when absent.
+            api_key: API key for the resource. Required unless
+                ``token_provider`` is given.
+            token_provider: Async callable supplying a Microsoft Entra ID bearer
+                token, used instead of ``api_key`` when given. Build one with
+                :func:`azure.identity.aio.get_bearer_token_provider` and the
+                ``https://ai.azure.com/.default`` scope.
+            model: Model backing the session, e.g. "gpt-4o-mini" or
+                "gpt-realtime". Sent as a query parameter on the connection.
+            voice: Azure text to speech voice for audio responses, e.g.
+                "en-US-Ava:DragonHDLatestNeural". Shorthand for
+                ``session_properties.voice``.
+            api_version: Voice Live API version to request.
+            settings: Full settings for fine-grained control. When
+                ``session_properties`` is provided in settings, it **replaces**
+                all defaults wholesale — provide a complete ``SessionProperties``
+                in that case.
+            start_audio_paused: Whether to start with audio input paused.
+            **kwargs: Additional arguments passed to parent LLMService.
+
+        Raises:
+            ValueError: If neither ``api_key`` nor ``token_provider`` is given.
+        """
+        if api_key is None and token_provider is None:
+            raise ValueError("Either `api_key` or `token_provider` is required.")
+
+        default_voice = voice or "en-US-Ava:DragonHDLatestNeural"
+
+        default_settings = self.Settings(
+            model=model,
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=events.SessionProperties(
+                model=model,
+                modalities=["text", "audio"],
+                voice=events.AzureStandardVoice(name=default_voice),
+                input_audio_format="pcm16",
+                output_audio_format="pcm16",
+                turn_detection=events.TurnDetection(
+                    type="azure_semantic_vad",
+                    create_response=True,
+                    interrupt_response=True,
+                ),
+                input_audio_transcription=events.InputAudioTranscription(model="azure-speech"),
+                input_audio_noise_reduction=events.InputAudioNoiseReduction(),
+            ),
+        )
+
+        self.Settings._sync_top_level_to_sp(default_settings)
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        base_url = self._build_base_url(endpoint)
+
+        super().__init__(
+            base_url=base_url,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self.api_key = api_key
+        self.base_url = base_url
+        self._token_provider = token_provider
+        self._api_version = api_version
+        self._model = model
+
+        self._audio_input_paused = start_audio_paused
+        self._audio_buffer = b""
+        self._audio_send_logged = False
+        self._interim_transcription_text = ""
+        self._websocket = None
+        self._receive_task = None
+        self._context: LLMContext | None = None
+
+        self._input_sample_rate: int | None = None
+        self._output_sample_rate: int | None = None
+
+        self._llm_needs_conversation_setup = True
+
+        self._disconnecting = False
+        self._api_session_ready = False
+        self._run_llm_when_api_session_ready = False
+
+        self._current_assistant_response = None
+        self._current_audio_response: CurrentAudioResponse | None = None
+
+        self._messages_added_manually = {}
+        self._pending_function_calls = {}
+        self._completed_tool_calls = set()
+        self._async_tool_warning_logged: bool = False
+
+        self._register_event_handler("on_conversation_item_created")
+        self._register_event_handler("on_conversation_item_updated")
+
+    @staticmethod
+    def _build_base_url(endpoint: str) -> str:
+        """Normalize a portal endpoint or full URL into a Voice Live WebSocket URL."""
+        url = re.sub(r"^https?://", "wss://", endpoint.strip()).rstrip("/")
+        if not url.startswith("wss://"):
+            url = f"wss://{url}"
+        if "/voice-live/realtime" not in url:
+            url = f"{url}/voice-live/realtime"
+        return url
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate usage metrics."""
+        return True
+
+    def set_audio_input_paused(self, paused: bool):
+        """Set whether audio input is paused.
+
+        Args:
+            paused: Whether to pause audio input.
+        """
+        self._audio_input_paused = paused
+
+    def _get_output_sample_rate(self) -> int:
+        """Sample rate of the audio Voice Live returns."""
+        return self._output_sample_rate or 24000
+
+    def _is_manual_turn_detection(self) -> bool:
+        """Whether the caller drives turn boundaries instead of Voice Live."""
+        props = self._settings.session_properties
+        if not is_given(props):
+            return False
+        return props.turn_detection is None
+
+    def service_metadata_frame(self) -> LLMServiceMetadataFrame:
+        """Describe this service to the rest of the pipeline."""
+        emits_turn_frames = not self._is_manual_turn_detection()
+        self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames)
+        return LLMServiceMetadataFrame(
+            service_name=self.name,
+            is_realtime_service=True,
+            user_turn_strategies=ExternalUserTurnStrategies() if emits_turn_frames else None,
+        )
+
+    def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
+        """Sync the session's audio formats with the transport's sample rates.
+
+        Voice Live takes the input rate directly but selects the output rate
+        through the output format, so an unsupported output rate falls back to
+        the 24 kHz default.
+
+        Args:
+            input_sample_rate: Sample rate for audio input (Hz).
+            output_sample_rate: Sample rate for audio output (Hz).
+        """
+        self._input_sample_rate = input_sample_rate
+        props = assert_given(self._settings.session_properties)
+        props.input_audio_sampling_rate = input_sample_rate
+
+        output_format = _OUTPUT_FORMAT_SAMPLE_RATES.get(output_sample_rate)
+        if output_format:
+            props.output_audio_format = output_format
+            self._output_sample_rate = output_sample_rate
+        else:
+            logger.warning(
+                f"{self}: Voice Live has no output format for {output_sample_rate}Hz; "
+                f"using 24000Hz instead."
+            )
+            props.output_audio_format = "pcm16"
+            self._output_sample_rate = 24000
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._ensure_audio_config(setup.audio_in_sample_rate, setup.audio_out_sample_rate)
+        await self._connect()
+
+    async def cleanup(self):
+        """Release resources on teardown."""
+        await super().cleanup()
+        await self._disconnect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close WebSocket connection."""
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close WebSocket connection."""
+        await super().cancel(frame)
+        await self._disconnect()
+
+    #
+    # Frame processing
+    #
+
+    async def send_client_event(self, event: events.ClientEvent):
+        """Send a client event to the Voice Live API.
+
+        Args:
+            event: The client event to send.
+        """
+        await self._ws_send(event.model_dump(exclude_none=True))
+
+    async def _connect(self):
+        """Establish WebSocket connection to Voice Live."""
+        try:
+            if self._websocket:
+                return
+
+            if self._token_provider:
+                headers = {"Authorization": f"Bearer {await self._token_provider()}"}
+            else:
+                headers = {"api-key": self.api_key or ""}
+
+            params = urllib.parse.urlencode(
+                {"api-version": self._api_version, "model": self._model}
+            )
+            separator = "&" if "?" in self.base_url else "?"
+            uri = f"{self.base_url}{separator}{params}"
+
+            logger.info(f"Connecting to {self.base_url}")
+            self._websocket = await websocket_connect(uri=uri, additional_headers=headers)
+            self._receive_task = self.create_task(self._receive_task_handler())
+        except Exception as e:
+            await self.push_error(error_msg=f"Error connecting to Voice Live: {e}", exception=e)
+            self._websocket = None
+
+    async def _disconnect(self):
+        """Close WebSocket connection."""
+        try:
+            self._disconnecting = True
+            self._api_session_ready = False
+            await self.stop_all_metrics()
+
+            if self._websocket:
+                await self._websocket.close()
+                self._websocket = None
+
+            if self._receive_task:
+                await self.cancel_task(self._receive_task, timeout=1.0)
+                self._receive_task = None
+
+            self._completed_tool_calls = set()
+            self._async_tool_warning_logged = False
+            self._audio_buffer = b""
+            self._interim_transcription_text = ""
+            self._disconnecting = False
+        except Exception as e:
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
+
+    async def _ws_send(self, realtime_message):
+        """Send a message over the WebSocket connection."""
+        try:
+            if not self._disconnecting and self._websocket:
+                await self._websocket.send(json.dumps(realtime_message))
+        except Exception as e:
+            if self._disconnecting or not self._websocket:
+                return
+            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
+
+    async def _update_settings(self, delta):
+        """Apply a settings delta, sending a session update when needed."""
+        input_rate = self._input_sample_rate
+        output_rate = self._output_sample_rate
+
+        changed = await super()._update_settings(delta)
+
+        if "session_properties" in changed and input_rate and output_rate:
+            self._ensure_audio_config(input_rate, output_rate)
+
+        handled = {"session_properties", "system_instruction", "model", "temperature"}
+        if changed.keys() & handled:
+            await self._send_session_update()
+        self._warn_unhandled_updated_settings(changed.keys() - handled)
+        return changed
+
+    async def _send_session_update(self):
+        """Update session settings on the server."""
+        # Mutate a copy: the stored session_properties is read elsewhere (e.g.
+        # _service_tools) and must stay intact.
+        settings = assert_given(self._settings.session_properties).model_copy()
+        adapter = self.get_llm_adapter()
+
+        # The model is selected by the connection URL; repeating it in the
+        # session payload is rejected.
+        settings.model = None
+
+        if self._context:
+            llm_invocation_params = adapter.get_llm_invocation_params(
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
+            )
+
+            # tools given in the context override the tools in the session properties
+            if llm_invocation_params["tools"]:
+                settings.tools = cast(list[events.VoiceLiveTool], llm_invocation_params["tools"])
+
+            # The adapter resolves conflicts between init-provided and
+            # context-provided system instructions (preferring init-provided).
+            if llm_invocation_params["system_instruction"]:
+                settings.instructions = llm_invocation_params["system_instruction"]
+
+        # Convert ToolsSchema to list of dicts if needed
+        if settings.tools and isinstance(settings.tools, ToolsSchema):
+            settings.tools = cast(
+                list[events.VoiceLiveTool], adapter.from_standard_tools(settings.tools)
+            )
+
+        await self.send_client_event(events.SessionUpdateEvent(session=settings))
+
+    #
+    # Inbound server event handling
+    #
+
+    async def _receive_task_handler(self):
+        """Handle incoming WebSocket messages."""
+        assert self._websocket is not None
+
+        async for message in self._websocket:
+            try:
+                raw = json.loads(message)
+                event_type = raw.get("type", "")
+            except Exception:
+                logger.warning(f"Failed to decode server message: {message[:200]}")
+                continue
+
+            try:
+                evt = events.parse_server_event(message)
+            except Exception as e:
+                logger.warning(f"Failed to parse server event: {e}")
+                continue
+
+            # Unrecognized event type (e.g. an avatar or animation event this
+            # service doesn't model). Benign — log quietly and skip.
+            if evt is None:
+                logger.debug(f"{self} ignoring unhandled server event: {event_type}")
+                continue
+
+            if evt.type == "session.created":
+                await self._handle_evt_session_created(evt)
+            elif evt.type == "session.updated":
+                await self._handle_evt_session_updated(evt)
+            elif evt.type == "error":
+                if evt.error.code in _NON_FATAL_ERROR_CODES:
+                    logger.debug(f"{self} {evt.error.message}")
+                else:
+                    await self._handle_evt_error(evt)
+                    return
+            else:
+                logger.debug(f"{self} received known but undispatched server event: {evt.type}")
+
+    async def _handle_evt_session_created(self, evt):
+        """Handle session.created event — first event after connecting."""
+        await self._send_session_update()
+
+    async def _handle_evt_session_updated(self, evt):
+        """Handle session.updated event."""
+        self._api_session_ready = True
+
+    async def _handle_evt_error(self, evt):
+        """Handle fatal error event."""
+        await self.push_error(error_msg=f"Azure Voice Live Error: {evt.error.message}")
+
+    #
+    # Response creation
+    #
