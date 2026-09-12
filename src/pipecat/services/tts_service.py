@@ -722,6 +722,13 @@ class TTSService(AIService):
 
     async def on_turn_context_completed(self):
         """Handle the completion of a turn."""
+        # Captured before the reset below, so the silent-turn flush at the end
+        # can still identify the turn whose end frame is held.
+        turn_context_id = self._turn_context_id
+        had_audio_context = bool(turn_context_id) and self.audio_context_available(
+            turn_context_id
+        )
+
         # For HTTP services they emit the frames synchronously, so close the audio context here
         # once all frames (including TTSTextFrame above) have been enqueued.
         if (
@@ -745,6 +752,39 @@ class TTSService(AIService):
 
         # Reset the turn context ID
         self._turn_context_id = None
+
+        await self._maybe_flush_silent_turn_end_frame(turn_context_id, had_audio_context)
+
+    async def _maybe_flush_silent_turn_end_frame(
+        self, turn_context_id: str | None, had_audio_context: bool
+    ):
+        """Emit the held LLMFullResponseEndFrame for a turn that produced no audio.
+
+        When ``push_text_frames`` is False, ``process_frame`` holds the end frame in
+        ``_pending_llm_response_end_frames`` and ``_maybe_reset_word_timestamps``
+        re-pushes it at the end of that turn's audio context. A tool-only or empty
+        LLM response never reaches ``run_tts``, so it has no audio context, that
+        method never runs for it, and the frame is dropped: downstream processors
+        see the turn start and never see it end.
+
+        Args:
+            turn_context_id: The turn context that just completed.
+            had_audio_context: Whether that turn had opened an audio context.
+        """
+        if had_audio_context or not turn_context_id:
+            # Audible turn: _maybe_reset_word_timestamps re-pushes the frame when
+            # this turn's audio ends, with the PTS of the last word frame.
+            return
+
+        # A TTSSpeakFrame also completes a turn context, but under a fresh context
+        # ID that is never a key here, so this no-ops for that path.
+        frame = self._pending_llm_response_end_frames.pop(turn_context_id, None)
+        if frame is None or not self._llm_response_started:
+            return
+
+        self._llm_response_started = False
+        frame.pts = self._word_last_pts
+        await self.push_frame(frame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for text-to-speech conversion.
