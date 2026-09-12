@@ -376,6 +376,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._websocket = None
         self._receive_task = None
         self._context: LLMContext | None = None
+        self._last_context_message_count = 0
 
         self._input_sample_rate: int | None = None
         self._output_sample_rate: int | None = None
@@ -388,6 +389,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response: CurrentAudioResponse | None = None
+        self._server_vad_handled_turn = False
 
         self._messages_added_manually = {}
         self._pending_function_calls = {}
@@ -600,11 +602,50 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle LLM context updates."""
         if not self._context:
             self._context = context
+            self._last_context_message_count = len(context.get_messages())
             await self._process_completed_function_calls(send_new_results=False)
             await self._create_response()
         else:
             self._context = context
             await self._process_completed_function_calls(send_new_results=True)
+
+            # Check for new user messages (e.g. from text input).
+            # The context is a shared mutable object, so we track the last
+            # known message count to detect new additions.
+            messages = self._context.get_messages()
+            current_count = len(messages)
+            if current_count > self._last_context_message_count:
+                last_msg = messages[-1]
+                self._last_context_message_count = current_count
+
+                # When server-side VAD handled this turn, the service already
+                # has the caller's audio and created a response, so sending a
+                # text item would duplicate the turn.
+                if self._server_vad_handled_turn:
+                    self._server_vad_handled_turn = False
+                    return
+
+                # LLMSpecificMessages are opaque provider-specific payloads, not
+                # standard user messages — skip them.
+                if isinstance(last_msg, LLMSpecificMessage):
+                    return
+
+                if last_msg.get("role") == "user":
+                    content = cast("str | list[dict[str, Any]]", last_msg.get("content", ""))
+                    if isinstance(content, list):
+                        content = " ".join(
+                            c.get("text", "") for c in content if c.get("type") == "text"
+                        )
+                    if content:
+                        item = events.ConversationItem(
+                            role="user",
+                            type="message",
+                            content=[events.ItemContent(type="input_text", text=content)],
+                        )
+                        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+                        await self.start_processing_metrics()
+                        await self.start_ttfb_metrics()
+                        await self.send_client_event(events.ResponseCreateEvent())
 
     async def _handle_messages_append(self, frame):
         """Handle a request to append messages to the conversation."""
@@ -997,6 +1038,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             # In manual mode, the client is responsible for broadcasting user turn frames
             return
 
+        # Server VAD creates its own response for this turn; the flag keeps
+        # _handle_context from sending a duplicate when the transcript lands.
+        self._server_vad_handled_turn = True
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
