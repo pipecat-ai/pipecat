@@ -7,6 +7,163 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [1.10.0] - 2026-09-11
+
+### Added
+
+- `SmallestTTSService` now uses Smallest AI's continuation API: text fragments
+  within the same LLM turn share a `context_id` so the server joins them into
+  one continuous generation instead of resetting prosody on each request. Added
+  an optional `max_buffer_delay_ms` setting to control the server-side
+  buffering window.
+  (PR [#5626](https://github.com/pipecat-ai/pipecat/pull/5626))
+
+- Added `LiveKitParams.audio_out_queue_size_ms` to configure the outgoing
+  `rtc.AudioSource` buffer size. Defaults to LiveKit's 1000 ms, so existing
+  behaviour is unchanged.
+  (PR [#5699](https://github.com/pipecat-ai/pipecat/pull/5699))
+
+- Added `enable_turn_detection` to `GradiumSTTService`. With it on, Gradium's
+  server-side end-pointing signal decides when user turns start and end instead
+  of the pipeline's VAD, and the service recommends
+  `ExternalUserTurnStrategies` to the user aggregator. The new `eot_horizon_s`,
+  `eot_threshold` and `post_flush_cooldown_frames` settings tune it.
+  (PR [#5706](https://github.com/pipecat-ai/pipecat/pull/5706))
+
+### Changed
+
+- ⚠️ **Behavior change:** Pipecat now supports the openai 3 SDK, and the
+  `openai` dependency is widened to `>=1.74.0,<4`, so a fresh resolve picks
+  openai 3. It builds its HTTP clients on `httpx2` instead of `httpx`, and TLS
+  certificates then verify against the operating system trust store rather than
+  `certifi`. Minimal container images without system CA certificates, and
+  environments behind a TLS-inspecting proxy, may need `SSL_CERT_FILE` or
+  `SSL_CERT_DIR` pointed at a CA bundle. Pin `openai<3` to stay on the previous
+  HTTP stack.
+
+      A `Timeout` passed to a service's `http_client` — `OpenAITTSService` and
+  the Whisper-based STT services — must come from the HTTP client family the
+  installed SDK uses: `httpx2` on openai 3, `httpx` before it.
+  (PR [#5620](https://github.com/pipecat-ai/pipecat/pull/5620))
+
+- Widened the `anthropic` dependency to `>=0.49.0,<2` to support the anthropic
+  1 SDK. `AnthropicLLMService` sends `temperature`, `top_k` and `top_p` through
+  the request's `extra_body`, since the Messages API methods dropped them as
+  parameters in anthropic 1. Requests reach the API unchanged, and the settings
+  keep their names and meaning.
+
+      If you pass your own Bedrock client, anthropic 1 requires an explicit
+  region — `AsyncAnthropicBedrock(aws_region=...)`, or `AWS_REGION` in the
+  environment — where it previously fell back to `us-east-1`.
+  (PR [#5623](https://github.com/pipecat-ai/pipecat/pull/5623))
+
+- Widened the `mcp` dependency to `mcp[cli]>=1.24.0,<3` so `MCPClient` works
+  with the MCP SDK's 2.x line as well as 1.x. The floor moves to 1.24.0, the
+  first release carrying the `streamable_http_client` transport that both lines
+  share.
+  (PR [#5624](https://github.com/pipecat-ai/pipecat/pull/5624))
+
+- `SpeechmaticsSTTService` reconnects with exponential backoff after a dropped
+  connection or a recoverable server error, buffering audio meanwhile. A
+  rejected credential, rejected session, request-rejecting server error, or
+  exhausted reconnect attempts are reported as a permanent error, leaving the
+  service unusable for the `PipelineWorker`'s `ProcessorUnusablePolicy` to act
+  on. A settings update that requires a reconnect gives a rejected session
+  another chance.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- ⚠️ **Breaking change:** `SpeechmaticsSTTService` now targets Speechmatics
+  Agent STT (`/v2/agent`) through the `speechmatics-agent-stt` SDK, which
+  replaces `speechmatics-voice[smart]` in the `speechmatics` extra. The service
+  cannot connect to the legacy real-time endpoint. The default
+  `turn_detection_mode` is now `TurnDetectionMode.VAD`, so Speechmatics closes
+  turns server-side and the service recommends `ExternalUserTurnStrategies`;
+  pass `turn_detection_mode=TurnDetectionMode.EXTERNAL` to keep driving turns
+  from Pipecat's own VAD. The default model is `linden-1`, selected by the new
+  `model` setting. `Settings.include_partials` is renamed `enable_partials`.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- The `pipecat eval suite` live dashboard now shows a repeated (bot, scenario)
+  row's pass rate while its attempts are still running, beside how many are
+  left, instead of only once every attempt is in. A pass rate, on the dashboard
+  and in the piped summary, is green while every finished attempt passed and
+  red once one has failed; the yellow middle band is gone.
+  (PR [#5704](https://github.com/pipecat-ai/pipecat/pull/5704))
+
+- The `recording` line in `pipecat eval suite`'s settings now says which of the
+  selected runs will actually record. Only an audio-mode run produces audio, so
+  with recording on it reads `on (3 of 6 runs; text mode skipped)` when the
+  selection is mixed and `off (all runs text mode)` when nothing will be
+  recorded. `pipecat eval run -a` prints the same line.
+  (PR [#5707](https://github.com/pipecat-ai/pipecat/pull/5707))
+
+- `DeepSeekLLMService` now defaults `thinking` to disabled. DeepSeek's V4
+  models otherwise reason before every answer, which delays the first spoken
+  token. Pass `thinking=DeepSeekLLMService.ThinkingConfig(type="enabled")` to
+  turn it on, or `thinking=None` to use DeepSeek's own default.
+  (PR [#5710](https://github.com/pipecat-ai/pipecat/pull/5710))
+
+### Deprecated
+
+- Deprecated `SpeechmaticsSTTService` `operating_point` on `Settings` and
+  `InputParams`; use `model` instead. Passing it still selects the model and
+  emits a `DeprecationWarning`. It will be removed in 2.0.0.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+### Removed
+
+- ⚠️ **Breaking change:** Agent STT has no speaker focus, so
+  `SpeechmaticsSTTService` no longer exports `SpeakerFocusMode` or
+  `SpeakerFocusConfig`, and `UpdateParams` and `update_params()` are removed.
+  The `Settings` and `InputParams` fields `focus_speakers`, `ignore_speakers`,
+  `focus_mode`, `speaker_passive_format`, `max_delay`,
+  `end_of_utterance_silence_trigger`, `end_of_utterance_max_delay`,
+  `split_sentences`, `include_results`, and `extra_params` are removed, as are
+  `TurnDetectionMode.FIXED`, `ADAPTIVE`, and `SMART_TURN`. `OperatingPoint` is
+  replaced by `Model`.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- ⚠️ Removed `LmntTTSService`. LMNT has shut down and is no longer available.
+  (PR [#5698](https://github.com/pipecat-ai/pipecat/pull/5698))
+
+### Fixed
+
+- Fixed the WebSocket transports treating an audio frame as unsent whenever the
+  serializer emitted no payload for it. A serializer that resamples through a
+  stream resampler buffers audio across calls and emits it in a later one, so
+  on a pipeline whose output sample rate differs from the wire rate most frames
+  took that path. Those frames are now paced and pushed downstream like any
+  other, so the output queue drains at playback speed again and
+  `BotStoppedSpeakingFrame` and the `EndFrame` behind it are no longer reached
+  early, which matters most where the serializer hangs up the call on the
+  `EndFrame`.
+  (PR [#5593](https://github.com/pipecat-ai/pipecat/pull/5593))
+
+Fixed `PIPECAT_SETUP_FILES` parsing on platforms whose path separator is not a
+  colon.
+  (PR [#5638](https://github.com/pipecat-ai/pipecat/pull/5638))
+
+- Fixed the `pipecat eval suite` live dashboard showing a repeated (bot,
+  scenario) row as idle while a finished attempt's bot was still being stopped.
+  The row now keeps spinning until its concurrency slot is released. `EvalRun`
+  gains a `stopping` flag for that window.
+  (PR [#5704](https://github.com/pipecat-ai/pipecat/pull/5704))
+
+- Async function calls (`cancel_on_interruption=False`) whose result arrives
+  before the conversation moves on are now recorded as ordinary tool results,
+  without the deferred-result message that asks the LLM to convey them. The
+  deferred delivery still applies when the LLM has responded, a new message has
+  landed, or the call sent an intermediate update in the meantime.
+  (PR [#5705](https://github.com/pipecat-ai/pipecat/pull/5705))
+
+- Fixed `DeepSeekLLMService` failing every request after a tool call in
+  thinking mode with a 400 (`The reasoning_content in the thinking mode must be
+  passed back to the API`). DeepSeek requires `reasoning_content` on each
+  assistant message of the current turn once a tool call is involved; the new
+  `DeepSeekLLMAdapter` supplies an empty one on assistant messages that have
+  none.
+  (PR [#5710](https://github.com/pipecat-ai/pipecat/pull/5710))
+
 ## [1.9.0] - 2026-09-10
 
 ### Added
