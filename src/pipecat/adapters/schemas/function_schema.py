@@ -36,6 +36,7 @@ class FunctionSchema:
         properties: dict[str, Any],
         required: list[str],
         handler: "FunctionCallHandler | None" = None,
+        strict: bool | None = None,
     ) -> None:
         """Initialize the function schema.
 
@@ -50,12 +51,21 @@ class FunctionSchema:
                 ``register_function`` call unnecessary. Decorate the handler with
                 ``@tool_options`` to override its default call options
                 (``cancel_on_interruption``, ``timeout_secs``).
+            strict: Whether the provider should enforce this schema when generating
+                the call. Honored only by the OpenAI Chat Completions and Responses
+                adapters, which also require every property to be listed in
+                ``required``. Keep a parameter optional by adding ``"null"`` to its
+                type rather than leaving it out. The adapters supply the
+                ``additionalProperties: false`` that strict mode needs, except on an
+                object that declares its own. Defaults to None, leaving the choice to
+                the provider.
         """
         self._name = name
         self._description = description
         self._properties = properties
         self._required = required
         self._handler = handler
+        self._strict = strict
 
     def to_default_dict(self) -> dict[str, Any]:
         """Converts the function schema to a dictionary.
@@ -118,3 +128,13 @@ class FunctionSchema:
             separately, through ``register_function``.
         """
         return self._handler
+
+    @property
+    def strict(self) -> bool | None:
+        """Get whether the provider should enforce this schema.
+
+        Returns:
+            Whether strict enforcement was requested, or ``None`` to leave the
+            choice to the provider.
+        """
+        return self._strict
