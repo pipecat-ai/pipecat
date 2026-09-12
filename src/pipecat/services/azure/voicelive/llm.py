@@ -10,6 +10,7 @@ Based on Azure's Voice Live API documentation:
 https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live
 """
 
+import base64
 import json
 import re
 import urllib.parse
@@ -19,6 +20,7 @@ from dataclasses import fields as dataclass_fields
 from typing import Any, Self, cast
 
 from loguru import logger
+from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -26,10 +28,15 @@ from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMA
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    LLMContextFrame,
+    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
+    TranscriptionFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -469,6 +476,43 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     # Frame processing
     #
 
+    @override
+    def _service_tools(self) -> "ToolsSchema | list[Any] | None":
+        """Return the tools configured on ``session_properties``, if any."""
+        return assert_given(self._settings.session_properties).tools
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames from the pipeline."""
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            pass
+        elif isinstance(frame, LLMContextFrame):
+            await self._handle_context(frame.context)
+        elif isinstance(frame, InputAudioRawFrame):
+            if not self._audio_input_paused:
+                await self._send_user_audio(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            await self._handle_messages_append(frame)
+
+        await self.push_frame(frame, direction)
+
+    async def _handle_context(self, context: LLMContext):
+        """Handle LLM context updates."""
+        if not self._context:
+            self._context = context
+            await self._create_response()
+        else:
+            self._context = context
+
+    async def _handle_messages_append(self, frame):
+        """Handle a request to append messages to the conversation."""
+        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Voice Live")
+
+    #
+    # WebSocket communication
+    #
+
     async def send_client_event(self, event: events.ClientEvent):
         """Send a client event to the Voice Live API.
 
@@ -632,6 +676,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     async def _handle_evt_session_updated(self, evt):
         """Handle session.updated event."""
         self._api_session_ready = True
+        if self._run_llm_when_api_session_ready:
+            self._run_llm_when_api_session_ready = False
+            await self._create_response()
 
     async def _handle_evt_error(self, evt):
         """Handle fatal error event."""
@@ -640,3 +687,69 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     #
     # Response creation
     #
+
+    async def _create_response(self):
+        """Create an assistant response."""
+        if not self._api_session_ready:
+            self._run_llm_when_api_session_ready = True
+            return
+
+        assert self._context is not None
+
+        adapter = self.get_llm_adapter()
+
+        if self._llm_needs_conversation_setup:
+            logger.debug(
+                f"Setting up Voice Live conversation with initial messages: "
+                f"{adapter.get_messages_for_logging(self._context)}"
+            )
+
+            llm_invocation_params = adapter.get_llm_invocation_params(
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
+            )
+
+            for item in llm_invocation_params["messages"]:
+                evt = events.ConversationItemCreateEvent(item=item)
+                if evt.item.id:
+                    self._messages_added_manually[evt.item.id] = True
+                await self.send_client_event(evt)
+
+            await self._send_session_update()
+            self._llm_needs_conversation_setup = False
+
+        logger.debug("Creating Voice Live response")
+
+        await self.start_processing_metrics()
+        await self.start_ttfb_metrics()
+
+        modalities = assert_given(self._settings.session_properties).modalities or [
+            "text",
+            "audio",
+        ]
+        await self.send_client_event(
+            events.ResponseCreateEvent(response=events.ResponseProperties(modalities=modalities))
+        )
+
+    async def _send_user_audio(self, frame):
+        """Send user audio to Voice Live, buffered to ~60ms chunks."""
+        if self._llm_needs_conversation_setup:
+            return
+
+        if not self._audio_send_logged:
+            logger.debug(
+                f"Streaming audio to Voice Live: {frame.sample_rate}Hz, "
+                f"{frame.num_channels}ch, {len(frame.audio)}B/frame"
+            )
+            self._audio_send_logged = True
+
+        # Compute chunk size from actual sample rate (16-bit mono = 2 bytes/sample)
+        chunk_bytes = int(frame.sample_rate * 2 * self._AUDIO_CHUNK_TARGET_MS / 1000)
+
+        # Accumulate and send in chunks
+        self._audio_buffer += frame.audio
+        while len(self._audio_buffer) >= chunk_bytes:
+            chunk = self._audio_buffer[:chunk_bytes]
+            self._audio_buffer = self._audio_buffer[chunk_bytes:]
+            payload = base64.b64encode(chunk).decode("utf-8")
+            await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
