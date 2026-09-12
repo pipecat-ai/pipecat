@@ -1201,6 +1201,23 @@ MANUAL_SERVICE_CONFIGS = {
         "    ),\n"
         ")"
     ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        '    model="gpt-4o-mini",\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
     "openai_realtime": (
         "session_properties = SessionProperties(\n"
         "    audio=AudioConfiguration(\n"
