@@ -7,7 +7,8 @@
 """Gradium's speech-to-text service implementation.
 
 This module provides integration with Gradium's real-time speech-to-text
-WebSocket API for streaming audio transcription.
+WebSocket API for streaming audio transcription, with optional turn detection
+from the server's end-pointing signal.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Any, cast
 
 from loguru import logger
@@ -26,6 +28,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -34,6 +39,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -42,6 +48,33 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 # Seconds to wait after a "flushed" message for trailing text tokens to arrive
 # before finalizing the transcription.
 TRANSCRIPT_AGGREGATION_DELAY = 0.1
+
+# Turn detection defaults: the end-pointing horizon watched, the inactivity
+# probability that opens and closes a turn, and how many step messages to let
+# pass after a flush before the signal is trusted again.
+DEFAULT_EOT_HORIZON_S = 3.0
+DEFAULT_EOT_THRESHOLD = 0.5
+DEFAULT_POST_FLUSH_COOLDOWN_FRAMES = 8
+
+# Settings read on the client as step messages arrive; a change to any of
+# them takes effect on the next step without a reconnect.
+_TURN_DETECTION_FIELDS = frozenset({"eot_horizon_s", "eot_threshold", "post_flush_cooldown_frames"})
+
+
+class _TurnPhase(Enum):
+    """Where turn detection is in a turn's lifecycle.
+
+    IDLE waits for the signal to read inactive, ARMED opens a turn on the next
+    dip, OPEN is a turn in progress, and ENDING has proposed the stop and
+    flushed the server, and ignores the signal until the flush is
+    acknowledged.
+    """
+
+    IDLE = auto()
+    ARMED = auto()
+    OPEN = auto()
+    ENDING = auto()
+
 
 # Gradium's language code asking it to detect the language rather than being
 # grounded to one. It is not a Language enum member because it names a mode
@@ -109,14 +142,32 @@ def language_to_gradium_language(language: Language | str) -> str:
 class GradiumSTTSettings(STTSettings):
     """Settings for GradiumSTTService.
 
+    The ``eot_*`` and ``post_flush_cooldown_frames`` fields tune turn
+    detection. They are ``None`` unless the service is constructed with
+    ``enable_turn_detection=True``, which gives them their defaults.
+
     Parameters:
         delay_in_frames: Delay in audio frames (80ms each) before text is
             generated. Higher delays allow more context but increase latency.
             Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
             Default is 12 (960ms). Lower values like 7-8 give faster response.
+        eot_horizon_s: Which end-pointing horizon drives turn decisions; the
+            step entry with the closest ``horizon_s`` is used. Default 3.0.
+        eot_threshold: Inactivity probability on that horizon at or above
+            which an open turn ends, and below which a turn opens once the
+            signal has read inactive. Default 0.5.
+        post_flush_cooldown_frames: Number of step messages to ignore after a
+            flush completes before the next turn may start or end. A flush
+            feeds the model ``delay_in_frames`` of silence, and the
+            end-pointing signal is unreliable on the frames that follow: it
+            can dip as if speech resumed, then fire again on the first real
+            frames. Default 8.
     """
 
     delay_in_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eot_horizon_s: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eot_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    post_flush_cooldown_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):
@@ -129,6 +180,47 @@ class GradiumSTTService(WebsocketSTTService):
     Transcribes English by default. Set ``settings.language`` to one of the
     other supported languages (German, Spanish, French, Portuguese), or to
     ``"any"`` to have Gradium detect the language.
+
+    By default the pipeline's VAD closes each utterance: a
+    ``VADUserStoppedSpeakingFrame`` flushes the server and the accumulated
+    text finalizes into a :class:`TranscriptionFrame`.
+
+    With ``enable_turn_detection=True`` the server's end-pointing signal
+    drives turns instead. Every "step" message carries, per horizon, the
+    probability that speech stays inactive over the next ``horizon_s``
+    seconds, and the service watches the horizon closest to
+    ``eot_horizon_s``::
+
+        step(inactivity >= threshold) -> step(inactivity < threshold: turn opens)
+            -> text* -> step(inactivity >= threshold: turn ends)
+            -> ProposedUserStoppedSpeakingFrame -> flush -> TranscriptionFrame
+
+    A turn opens on the signal falling below the threshold, not on it being
+    there: the estimate starts low when the model has heard nothing yet, and
+    again after each flush resets it, then climbs as silence accumulates.
+
+    A turn start broadcasts a :class:`ProposedUserStartedSpeakingFrame`; a
+    turn end broadcasts a :class:`ProposedUserStoppedSpeakingFrame` and
+    flushes the server, and the final :class:`TranscriptionFrame` follows
+    once the flush is acknowledged. Local VAD frames are ignored, and
+    ``service_metadata_frame()`` recommends
+    :class:`~pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies`,
+    which resolve the proposals into the user turn frames, own the
+    interruption, and hold the turn open until that transcript arrives.
+
+    Event handlers available (in addition to ``on_connected`` /
+    ``on_disconnected``), fired only with turn detection on:
+
+    - on_turn_start(service): the end-pointing signal opened a turn
+    - on_turn_end(service): the end-pointing signal closed the turn
+
+    Example::
+
+        stt = GradiumSTTService(
+            api_key="...",
+            enable_turn_detection=True,
+            settings=GradiumSTTService.Settings(eot_horizon_s=3.0, eot_threshold=0.5),
+        )
     """
 
     Settings = GradiumSTTSettings
@@ -168,6 +260,7 @@ class GradiumSTTService(WebsocketSTTService):
         sample_rate: int | None = None,
         params: InputParams | None = None,
         json_config: str | None = None,
+        enable_turn_detection: bool = False,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = GRADIUM_TTFS_P99,
         **kwargs,
@@ -195,6 +288,9 @@ class GradiumSTTService(WebsocketSTTService):
                     Use `params` instead for type-safe configuration.
                     Will be removed in 2.0.0.
 
+            enable_turn_detection: Whether the server's end-pointing signal
+                decides when user turns start and end, instead of the
+                pipeline's VAD. Off by default.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -215,6 +311,11 @@ class GradiumSTTService(WebsocketSTTService):
             model="default",
             language=Language.EN,
             delay_in_frames=12,
+            eot_horizon_s=DEFAULT_EOT_HORIZON_S if enable_turn_detection else None,
+            eot_threshold=DEFAULT_EOT_THRESHOLD if enable_turn_detection else None,
+            post_flush_cooldown_frames=(
+                DEFAULT_POST_FLUSH_COOLDOWN_FRAMES if enable_turn_detection else None
+            ),
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -242,6 +343,7 @@ class GradiumSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._api_endpoint_base_url = api_endpoint_base_url
         self._encoding = encoding
+        self._enable_turn_detection = enable_turn_detection
         self._websocket = None
         self._json_config = json_config
 
@@ -261,6 +363,14 @@ class GradiumSTTService(WebsocketSTTService):
         self._flush_counter = 0
         self._transcript_aggregation_task: asyncio.Task | None = None
 
+        # Turn detection state: the phase, and how many steps remain in the
+        # post-flush cooldown, which outlives the ENDING phase.
+        self._turn_phase = _TurnPhase.IDLE
+        self._flush_cooldown = 0
+
+        self._register_event_handler("on_turn_start")
+        self._register_event_handler("on_turn_end")
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
 
@@ -269,8 +379,36 @@ class GradiumSTTService(WebsocketSTTService):
         """
         return True
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """TTFS applies only while the pipeline's VAD ends utterances.
+
+        With turn detection on, the server defines the turn boundary, so there
+        is no separate speech-end to final-transcript interval to measure.
+        """
+        return not self._enable_turn_detection
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Recommend external turn strategies when turns are detected server-side.
+
+        With turn detection on, the service proposes turn boundaries
+        (``ProposedUserStarted/StoppedSpeakingFrame``), so the user aggregator
+        resolves those rather than running local VAD/smart-turn. Otherwise the
+        defaults are left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._enable_turn_detection:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta, sync params, and reconnect.
+
+        The model, language and decoder delay are bound to the connection's
+        setup message, so a change to any of them is applied by reconnecting.
+        The turn detection fields are read as step messages arrive and need
+        no reconnect.
 
         Args:
             delta: A :class:`STTSettings` (or ``GradiumSTTService.Settings``) delta.
@@ -279,7 +417,7 @@ class GradiumSTTService(WebsocketSTTService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not (changed.keys() - _TURN_DETECTION_FIELDS):
             return changed
 
         if self._websocket:
@@ -319,13 +457,16 @@ class GradiumSTTService(WebsocketSTTService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
+        A VAD stop flushes the server, unless turn detection is on: then the
+        server's end-pointing signal decides when a turn ends.
+
         Args:
             frame: The frame to process.
             direction: Direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame) and not self._enable_turn_detection:
             await self._send_flush()
 
     async def _send_flush(self):
@@ -334,9 +475,13 @@ class GradiumSTTService(WebsocketSTTService):
         Sends a flush message to tell the server to process buffered audio.
         The server responds with text fragments followed by a "flushed"
         acknowledgment, which triggers finalization.
+
+        Returns:
+            Whether the flush was sent, so a caller waiting on the "flushed"
+            acknowledgment knows one is coming.
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
-            return
+            return False
 
         self._flush_counter += 1
         flush_id = str(self._flush_counter)
@@ -345,6 +490,8 @@ class GradiumSTTService(WebsocketSTTService):
             await self._websocket.send(json.dumps(msg))
         except Exception as e:
             logger.warning(f"Failed to send flush: {e}")
+            return False
+        return True
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
@@ -445,6 +592,8 @@ class GradiumSTTService(WebsocketSTTService):
 
         self._accumulated_text.clear()
         self._flush_counter = 0
+        self._turn_phase = _TurnPhase.IDLE
+        self._flush_cooldown = 0
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -477,9 +626,18 @@ class GradiumSTTService(WebsocketSTTService):
                 continue
 
             type_ = msg.get("type", "")
-            if type_ == "text":
+            if type_ == "step":
+                if self._enable_turn_detection:
+                    await self._handle_step(msg)
+            elif type_ == "text":
                 await self._handle_text(msg["text"])
             elif type_ == "flushed":
+                if self._enable_turn_detection:
+                    self._turn_phase = _TurnPhase.IDLE
+                    self._flush_cooldown = (
+                        assert_given(self._settings.post_flush_cooldown_frames) or 0
+                    )
+                    self.confirm_finalize()
                 await self._handle_flushed()
             elif type_ == "end_of_stream":
                 logger.debug("Received end_of_stream message from server")
@@ -547,3 +705,62 @@ class GradiumSTTService(WebsocketSTTService):
             )
         )
         await self._trace_transcription(text, is_final=True, language=language)
+
+    async def _handle_step(self, msg: dict):
+        """Derive turn boundaries from the server's end-pointing signal.
+
+        Each step carries, per horizon, the probability that speech stays
+        inactive over the next ``horizon_s`` seconds; the entry closest to
+        ``eot_horizon_s`` is watched. A step at or above ``eot_threshold``
+        arms the detector; the next step below it opens a turn. At or above
+        the threshold while a turn is open, the turn ends.
+        """
+        vad = msg.get("vad") or []
+        if not vad:
+            return
+        if self._flush_cooldown > 0:
+            self._flush_cooldown -= 1
+            return
+
+        horizon = assert_given(self._settings.eot_horizon_s)
+        threshold = assert_given(self._settings.eot_threshold)
+        if horizon is None or threshold is None:
+            return
+        entry = min(vad, key=lambda e: abs(e.get("horizon_s", float("inf")) - horizon))
+        inactivity = entry.get("inactivity_prob")
+        if inactivity is None:
+            return
+        logger.trace(f"Gradium turn detection: inactivity {inactivity:.2f} over {horizon}s")
+
+        inactive = inactivity >= threshold
+        match self._turn_phase:
+            case _TurnPhase.IDLE if inactive:
+                self._turn_phase = _TurnPhase.ARMED
+            case _TurnPhase.ARMED if not inactive:
+                await self._start_turn()
+            case _TurnPhase.OPEN if inactive:
+                await self._end_turn()
+            # ENDING ignores the signal: the previous turn's TranscriptionFrame
+            # and stop proposal must not arrive after the next turn's start
+            # proposal.
+
+    async def _start_turn(self):
+        logger.debug("Gradium turn detection: start of turn")
+        self._turn_phase = _TurnPhase.OPEN
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        await self._call_event_handler("on_turn_start")
+
+    async def _end_turn(self):
+        logger.debug("Gradium turn detection: end of turn")
+        self._turn_phase = _TurnPhase.ENDING
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        await self._call_event_handler("on_turn_end")
+        # The flush pushes the decoder past its lookahead so the turn's tail
+        # tokens arrive and the transcript finalizes on the "flushed" ack.
+        # Without a flush no ack is coming, so the transcript finalizes on
+        # what has arrived.
+        self.request_finalize()
+        if await self._send_flush():
+            return
+        self._turn_phase = _TurnPhase.IDLE
+        await self._finalize_accumulated_text()
