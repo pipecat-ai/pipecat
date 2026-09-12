@@ -18,6 +18,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat import version as pipecat_version
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -31,7 +32,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -69,6 +70,9 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Speechmatics, you need to `uv add "pipecat-ai[speechmatics]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+
+# The only rate Agent STT accepts.
+_SPEECHMATICS_SAMPLE_RATE = 16000
 
 # Connect-time failures that will never clear on retry (auth, bad config, rejected session).
 # These are reported as permanent, leaving the service unusable, and never trigger a
@@ -409,7 +413,8 @@ class SpeechmaticsSTTService(STTService):
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
-            sample_rate: Optional audio sample rate in Hz.
+            sample_rate: Optional audio sample rate in Hz. Agent STT accepts 16000 only,
+                so audio is resampled to it from the pipeline rate whatever this is set to.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
 
@@ -502,6 +507,11 @@ class SpeechmaticsSTTService(STTService):
             **kwargs,
         )
 
+        self._resampler = create_stream_resampler()
+
+        # The rate audio arrives at; `sample_rate` can be set to one it does not have.
+        self._input_sample_rate: int = _SPEECHMATICS_SAMPLE_RATE
+
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stt_msg_task: asyncio.Task | None = None
@@ -583,6 +593,11 @@ class SpeechmaticsSTTService(STTService):
     # ============================================================================
     # LIFE-CYCLE / SESSION MANAGEMENT
     # ============================================================================
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and record the rate audio will arrive at."""
+        await super().setup(setup)
+        self._input_sample_rate = setup.audio_in_sample_rate
 
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
@@ -686,6 +701,12 @@ class SpeechmaticsSTTService(STTService):
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
+        if self._input_sample_rate != _SPEECHMATICS_SAMPLE_RATE:
+            logger.debug(
+                f"{self} resampling audio from {self._input_sample_rate} to "
+                f"{_SPEECHMATICS_SAMPLE_RATE}: Agent STT accepts only 16 kHz"
+            )
+
         # Agent STT client. Turn detection is a top-level turn_config (sibling of the
         # transcription config); audio encoding / sample rate go via AudioFormat.
         self._client = AgentSttAsyncClient(
@@ -700,7 +721,7 @@ class SpeechmaticsSTTService(STTService):
             ),
             audio_format=AudioFormat(
                 encoding=self._audio_encoding,
-                sample_rate=self.sample_rate,
+                sample_rate=_SPEECHMATICS_SAMPLE_RATE,
                 chunk_size=DEFAULT_CHUNK_SIZE,
             ),
         )
@@ -1159,10 +1180,19 @@ class SpeechmaticsSTTService(STTService):
         pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
-        """Adds audio to the audio buffer and yields None."""
+        """Send audio to Agent STT, resampled to the 16 kHz it accepts.
+
+        Transcription frames are pushed from the message pump, not yielded here.
+        """
         try:
             if self._client:
-                await self._client.send_audio(audio)
+                if self._input_sample_rate != _SPEECHMATICS_SAMPLE_RATE:
+                    audio = await self._resampler.resample(
+                        audio, self._input_sample_rate, _SPEECHMATICS_SAMPLE_RATE
+                    )
+                # The resampler buffers across calls, so a chunk can convert to nothing.
+                if audio:
+                    await self._client.send_audio(audio)
                 # send_audio swallows transport errors and shuts its own audio gate, so a
                 # dropped socket is only visible as the gate being closed. A gate closed
                 # with no session_error is a broken stream; when the service ended the
