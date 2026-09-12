@@ -252,5 +252,52 @@ class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["<spell>abc</spell>", "<spell>def</spell>", " done"])
 
 
+class TestSkipTagsAggregatorMultiplePairs(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.aggregator = SkipTagsAggregator([("<spell>", "</spell>"), ("<think>", "</think>")])
+
+    async def test_sentence_content_inside_later_tag_not_split(self):
+        """Content inside a tag from a later pair is not split at sentence boundaries.
+
+        Regression: with more than one registered tag pair, the scan returned
+        as soon as the first pair did not appear in the text, so a tag from a
+        later pair was never detected and its content was split at sentence
+        boundaries (or leaked chunk by chunk in TOKEN mode).
+        """
+        results = []
+        for chunk in ["Please spell ", "<think>foo. bar. baz</think>", " now."]:
+            async for agg in self.aggregator.aggregate(chunk):
+                results.append(agg)
+
+        # Nothing is emitted while inside <think>: sentence detection stays
+        # suspended until the closing tag arrives.
+        self.assertEqual(len(results), 0)
+
+        flush = await self.aggregator.flush()
+        self.assertEqual(flush.text, "Please spell <think>foo. bar. baz</think> now.")
+        self.assertEqual(self.aggregator.text.text, "")
+
+    async def test_token_content_inside_later_tag_buffered(self):
+        """In TOKEN mode, a tag from a later pair buffers its content like a first pair would."""
+        from pipecat.utils.text.base_text_aggregator import AggregationType
+
+        aggregator = SkipTagsAggregator(
+            [("<spell>", "</spell>"), ("<think>", "</think>")],
+            aggregation_type=AggregationType.TOKEN,
+        )
+
+        results = []
+        async for agg in aggregator.aggregate("<think>hidden text"):
+            results.append(agg)
+        # Still inside the tag: nothing is emitted.
+        self.assertEqual(len(results), 0)
+
+        async for agg in aggregator.aggregate("</think> and more"):
+            results.append(agg)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "<think>hidden text</think> and more")
+        self.assertEqual(results[0].type, "token")
+
+
 if __name__ == "__main__":
     unittest.main()
