@@ -5705,7 +5705,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.9" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
     { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=1.0.2" },
-    { name = "vui-tts", marker = "python_full_version == '3.12.*' and extra == 'vui'", specifier = ">=1.1.2,<2" },
+    { name = "vui-tts", marker = "python_full_version == '3.12.*' and extra == 'vui'", specifier = ">=1.1.3,<2" },
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
@@ -9154,7 +9154,7 @@ wheels = [
 
 [[package]]
 name = "vui-tts"
-version = "1.1.2"
+version = "1.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
@@ -9173,9 +9173,9 @@ dependencies = [
     { name = "torchcodec" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/0f/acaa59b4361d30352933a81a44c08d6b0d4e22735c28dd9d020bd1b79ab0/vui_tts-1.1.2.tar.gz", hash = "sha256:2e0b96ad86fd632e83975ea6bf3e0af5ad1d2cce681e65989c18b307b5ec6930", size = 2322786, upload-time = "2026-09-12T00:08:16.6Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/25/cdba39b83dfa5dc6e164bfda6c584d3221f79ed47f1b8f9dccc3a1e96e53/vui_tts-1.1.3.tar.gz", hash = "sha256:2bf5b3b4f2aa477e6a86d71b75dcbd9e684bb36ac0c56ce13f4fc04a886afc69", size = 2323312, upload-time = "2026-09-12T10:05:07.837Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/b1/1210bcc6b6b935d03ffa879339b79012ba8e26f2774c5accc5e105dfdd65/vui_tts-1.1.2-py3-none-any.whl", hash = "sha256:126538eab1918ff5e1eeac49e2d05b5e85a0fd98fcff9ce13544c48ed72d7688", size = 2315851, upload-time = "2026-09-12T00:08:14.456Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/e3/b54080c48aea8f0b92d1cbb28973cd5bbf7d312df2bf58f8e282002602a0/vui_tts-1.1.3-py3-none-any.whl", hash = "sha256:4c4c4cecd49470da71c7aab2d4a052bad9794a761a0cf5bcd97506e933d09f0e", size = 2316318, upload-time = "2026-09-12T10:05:05.706Z" },
 ]
 
 [[package]]
