@@ -94,6 +94,7 @@ their artifact filenames, so no attempt overwrites another's logs.
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import os
 import shlex
@@ -116,6 +117,7 @@ from pipecat.evals.results import (
     EvalSimulationMetricScore,
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
+    EvalTurnTiming,
 )
 from pipecat.evals.scenario import EvalKind, EvalScenarioFile
 from pipecat.evals.script import EvalScriptScenario
@@ -266,6 +268,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
                     }
                     for e in t.expectations
                 ],
+                "timing": _timing_record(t.timing),
             }
             for t in (result.turns if result else [])
         ],
@@ -274,6 +277,25 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     if result is not None and not record["passed"]:
         record["events_seen"] = result.events_seen
     return record
+
+
+def _timing_record(timing: EvalTurnTiming | None) -> dict | None:
+    """A turn's timing as results.jsonl carries it: its measures plus the derived ones."""
+    if timing is None:
+        return None
+    return {
+        **dataclasses.asdict(timing),
+        "voice_to_voice_ms": timing.voice_to_voice_ms,
+        "speech_padding_ms": timing.speech_padding_ms,
+    }
+
+
+def _timing_from_dict(data: dict | None) -> EvalTurnTiming | None:
+    """Rebuild a turn's timing from its JSON; the derived measures are recomputed, not read."""
+    if not data:
+        return None
+    fields = {f.name for f in dataclasses.fields(EvalTurnTiming)}
+    return EvalTurnTiming(**{k: v for k, v in data.items() if k in fields})
 
 
 def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
@@ -354,6 +376,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
                 failures=[EvalAssertionFailure(**f) for f in t.get("failures", [])],
                 expectations=[EvalExpectationResult(**e) for e in t.get("expectations", [])],
                 duration_ms=t.get("duration_ms", 0),
+                timing=_timing_from_dict(t.get("timing")),
             )
             for t in data.get("turns", [])
         ],
