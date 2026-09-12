@@ -17,10 +17,12 @@ Dependencies:
     Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
 
     The tokenizer and its ``punkt_tab`` data load on first use, and the data is
-    downloaded if it isn't already present. Deployments that build their own
-    image should bundle it at build time (``python -m nltk.downloader
-    punkt_tab``) or point ``NLTK_DATA`` at a directory that already has it, so
-    that a slow or unavailable network can't delay the first bot turn.
+    downloaded if it isn't already present. A failed download is an error, not a
+    usable tokenizer: callers must not receive ``sent_tokenize`` when the data
+    is still missing. Deployments that build their own image should bundle it at
+    build time (``python -m nltk.downloader punkt_tab``) or point ``NLTK_DATA``
+    at a directory that already has it, so that a slow or unavailable network
+    can't delay the first bot turn.
 """
 
 import re
@@ -32,6 +34,26 @@ from functools import cache
 from loguru import logger
 
 _load_lock = threading.Lock()
+
+_PUNKT_TAB_RESOURCE = "tokenizers/punkt_tab"
+_PUNKT_TAB_UNAVAILABLE = (
+    "Failed to load NLTK 'punkt_tab' tokenizer data. "
+    "Sentence tokenization needs this data. "
+    "Pre-install it with `python -m nltk.downloader punkt_tab`, "
+    "or set NLTK_DATA to a directory that already contains it. "
+    "If a proxy performs egress, NLTK refuses the download unless you opt in "
+    "with NLTK_ALLOW_PROXIED_URLOPEN=1 for a proxy you trust. "
+    "See https://www.nltk.org/data.html"
+)
+
+
+def _raise_punkt_tab_unavailable(cause: BaseException | None = None) -> None:
+    """Raise after punkt_tab cannot be found or downloaded."""
+    if cause is None:
+        logger.error(_PUNKT_TAB_UNAVAILABLE)
+        raise RuntimeError(_PUNKT_TAB_UNAVAILABLE)
+    logger.error(f"{_PUNKT_TAB_UNAVAILABLE} ({cause})")
+    raise RuntimeError(_PUNKT_TAB_UNAVAILABLE) from cause
 
 
 @cache
@@ -47,25 +69,22 @@ def _sent_tokenizer() -> Callable[[str], list[str]]:
     waits on the lock rather than loading alongside it, so the one-time
     ``punkt_tab`` download cannot run twice at once. The cache keeps the lock
     off the path once the tokenizer is loaded.
+
+    Raises:
+        RuntimeError: If ``punkt_tab`` is missing and cannot be downloaded.
     """
     with _load_lock:
         import nltk
         from nltk.tokenize import sent_tokenize
 
         try:
-            nltk.data.find("tokenizers/punkt_tab")
+            nltk.data.find(_PUNKT_TAB_RESOURCE)
         except LookupError:
             try:
                 nltk.download("punkt_tab", quiet=True)
-            except (OSError, PermissionError) as e:
-                logger.error(
-                    f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-                    "This data is required for sentence tokenization features. "
-                    "The download failed due to filesystem permissions. "
-                    "To resolve: pre-install the data in a location with appropriate read "
-                    "permissions, or set the NLTK_DATA environment variable to point to a "
-                    "writable directory. See https://www.nltk.org/data.html for more information."
-                )
+                nltk.data.find(_PUNKT_TAB_RESOURCE)
+            except Exception as e:
+                _raise_punkt_tab_unavailable(e)
 
         return sent_tokenize
 
@@ -160,6 +179,10 @@ def match_endofsentence(text: str) -> int:
 
     Returns:
         The position of the end of the sentence if found, otherwise 0.
+
+    Raises:
+        RuntimeError: If NLTK's ``punkt_tab`` data is missing and cannot be
+            downloaded.
     """
     text = text.rstrip()
 
