@@ -5,12 +5,54 @@
 #
 
 import unittest
+from unittest.mock import patch
 
 from pipecat.utils.string import (
+    _sent_tokenizer,
     longest_trailing_partial_match,
     match_endofsentence,
     parse_start_end_tags,
 )
+
+
+class TestSentTokenizerLoad(unittest.TestCase):
+    def tearDown(self):
+        _sent_tokenizer.cache_clear()
+
+    def test_raises_when_download_does_not_install_data(self):
+        import nltk
+
+        _sent_tokenizer.cache_clear()
+        with (
+            patch.object(nltk.data, "find", side_effect=LookupError("missing")),
+            patch.object(nltk, "download", return_value=False) as download,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                _sent_tokenizer()
+
+        self.assertIn("punkt_tab", str(ctx.exception))
+        download.assert_called_once_with("punkt_tab", quiet=True)
+
+    def test_does_not_cache_a_tokenizer_after_a_failed_download(self):
+        import nltk
+
+        _sent_tokenizer.cache_clear()
+        with (
+            patch.object(nltk.data, "find", side_effect=LookupError("missing")),
+            patch.object(nltk, "download", return_value=False),
+        ):
+            with self.assertRaises(RuntimeError):
+                _sent_tokenizer()
+
+        with (
+            patch.object(nltk.data, "find", return_value="/tmp/punkt_tab"),
+            patch.object(nltk, "download") as download,
+        ):
+            tokenizer = _sent_tokenizer()
+
+        self.assertTrue(callable(tokenizer))
+        download.assert_not_called()
+
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
