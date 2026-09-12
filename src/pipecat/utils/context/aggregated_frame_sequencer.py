@@ -639,10 +639,13 @@ class AggregatedFrameSequencer:
                 force-completed frames and forwarded to :meth:`flush`.
 
         Returns:
-            Combined list of TTSTextFrames (for incomplete spoken slots) and
+            Combined list of TTSTextFrames (for incomplete spoken slots),
+            AggregatedTextProgressFrames pairing the forced text, and
             AggregatedTextFrames (skipped slots now unblocked), in emission order.
         """
         frames: list[Frame] = []
+        if self._streaming:
+            self._discard_buffered_words(context_id)
         for slot in self._slots:
             if slot.spoken and not slot.complete and slot.context_id == context_id:
                 if slot.tracker:
@@ -668,6 +671,10 @@ class AggregatedFrameSequencer:
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
                         )
+                        # That frame carries the rest of the text, so the progress view
+                        # has to reach the end alongside it.
+                        slot.tracker.take_remaining_as_spoken()
+                        frames.append(self._build_progress_frame(slot, last_word_pts))
                 slot.complete = True
         frames.extend(self.flush(last_word_pts=last_word_pts))
         # Context is fully done: forget it so any later word is dropped as stale.
@@ -810,6 +817,22 @@ class AggregatedFrameSequencer:
                 self.process_word(w.word, w.pts, w.context_id, w.includes_inter_frame_spaces)
             )
         return frames
+
+    def _discard_buffered_words(self, context_id: str) -> None:
+        """Drop this context's still-buffered words, which no slot ever matched.
+
+        Sentence mode drops an unrecognised word where it arrives; streaming only knows
+        one will never match once the context it belongs to has ended.
+        """
+        keep: list[_BufferedWord] = []
+        for w in self._buffered_words:
+            if w.context_id != context_id:
+                keep.append(w)
+                continue
+            logger.warning(
+                f"{self._name} Dropping buffered word '{w.word}' not recognised by any slot."
+            )
+        self._buffered_words = keep
 
     def _slot_matches_context(self, slot: _AggregatedFrameSlot, context_id: str | None) -> bool:
         """Whether *slot* is an eligible active slot for *context_id*.
