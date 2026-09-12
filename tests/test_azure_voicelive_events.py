@@ -282,3 +282,29 @@ def test_unset_session_fields_are_omitted():
     ).model_dump(exclude_none=True)
 
     assert payload["session"] == {"instructions": "Be brief."}
+
+
+def test_disabled_turn_detection_is_sent_as_an_explicit_null():
+    """Omitting the field instead leaves the service's own server VAD running."""
+    payload = events.SessionUpdateEvent(
+        session=events.SessionProperties(instructions="Be brief.", turn_detection=None)
+    ).model_dump(exclude_none=True)
+
+    assert payload["session"]["turn_detection"] is None
+
+
+def test_turn_detection_false_also_disables():
+    payload = events.SessionUpdateEvent(
+        session=events.SessionProperties(instructions="Be brief.", turn_detection=False)
+    ).model_dump(exclude_none=True)
+
+    assert payload["session"]["turn_detection"] is None
+
+
+def test_unset_turn_detection_is_omitted():
+    """Leaving it unset keeps the service's default turn detection."""
+    payload = events.SessionUpdateEvent(
+        session=events.SessionProperties(instructions="Be brief.")
+    ).model_dump(exclude_none=True)
+
+    assert "turn_detection" not in payload["session"]

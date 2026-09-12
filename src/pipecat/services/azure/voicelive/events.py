@@ -391,7 +391,8 @@ class SessionProperties(BaseModel):
         output_audio_format: Encoding of the audio returned by the service.
         input_audio_sampling_rate: Sample rate of the audio sent to the service.
         output_audio_timestamp_types: Timestamp streams to emit alongside audio.
-        turn_detection: Turn detection settings, or None to disable.
+        turn_detection: Turn detection settings, or None/False to disable the
+            service's own turn detection.
         input_audio_transcription: Transcription settings for caller audio.
         input_audio_noise_reduction: Noise suppression settings.
         input_audio_echo_cancellation: Echo cancellation settings.
@@ -414,7 +415,7 @@ class SessionProperties(BaseModel):
     output_audio_format: OutputAudioFormat | None = None
     input_audio_sampling_rate: int | None = None
     output_audio_timestamp_types: list[Literal["word"]] | None = None
-    turn_detection: TurnDetection | None = None
+    turn_detection: TurnDetection | bool | None = None
     input_audio_transcription: InputAudioTranscription | None = None
     input_audio_noise_reduction: InputAudioNoiseReduction | None = None
     input_audio_echo_cancellation: InputAudioEchoCancellation | None = None
@@ -587,6 +588,28 @@ class SessionUpdateEvent(ClientEvent):
 
     type: Literal["session.update"] = "session.update"
     session: SessionProperties
+
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
+        """Serialize the event to a dictionary.
+
+        Turn detection is disabled by an explicit null. Leaving the field out
+        instead keeps the service's own server VAD running, so a session that
+        set it to None or False has the null restored after ``exclude_none``
+        drops it.
+
+        Args:
+            *args: Positional arguments passed to parent model_dump.
+            **kwargs: Keyword arguments passed to parent model_dump.
+
+        Returns:
+            Dictionary representation of the event.
+        """
+        dump = super().model_dump(*args, **kwargs)
+
+        if "turn_detection" in self.session.model_fields_set and not self.session.turn_detection:
+            dump["session"]["turn_detection"] = None
+
+        return dump
 
 
 class InputAudioBufferAppendEvent(ClientEvent):

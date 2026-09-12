@@ -428,7 +428,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         props = self._settings.session_properties
         if not is_given(props):
             return False
-        return props.turn_detection is None
+        return not props.turn_detection
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Describe this service to the rest of the pipeline."""

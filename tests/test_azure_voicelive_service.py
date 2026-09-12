@@ -128,3 +128,13 @@ def test_settings_from_mapping_routes_session_keys():
     assert settings.model == "gpt-realtime"
     assert settings.session_properties.modalities == ["audio"]
     assert not settings.extra
+
+
+def test_turn_detection_false_also_selects_manual_mode():
+    service = _service(
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(turn_detection=False)
+        )
+    )
+
+    assert service._is_manual_turn_detection() is True
