@@ -163,9 +163,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.add_workers(worker)
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport):
-        logger.info("Client subscribed — starting conversation")
+    @worker.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        logger.info("Client ready — starting conversation")
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )

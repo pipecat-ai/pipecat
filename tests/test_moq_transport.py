@@ -6,7 +6,7 @@
 
 """Tests for the MoQ (Media over QUIC) transport.
 
-Four areas covered:
+Six areas covered:
 
 1. **``_downmix_s16_to_mono``** — the workaround for ``@moq/publish``'s
    browser-side encoder publishing stereo even when the source mic
@@ -31,11 +31,24 @@ Four areas covered:
    future refactor moves either into ``_run()``, the bot will lose its
    first few hundred ms of audio (this was a real bug PR #4557's
    self-review fixed).
+
+5. **Audio subscriber gate** — the bot's audio track is live media with
+   no replay, so :class:`MOQOutputTransport` holds its first audio frame
+   until the peer has subscribed (bounded by
+   ``audio_out_subscriber_timeout``), and the wait is cancelled cleanly
+   by interruptions and session teardown.
+
+6. **Audio keepalive** — the track stays live at real-time cadence with
+   silence whenever no pipeline audio is scheduled ahead of wall-clock,
+   so an utterance is never a stream start for the subscriber.
 """
 
 import argparse
+import asyncio
+import time
 import unittest
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -45,14 +58,19 @@ import pytest
 pytest.importorskip("moq")
 
 import moq  # noqa: E402
+from loguru import logger  # noqa: E402
 
+from pipecat.frames.frames import OutputAudioRawFrame, StartFrame  # noqa: E402
+from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
+    DEFAULT_AUDIO_OUT_TRACK,
     MOQParams,
     MOQTransport,
     _downmix_s16_to_mono,
     _is_normal_close,
     _is_peer_gone,
 )
+from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
 
 # ----------------------------------------------------------------------
 # _downmix_s16_to_mono
@@ -754,6 +772,372 @@ class TestIsNormalClose(unittest.TestCase):
 
     def test_non_moq_exception_is_not_normal(self):
         self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
+
+    def test_cancelled_subscription_is_normal(self):
+        """Session teardown cancels in-flight subscriptions; track-scoped
+        errors carry the reason as their message tail (e.g. the transcript
+        JSON stream raising ``JsonTrack("cancelled")``)."""
+        self.assertTrue(_is_normal_close(moq.Error.JsonTrack("cancelled")))
+        self.assertTrue(_is_normal_close(self._audio_error("moq: cancelled")))
+
+    def test_other_track_errors_are_not_normal(self):
+        self.assertFalse(_is_normal_close(moq.Error.JsonTrack("decode error: bad json")))
+
+
+# ----------------------------------------------------------------------
+# Audio subscriber gate
+# ----------------------------------------------------------------------
+
+
+class _FakeAudioProducer:
+    """Stand-in for ``moq.AudioProducer`` whose ``used()`` resolves on demand."""
+
+    def __init__(self):
+        self.subscribed = asyncio.Event()
+        self.used_calls = 0
+        self.written = []
+
+    async def used(self):
+        self.used_calls += 1
+        await self.subscribed.wait()
+
+    def write(self, frame):
+        self.written.append(frame)
+
+    def finish(self):
+        pass
+
+
+class TestAudioSubscriberGate(unittest.IsolatedAsyncioTestCase):
+    """The bot's audio track is live media with no replay, so audio written
+    before the peer subscribes is lost. The output transport therefore holds
+    its first audio frame until the track has a subscriber (bounded by
+    ``audio_out_subscriber_timeout``), and the client exposes that signal.
+    """
+
+    async def asyncSetUp(self):
+        self.moq_mock = self.enterContext(patch("pipecat.transports.moq.transport.moq"))
+        self.producer = _FakeAudioProducer()
+        broadcast = MagicMock(name="broadcast")
+        broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+        broadcast.publish_audio.return_value = self.producer
+        origin = MagicMock(name="publish_origin")
+        origin.create_broadcast.return_value = broadcast
+        self.moq_mock.OriginProducer.return_value = origin
+
+    async def _make(self, **params):
+        p = MOQParams(**{"audio_in_enabled": True, "audio_out_enabled": True, **params})
+        transport = MOQTransport(params=p, host="localhost", port=4080)
+        client = transport._client
+        await client.setup(SimpleNamespace(task_manager=TaskManager()))
+        client.open_audio_track(24000)
+        return transport, client
+
+    async def asyncTearDown(self):
+        # Give any event-handler tasks a chance to finish.
+        await asyncio.sleep(0)
+
+    def test_default_timeout(self):
+        self.assertEqual(MOQParams().audio_out_subscriber_timeout, 15.0)
+
+    async def test_waits_until_a_subscriber_attaches(self):
+        _, client = await self._make()
+        waiter = asyncio.ensure_future(client.wait_for_audio_subscriber(timeout=5))
+        await asyncio.sleep(0.05)
+        self.assertFalse(waiter.done())
+
+        self.producer.subscribed.set()
+        self.assertTrue(await asyncio.wait_for(waiter, 1))
+        await client.disconnect()
+
+    async def test_times_out_with_a_warning_and_proceeds(self):
+        _, client = await self._make()
+        records = []
+        sink = logger.add(lambda m: records.append(m.record), level="WARNING")
+        try:
+            self.assertFalse(await client.wait_for_audio_subscriber(timeout=0.05))
+        finally:
+            logger.remove(sink)
+        warnings = [r["message"] for r in records if r["level"].name == "WARNING"]
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn(DEFAULT_AUDIO_OUT_TRACK, warnings[0])
+        self.assertIn("0.05", warnings[0])
+        await client.disconnect()
+
+    async def test_disabled_timeout_skips_the_wait(self):
+        _, client = await self._make()
+        for timeout in (0, None):
+            with self.subTest(timeout=timeout):
+                self.assertTrue(
+                    await asyncio.wait_for(client.wait_for_audio_subscriber(timeout), 1)
+                )
+        self.assertEqual(self.producer.used_calls, 0)
+        await client.disconnect()
+
+    async def test_no_audio_track_skips_the_wait(self):
+        _, client = await self._make(audio_out_enabled=False)
+        self.assertIsNone(client._audio_out)
+        self.assertTrue(await asyncio.wait_for(client.wait_for_audio_subscriber(5), 1))
+        await client.disconnect()
+
+    async def test_on_audio_subscribed_fires_exactly_once(self):
+        transport, client = await self._make()
+        fired = []
+        done = asyncio.Event()
+
+        @transport.event_handler("on_audio_subscribed")
+        async def on_audio_subscribed(_transport):
+            fired.append(True)
+            done.set()
+
+        self.producer.subscribed.set()
+        self.assertTrue(await client.wait_for_audio_subscriber(1))
+        self.assertTrue(await client.wait_for_audio_subscriber(1))
+        await asyncio.wait_for(done.wait(), 1)
+        await asyncio.sleep(0.05)
+        self.assertEqual(fired, [True])
+        await client.disconnect()
+
+    async def test_transport_passthrough_defaults_to_params_timeout(self):
+        transport, client = await self._make(audio_out_subscriber_timeout=0.05)
+        self.assertFalse(await asyncio.wait_for(transport.wait_for_audio_subscriber(), 1))
+        self.producer.subscribed.set()
+        self.assertTrue(await asyncio.wait_for(transport.wait_for_audio_subscriber(1), 1))
+        await client.disconnect()
+
+    async def test_disconnect_mid_wait_returns_without_leaking(self):
+        _, client = await self._make()
+        waiter = asyncio.ensure_future(client.wait_for_audio_subscriber(timeout=5))
+        await asyncio.sleep(0.05)
+        self.assertFalse(waiter.done())
+
+        await client.disconnect()
+        self.assertFalse(await asyncio.wait_for(waiter, 1))
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        self.assertEqual(pending, [])
+
+    async def test_cancelling_the_waiter_does_not_raise_or_leak(self):
+        _, client = await self._make()
+        waiter = asyncio.ensure_future(client.wait_for_audio_subscriber(timeout=5))
+        await asyncio.sleep(0.05)
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+
+        await client.disconnect()
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        self.assertEqual(pending, [])
+
+    async def _output_with_sender(self, transport):
+        output = transport.output()
+        sender = MagicMock(name="media_sender")
+        sender.handle_audio_frame = AsyncMock()
+        output._media_senders[None] = sender
+        return output, sender
+
+    def _audio_frame(self):
+        return OutputAudioRawFrame(audio=b"\x00" * 960, sample_rate=24000, num_channels=1)
+
+    async def test_first_audio_frame_is_held_until_a_subscriber_attaches(self):
+        transport, client = await self._make()
+        output, sender = await self._output_with_sender(transport)
+
+        first = asyncio.ensure_future(
+            output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM)
+        )
+        await asyncio.sleep(0.05)
+        self.assertFalse(first.done())
+        sender.handle_audio_frame.assert_not_awaited()
+
+        self.producer.subscribed.set()
+        await asyncio.wait_for(first, 1)
+        sender.handle_audio_frame.assert_awaited_once()
+
+        # Later frames go straight through.
+        await asyncio.wait_for(
+            output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM), 1
+        )
+        self.assertEqual(sender.handle_audio_frame.await_count, 2)
+        self.assertEqual(self.producer.used_calls, 1)
+        await client.disconnect()
+
+    async def test_audio_flows_after_the_subscriber_timeout(self):
+        transport, client = await self._make(audio_out_subscriber_timeout=0.05)
+        output, sender = await self._output_with_sender(transport)
+
+        for _ in range(2):
+            await asyncio.wait_for(
+                output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM), 1
+            )
+        self.assertEqual(sender.handle_audio_frame.await_count, 2)
+        await client.disconnect()
+
+    async def test_disabled_timeout_does_not_hold_audio(self):
+        transport, client = await self._make(audio_out_subscriber_timeout=None)
+        output, sender = await self._output_with_sender(transport)
+        await asyncio.wait_for(
+            output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM), 1
+        )
+        sender.handle_audio_frame.assert_awaited_once()
+        self.assertEqual(self.producer.used_calls, 0)
+        await client.disconnect()
+
+    async def test_interrupted_wait_is_retried_on_the_next_utterance(self):
+        transport, client = await self._make()
+        output, sender = await self._output_with_sender(transport)
+
+        first = asyncio.ensure_future(
+            output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM)
+        )
+        await asyncio.sleep(0.05)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        sender.handle_audio_frame.assert_not_awaited()
+
+        second = asyncio.ensure_future(
+            output.process_frame(self._audio_frame(), FrameDirection.DOWNSTREAM)
+        )
+        await asyncio.sleep(0.05)
+        self.assertFalse(second.done())
+        self.producer.subscribed.set()
+        await asyncio.wait_for(second, 1)
+        sender.handle_audio_frame.assert_awaited_once()
+        await client.disconnect()
+
+
+# ----------------------------------------------------------------------
+# Audio keepalive
+# ----------------------------------------------------------------------
+
+
+class TestAudioKeepalive(unittest.IsolatedAsyncioTestCase):
+    """The track carries paced silence whenever the pipeline has nothing
+    scheduled ahead of wall-clock, so the subscriber sees one continuous
+    timeline rather than a stream start at every utterance.
+    """
+
+    SAMPLE_RATE = 24000
+    FRAME_MS = 20
+    FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+
+    async def asyncSetUp(self):
+        self.moq_mock = self.enterContext(patch("pipecat.transports.moq.transport.moq"))
+        self.moq_mock.AudioFrame = lambda timestamp_us, data: SimpleNamespace(
+            timestamp_us=timestamp_us, data=data
+        )
+        self.producer = _FakeAudioProducer()
+        broadcast = MagicMock(name="broadcast")
+        broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+        broadcast.publish_audio.return_value = self.producer
+        origin = MagicMock(name="publish_origin")
+        origin.create_broadcast.return_value = broadcast
+        self.moq_mock.OriginProducer.return_value = origin
+
+    async def _make(self, **params):
+        p = MOQParams(**{"audio_in_enabled": True, "audio_out_enabled": True, **params})
+        transport = MOQTransport(params=p, host="localhost", port=4080)
+        client = transport._client
+        await client.setup(SimpleNamespace(task_manager=TaskManager()))
+        client.open_audio_track(self.SAMPLE_RATE)
+        return transport, client
+
+    def _assert_contiguous(self, frames):
+        for prev, cur in zip(frames, frames[1:]):
+            self.assertEqual(
+                cur.timestamp_us,
+                prev.timestamp_us + len(prev.data) * 1_000_000 // (self.SAMPLE_RATE * 2),
+            )
+
+    async def test_writes_paced_silence_when_idle(self):
+        _, client = await self._make()
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.2)
+        await client.stop_audio_keepalive()
+
+        frames = self.producer.written
+        # 20 ms cadence over 200 ms; allow scheduler jitter either way.
+        self.assertGreaterEqual(len(frames), 8, len(frames))
+        self.assertLessEqual(len(frames), 12, len(frames))
+        for f in frames:
+            self.assertEqual(f.data, b"\x00" * self.FRAME_BYTES)
+        self._assert_contiguous(frames)
+        await client.disconnect()
+
+    async def test_yields_to_pipeline_audio_and_resumes_contiguously(self):
+        _, client = await self._make()
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.05)
+
+        # 100 ms of speech scheduled ahead of wall-clock: the keepalive
+        # must not interleave silence into it.
+        speech = b"\x01" * (self.FRAME_BYTES * 5)
+        await client.publish_audio(speech)
+        n = len(self.producer.written)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(self.producer.written), n)
+
+        # Once the pacing clock catches up, silence resumes on the same timeline.
+        await asyncio.sleep(0.1)
+        await client.stop_audio_keepalive()
+        self.assertGreater(len(self.producer.written), n)
+        self.assertEqual(self.producer.written[n - 1].data, speech)
+        self.assertEqual(self.producer.written[n].data, b"\x00" * self.FRAME_BYTES)
+        self._assert_contiguous(self.producer.written)
+        await client.disconnect()
+
+    async def test_disabled_keepalive_writes_nothing(self):
+        _, client = await self._make(audio_out_keepalive=False)
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.1)
+        self.assertEqual(self.producer.written, [])
+        await client.disconnect()
+
+    async def test_no_audio_track_writes_nothing(self):
+        _, client = await self._make(audio_out_enabled=False)
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.producer.written, [])
+        await client.disconnect()
+
+    async def _assert_release_ends_keepalive(self, release):
+        _, client = await self._make()
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.05)
+        self.assertGreater(len(self.producer.written), 0)
+
+        await asyncio.wait_for(getattr(client, release)(), 2)
+        n = len(self.producer.written)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(self.producer.written), n)
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        self.assertEqual(pending, [])
+
+    async def test_stop_ends_the_keepalive(self):
+        await self._assert_release_ends_keepalive("stop")
+
+    async def test_cancel_ends_the_keepalive(self):
+        await self._assert_release_ends_keepalive("cancel")
+
+    async def test_drain_is_short_while_idle(self):
+        _, client = await self._make()
+        client.start_audio_keepalive()
+        await asyncio.sleep(0.05)
+        await client.stop_audio_keepalive()
+        started = asyncio.get_running_loop().time()
+        await client.wait_for_audio_drain(jitter_buffer_margin_s=0)
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.1)
+        await client.disconnect()
+
+    async def test_output_transport_start_begins_the_keepalive(self):
+        transport, client = await self._make()
+        output = transport.output()
+        client.start_audio_keepalive = MagicMock(name="start_audio_keepalive")
+        with patch.object(output, "set_transport_ready", AsyncMock()) as ready:
+            await output.start(StartFrame())
+        ready.assert_awaited_once()
+        client.start_audio_keepalive.assert_called_once()
+        await client.disconnect()
 
 
 if __name__ == "__main__":
