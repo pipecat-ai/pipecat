@@ -689,7 +689,7 @@ class LLMMessagesAppendFrame(DataFrame, UninterruptibleFrame):
 
 
 @dataclass
-class LLMMessagesUpdateFrame(DataFrame):
+class LLMMessagesUpdateFrame(DataFrame, UninterruptibleFrame):
     """Frame containing LLM messages to replace current context.
 
     A frame containing a list of new LLM messages to replace the current
