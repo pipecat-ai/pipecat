@@ -13,7 +13,7 @@ from typing import Any
 
 import aiohttp
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ----------------------------
@@ -34,17 +34,25 @@ class WhatsAppSession(BaseModel):
 class WhatsAppError(BaseModel):
     """Error information from WhatsApp API responses.
 
+    All fields except ``code`` are optional — Meta's terminate-side error
+    deliveries routinely omit ``href`` and ``error_data``, and use ``title``
+    in place of ``message``. Unknown fields are ignored.
+
     Parameters:
         code: Error code number
         message: Human-readable error message
+        title: Short error title (sent in lieu of ``message`` on some events)
         href: URL for more information about the error
         error_data: Additional error-specific data
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     code: int
-    message: str
-    href: str
-    error_data: dict[str, Any]
+    message: str | None = None
+    title: str | None = None
+    href: str | None = None
+    error_data: dict[str, Any] | None = None
 
 
 class WhatsAppConnectCall(BaseModel):
