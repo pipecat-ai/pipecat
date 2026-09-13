@@ -277,6 +277,26 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             41,
         )
 
+    async def test_multiple_pairs(self):
+        # With several tag pairs, a pair that is absent from the text must not
+        # stop a later, present pair from being detected.
+        tags = [("<a>", "</a>"), ("<b>", "</b>")]
+
+        # Only the second pair appears, as an open (unclosed) start tag.
+        assert parse_start_end_tags("Hello <b>World", tags, None, 0) == (
+            ("<b>", "</b>"),
+            len("Hello <b>World"),
+        )
+
+        # Only the second pair appears, complete.
+        assert parse_start_end_tags("Hello <b>World</b>!", tags, None, 0) == (
+            None,
+            len("Hello <b>World</b>!"),
+        )
+
+        # No pair appears at all.
+        assert parse_start_end_tags("Hello World", tags, None, 0) == (None, 0)
+
 
 class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):
     async def test_empty_and_no_match(self):
