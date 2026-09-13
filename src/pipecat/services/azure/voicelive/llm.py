@@ -368,7 +368,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self.base_url = base_url
         self._token_provider = token_provider
         self._api_version = api_version
-        self._model = model
+        # The connection URL selects the model, so take it after the settings
+        # delta has been applied: a model given only through `settings` wins.
+        self._model = assert_given(self._settings.model) or model
 
         self._audio_input_paused = start_audio_paused
         self._audio_buffer = b""
@@ -538,6 +540,13 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._input_sample_rate = input_sample_rate
         props = assert_given(self._settings.session_properties)
         props.input_audio_sampling_rate = input_sample_rate
+
+        # Output frames carry PCM, so a G.711 output format can't be honored.
+        if props.output_audio_format in ("g711_ulaw", "g711_alaw"):
+            logger.warning(
+                f"{self}: output_audio_format {props.output_audio_format!r} is not supported; "
+                f"audio is returned as PCM at the transport's output sample rate."
+            )
 
         output_format = _OUTPUT_FORMAT_SAMPLE_RATES.get(output_sample_rate)
         if output_format:
@@ -777,6 +786,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         # The model is selected by the connection URL; repeating it in the
         # session payload is rejected.
         settings.model = None
+
+        # A repeated session update that names a voice on a text-only session is
+        # rejected with "Text to speech synthesizer is not configured".
+        if settings.modalities and "audio" not in settings.modalities:
+            settings.voice = None
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
@@ -1194,13 +1208,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
-        modalities = assert_given(self._settings.session_properties).modalities or [
-            "text",
-            "audio",
-        ]
-        await self.send_client_event(
-            events.ResponseCreateEvent(response=events.ResponseProperties(modalities=modalities))
-        )
+        # The response takes the session's modalities. Overriding them per response
+        # is rejected for native-audio voices, which accept only ["text"] or ["audio"].
+        await self.send_client_event(events.ResponseCreateEvent())
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         """Process completed function calls and send results to the service."""

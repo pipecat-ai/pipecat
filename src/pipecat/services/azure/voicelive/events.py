@@ -46,6 +46,9 @@ OutputAudioFormat: TypeAlias = Literal[
 class OpenAIVoice(BaseModel):
     """A voice belonging to the generative model itself.
 
+    Needs a native-audio model such as "gpt-realtime"; other models accept
+    only Azure voices.
+
     Parameters:
         type: Voice type, always "openai".
         name: Voice name, e.g. "alloy" or "marin".
@@ -176,7 +179,8 @@ class TurnDetection(BaseModel):
     anyone is speaking, so a mid-sentence pause doesn't end the turn.
 
     Parameters:
-        type: Detection strategy to use.
+        type: Detection strategy to use. "semantic_vad" needs a native-audio
+            model such as "gpt-realtime".
         threshold: Speech probability above which audio counts as speech.
         prefix_padding_ms: Audio to keep from before speech was detected.
         silence_duration_ms: Silence that ends a turn.
@@ -254,7 +258,9 @@ class InputAudioTranscription(BaseModel):
     """Transcription of the caller's audio.
 
     Parameters:
-        model: Transcription model to use.
+        model: Transcription model to use. The OpenAI models ("whisper-1" and
+            the "gpt-4o-*" models) need a native-audio model such as
+            "gpt-realtime"; other models accept only the Azure ones.
         language: Language to transcribe, as BCP-47 or ISO 639-1.
         phrase_list: Words and phrases to bias recognition toward.
         prompt: Prompt steering transcription, for models that accept one.
@@ -268,7 +274,13 @@ class InputAudioTranscription(BaseModel):
             "gpt-4o-mini-transcribe",
             "gpt-4o-transcribe-diarize",
             "azure-speech",
+            "azure-mrs",
             "mai-transcribe",
+            "mai-transcribe-1",
+            "mai-transcribe-1.5",
+            "mai-transcribe-2",
+            "mai-transcribe-2-streaming",
+            "mai-transcribe-medical",
         ]
         | None
     ) = None

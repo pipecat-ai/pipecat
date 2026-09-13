@@ -275,6 +275,21 @@ def test_session_update_serializes_flat():
     )
 
 
+def test_every_supported_azure_transcription_model_is_accepted():
+    """The models Voice Live lists as supported for cascaded pipelines."""
+    for model in (
+        "azure-speech",
+        "azure-mrs",
+        "mai-transcribe",
+        "mai-transcribe-1",
+        "mai-transcribe-1.5",
+        "mai-transcribe-2",
+        "mai-transcribe-2-streaming",
+        "mai-transcribe-medical",
+    ):
+        assert events.InputAudioTranscription(model=model).model == model
+
+
 def test_unset_session_fields_are_omitted():
     """Only what the caller configured is sent, so server defaults stand."""
     payload = events.SessionUpdateEvent(

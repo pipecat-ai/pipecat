@@ -159,6 +159,49 @@ async def test_a_model_update_is_reported_as_unsupported():
 
 
 @pytest.mark.parametrize(
+    "modalities, sends_voice",
+    [(["text", "audio"], True), (["text"], False)],
+    ids=["audio", "text-only"],
+)
+@pytest.mark.asyncio
+async def test_a_text_only_session_update_leaves_out_the_voice(modalities, sends_voice):
+    """Voice Live rejects a repeated update naming a voice when audio is off."""
+    service = _service(voice="en-US-Ava:DragonHDLatestNeural")
+    service._settings.session_properties.modalities = modalities
+    sent = []
+
+    async def _record(event):
+        sent.append(event)
+
+    service.send_client_event = _record
+
+    await service._send_session_update()
+
+    assert ("voice" in sent[0].model_dump(exclude_none=True)["session"]) is sends_voice
+    assert service._settings.session_properties.voice is not None
+
+
+@pytest.mark.asyncio
+async def test_a_model_given_in_settings_selects_the_connection_model(monkeypatch):
+    """The connection URL picks the model, so a model set only in settings must reach it."""
+    import pipecat.services.azure.voicelive.llm as llm_module
+
+    uris = []
+
+    async def fake_connect(uri, **kwargs):
+        uris.append(uri)
+        raise ConnectionError("no network in tests")
+
+    monkeypatch.setattr(llm_module, "websocket_connect", fake_connect)
+    service = _service(settings=AzureVoiceLiveLLMService.Settings(model="gpt-realtime"))
+    service.push_error = _noop
+
+    await service._connect()
+
+    assert "model=gpt-realtime" in uris[0]
+
+
+@pytest.mark.parametrize(
     "output_rate, expected_format",
     [(8000, "pcm16_8000hz"), (16000, "pcm16_16000hz"), (24000, "pcm16")],
 )
@@ -170,6 +213,25 @@ def test_output_sample_rate_selects_the_matching_format(output_rate, expected_fo
 
     assert service._settings.session_properties.output_audio_format == expected_format
     assert service._get_output_sample_rate() == output_rate
+
+
+def test_a_g711_output_format_is_replaced_with_a_warning():
+    """Output frames carry PCM, so the transport's rate decides the format."""
+    service = _service(
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(output_audio_format="g711_ulaw")
+        )
+    )
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        service._ensure_audio_config(8000, 8000)
+    finally:
+        logger.remove(handler_id)
+
+    assert "g711_ulaw" in sink.getvalue()
+    assert service._settings.session_properties.output_audio_format == "pcm16_8000hz"
 
 
 def test_unsupported_output_sample_rate_falls_back_to_24khz():

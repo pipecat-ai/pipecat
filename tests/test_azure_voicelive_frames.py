@@ -483,6 +483,28 @@ async def test_a_response_asked_for_mid_flight_waits_for_response_done():
 
 
 @pytest.mark.asyncio
+async def test_a_response_takes_the_session_modalities():
+    """Native-audio voices reject ["text", "audio"] as a per-response override."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._llm_needs_conversation_setup = False
+    service._context = LLMContext([{"role": "user", "content": "hi"}])
+
+    await service._create_response()
+
+    creates = [e for e in sent if isinstance(e, events.ResponseCreateEvent)]
+    assert len(creates) == 1
+    assert "response" not in creates[0].model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
 async def test_a_deferred_response_survives_a_failed_response():
     """A tool result owed a response still gets one when the response it waited on fails."""
     service = _make_service()
