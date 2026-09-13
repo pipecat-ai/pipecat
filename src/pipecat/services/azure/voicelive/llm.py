@@ -195,10 +195,18 @@ class AzureVoiceLiveLLMSettings(LLMSettings):
         return instance
 
 
-# Error codes that are non-fatal and should not exit the receive loop.
-_NON_FATAL_ERROR_CODES = {
+# Error codes that are expected during normal turn-taking, logged at debug.
+_EXPECTED_ERROR_CODES = {
     "response_cancel_not_active",
     "conversation_already_has_active_response",
+}
+
+# Error codes that reject a single request and leave the session usable, so they
+# are reported without ending the receive loop.
+_RECOVERABLE_ERROR_CODES = {
+    "input_audio_buffer_commit_empty",
+    "invalid_audio_end_time",
+    "item_not_found",
 }
 
 
@@ -513,12 +521,15 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         current = self._current_audio_response
         self._current_audio_response = None
 
+        # Playback runs behind the audio received, so the elapsed time can pass the
+        # audio's length, and the service rejects a truncation beyond it.
         elapsed_ms = int(time.time() * 1000) - current.start_time_ms
+        audio_ms = int(current.total_size / 2 / self._get_output_sample_rate() * 1000)
         await self.send_client_event(
             events.ConversationItemTruncateEvent(
                 item_id=current.item_id,
                 content_index=current.content_index,
-                audio_end_ms=max(elapsed_ms, 0),
+                audio_end_ms=max(min(elapsed_ms, audio_ms), 0),
             )
         )
 
@@ -890,8 +901,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                if evt.error.code in _NON_FATAL_ERROR_CODES:
+                if evt.error.code in _EXPECTED_ERROR_CODES:
                     logger.debug(f"{self} {evt.error.message}")
+                elif evt.error.code in _RECOVERABLE_ERROR_CODES:
+                    await self._handle_evt_error(evt)
                 else:
                     await self._handle_evt_error(evt)
                     return

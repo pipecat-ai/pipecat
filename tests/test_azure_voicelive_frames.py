@@ -251,6 +251,29 @@ async def test_an_interruption_reports_a_tts_stop_only_when_one_started(
 
 
 @pytest.mark.asyncio
+async def test_truncation_never_passes_the_audio_received():
+    """Playback lags generation, and the service rejects a truncation beyond the audio."""
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+
+    # 100 ms of 24 kHz mono PCM16.
+    await _drive(service, [_audio_delta(b"\x00" * 4800)])
+    assert service._current_audio_response is not None
+    service._current_audio_response.start_time_ms -= 30_000
+
+    await service._truncate_current_audio_response()
+
+    truncates = [e for e in sent if isinstance(e, events.ConversationItemTruncateEvent)]
+    assert [t.audio_end_ms for t in truncates] == [100]
+
+
+@pytest.mark.asyncio
 async def test_audio_transcript_delta_pushes_tts_text():
     service = _make_service()
     recorder = _FrameRecorder()
@@ -375,6 +398,37 @@ async def test_non_fatal_error_does_not_end_the_receive_loop():
     ]
     await _drive(service, scripted)
 
+    assert len(recorder.of_types(TTSAudioRawFrame)) == 1
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["invalid_audio_end_time", "item_not_found", "input_audio_buffer_commit_empty"],
+)
+@pytest.mark.asyncio
+async def test_a_rejected_request_is_reported_without_ending_the_receive_loop(code):
+    """These errors reject one request; the session keeps working after them."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+    errors: list[str] = []
+
+    async def record_error(error_msg, **kwargs):
+        errors.append(error_msg)
+
+    service.push_error = record_error
+
+    scripted = [
+        {
+            "type": "error",
+            "event_id": "e1",
+            "error": {"type": "invalid_request_error", "code": code, "message": "rejected"},
+        },
+        _audio_delta(),
+    ]
+    await _drive(service, scripted)
+
+    assert len(errors) == 1
     assert len(recorder.of_types(TTSAudioRawFrame)) == 1
 
 
