@@ -6,8 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "pipecat-ai"
 dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
-license = "BSD-2-Clause"
-license-files = ["LICENSE"]
+license = "BSD-2-Clause AND LicenseRef-Punkt-Unclarified"
+license-files = [
+    "LICENSE",
+    "src/pipecat/utils/text/data/README.md",
+    "src/pipecat/utils/text/data/LICENSE",
+    "src/pipecat/utils/text/data/LICENSE-OVERVIEW.md",
+    "src/pipecat/utils/text/data/DATASET-LICENSES.md",
+]
 readme = "README.md"
 requires-python = ">=3.11"
 keywords = ["webrtc", "audio", "video", "ai"]
@@ -202,7 +208,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pipecat" = ["py.typed"]
-"pipecat.utils.text.data" = ["punkt_tab.zip", "README.md"]
+"pipecat.utils.text.data" = [
+    "punkt_tab.zip",
+    "README.md",
+    "LICENSE",
+    "LICENSE-OVERVIEW.md",
+    "DATASET-LICENSES.md",
+]
 "pipecat.audio.dtmf" = [
     "src/pipecat/audio/dtmf/dtmf-0.wav",
     "src/pipecat/audio/dtmf/dtmf-1.wav",
