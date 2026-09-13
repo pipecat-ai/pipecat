@@ -6,6 +6,7 @@
 
 """RTVI observer for converting pipeline frames to outgoing RTVI messages."""
 
+import asyncio
 import inspect
 import time
 import warnings
@@ -63,7 +64,7 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
@@ -74,10 +75,15 @@ from pipecat.processors.frameworks.rtvi.frames import (
 )
 from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.string import (
+    _sent_tokenizer,
+    match_endofsentence,
+    resolve_sentence_tokenizer_language,
+)
 
 if TYPE_CHECKING:
     from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
+    from pipecat.services.tts_service import TTSService
 
 
 class RTVIFunctionCallReportLevel(StrEnum):
@@ -211,6 +217,8 @@ class RTVIObserver(BaseObserver):
         rtvi: Optional["RTVIProcessor"] = None,
         *,
         params: RTVIObserverParams | None = None,
+        tts_service: "TTSService | None" = None,
+        text_aggregation_language: str | None = None,
         **kwargs,
     ):
         """Initialize the RTVI observer.
@@ -218,11 +226,20 @@ class RTVIObserver(BaseObserver):
         Args:
             rtvi: The RTVI processor to push frames to.
             params: Settings to enable/disable specific messages.
+            tts_service: TTS service whose generation language drives legacy bot
+                transcription boundaries. Only LLM text processed by this service
+                contributes to those messages; other RTVI events are unaffected.
+            text_aggregation_language: Explicit sentence-detection language, used
+                when no TTS service is associated. Defaults to English.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._rtvi = rtvi
         self._params = params or RTVIObserverParams()
+        self._tts_service = tts_service
+        self._text_aggregation_language = resolve_sentence_tokenizer_language(
+            text_aggregation_language
+        )
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
@@ -766,15 +783,49 @@ class RTVIObserver(BaseObserver):
             tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
+    async def on_process_frame(self, data: FrameProcessed):
+        """Track generation language and text at the explicitly associated TTS.
+
+        Args:
+            data: Frame and processor being observed.
+        """
+        if (
+            self._tts_service is None
+            or data.processor is not self._tts_service
+            or data.processor in self._ignored_sources
+            or data.direction != FrameDirection.DOWNSTREAM
+            or not self._params.bot_llm_enabled
+        ):
+            return
+        frame = data.frame
+        language = self._tts_service.get_text_aggregation_language(frame)
+        if isinstance(frame, LLMFullResponseStartFrame):
+            if language is not None:
+                self._text_aggregation_language = language
+                await asyncio.to_thread(_sent_tokenizer, language)
+            self._bot_transcription = ""
+        elif isinstance(frame, LLMTextFrame) and not frame.skip_tts:
+            if language is not None and language != self._text_aggregation_language:
+                self._text_aggregation_language = language
+                await asyncio.to_thread(_sent_tokenizer, language)
+            await self._aggregate_bot_transcription(frame.text)
+        elif isinstance(frame, (LLMFullResponseEndFrame, InterruptionFrame)):
+            self._bot_transcription = ""
+
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
         message = RTVI.BotLLMTextMessage(data=RTVI.TextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
-        # TODO (mrkb): Remove all this logic when we fully deprecate bot-transcription messages.
-        self._bot_transcription += frame.text
+        if self._tts_service is None:
+            await self._aggregate_bot_transcription(frame.text)
 
-        if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
+    async def _aggregate_bot_transcription(self, text: str):
+        """Accumulate legacy bot transcription text using this generation's model."""
+        # TODO (mrkb): Remove all this logic when we fully deprecate bot-transcription messages.
+        self._bot_transcription += text
+
+        if match_endofsentence(self._bot_transcription, language=self._text_aggregation_language):
             await self.send_rtvi_message(
                 RTVI.BotTranscriptionMessage(
                     data=RTVI.TextMessageData(text=self._bot_transcription)

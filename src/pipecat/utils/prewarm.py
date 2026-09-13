@@ -29,6 +29,6 @@ def warm_deferred_imports() -> None:
         # Loaded by match_endofsentence(), first called on the opening bot turn.
         from pipecat.utils.string import _sent_tokenizer
 
-        _sent_tokenizer()
+        _sent_tokenizer("english")
     except Exception as e:
         logger.trace(f"Could not warm the NLTK sentence tokenizer: {e}")

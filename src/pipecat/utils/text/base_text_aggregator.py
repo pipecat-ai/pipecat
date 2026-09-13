@@ -16,6 +16,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
 
+from pipecat.utils.string import resolve_sentence_tokenizer_language
+
 
 class AggregationType(StrEnum):
     """Built-in aggregation strings."""
@@ -67,15 +69,36 @@ class BaseTextAggregator(ABC):
     logic, text manipulation behavior, and state management for interruptions.
     """
 
-    def __init__(self, *, aggregation_type: AggregationType = AggregationType.SENTENCE):
+    def __init__(
+        self,
+        *,
+        aggregation_type: AggregationType = AggregationType.SENTENCE,
+        language: str | None = None,
+    ):
         """Initialize the base text aggregator.
 
         Args:
             aggregation_type: The aggregation strategy to use. SENTENCE buffers
                 text until sentence boundaries are detected, TOKEN passes text
                 through immediately, and WORD buffers until word boundaries.
+            language: Language code or Punkt model name for sentence detection.
         """
         self._aggregation_type = AggregationType(aggregation_type)
+        self._language = resolve_sentence_tokenizer_language(language)
+
+    @property
+    def language(self) -> str:
+        """The sentence tokenizer model used by this aggregator."""
+        return self._language
+
+    def set_language(self, language: str | None) -> None:
+        """Select a sentence tokenizer without discarding buffered text.
+
+        Args:
+            language: Language code or Punkt model name. Call between generations
+                to keep one model for all text within a generation.
+        """
+        self._language = resolve_sentence_tokenizer_language(language)
 
     @property
     def aggregation_type(self) -> AggregationType:

@@ -101,7 +101,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             if char.strip():
                 # We have meaningful lookahead, call NLTK
                 self._needs_lookahead = False
-                eos_marker = match_endofsentence(self._text)
+                eos_marker = match_endofsentence(self._text, language=self.language)
 
                 if eos_marker:
                     # NLTK confirmed a sentence - return it

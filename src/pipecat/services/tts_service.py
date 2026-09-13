@@ -55,6 +55,7 @@ from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequ
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
+from pipecat.utils.string import _sent_tokenizer, resolve_sentence_tokenizer_language
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -147,6 +148,7 @@ class TTSService(AIService):
         self,
         *,
         text_aggregation_mode: TextAggregationMode | None = None,
+        text_aggregation_language: Language | str | None = None,
         aggregate_sentences: bool | None = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
@@ -196,6 +198,9 @@ class TTSService(AIService):
             text_aggregation_mode: How to aggregate incoming text before synthesis.
                 TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
                 TextAggregationMode.TOKEN streams tokens directly for lower latency.
+            text_aggregation_language: Sentence-detection language override. None
+                follows the TTS language. Changes to the TTS language select the
+                tokenizer for the next generation, preserving buffered text.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
 
                 .. deprecated:: 0.0.104
@@ -256,6 +261,13 @@ class TTSService(AIService):
             or TTSSettings(),
             **kwargs,
         )
+
+        self._text_aggregation_language_override = text_aggregation_language
+        self._tts_language = self._settings.language
+        self._generation_text_aggregation_language = self.text_aggregation_language
+        self._aggregation_generation_started = False
+        self._tokenizer_tasks: dict[str, asyncio.Task] = {}
+        self._prepare_tokenizers = False
 
         # Convert Language enum to service-specific format at init time.
         # Runtime updates are handled by _update_settings(), but init-time
@@ -327,7 +339,10 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._text_aggregator = SimpleTextAggregator(aggregation_type=self._text_aggregation_mode)
+        self._text_aggregator = SimpleTextAggregator(
+            aggregation_type=self._text_aggregation_mode,
+            language=self.text_aggregation_language,
+        )
 
         self._skip_aggregator_types: list[str] = skip_aggregator_types or []
         self._text_transforms: list[
@@ -594,6 +609,48 @@ class TTSService(AIService):
         """
         pass
 
+    @property
+    def text_aggregation_language(self) -> str:
+        """Sentence tokenizer model selected for the next generation.
+
+        Follows the TTS language unless ``text_aggregation_language`` overrides
+        it. Unsupported or unspecified languages use the English model together
+        with Pipecat's additional punctuation handling.
+        """
+        language = self._text_aggregation_language_override
+        if language is None:
+            language = self._tts_language
+        return resolve_sentence_tokenizer_language(language)
+
+    def _prepare_sentence_tokenizer(self, language: str | None = None) -> None:
+        language = language or self.text_aggregation_language
+        if self._prepare_tokenizers and language not in self._tokenizer_tasks:
+            self._tokenizer_tasks[language] = self.create_task(
+                asyncio.to_thread(_sent_tokenizer, language),
+                name=f"{self.name}:tokenizer:{language}",
+            )
+
+    def get_text_aggregation_language(self, frame: Frame) -> str | None:
+        """Return this service's captured sentence language for a processed frame.
+
+        Args:
+            frame: An LLM response-start or text frame processed by this service.
+
+        Returns:
+            The generation's model name, or None if this service has not recorded
+            a language on the frame. Observers can read this after settings change.
+        """
+        return frame.metadata.get("tts_text_aggregation_languages", {}).get(self.id)
+
+    async def _begin_text_aggregation(self, language: str | None = None) -> None:
+        self._generation_text_aggregation_language = language or self.text_aggregation_language
+        self._prepare_sentence_tokenizer(self._generation_text_aggregation_language)
+        task = self._tokenizer_tasks.get(self._generation_text_aggregation_language)
+        if task is not None:
+            await asyncio.shield(task)
+        self._text_aggregator.set_language(self._generation_text_aggregation_language)
+        self._aggregation_generation_started = True
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
 
@@ -602,6 +659,8 @@ class TTSService(AIService):
         """
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        self._prepare_tokenizers = True
+        self._prepare_sentence_tokenizer()
 
     async def cleanup(self):
         """Release TTS resources at teardown."""
@@ -685,6 +744,7 @@ class TTSService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        language = delta.language
         # Translate language *before* applying so the stored value is canonical.
         # Raw strings are first converted to Language enums for proper resolution.
         if (
@@ -705,6 +765,10 @@ class TTSService(AIService):
                 delta.language = converted
 
         changed = await super()._update_settings(delta)
+
+        if is_given(language):
+            self._tts_language = language
+            self._prepare_sentence_tokenizer()
 
         return changed
 
@@ -756,6 +820,15 @@ class TTSService(AIService):
             frame: The frame to process.
             direction: The direction of frame processing.
         """
+        if isinstance(frame, (LLMFullResponseStartFrame, TextFrame)):
+            language = (
+                self.text_aggregation_language
+                if isinstance(frame, LLMFullResponseStartFrame)
+                or not self._aggregation_generation_started
+                else self._generation_text_aggregation_language
+            )
+            frame.metadata.setdefault("tts_text_aggregation_languages", {})[self.id] = language
+
         await super().process_frame(frame, direction)
 
         if (
@@ -764,6 +837,8 @@ class TTSService(AIService):
         ):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AggregatedTextFrame):
+            if not self._aggregation_generation_started:
+                await self._begin_text_aggregation(self.get_text_aggregation_language(frame))
             await self._push_tts_frames(frame)
         elif (
             isinstance(frame, TextFrame)
@@ -777,6 +852,7 @@ class TTSService(AIService):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
+            await self._begin_text_aggregation(self.get_text_aggregation_language(frame))
             self._llm_response_started = True
             # New LLM turn → assign a fresh context ID shared by all sentences
             self._turn_context_id = self.create_context_id()
@@ -823,6 +899,7 @@ class TTSService(AIService):
                 self._streamed_text = ""
 
             # Reset aggregator state
+            self._aggregation_generation_started = False
             self._processing_text = False
             self._sent_non_whitespace_in_context = False
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -843,6 +920,8 @@ class TTSService(AIService):
 
             await self.on_turn_context_completed()
         elif isinstance(frame, TTSSpeakFrame):
+            saved_aggregation_language = self._generation_text_aggregation_language
+            self._generation_text_aggregation_language = self.text_aggregation_language
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
             saved_sent_non_whitespace = self._sent_non_whitespace_in_context
@@ -875,6 +954,7 @@ class TTSService(AIService):
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
             self._turn_context_id = saved_turn_context_id
+            self._generation_text_aggregation_language = saved_aggregation_language
             self._sent_non_whitespace_in_context = saved_sent_non_whitespace
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
@@ -1034,6 +1114,7 @@ class TTSService(AIService):
         self._processing_text = False
         self._sent_non_whitespace_in_context = False
         self._bot_speaking = False
+        self._aggregation_generation_started = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
@@ -1093,6 +1174,8 @@ class TTSService(AIService):
             await self.resume_processing_frames()
 
     async def _process_text_frame(self, frame: TextFrame):
+        if not self._aggregation_generation_started:
+            await self._begin_text_aggregation(self.get_text_aggregation_language(frame))
         async for aggregate in self._text_aggregator.aggregate(frame.text):
             includes_inter_frame_spaces = (
                 frame.includes_inter_frame_spaces
@@ -1297,6 +1380,7 @@ class TTSService(AIService):
                 prepared_text,
                 append_to_context=self._tts_contexts[context_id].append_to_context,
                 build_tracker=not self._push_text_frames,
+                language=self._generation_text_aggregation_language,
             ),
             context_id,
         )

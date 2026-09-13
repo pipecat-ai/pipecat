@@ -67,12 +67,18 @@ class _ParallelSentenceAggregator:
       emitted and the whole triggering token begins the next sentence's buffer.
     """
 
-    def __init__(self):
-        """Initialize the aggregator with empty channels."""
+    def __init__(self, language: str | None = None):
+        """Initialize empty channels using the context's sentence language.
+
+        Args:
+            language: Language code or Punkt model name for this context.
+        """
         # A plain SENTENCE-mode aggregator drives boundary detection on the TTS
         # text. The TTS text is already post-transform, so tag/pattern-aware
         # boundary rules are not needed here.
-        self._aggregator = SimpleTextAggregator(aggregation_type=AggregationType.SENTENCE)
+        self._aggregator = SimpleTextAggregator(
+            aggregation_type=AggregationType.SENTENCE, language=language
+        )
         self._reset()
 
     def _reset(self):
@@ -116,7 +122,7 @@ class _ParallelSentenceAggregator:
             combined = self._tts + tts_text
             idx = 0
             for _ in range(boundary_count):
-                boundary = match_endofsentence(combined[idx:])
+                boundary = match_endofsentence(combined[idx:], language=self._aggregator.language)
                 if boundary <= 0:
                     break
                 sentence = combined[idx : idx + boundary]
@@ -297,6 +303,8 @@ class AggregatedFrameSequencer:
         append_to_context: bool,
         build_tracker: bool = True,
         includes_inter_frame_spaces: bool = False,
+        *,
+        language: str | None = None,
     ) -> list[Frame]:
         """Register a spoken AggregatedTextFrame slot.
 
@@ -317,6 +325,8 @@ class AggregatedFrameSequencer:
 
         Args:
             frame: The AggregatedTextFrame being spoken (one token when streaming).
+            language: Sentence tokenizer for this context. Captured on its first
+                token and retained until the context is finalized.
             context_id: The TTS context ID assigned to this frame.
             tts_text: The text actually sent to the TTS for this call (may differ
                 from ``frame.text`` after filters/transforms).
@@ -352,10 +362,11 @@ class AggregatedFrameSequencer:
             )
             return []
 
-        sc = self._streaming_contexts.setdefault(
-            context_id,
-            _StreamingContext(_ParallelSentenceAggregator(), append_to_context, build_tracker),
-        )
+        if context_id not in self._streaming_contexts:
+            self._streaming_contexts[context_id] = _StreamingContext(
+                _ParallelSentenceAggregator(language), append_to_context, build_tracker
+            )
+        sc = self._streaming_contexts[context_id]
         frames: list[Frame] = []
         async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
