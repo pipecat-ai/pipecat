@@ -7,6 +7,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
+from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.text.pattern_pair_aggregator import (
     MatchAction,
     PatternMatch,
@@ -562,6 +563,67 @@ class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
         # reassembles intact instead of leaking as a fragment ("<e").
         texts = [r.text for r in results]
         self.assertEqual(texts, ["very ", "<em>excited</em> today"])
+
+
+class TestPatternPairIdenticalDelimiters(unittest.IsolatedAsyncioTestCase):
+    async def _collect(self, aggregator, chunks):
+        results = []
+        for chunk in chunks:
+            results.extend([result async for result in aggregator.aggregate(chunk)])
+        remaining = await aggregator.flush()
+        if remaining is not None:
+            results.append(remaining)
+        self.assertIsNone(await aggregator.flush())
+        return results
+
+    async def test_completed_pairs_across_chunk_boundaries(self):
+        for mode in (AggregationType.SENTENCE, AggregationType.TOKEN):
+            for action in MatchAction:
+                for start, end in (("```", "```"), ("<code>", "</code>")):
+                    text = f"Before{start}one{end}{start}two{end}after"
+                    chunkings = [[text], list(text)] + [
+                        [text[:index], text[index:]] for index in range(1, len(text))
+                    ]
+                    for chunks in chunkings:
+                        with self.subTest(mode=mode, action=action, start=start, chunks=chunks):
+                            aggregator = PatternPairAggregator(aggregation_type=mode)
+                            aggregator.add_pattern("code", start, end, action)
+                            handler = AsyncMock()
+                            aggregator.on_pattern_match("code", handler)
+
+                            results = await self._collect(aggregator, chunks)
+
+                            expected = {
+                                MatchAction.REMOVE: "Beforeafter",
+                                MatchAction.KEEP: text,
+                                MatchAction.AGGREGATE: "Beforeonetwoafter",
+                            }[action]
+                            self.assertEqual("".join(result.text for result in results), expected)
+                            self.assertEqual(
+                                [call.args[0].text for call in handler.await_args_list],
+                                ["one", "two"],
+                            )
+                            self.assertEqual(
+                                [result.text for result in results if result.type == "code"],
+                                ["one", "two"] if action == MatchAction.AGGREGATE else [],
+                            )
+
+    async def test_unclosed_pair_flush_and_reuse(self):
+        for mode in (AggregationType.SENTENCE, AggregationType.TOKEN):
+            for action in MatchAction:
+                with self.subTest(mode=mode, action=action):
+                    aggregator = PatternPairAggregator(aggregation_type=mode)
+                    aggregator.add_pattern("code", "```", "```", action)
+                    handler = AsyncMock()
+                    aggregator.on_pattern_match("code", handler)
+
+                    results = await self._collect(aggregator, ["Before`", "``unfinished"])
+
+                    expected = "Before```unfinished" if action == MatchAction.KEEP else "Before"
+                    self.assertEqual("".join(result.text for result in results), expected)
+                    handler.assert_not_awaited()
+                    results = await self._collect(aggregator, ["Fresh"])
+                    self.assertEqual("".join(result.text for result in results), "Fresh")
 
 
 if __name__ == "__main__":
