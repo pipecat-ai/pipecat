@@ -2015,7 +2015,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
         deferred = self._is_deferred(in_progress_frame)
         del self._function_calls_in_progress[frame.tool_call_id]
 
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        # Multimodal tool results (e.g. an MCP tool returning ImageContent) are
+        # represented as a list of content blocks — e.g.
+        #   [{"type": "text", "text": "..."},
+        #    {"type": "image", "source": {"type": "base64", ...}}]
+        # Anthropic's tool_result.content accepts either a string or a list of
+        # blocks. If we json.dumps a list here, the LLM sees the literal JSON
+        # text instead of an image input and the visual signal is lost.
+        # Pass lists through unchanged; stringify everything else (the existing
+        # text-only behavior).
+        if isinstance(frame.result, list):
+            result = frame.result
+        elif frame.result:
+            result = json.dumps(frame.result, ensure_ascii=False)
+        else:
+            result = "COMPLETED"
 
         if deferred:
             # The conversation moved on while the call ran, so the LLM is told
