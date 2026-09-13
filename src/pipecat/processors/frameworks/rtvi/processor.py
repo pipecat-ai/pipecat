@@ -44,6 +44,7 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserv
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 
 
@@ -231,7 +232,14 @@ class RTVIProcessor(FrameProcessor):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, ErrorFrame):
-            await self._send_error_frame(frame)
+            # Errors raised by the output transport are not reported to the
+            # client. The RTVI message would have to travel over the same
+            # connection that just failed, and if that send fails too it raises
+            # another ErrorFrame, which lands back here: a loop that runs at
+            # event loop speed until the call ends. The frame still goes
+            # upstream, so the app and any observers see it.
+            if not isinstance(frame.processor, BaseOutputTransport):
+                await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputTransportMessageFrame):
             await self._handle_transport_message(frame)
