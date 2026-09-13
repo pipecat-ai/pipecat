@@ -97,6 +97,11 @@ class InworldTTSSettings(TTSSettings):
             ``"BALANCED"`` is the default midpoint.
             ``"CREATIVE"`` produces more expressive, emotionally varied speech.
             Only supported by ``inworld-tts-2``.
+        instruction: Plain-English steering for the whole request, e.g.
+            ``"speak loudly and urgently"``. Honored by
+            :class:`InworldHttpTTSService` with ``inworld-tts-2``; the
+            WebSocket API takes steering as inline ``[tags]`` in the text
+            instead, so :class:`InworldTTSService` ignores this field.
     """
 
     speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -104,6 +109,7 @@ class InworldTTSSettings(TTSSettings):
     delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {
         "voiceId": "voice",
@@ -206,6 +212,7 @@ class InworldHttpTTSService(TTSService):
             speaking_rate=None,
             temperature=None,
             delivery_mode=None,
+            instruction=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -363,6 +370,8 @@ class InworldHttpTTSService(TTSService):
             payload["temperature"] = self._settings.temperature
         if self._settings.delivery_mode is not None:
             payload["deliveryMode"] = self._settings.delivery_mode
+        if self._settings.instruction is not None:
+            payload["instruction"] = self._settings.instruction
         if self._settings.language is not None:
             payload["language"] = self._settings.language
 
@@ -669,6 +678,7 @@ class InworldTTSService(WebsocketTTSService):
             speaking_rate=None,
             temperature=None,
             delivery_mode=None,
+            instruction=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
