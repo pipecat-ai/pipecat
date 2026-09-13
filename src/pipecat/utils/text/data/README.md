@@ -10,8 +10,8 @@ Its embedded `punkt_tab/README` records the model authors and training sources.
 NLTK's code license does not establish the license of these model files.
 Upstream explicitly identifies Punkt's data license as unclear:
 https://github.com/nltk/nltk_data/blob/gh-pages/LICENSE-OVERVIEW.md.
-Redistribution clearance is unresolved; this bundle is for local validation
-pending that determination.
+Redistribution clearance is unresolved; release of this bundle requires a
+licensing determination.
 
 To update, obtain the archive from a pinned upstream revision, verify its
 checksum, update this record, and run the sentence-tokenization tests for all
