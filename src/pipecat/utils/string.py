@@ -16,11 +16,8 @@ Dependencies:
     See: https://www.nltk.org/
     Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
 
-    The tokenizer and its ``punkt_tab`` data load on first use, and the data is
-    downloaded if it isn't already present. Deployments that build their own
-    image should bundle it at build time (``python -m nltk.downloader
-    punkt_tab``) or point ``NLTK_DATA`` at a directory that already has it, so
-    that a slow or unavailable network can't delay the first bot turn.
+    The tokenizer loads on first use from Pipecat's bundled ``punkt_tab`` data.
+    It requires no network access or external NLTK data directory.
 """
 
 import re
@@ -28,8 +25,9 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cache
-
-from loguru import logger
+from importlib.resources import files
+from io import TextIOWrapper
+from zipfile import ZipFile
 
 _load_lock = threading.Lock()
 
@@ -44,30 +42,32 @@ def _sent_tokenizer() -> Callable[[str], list[str]]:
     never tokenize.
 
     A caller arriving while the pipeline's background warming is still loading
-    waits on the lock rather than loading alongside it, so the one-time
-    ``punkt_tab`` download cannot run twice at once. The cache keeps the lock
-    off the path once the tokenizer is loaded.
+    waits on the lock rather than loading alongside it. The cache keeps the
+    lock off the path once the tokenizer is loaded. Model parameters are read
+    directly from the packaged archive without modifying NLTK's data paths.
     """
     with _load_lock:
-        import nltk
-        from nltk.tokenize import sent_tokenize
+        return _load_punkt_tokenizer("english")
 
-        try:
-            nltk.data.find("tokenizers/punkt_tab")
-        except LookupError:
-            try:
-                nltk.download("punkt_tab", quiet=True)
-            except (OSError, PermissionError) as e:
-                logger.error(
-                    f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-                    "This data is required for sentence tokenization features. "
-                    "The download failed due to filesystem permissions. "
-                    "To resolve: pre-install the data in a location with appropriate read "
-                    "permissions, or set the NLTK_DATA environment variable to point to a "
-                    "writable directory. See https://www.nltk.org/data.html for more information."
-                )
 
-        return sent_tokenize
+def _load_punkt_tokenizer(language: str) -> Callable[[str], list[str]]:
+    """Read a bundled Punkt model into memory without NLTK filesystem lookups."""
+    from nltk.tabdata import PunktDecoder
+    from nltk.tokenize.punkt import PunktParameters, PunktSentenceTokenizer
+
+    params = PunktParameters()
+    decoder = PunktDecoder()
+    resource = files("pipecat.utils.text.data").joinpath("punkt_tab.zip")
+    with resource.open("rb") as stream, ZipFile(stream) as archive:
+        with archive.open(f"punkt_tab/{language}/collocations.tab") as data:
+            params.collocations = set(decoder.tab2tups(TextIOWrapper(data, encoding="utf-8")))
+        with archive.open(f"punkt_tab/{language}/sent_starters.txt") as data:
+            params.sent_starters = decoder.txt2set(TextIOWrapper(data, encoding="utf-8"))
+        with archive.open(f"punkt_tab/{language}/abbrev_types.txt") as data:
+            params.abbrev_types = decoder.txt2set(TextIOWrapper(data, encoding="utf-8"))
+        with archive.open(f"punkt_tab/{language}/ortho_context.tab") as data:
+            params.ortho_context = decoder.tab2intdict(TextIOWrapper(data, encoding="utf-8"))
+    return PunktSentenceTokenizer(params).tokenize
 
 
 SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
