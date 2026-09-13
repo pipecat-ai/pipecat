@@ -402,6 +402,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response: CurrentAudioResponse | None = None
+        self._tts_started = False
         self._server_vad_handled_turn = False
 
         self._messages_added_manually = {}
@@ -473,9 +474,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
 
-        # Audio only opens a TTS turn once a delta arrives, and a text-only
-        # session never opens one, so the stop is owed only if a start went out.
-        tts_started = self._current_audio_response is not None
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
 
@@ -484,8 +482,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             # tracked item to keep that from closing the turn a second time.
             self._current_assistant_response = None
             await self.push_frame(LLMFullResponseEndFrame())
-            if tts_started:
-                await self.push_frame(TTSStoppedFrame())
+        # Tracked apart from the truncation state, which server VAD's
+        # speech_started clears before the interruption reaches this point.
+        if self._tts_started:
+            self._tts_started = False
+            await self.push_frame(TTSStoppedFrame())
         self._run_llm_when_response_done = False
 
     async def _handle_user_started_speaking(self, frame):
@@ -750,6 +751,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._server_vad_handled_turn = False
             self._current_assistant_response = None
             self._current_audio_response = None
+            self._tts_started = False
             self._pending_function_calls = {}
             self._messages_added_manually = {}
         except Exception as e:
@@ -930,11 +932,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle audio delta event — streaming audio from assistant."""
         await self.stop_ttfb_metrics()
 
+        # A new audio item can start before the previous one finishes playing (the
+        # response after a tool result, for one). Truncation follows the newest.
         if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
-            logger.warning(
-                "Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
-            )
-            logger.debug("Forcing previous audio response to None")
+            logger.debug(f"{self} tracking new audio item {evt.item_id}")
             self._current_audio_response = None
 
         if not self._current_audio_response:
@@ -943,6 +944,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 content_index=evt.content_index,
                 start_time_ms=int(time.time() * 1000),
             )
+        if not self._tts_started:
+            self._tts_started = True
             await self.push_frame(TTSStartedFrame())
 
         audio = base64.b64decode(evt.delta)
@@ -957,7 +960,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
     async def _handle_evt_audio_done(self, evt):
         """Handle audio done event."""
-        if self._current_audio_response:
+        if self._tts_started:
+            self._tts_started = False
             await self.push_frame(TTSStoppedFrame())
 
     async def _handle_evt_conversation_item_added(self, evt):

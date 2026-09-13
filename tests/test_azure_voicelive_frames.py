@@ -155,6 +155,21 @@ async def test_audio_deltas_are_bracketed_by_tts_frames():
 
 
 @pytest.mark.asyncio
+async def test_a_second_audio_item_stays_in_the_open_tts_turn():
+    """A new item that starts before the previous one reports done opens no second turn."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+
+    second_item = {**_audio_delta(), "item_id": "msg_2"}
+    await _drive(service, [_audio_delta(), second_item, {**_audio_done(), "item_id": "msg_2"}])
+
+    assert len(recorder.of_types(TTSStartedFrame)) == 1
+    assert len(recorder.of_types(TTSStoppedFrame)) == 1
+    assert service._current_audio_response.item_id == "msg_2"
+
+
+@pytest.mark.asyncio
 async def test_audio_frames_carry_the_configured_output_rate():
     service = _make_service()
     service._ensure_audio_config(16000, 16000)
@@ -248,6 +263,48 @@ async def test_an_interruption_reports_a_tts_stop_only_when_one_started(
 
     assert bool(recorder.of_types(TTSStoppedFrame)) is expect_tts_stop
     assert len(recorder.of_types(LLMFullResponseEndFrame)) == 1
+
+
+@pytest.mark.parametrize("audio_done_first", [False, True], ids=["mid-audio", "after-audio-done"])
+@pytest.mark.asyncio
+async def test_a_server_vad_interruption_closes_the_tts_turn_exactly_once(audio_done_first):
+    """speech_started truncates, and so clears the audio tracking, before the interruption."""
+    service = _make_service()
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+    service.broadcast_frame = _BroadcastRecorder()
+
+    async def _sent(event):
+        return None
+
+    service.send_client_event = _sent
+
+    script: list[dict[str, Any]] = [
+        {
+            "type": "response.output_item.added",
+            "event_id": "e1",
+            "response_id": RESPONSE_ID,
+            "output_index": 0,
+            "item": {
+                "id": ITEM_ID,
+                "object": "realtime.item",
+                "type": "message",
+                "status": "incomplete",
+                "role": "assistant",
+                "content": [],
+            },
+        },
+        _audio_delta(),
+    ]
+    if audio_done_first:
+        script.append(_audio_done())
+    script.append({"type": "input_audio_buffer.speech_started", "event_id": "e2"})
+    await _drive(service, script)
+
+    await service._handle_interruption()
+
+    assert len(recorder.of_types(TTSStartedFrame)) == 1
+    assert len(recorder.of_types(TTSStoppedFrame)) == 1
 
 
 @pytest.mark.asyncio
