@@ -1,0 +1,1 @@
+- Added `language` and `prompt` to Inworld Realtime's `InputTranscription`, so a session can pin the STT language and pass vocabulary or domain hints to the transcriber.
