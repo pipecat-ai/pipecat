@@ -72,6 +72,24 @@ async def test_a_text_user_turn_is_sent_and_answered():
 
 
 @pytest.mark.asyncio
+async def test_a_text_turn_during_a_response_is_answered_when_it_finishes():
+    """The service rejects a second response while one is running."""
+    service, recorder = _make_service()
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+
+    await service._handle_context(context)
+    service._response_in_flight = True
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "What is the capital of Japan?"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["What is the capital of Japan?"]
+    assert "ResponseCreateEvent" not in recorder.kinds()
+    assert service._run_llm_when_response_done is True
+
+
+@pytest.mark.asyncio
 async def test_a_server_vad_turn_is_not_sent_again():
     """Server VAD already has the audio and created its own response."""
     service, recorder = _make_service()
@@ -87,6 +105,44 @@ async def test_a_server_vad_turn_is_not_sent_again():
 
     assert recorder.user_texts() == []
     assert "ResponseCreateEvent" not in recorder.kinds()
+
+
+@pytest.mark.asyncio
+async def test_a_tool_result_landing_first_does_not_release_the_server_vad_turn():
+    """The transcript is written after the response starts, so a tool result can land first."""
+    service, recorder = _make_service()
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+
+    await service._handle_context(context)
+    await service._handle_evt_speech_stopped(None)
+
+    # The spoken turn's tool call completes before its transcript is written.
+    context.add_message(
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "get_current_weather", "arguments": "{}"},
+                }
+            ],
+        }
+    )
+    context.add_message({"role": "tool", "tool_call_id": "call_1", "content": '{"temp": 75}'})
+    await service._handle_context(context)
+
+    recorder.events.clear()
+    context.add_message({"role": "user", "content": "What's the weather?"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == []
+    assert "ResponseCreateEvent" not in recorder.kinds()
+
+    context.add_message({"role": "user", "content": "typed turn"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == ["typed turn"]
 
 
 @pytest.mark.asyncio

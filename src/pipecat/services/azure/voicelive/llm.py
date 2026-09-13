@@ -653,14 +653,21 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             messages = self._context.get_messages()
             current_count = len(messages)
             if current_count > self._last_context_message_count:
+                new_messages = messages[self._last_context_message_count :]
                 last_msg = messages[-1]
                 self._last_context_message_count = current_count
 
                 # When server-side VAD handled this turn, the service already
                 # has the caller's audio and created a response, so sending a
-                # text item would duplicate the turn.
+                # text item would duplicate the turn. Only the caller's
+                # transcript releases the claim: a tool result can reach the
+                # context first.
                 if self._server_vad_handled_turn:
-                    self._server_vad_handled_turn = False
+                    if any(
+                        not isinstance(m, LLMSpecificMessage) and m.get("role") == "user"
+                        for m in new_messages
+                    ):
+                        self._server_vad_handled_turn = False
                     return
 
                 # LLMSpecificMessages are opaque provider-specific payloads, not
@@ -681,9 +688,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                             content=[events.ItemContent(type="input_text", text=content)],
                         )
                         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
-                        await self.start_processing_metrics()
-                        await self.start_ttfb_metrics()
-                        await self.send_client_event(events.ResponseCreateEvent())
+                        await self._create_response()
 
     async def _handle_messages_append(self, frame):
         """Handle a request to append messages to the conversation."""
