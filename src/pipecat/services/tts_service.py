@@ -620,7 +620,7 @@ class TTSService(AIService):
         language = self._text_aggregation_language_override
         if language is None:
             language = self._tts_language
-        return resolve_sentence_tokenizer_language(language)
+        return resolve_sentence_tokenizer_language(language if is_given(language) else None)
 
     def _prepare_sentence_tokenizer(self, language: str | None = None) -> None:
         language = language or self.text_aggregation_language
