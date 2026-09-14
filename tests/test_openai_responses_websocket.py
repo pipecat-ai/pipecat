@@ -837,6 +837,17 @@ class TestReasoningParams:
         assert params["reasoning"] == {"effort": "high", "summary": "auto"}
         assert params["include"] == ["reasoning.encrypted_content"]
 
+    def test_reasoning_mode_is_passed_through(self):
+        """`mode` reaches the request alongside `effort`."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.6-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low", mode="pro"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low", "mode": "pro"}
+
     def test_empty_reasoning_config_falls_back_to_default(self):
         """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
         service = _make_service(

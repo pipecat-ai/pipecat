@@ -126,12 +126,18 @@ class OpenAIResponsesReasoningConfig(BaseModel):
             default) requests no summary. Any summary is surfaced via thought
             frames (the ``on_assistant_thought`` event); the encrypted reasoning
             itself is preserved across turns regardless of this setting.
+        mode: Reasoning mode for models that offer one, such as the gpt-5.6
+            series: ``"standard"`` or the slower, more thorough ``"pro"``.
+            ``None`` (the default) leaves the field unset, so the model's own
+            default applies. ``effort`` selects the reasoning intensity within
+            the chosen mode.
     """
 
     # ``| str`` for forward compatibility: if OpenAI adds new levels, users can
     # pass the new string without waiting for a Pipecat release.
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | str | None = None
     summary: Literal["auto", "concise", "detailed"] | str | None = None
+    mode: Literal["standard", "pro"] | str | None = None
 
 
 @dataclass
