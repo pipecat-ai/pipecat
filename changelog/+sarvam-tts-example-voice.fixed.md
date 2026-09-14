@@ -1,0 +1,1 @@
+- Fixed the `voice-sarvam` example's optional voice-switch line, which named `anushka`, a `bulbul:v2` speaker that `bulbul:v3` rejects. It now names `anand`, a `bulbul:v3` speaker.
