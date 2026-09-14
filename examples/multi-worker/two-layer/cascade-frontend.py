@@ -134,9 +134,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = TwoLayerLLMService(
         frontend=OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAILLMService.Settings(
-                model="gpt-5.4-mini", system_instruction=FRONTEND_INSTRUCTIONS
-            ),
+            settings=OpenAILLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
         # Thinking summaries stream back to the frontend as "thought" outputs.
         backend=BackendLLMWorker(
