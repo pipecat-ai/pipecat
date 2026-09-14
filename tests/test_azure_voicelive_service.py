@@ -10,6 +10,8 @@ import io
 
 import pytest
 from loguru import logger
+from websockets.exceptions import ConnectionClosedError
+from websockets.protocol import State
 
 from pipecat.services.azure.voicelive import events
 from pipecat.services.azure.voicelive.llm import AzureVoiceLiveLLMService
@@ -88,19 +90,15 @@ def test_voice_shorthand_populates_session_properties():
     assert voice.name == "en-US-Andrew:DragonHDLatestNeural"
 
 
-def test_server_turn_detection_is_on_by_default():
-    assert _service()._is_manual_turn_detection() is False
+@pytest.mark.parametrize("model_in_settings", [False, True], ids=["model-argument", "settings"])
+def test_azure_realtime_is_left_to_pick_its_own_voice(model_in_settings):
+    """`azure-realtime` rejects Azure standard voices and picks a native one when none is sent."""
+    if model_in_settings:
+        service = _service(settings=AzureVoiceLiveLLMService.Settings(model="azure-realtime"))
+    else:
+        service = _service(model="azure-realtime")
 
-
-def test_turn_detection_none_selects_manual_mode():
-    """Callers driving turns from transport VAD disable the server's own."""
-    service = _service(
-        settings=AzureVoiceLiveLLMService.Settings(
-            session_properties=events.SessionProperties(turn_detection=None)
-        )
-    )
-
-    assert service._is_manual_turn_detection() is True
+    assert service._settings.session_properties.voice is None
 
 
 @pytest.mark.parametrize(
@@ -116,8 +114,8 @@ def test_turn_detection_none_selects_manual_mode():
 def test_manual_mode_matches_what_the_session_update_sends(session_kwargs, manual):
     """The service and the wire have to agree on who is detecting turns.
 
-    An unset ``turn_detection`` is omitted from the session update, leaving the
-    service's own VAD running, so it is not manual mode.
+    An unset ``turn_detection`` is omitted from the session update, leaving
+    Voice Live's own VAD running, so it is not manual mode.
     """
     service = _service(
         settings=AzureVoiceLiveLLMService.Settings(
@@ -262,16 +260,6 @@ def test_settings_from_mapping_routes_session_keys():
     assert not settings.extra
 
 
-def test_turn_detection_false_also_selects_manual_mode():
-    service = _service(
-        settings=AzureVoiceLiveLLMService.Settings(
-            session_properties=events.SessionProperties(turn_detection=False)
-        )
-    )
-
-    assert service._is_manual_turn_detection() is True
-
-
 @pytest.mark.asyncio
 async def test_a_failed_disconnect_still_clears_the_disconnecting_flag():
     """Sends are dropped while the flag is set, so a stuck flag mutes the service."""
@@ -285,6 +273,82 @@ async def test_a_failed_disconnect_still_clears_the_disconnecting_flag():
     await service._disconnect()
 
     assert service._disconnecting is False
+
+
+class _EndedWebSocket:
+    """A connection whose event stream has ended, in the given state."""
+
+    def __init__(self, state: State, error: Exception | None = None):
+        self.state = state
+        self._error = error
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._error:
+            raise self._error
+        raise StopAsyncIteration
+
+    async def send(self, message):
+        raise ConnectionClosedError(None, None)
+
+
+def _record_errors(service) -> list[bool]:
+    reported: list[bool] = []
+
+    async def record(error_msg, **kwargs):
+        reported.append(kwargs.get("force_treat_as_permanent", False))
+
+    service.push_error = record
+    return reported
+
+
+@pytest.mark.parametrize(
+    "error", [None, ConnectionClosedError(None, None)], ids=["clean-close", "error-close"]
+)
+@pytest.mark.asyncio
+async def test_a_lost_connection_is_reported_once_as_permanent(error):
+    """Without its connection the service can't respond; the unusable policy decides next."""
+    service = _service()
+    reported = _record_errors(service)
+    service._websocket = _EndedWebSocket(State.CLOSED, error)
+
+    await service._run_receive_loop()
+    await service.send_client_event(events.InputAudioBufferClearEvent())
+
+    assert reported == [True]
+    assert service._websocket is None
+
+
+@pytest.mark.parametrize(
+    "disconnecting, state",
+    [(True, State.CLOSED), (False, State.OPEN)],
+    ids=["own-disconnect", "stopped-after-error-event"],
+)
+@pytest.mark.asyncio
+async def test_an_expected_end_of_the_receive_loop_reports_nothing(disconnecting, state):
+    """Closing the connection itself, or stopping after an error event already reported."""
+    service = _service()
+    reported = _record_errors(service)
+    service._websocket = _EndedWebSocket(state)
+    service._disconnecting = disconnecting
+
+    await service._run_receive_loop()
+
+    assert reported == []
+
+
+@pytest.mark.asyncio
+async def test_sending_on_a_closed_connection_reports_nothing():
+    """The receive loop reports the lost connection; each send would report it again."""
+    service = _service()
+    reported = _record_errors(service)
+    service._websocket = _EndedWebSocket(State.CLOSED)
+
+    await service.send_client_event(events.InputAudioBufferClearEvent())
+
+    assert reported == []
 
 
 @pytest.mark.asyncio
@@ -315,6 +379,8 @@ async def test_reset_conversation_sends_the_history_to_the_new_session():
     context = LLMContext([{"role": "user", "content": "remember this"}])
     await service._handle_context(context)
     service._llm_needs_conversation_setup = False
+    # The first response finishes before the reset.
+    service._response_in_flight = False
     created.clear()
 
     await service.reset_conversation()

@@ -23,6 +23,8 @@ from typing import Any, Self, cast
 from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.azure_voicelive_adapter import AzureVoiceLiveLLMAdapter
@@ -44,6 +46,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    SpeechControlParamsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -80,6 +83,13 @@ _OUTPUT_FORMAT_SAMPLE_RATES: dict[int, events.OutputAudioFormat] = {
     16000: "pcm16_16000hz",
     24000: "pcm16",
 }
+
+# With manual turn detection, the interruption that opens a caller's turn clears
+# the input buffer after the speech onset was already sent, so the most recent
+# audio is replayed. It covers the local VAD's `start_secs` plus a margin once
+# the VAD's parameters arrive.
+_DEFAULT_USER_AUDIO_PREROLL_SECS = 0.5
+_USER_AUDIO_PREROLL_MARGIN_SECS = 0.3
 
 
 @dataclass
@@ -199,6 +209,9 @@ class AzureVoiceLiveLLMSettings(LLMSettings):
 _EXPECTED_ERROR_CODES = {
     "response_cancel_not_active",
     "conversation_already_has_active_response",
+    # With `auto_truncate`, Voice Live truncates an interrupted item itself
+    # before this service's truncation arrives.
+    "item_already_truncated",
 }
 
 # Error codes that reject a single request and leave the session usable, so they
@@ -314,7 +327,9 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 "gpt-realtime". Sent as a query parameter on the connection.
             voice: Azure text to speech voice for audio responses, e.g.
                 "en-US-Ava:DragonHDLatestNeural". Shorthand for
-                ``session_properties.voice``.
+                ``session_properties.voice``. Defaults to
+                "en-US-Ava:DragonHDLatestNeural", except for ``azure-realtime``,
+                which picks one of its own native voices.
             api_version: Voice Live API version to request.
             settings: Full settings for fine-grained control. When
                 ``session_properties`` is provided in settings, it **replaces**
@@ -329,7 +344,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if api_key is None and token_provider is None:
             raise ValueError("Either `api_key` or `token_provider` is required.")
 
-        default_voice = voice or "en-US-Ava:DragonHDLatestNeural"
+        default_voice = events.AzureStandardVoice(name=voice or "en-US-Ava:DragonHDLatestNeural")
 
         default_settings = self.Settings(
             model=model,
@@ -346,7 +361,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             session_properties=events.SessionProperties(
                 model=model,
                 modalities=["text", "audio"],
-                voice=events.AzureStandardVoice(name=default_voice),
+                voice=default_voice,
                 input_audio_format="pcm16",
                 output_audio_format="pcm16",
                 turn_detection=events.TurnDetection(
@@ -363,6 +378,17 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # `azure-realtime` rejects Azure standard voices, and chooses one of its
+        # native voices when the session names none.
+        props = default_settings.session_properties
+        if (
+            voice is None
+            and is_given(props)
+            and props.voice is default_voice
+            and str(default_settings.model).startswith("azure-realtime")
+        ):
+            props.voice = None
 
         base_url = self._build_base_url(endpoint)
 
@@ -399,11 +425,16 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._run_llm_when_api_session_ready = False
         self._response_in_flight = False
         self._run_llm_when_response_done = False
+        self._current_response_id: str | None = None
+        self._interrupted_response_id: str | None = None
+        self._cancel_announced_response = False
 
         self._current_assistant_response = None
         self._current_audio_response: CurrentAudioResponse | None = None
         self._tts_started = False
-        self._server_vad_handled_turn = False
+        self._transcript_awaiting_context = False
+        self._user_audio_preroll = bytearray()
+        self._user_audio_preroll_secs = _DEFAULT_USER_AUDIO_PREROLL_SECS
 
         self._messages_added_manually = {}
         self._pending_function_calls = {}
@@ -467,12 +498,27 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
 
-        Server-side VAD cancels the response and clears the buffer itself; in
-        manual mode the client must send the cancel and clear events.
+        Voice Live cancels the response itself only for a barge-in its server
+        VAD detects, so any other interruption (manual turns, typed input, the
+        application) cancels it here. A cancelled response keeps streaming what
+        it already generated until ``response.done``; that output is dropped.
+        In manual mode the input buffer is cleared as well, and the most recent
+        audio replayed so the caller's speech onset survives the clear.
         """
         if self._is_manual_turn_detection():
             await self.send_client_event(events.InputAudioBufferClearEvent())
+            if self._user_audio_preroll:
+                payload = base64.b64encode(bytes(self._user_audio_preroll)).decode("utf-8")
+                await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+
+        if self._response_in_flight:
             await self.send_client_event(events.ResponseCancelEvent())
+            if self._current_response_id:
+                self._interrupted_response_id = self._current_response_id
+            else:
+                # Asked for but not announced yet; its id arrives with
+                # response.created.
+                self._cancel_announced_response = True
 
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
@@ -497,18 +543,24 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle user stopped speaking event.
 
         Server-side VAD commits the buffer and creates the response itself; in
-        manual mode the client must send them. Metrics are started in
-        ``_handle_evt_speech_stopped`` in the server-VAD path.
+        manual mode the client must send them. The response waits for one the
+        caller interrupted to finish, since Voice Live rejects a second response
+        while it streams. Metrics are started in ``_handle_evt_speech_stopped``
+        in the server-VAD path.
         """
-        if self._is_manual_turn_detection():
-            await self.start_ttfb_metrics()
-            await self.start_processing_metrics()
-            await self.send_client_event(events.InputAudioBufferCommitEvent())
-            await self.send_client_event(events.ResponseCreateEvent())
+        # No audio is sent before conversation setup, so there is nothing to commit.
+        if not self._is_manual_turn_detection() or self._llm_needs_conversation_setup:
+            return
+        await self.send_client_event(events.InputAudioBufferCommitEvent())
+        await self._create_response()
 
     async def _handle_bot_stopped_speaking(self):
         """Handle bot stopped speaking event."""
         self._current_audio_response = None
+
+    def _is_from_interrupted_response(self, response_id: str | None) -> bool:
+        """Whether an event belongs to the response an interruption cancelled."""
+        return response_id is not None and response_id == self._interrupted_response_id
 
     async def _truncate_current_audio_response(self):
         """Truncate the assistant audio the caller spoke over.
@@ -523,7 +575,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._current_audio_response = None
 
         # Playback runs behind the audio received, so the elapsed time can pass the
-        # audio's length, and the service rejects a truncation beyond it.
+        # audio's length, and Voice Live rejects a truncation beyond it.
         elapsed_ms = int(time.time() * 1000) - current.start_time_ms
         audio_ms = int(current.total_size / 2 / self._get_output_sample_rate() * 1000)
         await self.send_client_event(
@@ -625,6 +677,8 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
+        elif isinstance(frame, SpeechControlParamsFrame):
+            self._handle_speech_control_params(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
@@ -657,17 +711,17 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 last_msg = messages[-1]
                 self._last_context_message_count = current_count
 
-                # When server-side VAD handled this turn, the service already
-                # has the caller's audio and created a response, so sending a
-                # text item would duplicate the turn. Only the caller's
-                # transcript releases the claim: a tool result can reach the
-                # context first.
-                if self._server_vad_handled_turn:
+                # A transcript this service pushed is the caller's audio turn,
+                # which Voice Live already has along with a response for it, so
+                # sending it as a text item would duplicate the turn. Only a
+                # user message consumes it: a tool result can reach the context
+                # first.
+                if self._transcript_awaiting_context:
                     if any(
                         not isinstance(m, LLMSpecificMessage) and m.get("role") == "user"
                         for m in new_messages
                     ):
-                        self._server_vad_handled_turn = False
+                        self._transcript_awaiting_context = False
                     return
 
                 # LLMSpecificMessages are opaque provider-specific payloads, not
@@ -725,7 +779,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
             logger.info(f"Connecting to {self.base_url}")
             self._websocket = await websocket_connect(uri=uri, additional_headers=headers)
-            self._receive_task = self.create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._run_receive_loop())
         except Exception as e:
             await self.push_error(error_msg=f"Error connecting to Voice Live: {e}", exception=e)
             self._websocket = None
@@ -753,10 +807,14 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._response_in_flight = False
             self._run_llm_when_response_done = False
             self._run_llm_when_api_session_ready = False
-            self._server_vad_handled_turn = False
+            self._transcript_awaiting_context = False
+            self._user_audio_preroll = bytearray()
             self._current_assistant_response = None
             self._current_audio_response = None
             self._tts_started = False
+            self._current_response_id = None
+            self._interrupted_response_id = None
+            self._cancel_announced_response = False
             self._pending_function_calls = {}
             self._messages_added_manually = {}
         except Exception as e:
@@ -771,6 +829,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         try:
             if not self._disconnecting and self._websocket:
                 await self._websocket.send(json.dumps(realtime_message))
+        except ConnectionClosed:
+            # The receive loop reports a lost connection once; every send after
+            # it would otherwise report it again.
+            return
         except Exception as e:
             if self._disconnecting or not self._websocket:
                 return
@@ -836,6 +898,37 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     #
     # Inbound server event handling
     #
+
+    async def _run_receive_loop(self):
+        """Receive server events, reporting a connection that closes unexpectedly.
+
+        Without its connection the service can't respond, so the loss is
+        reported as permanent and the pipeline worker's
+        :class:`~pipecat.pipeline.worker.ProcessorUnusablePolicy` decides what
+        follows.
+        """
+        websocket = self._websocket
+        assert websocket is not None
+
+        error: ConnectionClosed | None = None
+        try:
+            await self._receive_task_handler()
+        except ConnectionClosed as e:
+            error = e
+
+        # A fatal error event ends the loop with the connection still open, and
+        # has been reported already.
+        if self._disconnecting or websocket.state is State.OPEN:
+            return
+
+        if self._websocket is websocket:
+            self._websocket = None
+        self._api_session_ready = False
+        await self.push_error(
+            error_msg=f"Voice Live connection closed{f': {error}' if error else ''}",
+            exception=error,
+            force_treat_as_permanent=True,
+        )
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
@@ -913,7 +1006,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                 elif evt.error.code in _RECOVERABLE_ERROR_CODES:
                     await self._handle_evt_error(evt)
                 else:
-                    await self._handle_evt_error(evt)
+                    await self._handle_evt_error(evt, stops_receiving=True)
                     return
             else:
                 logger.debug(f"{self} received known but undispatched server event: {evt.type}")
@@ -932,9 +1025,16 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     async def _handle_evt_response_created(self, evt):
         """Handle response.created event."""
         self._response_in_flight = True
+        self._current_response_id = evt.response.get("id")
+        if self._cancel_announced_response:
+            self._cancel_announced_response = False
+            self._interrupted_response_id = self._current_response_id
 
     async def _handle_evt_audio_delta(self, evt):
         """Handle audio delta event — streaming audio from assistant."""
+        if self._is_from_interrupted_response(evt.response_id):
+            return
+
         await self.stop_ttfb_metrics()
 
         # A new audio item can start before the previous one finishes playing (the
@@ -1013,16 +1113,16 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         self._interim_transcription_text = ""
         await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
 
+        # Voice Live also reports an empty transcript for an item it already
+        # transcribed once the next audio is committed; only a non-empty one
+        # reaches the context.
         transcript = evt.transcript.strip() if evt.transcript else ""
         if transcript:
+            self._transcript_awaiting_context = True
             await self.push_frame(
                 TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
                 FrameDirection.UPSTREAM,
             )
-        else:
-            # Nothing from this turn reaches the context, so release the turn
-            # server VAD claimed rather than let it consume the next message.
-            self._server_vad_handled_turn = False
 
     async def _handle_evt_input_audio_transcription_failed(self, evt):
         """Handle input audio transcription failed event.
@@ -1031,7 +1131,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         into the next turn, since only a completed transcription clears it.
         """
         self._interim_transcription_text = ""
-        self._server_vad_handled_turn = False
         message = evt.error.message if evt.error else None
         await self.push_error(
             error_msg=f"Voice Live transcription failed: {message or 'no detail given'}"
@@ -1050,6 +1149,10 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
 
         await self.stop_processing_metrics()
         self._response_in_flight = False
+        self._current_response_id = None
+        self._cancel_announced_response = False
+        if self._interrupted_response_id == evt.response.get("id"):
+            self._interrupted_response_id = None
 
         # An interruption closes the turn before the cancelled response reports
         # done, so only close a turn that is still open.
@@ -1077,13 +1180,15 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         A session that also responds with audio reports its text through
         ``response.audio_transcript.delta`` instead.
         """
+        if self._is_from_interrupted_response(evt.response_id):
+            return
         await self.stop_ttfb_metrics()
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
-        if evt.delta:
+        if evt.delta and not self._is_from_interrupted_response(evt.response_id):
             await self._push_output_transcript_text_frames(evt.delta)
 
     async def _push_output_transcript_text_frames(self, text: str):
@@ -1144,20 +1249,22 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             # In manual mode, the client is responsible for broadcasting user turn frames
             return
 
-        # Server VAD creates its own response for this turn; the flag keeps
-        # _handle_context from sending a duplicate when the transcript lands.
-        # Without transcription no transcript ever lands, so arming it would
-        # leave it to swallow whatever reaches the context next.
-        props = self._settings.session_properties
-        if is_given(props) and props.input_audio_transcription:
-            self._server_vad_handled_turn = True
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
-    async def _handle_evt_error(self, evt):
-        """Handle fatal error event."""
-        await self.push_error(error_msg=f"Azure Voice Live Error: {evt.error.message}")
+    async def _handle_evt_error(self, evt, *, stops_receiving: bool = False):
+        """Report an error event from Voice Live.
+
+        Args:
+            evt: The error event.
+            stops_receiving: Whether the service stops reading server events
+                after this error, leaving it unable to respond.
+        """
+        await self.push_error(
+            error_msg=f"Azure Voice Live Error: {evt.error.message}",
+            force_treat_as_permanent=stops_receiving,
+        )
 
     #
     # Response creation
@@ -1194,7 +1301,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._run_llm_when_api_session_ready = True
             return
 
-        # The service rejects a second response while one is running, so a
+        # Voice Live rejects a second response while one is running, so a
         # response asked for mid-flight (a tool result landing before the
         # calling response finished) waits for response.done instead.
         if self._response_in_flight:
@@ -1230,6 +1337,11 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
+        # Running from the request on: an interruption can arrive before Voice
+        # Live announces the response, and a second request before then is
+        # rejected. A request Voice Live rejects for an unannounced response of
+        # its own is cleared by that response's response.done.
+        self._response_in_flight = True
         # The response takes the session's modalities. Overriding them per response
         # is rejected for native-audio voices, which accept only ["text"] or ["audio"].
         await self.send_client_event(events.ResponseCreateEvent())
@@ -1347,6 +1459,17 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._audio_buffer = self._audio_buffer[chunk_bytes:]
             payload = base64.b64encode(chunk).decode("utf-8")
             await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+            if self._is_manual_turn_detection():
+                self._user_audio_preroll += chunk
+                preroll_bytes = int(frame.sample_rate * 2 * self._user_audio_preroll_secs)
+                del self._user_audio_preroll[:-preroll_bytes]
+
+    def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        """Size the replayed speech onset to the local VAD's start delay."""
+        if frame.vad_params is not None:
+            self._user_audio_preroll_secs = (
+                frame.vad_params.start_secs + _USER_AUDIO_PREROLL_MARGIN_SECS
+            )
 
     async def _send_tool_result(self, tool_call_id: str, result: str | None):
         """Send a tool call result to Voice Live."""

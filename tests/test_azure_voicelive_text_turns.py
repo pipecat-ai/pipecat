@@ -8,8 +8,8 @@
 
 These tests drive the context handler directly with a fake
 ``send_client_event`` and assert on the client events emitted to the service.
-An audio turn reaches the service as audio and server VAD creates its own
-response for it; a turn that only appears in the context has to be sent.
+An audio turn reaches Voice Live as audio and gets a response for it; a turn
+that only appears in the context has to be sent.
 """
 
 from typing import Any
@@ -41,18 +41,39 @@ class _EventRecorder:
         return texts
 
 
-def _make_service() -> tuple[AzureVoiceLiveLLMService, _EventRecorder]:
+async def _ignore_frame(*args, **kwargs) -> None:
+    """Stand-in for ``push_frame``, which needs a linked processor."""
+
+
+def _make_service(
+    session_properties: events.SessionProperties | None = None,
+) -> tuple[AzureVoiceLiveLLMService, _EventRecorder]:
     """Construct a service wired to a fake send_client_event."""
+    settings = (
+        AzureVoiceLiveLLMService.Settings(session_properties=session_properties)
+        if session_properties
+        else None
+    )
     service = AzureVoiceLiveLLMService(
         api_key="test-key",
         endpoint="https://my-resource.services.ai.azure.com",
+        settings=settings,
     )
     recorder = _EventRecorder()
     service.send_client_event = recorder
+    service.push_frame = _ignore_frame
     # The session is configured by the time context frames arrive.
     service._api_session_ready = True
     service._llm_needs_conversation_setup = False
     return service, recorder
+
+
+async def _start(service: AzureVoiceLiveLLMService, context: LLMContext) -> None:
+    """Hand the service its first context and let the response it asks for finish."""
+    await service._handle_context(context)
+    await service._handle_evt_response_done(
+        events.ResponseDone(type="response.done", response={"id": "resp_0", "status": "completed"})
+    )
 
 
 @pytest.mark.asyncio
@@ -61,7 +82,7 @@ async def test_a_text_user_turn_is_sent_and_answered():
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
+    await _start(service, context)
     recorder.events.clear()
 
     context.add_message({"role": "user", "content": "What is the capital of France?"})
@@ -73,11 +94,11 @@ async def test_a_text_user_turn_is_sent_and_answered():
 
 @pytest.mark.asyncio
 async def test_a_text_turn_during_a_response_is_answered_when_it_finishes():
-    """The service rejects a second response while one is running."""
+    """Voice Live rejects a second response while one is running."""
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
+    await _start(service, context)
     service._response_in_flight = True
     recorder.events.clear()
 
@@ -95,11 +116,11 @@ async def test_a_server_vad_turn_is_not_sent_again():
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
+    await _start(service, context)
     recorder.events.clear()
 
-    # Server VAD closed the turn; the transcript lands in the context after.
-    await service._handle_evt_speech_stopped(None)
+    # The service pushes the transcript; it lands in the context after.
+    await _transcription_completed(service, "What is the capital of France?")
     context.add_message({"role": "user", "content": "What is the capital of France?"})
     await service._handle_context(context)
 
@@ -113,8 +134,8 @@ async def test_a_tool_result_landing_first_does_not_release_the_server_vad_turn(
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
-    await service._handle_evt_speech_stopped(None)
+    await _start(service, context)
+    await _transcription_completed(service, "What's the weather?")
 
     # The spoken turn's tool call completes before its transcript is written.
     context.add_message(
@@ -146,11 +167,34 @@ async def test_a_tool_result_landing_first_does_not_release_the_server_vad_turn(
 
 
 @pytest.mark.asyncio
+async def test_a_manual_turn_is_not_sent_again_when_its_transcript_lands():
+    """A manual turn commits the caller's audio, so Voice Live already has the turn."""
+    service, recorder = _make_service(
+        events.SessionProperties(
+            turn_detection=None,
+            input_audio_transcription=events.InputAudioTranscription(model="azure-speech"),
+        )
+    )
+    context = LLMContext([{"role": "developer", "content": "Be brief."}])
+    await _start(service, context)
+
+    await service._handle_user_stopped_speaking(None)
+    await _transcription_completed(service, "What is the capital of France?")
+    recorder.events.clear()
+
+    context.add_message({"role": "user", "content": "What is the capital of France?"})
+    await service._handle_context(context)
+
+    assert recorder.user_texts() == []
+    assert "ResponseCreateEvent" not in recorder.kinds()
+
+
+@pytest.mark.asyncio
 async def test_an_assistant_message_does_not_create_a_turn():
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
+    await _start(service, context)
     recorder.events.clear()
 
     context.add_message({"role": "assistant", "content": "Paris."})
@@ -160,85 +204,28 @@ async def test_an_assistant_message_does_not_create_a_turn():
     assert "ResponseCreateEvent" not in recorder.kinds()
 
 
-@pytest.mark.asyncio
-async def test_a_text_turn_after_a_server_vad_turn_is_still_sent():
-    """The skip applies to the turn server VAD handled, not to later ones."""
-    service, recorder = _make_service()
-    context = LLMContext([{"role": "developer", "content": "Be brief."}])
-
-    await service._handle_context(context)
-
-    await service._handle_evt_speech_stopped(None)
-    context.add_message({"role": "user", "content": "spoken turn"})
-    await service._handle_context(context)
-
-    recorder.events.clear()
-    context.add_message({"role": "user", "content": "typed turn"})
-    await service._handle_context(context)
-
-    assert recorder.user_texts() == ["typed turn"]
-
-
 async def _transcription_completed(service, transcript):
     await service._handle_evt_input_audio_transcription_completed(
         type("Evt", (), {"item_id": "item_1", "transcript": transcript})()
     )
 
 
-async def _transcription_failed(service, _transcript):
-    await service._handle_evt_input_audio_transcription_failed(
-        type("Evt", (), {"error": type("Err", (), {"message": "no speech detected"})()})()
-    )
-
-
-@pytest.mark.parametrize(
-    "close_turn, transcript",
-    [
-        (_transcription_completed, "   "),
-        (_transcription_completed, None),
-        (_transcription_failed, None),
-    ],
-    ids=["blank-transcript", "null-transcript", "failed-transcription"],
-)
 @pytest.mark.asyncio
-async def test_a_vad_turn_without_a_transcript_does_not_swallow_the_next_turn(
-    close_turn, transcript
-):
-    """The skip belongs to a turn that reaches the context; one that doesn't owes nothing.
-
-    Server VAD fires on noise often enough that the claim has to be released
-    when no transcript follows it.
-    """
+async def test_an_empty_repeat_transcription_does_not_release_the_claim():
+    """Voice Live reports an empty transcript for an item again once the next audio commits."""
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
-    await service._handle_context(context)
+    await _start(service, context)
 
-    await service._handle_evt_speech_stopped(None)
-    await close_turn(service, transcript)
+    await _transcription_completed(service, "What is the capital of France?")
+    await _transcription_completed(service, "")
     recorder.events.clear()
 
-    context.add_message({"role": "user", "content": "typed turn"})
+    context.add_message({"role": "user", "content": "What is the capital of France?"})
     await service._handle_context(context)
 
-    assert recorder.user_texts() == ["typed turn"]
-    assert "ResponseCreateEvent" in recorder.kinds()
-
-
-@pytest.mark.asyncio
-async def test_no_turn_is_claimed_when_transcription_is_off():
-    """With transcription disabled no transcript ever arrives to consume the claim."""
-    service, recorder = _make_service()
-    service._settings.session_properties.input_audio_transcription = None
-    context = LLMContext([{"role": "developer", "content": "Be brief."}])
-    await service._handle_context(context)
-
-    await service._handle_evt_speech_stopped(None)
-    recorder.events.clear()
-
-    context.add_message({"role": "user", "content": "typed turn"})
-    await service._handle_context(context)
-
-    assert recorder.user_texts() == ["typed turn"]
+    assert recorder.user_texts() == []
+    assert "ResponseCreateEvent" not in recorder.kinds()
 
 
 @pytest.mark.asyncio
@@ -246,7 +233,7 @@ async def test_list_content_is_flattened_to_text():
     service, recorder = _make_service()
     context = LLMContext([{"role": "developer", "content": "Be brief."}])
 
-    await service._handle_context(context)
+    await _start(service, context)
     recorder.events.clear()
 
     context.add_message(

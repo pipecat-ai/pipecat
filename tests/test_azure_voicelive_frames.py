@@ -17,13 +17,16 @@ from typing import Any
 
 import pytest
 
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    SpeechControlParamsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -307,9 +310,169 @@ async def test_a_server_vad_interruption_closes_the_tts_turn_exactly_once(audio_
     assert len(recorder.of_types(TTSStoppedFrame)) == 1
 
 
+@pytest.mark.parametrize("manual", [False, True], ids=["server-vad", "manual"])
+@pytest.mark.asyncio
+async def test_an_interruption_cancels_the_response_and_drops_what_it_still_streams(manual):
+    """A cancelled response streams what it generated until response.done."""
+    session = (
+        events.SessionProperties(turn_detection=None) if manual else events.SessionProperties()
+    )
+    service = AzureVoiceLiveLLMService(
+        api_key="test-key",
+        endpoint="https://my-resource.services.ai.azure.com",
+        settings=AzureVoiceLiveLLMService.Settings(session_properties=session),
+    )
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+    sent: list[str] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+
+    await _drive(
+        service,
+        [
+            {"type": "response.created", "event_id": "e1", "response": {"id": RESPONSE_ID}},
+            _audio_delta(),
+        ],
+    )
+    await service._handle_interruption()
+    assert "ResponseCancelEvent" in sent
+
+    recorder.frames.clear()
+    transcript = {
+        "type": "response.audio_transcript.delta",
+        "event_id": "e2",
+        "response_id": RESPONSE_ID,
+        "item_id": ITEM_ID,
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "three, four",
+    }
+    await _drive(
+        service,
+        [
+            _audio_delta(),
+            transcript,
+            _response_done(status="cancelled"),
+            {"type": "response.created", "event_id": "e3", "response": {"id": "resp_2"}},
+            {**_audio_delta(), "response_id": "resp_2", "item_id": "msg_2"},
+        ],
+    )
+
+    assert not recorder.of_types(TTSTextFrame)
+    assert len(recorder.of_types(TTSAudioRawFrame)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_response_interrupted_before_it_is_announced_is_still_dropped():
+    """A split utterance can interrupt a response Voice Live hasn't announced yet."""
+    service = AzureVoiceLiveLLMService(
+        api_key="test-key",
+        endpoint="https://my-resource.services.ai.azure.com",
+        settings=AzureVoiceLiveLLMService.Settings(
+            session_properties=events.SessionProperties(turn_detection=None)
+        ),
+    )
+    recorder = _FrameRecorder()
+    service.push_frame = recorder
+    sent: list[str] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+    service._api_session_ready = True
+    service._llm_needs_conversation_setup = False
+    service._context = LLMContext([{"role": "user", "content": "hi"}])
+
+    await service._handle_user_stopped_speaking(None)
+    await service._handle_interruption()
+    assert "ResponseCancelEvent" in sent
+
+    # The caller stops again before the cancelled response has finished.
+    await service._handle_user_stopped_speaking(None)
+    assert sent.count("ResponseCreateEvent") == 1
+
+    await _drive(
+        service,
+        [
+            {"type": "response.created", "event_id": "e1", "response": {"id": RESPONSE_ID}},
+            _audio_delta(),
+            _response_done(status="cancelled"),
+        ],
+    )
+
+    assert not recorder.of_types(TTSAudioRawFrame)
+    assert sent.count("ResponseCreateEvent") == 2
+
+
+@pytest.mark.asyncio
+async def test_an_interruption_with_no_response_running_sends_no_cancel():
+    service = _make_service()
+    service.push_frame = _FrameRecorder()
+    sent: list[str] = []
+
+    async def record(event):
+        sent.append(type(event).__name__)
+
+    service.send_client_event = record
+
+    await service._handle_interruption()
+
+    assert "ResponseCancelEvent" not in sent
+
+
+@pytest.mark.parametrize("manual", [True, False], ids=["manual", "server-vad"])
+@pytest.mark.asyncio
+async def test_a_manual_interruption_replays_the_speech_onset_after_clearing(manual):
+    """Local VAD confirms speech after its onset was sent, and the clear would discard it."""
+    session = (
+        events.SessionProperties(turn_detection=None) if manual else events.SessionProperties()
+    )
+    service = AzureVoiceLiveLLMService(
+        api_key="test-key",
+        endpoint="https://my-resource.services.ai.azure.com",
+        settings=AzureVoiceLiveLLMService.Settings(session_properties=session),
+    )
+    service.push_frame = _FrameRecorder()
+    sent: list[Any] = []
+
+    async def record(event):
+        sent.append(event)
+
+    service.send_client_event = record
+    service._llm_needs_conversation_setup = False
+    service._handle_speech_control_params(
+        SpeechControlParamsFrame(vad_params=VADParams(start_secs=0.2))
+    )
+
+    # One second of 16 kHz audio in 20 ms frames, each frame holding its index.
+    for i in range(50):
+        audio = bytes([i, 0]) * 320
+        await service._send_user_audio(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1)
+        )
+    sent.clear()
+
+    await service._handle_interruption()
+
+    kinds = [type(e).__name__ for e in sent]
+    if not manual:
+        assert "InputAudioBufferClearEvent" not in kinds
+        return
+    assert kinds[:2] == ["InputAudioBufferClearEvent", "InputAudioBufferAppendEvent"]
+    replayed = base64.b64decode(sent[1].audio)
+    # start_secs plus the margin, ending with the last full chunk sent.
+    assert len(replayed) == int(16000 * 2 * 0.5)
+    assert replayed[-2:] == bytes([47, 0])
+
+
 @pytest.mark.asyncio
 async def test_truncation_never_passes_the_audio_received():
-    """Playback lags generation, and the service rejects a truncation beyond the audio."""
+    """Playback lags generation, and Voice Live rejects a truncation beyond the audio."""
     service = _make_service()
     service.push_frame = _FrameRecorder()
     sent: list[Any] = []
@@ -434,44 +597,32 @@ async def test_manual_turn_detection_suppresses_proposed_turn_frames():
     assert broadcasts.types == []
 
 
-@pytest.mark.asyncio
-async def test_non_fatal_error_does_not_end_the_receive_loop():
-    """Cancelling with no active response is expected during interruptions."""
-    service = _make_service()
-    recorder = _FrameRecorder()
-    service.push_frame = recorder
-
-    scripted = [
-        {
-            "type": "error",
-            "event_id": "e1",
-            "error": {
-                "type": "invalid_request_error",
-                "code": "response_cancel_not_active",
-                "message": "No active response.",
-            },
-        },
-        _audio_delta(),
-    ]
-    await _drive(service, scripted)
-
-    assert len(recorder.of_types(TTSAudioRawFrame)) == 1
-
-
 @pytest.mark.parametrize(
-    "code",
-    ["invalid_audio_end_time", "item_not_found", "input_audio_buffer_commit_empty"],
+    "code, reported, permanent, keeps_receiving",
+    [
+        # Routine during turn-taking, including re-truncating what `auto_truncate` cut.
+        ("response_cancel_not_active", False, False, True),
+        ("conversation_already_has_active_response", False, False, True),
+        ("item_already_truncated", False, False, True),
+        # Rejects one request; the session keeps working.
+        ("invalid_audio_end_time", True, False, True),
+        ("item_not_found", True, False, True),
+        ("input_audio_buffer_commit_empty", True, False, True),
+        # Anything else stops the service reading events.
+        ("invalid_voice", True, True, False),
+    ],
 )
 @pytest.mark.asyncio
-async def test_a_rejected_request_is_reported_without_ending_the_receive_loop(code):
-    """These errors reject one request; the session keeps working after them."""
+async def test_an_error_event_is_handled_by_its_effect_on_the_session(
+    code, reported, permanent, keeps_receiving
+):
     service = _make_service()
     recorder = _FrameRecorder()
     service.push_frame = recorder
-    errors: list[str] = []
+    errors: list[bool] = []
 
     async def record_error(error_msg, **kwargs):
-        errors.append(error_msg)
+        errors.append(kwargs.get("force_treat_as_permanent", False))
 
     service.push_error = record_error
 
@@ -485,8 +636,8 @@ async def test_a_rejected_request_is_reported_without_ending_the_receive_loop(co
     ]
     await _drive(service, scripted)
 
-    assert len(errors) == 1
-    assert len(recorder.of_types(TTSAudioRawFrame)) == 1
+    assert errors == ([permanent] if reported else [])
+    assert bool(recorder.of_types(TTSAudioRawFrame)) is keeps_receiving
 
 
 @pytest.mark.asyncio
@@ -565,7 +716,7 @@ async def test_interruption_closes_the_turn_only_once():
 
 @pytest.mark.asyncio
 async def test_a_response_asked_for_mid_flight_waits_for_response_done():
-    """The service rejects a second response while one is running."""
+    """Voice Live rejects a second response while one is running."""
     service = _make_service()
     service.push_frame = _FrameRecorder()
     sent: list[Any] = []
