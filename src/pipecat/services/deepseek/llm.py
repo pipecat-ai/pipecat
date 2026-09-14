@@ -85,7 +85,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-v4-flash".
+            model: The model identifier to use. Defaults to "deepseek-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -97,7 +97,7 @@ class DeepSeekLLMService(OpenAILLMService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="deepseek-v4-flash", thinking=DeepSeekThinkingConfig(type="disabled")
+            model="deepseek-flash", thinking=DeepSeekThinkingConfig(type="disabled")
         )
 
         # 2. Apply direct init arg overrides (deprecated)
