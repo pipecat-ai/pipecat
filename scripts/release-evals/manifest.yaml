@@ -436,9 +436,9 @@ suite:
   # tools the bot called. A plain voice bot takes a curious caller in text and
   # in audio, which checks the simulation machinery itself in both modes; the
   # Flows bots check that the framework still carries a task-oriented
-  # conversation to its goal. Each file names how many times it
-  # runs and the success rate it needs: a persona does not say the same thing
-  # twice, so one run is an anecdote.
+  # conversation to its goal. Each runs once; a persona does not say the
+  # same thing twice, so repeat a doubtful result with -r rather than read
+  # one run as a verdict.
   #
   - bot: voice/voice-cartesia.py
     scenarios: [simulated/capital_curious, simulated/capital_curious_audio]

@@ -286,9 +286,9 @@ intake, place an order, quote a policy.
 ./run.sh -s order_pizza -r 5       # one simulation, five runs
 ```
 
-Each simulation file names how many times it runs (`runs`), and every run must
-pass; a persona does not say the same thing twice, so a single run is an
-anecdote and the release set runs each three times. A run passes when the judge
+A simulation runs once unless its file says otherwise (`runs`) or `-r` repeats
+it, and every run must pass; a persona does not say the same thing twice, so
+repeat a doubtful result rather than read one run as a verdict. A run passes when the judge
 says the bot did its job (`success`), no judged metric with a `min_score`
 scored below it, and no measured one failed its range or its call list; a run
 that fails says which of those gave way. The judge sees the bot's tool calls
