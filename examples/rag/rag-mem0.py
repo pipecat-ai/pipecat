@@ -178,7 +178,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     #     "llm": {
     #         "provider": "anthropic",
     #         "config": {
-    #             "model": "claude-3-5-sonnet-20240620",
+    #             "model": "claude-sonnet-4-6",
     #             "api_key": os.getenv("ANTHROPIC_API_KEY"),  # Make sure to set this in your .env
     #         }
     #     },
