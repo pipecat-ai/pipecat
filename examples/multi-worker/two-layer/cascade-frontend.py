@@ -97,6 +97,9 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         location: The city and state, e.g. "San Francisco, CA".
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
+    # Uncomment to exercise longer-running backend work.
+    # import asyncio
+    # await asyncio.sleep(6)
     temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
