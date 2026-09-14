@@ -501,6 +501,66 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         version = self._gemini_version
         return version is None or version < (3, 0) or version >= (3, 8)
 
+    @property
+    def _tools_default_to_non_blocking(self) -> bool:
+        """Whether the model runs function calls NON_BLOCKING unless declared otherwise.
+
+        The 3.8 Live family flipped the default: function calls execute
+        NON_BLOCKING unless the declaration explicitly asks for BLOCKING.
+        """
+        model = assert_given(self._settings.model) or ""
+        version = self._gemini_version
+        return "live" in model and version is not None and version >= (3, 8)
+
+    @property
+    def _supports_blocking_tools(self) -> bool:
+        """Whether the model accepts BLOCKING function declarations.
+
+        Live thinking models run every function call NON_BLOCKING and don't
+        accept a BLOCKING declaration.
+        """
+        return not self._expects_interaction_status
+
+    def _tag_tool_behaviors(self, tools: list) -> None:
+        """Set each function declaration's ``behavior`` for the current model.
+
+        Tools registered with ``cancel_on_interruption=False`` are declared
+        NON_BLOCKING so Gemini doesn't stall the conversation while they run.
+        Synchronous tools should block — the model finishes its turn only once
+        the result lands, avoiding the "let me look that up for you" filler it
+        produces when it knows the result is async — so where NON_BLOCKING is
+        the model's default they are explicitly declared BLOCKING. Live
+        thinking models accept only NON_BLOCKING: synchronous tools can't
+        block there, which is warned about once.
+
+        https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
+        """
+        declare_blocking = self._tools_default_to_non_blocking and self._supports_blocking_tools
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            decls = tool.get("function_declarations")
+            if not isinstance(decls, list):
+                continue
+            for decl in decls:
+                if not isinstance(decl, dict):
+                    continue
+                name = decl.get("name")
+                if not isinstance(name, str):
+                    continue
+                if self._function_is_async(name):
+                    decl["behavior"] = "NON_BLOCKING"
+                elif declare_blocking:
+                    decl["behavior"] = "BLOCKING"
+                elif self._tools_default_to_non_blocking and not self._sync_tool_warning_logged:
+                    self._sync_tool_warning_logged = True
+                    logger.warning(
+                        f"{self}: {self._settings.model} runs every function call "
+                        f"NON_BLOCKING; synchronous tools like '{name}' won't pause "
+                        f"the conversation while they execute, so the model may keep "
+                        f"talking before the result arrives."
+                    )
+
     def __init__(
         self,
         *,
@@ -735,6 +795,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # message in the context only carries the id.
         self._tool_call_id_to_name: dict[str, str] = {}
         self._async_tool_warning_logged: bool = False
+        self._sync_tool_warning_logged: bool = False
 
     def create_client(self):
         """Create the Gemini API client instance. Subclasses can override this."""
@@ -1346,27 +1407,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
             if tools:
-                # Tag function declarations registered with
-                # cancel_on_interruption=False as NON_BLOCKING so Gemini
-                # doesn't stall the conversation while the tool runs.
-                # Synchronous (default) tools stay BLOCKING so the model
-                # finishes its turn before the result lands — otherwise
-                # we get the "let me look that up for you" filler the
-                # model produces when it knows the result is async.
-                # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
                 if self._supports_non_blocking_tools:
-                    for tool in tools:
-                        if not isinstance(tool, dict):
-                            continue
-                        decls = tool.get("function_declarations")
-                        if not isinstance(decls, list):
-                            continue
-                        for decl in decls:
-                            if not isinstance(decl, dict):
-                                continue
-                            name = decl.get("name")
-                            if isinstance(name, str) and self._function_is_async(name):
-                                decl["behavior"] = "NON_BLOCKING"
+                    self._tag_tool_behaviors(tools)
                 logger.debug(f"Setting tools: {tools}")
                 config.tools = tools
 
