@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     AggregationType,
     CancelFrame,
     EndFrame,
+    ExternalFunctionCallFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
@@ -61,6 +62,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
+    BackendToolCall,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -957,15 +959,29 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         answered = False
         try:
-            async for output in _delegate_to_backend(
+            async for event in _delegate_to_backend(
                 self.pipeline_worker,
                 config.backend.name,
                 request=request,
                 timeout_secs=config.timeout_secs,
             ):
+                if isinstance(event, BackendToolCall):
+                    # Reported for clients, as the Responses-delegation backend's
+                    # calls are; the delegation itself is not a call, so no parent.
+                    await self.push_frame(
+                        ExternalFunctionCallFrame(
+                            phase=event.phase,
+                            function_name=event.function_name,
+                            tool_call_id=event.tool_call_id,
+                            arguments=event.arguments,
+                            result=event.result,
+                            cancelled=event.cancelled,
+                        )
+                    )
+                    continue
                 answered = True
                 await self._send_context_append(
-                    delegation.id, output.text, spoken=output.prefers_spoken
+                    delegation.id, event.text, spoken=event.prefers_spoken
                 )
             if not answered:
                 # The live model holds the conversation until the delegation

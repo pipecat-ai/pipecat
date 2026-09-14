@@ -32,6 +32,7 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    ExternalFunctionCallFrame,
     Frame,
     FunctionCallResultProperties,
     InterruptionFrame,
@@ -54,6 +55,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
     BackendLLMWorker,
     BackendOutput,
+    BackendToolCall,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -323,7 +325,9 @@ class BackendConnector:
 
     A delegation that fails raises out of the tool handler, which the frontend
     service settles as an error result; one that ends without an answer settles
-    the call by saying so.
+    the call by saying so. The function calls the backend makes on the way are
+    reported in the frontend's pipeline as children of the ``delegate`` call,
+    for clients to show; nothing else in the pipeline sees them.
 
     Example::
 
@@ -452,17 +456,43 @@ class BackendConnector:
         request = await self.request.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         answered = False
-        async for output in _delegate_to_backend(
+        async for event in _delegate_to_backend(
             params.pipeline_worker,
             self._context.backend_name,
             request=request,
             timeout_secs=self._timeout_secs,
         ):
-            answered = answered or output.is_final
-            await self.reply.deliver(params, output)
+            if isinstance(event, BackendToolCall):
+                await self.report_tool_call(params, event)
+                continue
+            answered = answered or event.is_final
+            await self.reply.deliver(params, event)
         if not answered:
             logger.warning(f"Delegation to '{self._context.backend_name}' produced no answer")
             await params.result_callback({"error": "The backend finished without an answer."})
+
+    async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
+        """Report a function call the backend made, as the ``delegate`` call's child.
+
+        The call ran in the backend's pipeline; here it is only reported, as
+        an :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` the RTVI
+        observer turns into function-call events under the ``delegate`` call.
+
+        Args:
+            params: The ``delegate`` call the backend is working for.
+            call: The phase of the backend's call.
+        """
+        await params.llm.push_frame(
+            ExternalFunctionCallFrame(
+                phase=call.phase,
+                function_name=call.function_name,
+                tool_call_id=call.tool_call_id,
+                arguments=call.arguments,
+                result=call.result,
+                cancelled=call.cancelled,
+                parent_tool_call_id=params.tool_call_id,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
