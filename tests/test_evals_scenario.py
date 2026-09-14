@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from loguru import logger
+
 from pipecat.evals.scenario import (
     EvalExpectation,
     EvalFunctionCall,
@@ -493,24 +495,52 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(e.text_contains)
         self.assertIsNone(e.eval)
 
+    def _load_capturing_warnings(self, yaml_text: str) -> tuple[EvalScriptScenario, list[str]]:
+        """Parse ``yaml_text``, collecting the warnings the parser logs."""
+        warnings: list[str] = []
+        handler = logger.add(lambda msg: warnings.append(msg.record["message"]), level="WARNING")
+        try:
+            return EvalScriptScenario.load(_write(yaml_text)), warnings
+        finally:
+            logger.remove(handler)
+
     def test_eval_on_non_bot_event_warns(self):
-        """eval: on user-side events should produce a parser warning
-        (the user transcript is deterministic, so judging it adds cost without
-        signal). We can't easily assert on loguru output, but the parse
-        should succeed and the field should be preserved."""
-        s = EvalScriptScenario.load(
-            _write(
-                """
-                name: misused_eval
-                turns:
-                  - user: "hi"
-                    expect:
-                      - event: user_stopped_speaking
-                        eval: "is a greeting"
-                """
-            )
+        """eval: on user-side events produces a parser warning (the user
+        transcript is deterministic, so judging it adds cost without signal),
+        but the parse succeeds and the field is preserved."""
+        s, warnings = self._load_capturing_warnings(
+            """
+            name: misused_eval
+            turns:
+              - user: "hi"
+                expect:
+                  - event: user_stopped_speaking
+                    eval: "is a greeting"
+            """
         )
         self.assertEqual(s.turns[0].expect[0].eval, "is a greeting")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'eval:' on event 'user_stopped_speaking'", warnings[0])
+
+    def test_eval_on_function_call_is_accepted(self):
+        """eval: on a function call judges the matched calls, so it is not a misuse."""
+        for event in ("function_call", "function_call_stopped"):
+            s, warnings = self._load_capturing_warnings(
+                f"""
+                name: judged_call
+                turns:
+                  - user: "suggest a session"
+                    expect:
+                      - event: {event}
+                        calls: [{{name: submit_session_suggestion}}]
+                        eval: "the suggestion is about tracing"
+                """
+            )
+            exp = s.turns[0].expect[0]
+            self.assertEqual(exp.event, event)
+            self.assertEqual(exp.calls, [EvalFunctionCall(name="submit_session_suggestion")])
+            self.assertEqual(exp.eval, "the suggestion is about tracing")
+            self.assertEqual(warnings, [])
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""
