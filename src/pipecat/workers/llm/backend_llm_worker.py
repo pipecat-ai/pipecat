@@ -11,7 +11,8 @@ careful reasoning. What the frontend is does not matter to this contract: a
 speech-to-speech model delegating on its own, or a pipeline calling a tool.
 A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work: over the worker job API it
-streams back everything it produces, its final answer last.
+streams back everything it produces, its final answer last, along with the
+function calls it makes on the way, for the frontend to report.
 :func:`_delegate_to_backend` is the caller side of that contract, an async
 iterator over that stream.
 
@@ -23,14 +24,23 @@ that instead.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
 from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.frames.frames import ErrorFrame, LLMContextFrame, LLMMessagesAppendFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    LLMContextFrame,
+    LLMMessagesAppendFrame,
+)
 from pipecat.pipeline.job_context import JobEvent, JobParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import (
@@ -54,10 +64,11 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
 
-#: The ``type`` of a job update that carries a :class:`BackendOutput`. Other
-#: update types may share the stream; :func:`_delegate_to_backend` yields only
-#: outputs.
+#: The ``type`` of a job update that carries a :class:`BackendOutput`.
 OUTPUT_UPDATE_TYPE = "output"
+
+#: The ``type`` of a job update that carries a :class:`BackendToolCall`.
+TOOL_CALL_UPDATE_TYPE = "tool_call"
 
 #: Appended to the backend LLM's system instruction: its output is relayed to
 #: a listener by the frontend, whatever the app's prompt says the backend does.
@@ -121,6 +132,71 @@ class BackendOutput:
             if name in payload
         }
         return cls(text=str(payload.get("text") or ""), **flags)
+
+
+@dataclass
+class BackendToolCall:
+    """One phase of a function call the backend made while working, on its way to the frontend.
+
+    The call ran in the backend's own pipeline; the frontend reports it to
+    clients (as an ``ExternalFunctionCallFrame``) and does nothing else with it.
+
+    Parameters:
+        phase: ``started``, ``in_progress`` or ``stopped``.
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function, once known.
+        result: The result, once the call has stopped with one.
+        cancelled: Whether the call stopped by cancellation rather than with a
+            result.
+    """
+
+    phase: Literal["started", "in_progress", "stopped"]
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any] | None = None
+    result: Any = None
+    cancelled: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        """Render the call phase as a job update payload.
+
+        Returns:
+            The payload.
+        """
+        return {
+            "type": TOOL_CALL_UPDATE_TYPE,
+            "phase": self.phase,
+            "function_name": self.function_name,
+            "tool_call_id": self.tool_call_id,
+            "arguments": dict(self.arguments) if self.arguments is not None else None,
+            "result": self.result,
+            "cancelled": self.cancelled,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "BackendToolCall":
+        """Rebuild a call phase from a job update payload.
+
+        Args:
+            payload: The update payload.
+
+        Returns:
+            The call phase.
+        """
+        return cls(
+            phase=payload.get("phase") or "in_progress",
+            function_name=str(payload.get("function_name") or ""),
+            tool_call_id=str(payload.get("tool_call_id") or ""),
+            arguments=payload.get("arguments"),
+            result=payload.get("result"),
+            cancelled=bool(payload.get("cancelled", False)),
+        )
+
+
+#: What :func:`_delegate_to_backend` yields: the backend's outputs and the
+#: phases of the function calls it made on the way.
+BackendEvent = BackendOutput | BackendToolCall
 
 
 #: Adjusts a backend output — its text, or whether the user may hear it —
@@ -239,7 +315,8 @@ class BackendLLMWorker(LLMContextWorker):
       simply send it.
     - updates: a :class:`BackendOutput` payload for every piece of output —
       reasoning summaries, what the backend says before calling tools, and its
-      final answer.
+      final answer — and a :class:`BackendToolCall` payload for each phase of
+      each function call the backend makes, so the frontend can report them.
     - response: ``{"text": str}`` — the final answer, or ``""`` if the
       delegation ended without one. A backend LLM failure answers the job
       with ``JobStatus.ERROR``, so the frontend hears about it as soon as it
@@ -313,6 +390,12 @@ class BackendLLMWorker(LLMContextWorker):
             if isinstance(frame, LLMContextFrame) and self._run is not None:
                 self._run.runs_requested += 1
 
+        # The backend's function calls are relayed as they pass the assistant
+        # aggregator, which every phase of a call reaches.
+        @self.assistant_aggregator.event_handler("on_before_process_frame")
+        async def on_before_aggregator_frame(aggregator, frame: Frame):
+            await self._on_function_call_frame(frame)
+
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
             await self._on_assistant_turn_stopped(message)
@@ -381,6 +464,39 @@ class BackendLLMWorker(LLMContextWorker):
             run.final_text = sent.text if sent else ""
             run.finished.set()
 
+    async def _on_function_call_frame(self, frame: Frame):
+        """Relay a phase of one of the backend's own function calls as a job update."""
+        run = self._run
+        if run is None:
+            return
+        calls: list[BackendToolCall] = []
+        if isinstance(frame, FunctionCallsStartedFrame):
+            calls = [
+                BackendToolCall("started", call.function_name, call.tool_call_id)
+                for call in frame.function_calls
+            ]
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            calls = [
+                BackendToolCall(
+                    "in_progress",
+                    frame.function_name,
+                    frame.tool_call_id,
+                    arguments=frame.arguments,
+                )
+            ]
+        elif isinstance(frame, FunctionCallResultFrame):
+            calls = [
+                BackendToolCall(
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                )
+            ]
+        elif isinstance(frame, FunctionCallCancelFrame):
+            calls = [
+                BackendToolCall("stopped", frame.function_name, frame.tool_call_id, cancelled=True)
+            ]
+        for call in calls:
+            await self.send_job_update(run.job_id, call.to_payload())
+
     async def _on_pipeline_error(self, frame: ErrorFrame):
         """End the delegation in progress: the backend cannot answer it.
 
@@ -419,7 +535,7 @@ async def _delegate_to_backend(
     *,
     request: str,
     timeout_secs: float | None = None,
-) -> AsyncIterator[BackendOutput]:
+) -> AsyncIterator[BackendEvent]:
     """Put a request to a :class:`BackendLLMWorker` and yield what it produces.
 
     Args:
@@ -439,7 +555,8 @@ async def _delegate_to_backend(
 
     Yields:
         Each :class:`BackendOutput` as the backend produces it, the final
-        answer last with ``is_final`` set. A delegation that ends without an
+        answer last with ``is_final`` set, and each :class:`BackendToolCall`
+        phase as the backend's calls run. A delegation that ends without an
         answer yields no final output.
 
     Raises:
@@ -454,8 +571,10 @@ async def _delegate_to_backend(
         async for event in backend_job:
             if event.type != JobEvent.UPDATE or not event.data:
                 continue
-            if event.data.get("type", OUTPUT_UPDATE_TYPE) != OUTPUT_UPDATE_TYPE:
-                continue
-            output = BackendOutput.from_payload(event.data)
-            if output.text:
-                yield output
+            update_type = event.data.get("type", OUTPUT_UPDATE_TYPE)
+            if update_type == OUTPUT_UPDATE_TYPE:
+                output = BackendOutput.from_payload(event.data)
+                if output.text:
+                    yield output
+            elif update_type == TOOL_CALL_UPDATE_TYPE:
+                yield BackendToolCall.from_payload(event.data)

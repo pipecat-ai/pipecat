@@ -40,6 +40,7 @@ from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
     BACKEND_JOB_NAME,
     BackendOutput,
+    BackendToolCall,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -164,13 +165,17 @@ async def _run_backend(
     await runner.add_workers(requester, backend)
 
     updates: list[BackendOutput] = []
+    backend.tool_calls = []  # type: ignore[attr-defined]  # the BackendToolCall phases seen
 
     async def body():
         try:
-            async for output in _delegate_to_backend(
+            async for event in _delegate_to_backend(
                 requester, "backend", request=request, timeout_secs=10
             ):
-                updates.append(output)
+                if isinstance(event, BackendToolCall):
+                    backend.tool_calls.append(event)  # type: ignore[attr-defined]
+                else:
+                    updates.append(event)
         finally:
             await runner.cancel()
 
@@ -200,6 +205,14 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     )
 
     assert text == "It's 62 and raining in Seattle."
+    # The backend's own call is relayed phase by phase, for the frontend to report.
+    assert [(c.phase, c.function_name, c.tool_call_id) for c in backend.tool_calls] == [
+        ("started", "get_weather", "call_1"),
+        ("in_progress", "get_weather", "call_1"),
+        ("stopped", "get_weather", "call_1"),
+    ]
+    assert backend.tool_calls[1].arguments == {"location": "Seattle"}
+    assert backend.tool_calls[2].result == {"temp": 62, "conditions": "rain"}
     # Only the answer is prefers_spoken; what the backend says on the way is not.
     assert updates == [
         BackendOutput(text="Let me check.", is_final=False, prefers_spoken=False),
@@ -430,7 +443,7 @@ async def test_the_response_carries_the_transformed_answer():
 
 @pytest.mark.asyncio
 async def test_updates_of_another_type_are_not_outputs():
-    """The stream may carry other update types; only outputs are yielded.
+    """The stream may carry update types the iterator does not know; those are skipped.
 
     The backend here is a plain worker speaking the job contract, which is
     also what a backend registered by name may be.
@@ -439,7 +452,7 @@ async def test_updates_of_another_type_are_not_outputs():
     class _ContractBackend(BaseWorker):
         @job(name=BACKEND_JOB_NAME, sequential=True)
         async def run_delegation(self, message: BusJobRequestMessage):
-            await self.send_job_update(message.job_id, {"type": "tool_call", "name": "lookup"})
+            await self.send_job_update(message.job_id, {"type": "progress", "percent": 50})
             await self.send_job_update(
                 message.job_id, BackendOutput(text="Done.", is_final=True).to_payload()
             )
@@ -463,6 +476,12 @@ async def test_updates_of_another_type_are_not_outputs():
 
 def test_a_payload_names_its_type():
     assert BackendOutput(text="hello").to_payload()["type"] == "output"
+    assert BackendToolCall("started", "f", "c1").to_payload()["type"] == "tool_call"
+
+
+def test_a_tool_call_phase_survives_the_payload_round_trip():
+    call = BackendToolCall("stopped", "get_weather", "c1", arguments={"a": 1}, result={"t": 62})
+    assert BackendToolCall.from_payload(call.to_payload()) == call
 
 
 def test_a_payload_leaves_the_flags_it_omits_at_their_defaults():
