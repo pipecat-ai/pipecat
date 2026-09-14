@@ -33,6 +33,7 @@ from pipecat.evals.script import EvalFunctionCall
 from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.utils.deprecation import deprecated
 
 # The event the driver appends when the persona calls end_call.
 END_CALL_EVENT = "end_call"
@@ -221,6 +222,28 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         nothing is not a turn. Built as the events arrive.
         """
         return list(self._lines)
+
+    @deprecated(
+        "`EvalSimulationDriver.transcript` is deprecated since 1.11.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
+    def transcript(self) -> list[dict]:
+        """The conversation as the judge sees it: the lines, each tool call in place before the line it preceded.
+
+        .. deprecated:: 1.11.0
+            No replacement: the judge keeps the conversation it judges.
+            Will be removed in 2.0.0.
+        """
+        entries: list[dict] = []
+        placed = 0
+        for line in self._lines:
+            for call in line["evidence"][placed:]:
+                entries.append({"role": "tool", "content": call})
+            placed = len(line["evidence"])
+            entries.append({"role": line["role"], "content": line["content"]})
+        for call in self._evidence[placed:]:
+            entries.append({"role": "tool", "content": call})
+        return entries
 
     def conversation(self) -> list[dict]:
         """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""

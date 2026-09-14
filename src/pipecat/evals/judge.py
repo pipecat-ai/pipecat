@@ -33,8 +33,10 @@ Example::
 import hashlib
 import json
 import re
+import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -255,7 +257,12 @@ class EvalJudge:
         ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
         return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
 
-    async def evaluate_run(self, criteria: dict[str, str], success: str) -> "RunVerdicts":
+    async def evaluate_run(
+        self,
+        criteria: dict[str, str],
+        success: str,
+        transcript: Sequence[dict] | None = None,
+    ) -> "RunVerdicts":
         """Judge the whole conversation in one call: every bot turn on every criterion, and the goal.
 
         The conversation goes in the question, bot turns numbered and tool
@@ -265,15 +272,39 @@ class EvalJudge:
         Args:
             criteria: The per-turn criteria to decide, by name.
             success: The goal criterion, decided over the whole conversation.
+            transcript: A conversation to judge in place of the one the judge
+                kept: dicts with a ``role`` of ``user``, ``assistant`` or
+                ``tool`` and the ``content``. Also accepted first, before
+                ``criteria`` and ``success``.
+
+                .. deprecated:: 1.11.0
+                    Feed the judge with :meth:`add_user_message`,
+                    :meth:`add_assistant_message` and :meth:`add_tool_call`
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             The goal's verdict and, per criterion, a verdict per bot turn in
             order. A verdict of ``none`` is one the judge did not give: a turn
             it left out, a goal it did not answer, or a call that failed.
         """
+        if not isinstance(criteria, dict):
+            # The (transcript, criteria, success) order of the deprecated form.
+            transcript, criteria, success = (
+                cast("Sequence[dict]", criteria),
+                cast("dict[str, str]", success),
+                cast("str", transcript),
+            )
+        if transcript is not None:
+            warnings.warn(
+                "`transcript` parameter of `EvalJudge.evaluate_run` is deprecated since 1.11.0 "
+                "and will be removed in 2.0.0. Feed the judge with `add_user_message`, "
+                "`add_assistant_message` and `add_tool_call` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         lines: list[str] = []
         turn = 0
-        for entry in self._transcript:
+        for entry in self._transcript if transcript is None else transcript:
             if entry["role"] == "assistant":
                 if lines and lines[-1].startswith(f"Bot turn {turn}:"):
                     lines[-1] += f" {entry['content']}"

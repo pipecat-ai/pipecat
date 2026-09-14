@@ -91,6 +91,17 @@
       "location": "pipecat/evals/harness.py"
     },
     {
+      "subject": "EvalJudge.evaluate_run.transcript",
+      "module": "pipecat.evals.judge",
+      "kind": "parameter",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "add_user_message",
+      "message": "Feed the judge with :meth:`add_user_message`, :meth:`add_assistant_message` and :meth:`add_tool_call` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/judge.py"
+    },
+    {
       "subject": "EvalResult",
       "module": "pipecat.evals.results",
       "kind": "class",
@@ -386,6 +397,17 @@
       "replacement": "params",
       "message": "Use ``params`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSimulationDriver.transcript",
+      "module": "pipecat.evals.simulation_driver",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`EvalSimulationDriver.transcript` is deprecated since 1.11.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/evals/simulation_driver.py"
     },
     {
       "subject": "EvalSuite.run.default_timeout_ms",

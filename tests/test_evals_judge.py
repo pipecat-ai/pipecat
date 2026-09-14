@@ -258,6 +258,24 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
         roles = [m["role"] for m in svc.calls[0]["messages"]]
         self.assertEqual(roles, ["assistant", "user"])
 
+    async def test_a_transcript_passed_in_is_deprecated_and_judged_in_place_of_the_kept_one(self):
+        svc = _FakeLLMService(
+            ['{"goal": {"verdict": "yes", "reason": "ok"}, "turns": {"polite": ["yes"]}}'] * 2
+        )
+        judge = EvalJudge(svc)
+        judge.add_assistant_message("kept")
+        given = [{"role": "assistant", "content": "given"}]
+        for call in (
+            lambda: judge.evaluate_run(given, {"polite": "is polite"}, "done"),
+            lambda: judge.evaluate_run({"polite": "is polite"}, "done", transcript=given),
+        ):
+            with self.assertWarns(DeprecationWarning):
+                verdicts = await call()
+            self.assertTrue(verdicts.goal.passed)
+            ask = svc.calls[-1]["messages"][-1]["content"]
+            self.assertIn("Bot turn 1: given", ask)
+            self.assertNotIn("kept", ask)
+
 
 class TestJudgeVerdictDataclass(unittest.TestCase):
     def test_construction(self):

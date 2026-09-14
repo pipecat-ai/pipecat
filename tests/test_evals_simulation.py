@@ -767,14 +767,15 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(conversation())
         await driver.run()
         await task
-        self.assertEqual(
-            [e["content"] for e in judge.transcript if e["role"] == "tool"],
-            [
-                'check_availability({"time": "6:00 PM"})',
-                "end_conversation()",
-                "end_conversation was cancelled",
-            ],
-        )
+        calls = [
+            'check_availability({"time": "6:00 PM"})',
+            "end_conversation()",
+            "end_conversation was cancelled",
+        ]
+        self.assertEqual([e["content"] for e in judge.transcript if e["role"] == "tool"], calls)
+        with self.assertWarns(DeprecationWarning):
+            transcript = driver.transcript()
+        self.assertEqual([e["content"] for e in transcript if e["role"] == "tool"], calls)
 
     async def test_wall_clock_cap_ends_the_run(self):
         driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))
