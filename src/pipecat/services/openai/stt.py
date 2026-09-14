@@ -217,10 +217,15 @@ class OpenAIRealtimeSTTSettings(STTSettings):
         noise_reduction: Noise reduction mode. ``"near_field"`` for close
             microphones, ``"far_field"`` for distant microphones, or ``None``
             to disable.
+        delay: How long the model waits before emitting transcription text, trading
+            latency for accuracy. Only supported by ``"gpt-realtime-whisper"``.
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     noise_reduction: Literal["near_field", "far_field"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -350,6 +355,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             language=Language.EN,
             prompt=None,
             noise_reduction=None,
+            delay=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -620,6 +626,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         if self._settings.prompt:
             transcription["prompt"] = self._settings.prompt
+
+        if self._settings.delay:
+            transcription["delay"] = self._settings.delay
 
         input_audio: dict = {
             "format": {
