@@ -811,6 +811,12 @@ class TestReasoningParams:
         params = self._params(service)
         assert "reasoning" not in params
 
+    def test_gpt_6_astra_left_untouched(self):
+        """gpt-6-astra reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6-astra"))
+        params = self._params(service)
+        assert "reasoning" not in params
+
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
         service = _make_service(
