@@ -376,3 +376,68 @@ async def test_turn_complete_bundled_with_idle_supersedes_a_held_turn():
 
     assert len(closes) == 1, "the turn must be closed exactly once"
     assert _frame_types(service) == [TTSStoppedFrame, LLMFullResponseEndFrame]
+
+
+# ---------------------------------------------------------------------------
+# Tool behavior declarations
+# ---------------------------------------------------------------------------
+
+
+def _tagged_declarations(service, monkeypatch) -> list[dict]:
+    """Tag one sync and one async declaration, returning the declarations."""
+    monkeypatch.setattr(
+        service, "_function_is_async", lambda name: name == "async_tool", raising=True
+    )
+    tools = [{"function_declarations": [{"name": "sync_tool"}, {"name": "async_tool"}]}]
+    service._tag_tool_behaviors(tools)
+    return tools[0]["function_declarations"]
+
+
+@pytest.mark.parametrize(
+    "model, sync_behavior",
+    [
+        # BLOCKING is already the default outside the 3.8 Live family.
+        ("models/gemini-2.0-flash-live-001", None),
+        # The 3.8 Live family defaults to NON_BLOCKING, so blocking is declared.
+        ("models/gemini-3.8-live", "BLOCKING"),
+        # Live thinking models accept only NON_BLOCKING.
+        ("models/gemini-3.8-live-extended-thinking", None),
+    ],
+)
+def test_sync_tools_block_where_the_model_allows_it(model, sync_behavior, monkeypatch):
+    """Synchronous tools keep blocking semantics wherever the model can honor them."""
+    service = _make_service(model=model)
+
+    declarations = _tagged_declarations(service, monkeypatch)
+
+    assert declarations[0].get("behavior") == sync_behavior
+    assert declarations[1].get("behavior") == "NON_BLOCKING"
+
+
+def test_sync_tool_on_a_strictly_non_blocking_model_warns_once(monkeypatch):
+    """Synchronous tools can't block on live thinking models; say so once."""
+    service = _make_service(model="models/gemini-3.8-live-extended-thinking")
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+
+    try:
+        _tagged_declarations(service, monkeypatch)
+        _tagged_declarations(service, monkeypatch)
+    finally:
+        logger.remove(handler_id)
+
+    assert sink.getvalue().count("won't pause") == 1
+
+
+def test_no_warning_when_sync_tools_can_block(monkeypatch):
+    """On gemini-3.8-live the BLOCKING declaration restores sync semantics silently."""
+    service = _make_service(model="models/gemini-3.8-live")
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+
+    try:
+        _tagged_declarations(service, monkeypatch)
+    finally:
+        logger.remove(handler_id)
+
+    assert sink.getvalue() == ""
