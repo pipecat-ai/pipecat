@@ -21,14 +21,18 @@ from loguru import logger
 
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.google.gemini_live import llm as llm_module
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 # ---------------------------------------------------------------------------
@@ -441,3 +445,41 @@ def test_no_warning_when_sync_tools_can_block(monkeypatch):
         logger.remove(handler_id)
 
     assert sink.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
+# Context recording across an interruption
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_partial_assistant_message_survives_interruption():
+    """Text streamed before a barge-in reaches the context even though the
+    turn-closing frames are still held waiting for an idle status."""
+    # Capture the frames the service pushes while streaming a reply that is
+    # cut short: transcription chunks arrive, turn_complete is held because
+    # the status is IN_PROGRESS, then the user barges in.
+    service = _make_service()
+    await _setup_service(service)
+
+    for chunk in ("The answer ", "is 42."):
+        content = _FakeServerContent()
+        content.output_transcription = SimpleNamespace(text=chunk)
+        await service._handle_server_message(_FakeServerMessage(content))
+    await service._handle_server_message(
+        _FakeServerMessage(_FakeServerContent(turn_complete=True, interaction_status="IN_PROGRESS"))
+    )
+    await service._handle_interruption()
+    streamed = list(service.pushed_frames)
+
+    # Replay that exact sequence into an assistant aggregator, along with the
+    # InterruptionFrame the pipeline broadcasts at the barge-in.
+    context = LLMContext()
+    aggregator = LLMAssistantAggregator(context)
+    await run_test(aggregator, frames_to_send=[*streamed, InterruptionFrame()])
+
+    assistant_messages = [
+        m for m in context.get_messages() if isinstance(m, dict) and m.get("role") == "assistant"
+    ]
+    assert assistant_messages, "the partial reply must be recorded on interruption"
+    assert assistant_messages[-1]["content"] == "The answer is 42."
