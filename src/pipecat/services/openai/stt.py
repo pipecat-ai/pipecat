@@ -54,9 +54,14 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 @dataclass
 class OpenAISTTSettings(BaseWhisperSTTService.Settings):
-    """Settings for the OpenAI STT service."""
+    """Settings for the OpenAI STT service.
 
-    pass
+    Parameters:
+        keywords: Words or phrases that guide transcription of the input audio, such
+            as product names or acronyms. Supported by ``"gpt-transcribe"``.
+    """
+
+    keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -128,6 +133,7 @@ class OpenAISTTService(BaseWhisperSTTService):
             language=_language,
             prompt=None,
             temperature=None,
+            keywords=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -194,6 +200,9 @@ class OpenAISTTService(BaseWhisperSTTService):
 
         if self._settings.temperature is not None:
             kwargs["temperature"] = self._settings.temperature
+
+        if self._settings.keywords:
+            kwargs["keywords"] = self._settings.keywords
 
         return await self._client.audio.transcriptions.create(**kwargs)
 
