@@ -196,10 +196,14 @@ class WhisperSTTSettings(STTSettings):
         no_speech_prob: Probability threshold for filtering non-speech segments.
         hotwords: Words or phrases to bias the transcription towards, as a single
             space-separated string (e.g. product names or jargon).
+        initial_prompt: Text prepended to the decoder prompt as preceding context,
+            steering style, punctuation and spelling (e.g. a sample sentence in the
+            wording the transcript should use).
     """
 
     no_speech_prob: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     hotwords: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    initial_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -278,6 +282,7 @@ class WhisperSTTService(SegmentedSTTService):
             language=Language.EN,
             no_speech_prob=0.4,
             hotwords=None,
+            initial_prompt=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -429,6 +434,7 @@ class WhisperSTTService(SegmentedSTTService):
             audio_float,
             language=language,
             hotwords=assert_given(self._settings.hotwords),
+            initial_prompt=assert_given(self._settings.initial_prompt),
         )
         text: str = ""
         no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
