@@ -1,0 +1,1 @@
+- `CartesiaSTTService` now sends `keyterm` for Cartesia's `ink-preview` models, which support keyterms alongside `ink-2`.
