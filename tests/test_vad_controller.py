@@ -103,7 +103,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
     async def test_speech_activity_event(self):
         """Test that on_speech_activity event is triggered while speaking."""
         analyzer = MockVADAnalyzer()
-        controller = VADController(analyzer)
+        controller = VADController(analyzer, speech_activity_period=0.0)
 
         activity_count = 0
 
@@ -121,6 +121,29 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(audio_frame)
         await controller.process_frame(audio_frame)
         self.assertEqual(activity_count, 2)
+        await controller.cleanup()
+
+    async def test_speech_activity_event_is_throttled(self):
+        """Test that speech_activity_period limits how often the event fires."""
+        analyzer = MockVADAnalyzer()
+        controller = VADController(analyzer, speech_activity_period=60.0)
+
+        activity_count = 0
+
+        @controller.event_handler("on_speech_activity")
+        async def on_speech_activity(_controller):
+            nonlocal activity_count
+            activity_count += 1
+
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
+
+        # These all arrive well within one period, so only the first fires.
+        analyzer.set_next_state(VADState.SPEAKING)
+        for _ in range(10):
+            await controller.process_frame(audio_frame)
+        self.assertEqual(activity_count, 1)
         await controller.cleanup()
 
     async def test_push_frame_event(self):
