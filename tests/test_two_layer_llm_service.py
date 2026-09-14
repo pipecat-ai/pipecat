@@ -182,7 +182,7 @@ def test_the_tool_description_says_what_the_backend_is_for():
 def test_the_frontend_guidance_comes_from_both_strategies():
     connector = _bound(BackendConnector(reply=AdvisorySpeechFlagBackendReplyStrategy()))
     instruction = connector.frontend_instruction or ""
-    assert "Hand off to the backend" in instruction
+    assert "call the delegate tool" in instruction
     assert SILENCE_MARKER in instruction
     assert connector.skip_marker == SILENCE_MARKER
 
@@ -353,7 +353,7 @@ def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     TwoLayerLLMService(frontend=frontend, backend="backend")
     composed = frontend._settings.system_instruction
     assert composed.startswith("You are a voice assistant.")
-    assert "Hand off to the backend" in composed
+    assert "call the delegate tool" in composed
 
 
 @pytest.mark.asyncio
