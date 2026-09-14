@@ -1008,11 +1008,13 @@ class FrameProcessor(BaseObject):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
-        await self._call_event_handler("on_before_push_frame", frame)
+        if self._event_handlers["on_before_push_frame"].handlers:
+            await self._call_event_handler("on_before_push_frame", frame)
 
         await self.__internal_push_frame(frame, direction)
 
-        await self._call_event_handler("on_after_push_frame", frame)
+        if self._event_handlers["on_after_push_frame"].handlers:
+            await self._call_event_handler("on_after_push_frame", frame)
 
     async def broadcast_interruption(self):
         """Broadcast an `InterruptionFrame` both upstream and downstream."""
@@ -1166,9 +1168,10 @@ class FrameProcessor(BaseObject):
         """
         observer = self._setup.observer if self._setup else None
         try:
-            timestamp = self.get_clock().get_time() if self._setup else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
+                if observer:
+                    timestamp = self.get_clock().get_time()
+                logger.trace("Pushing {} downstream from {} to {}", frame, self, self._next)
 
                 if observer:
                     data = FramePushed(
@@ -1181,7 +1184,10 @@ class FrameProcessor(BaseObject):
                     await observer.on_push_frame(data)
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                if observer:
+                    timestamp = self.get_clock().get_time()
+                logger.trace("Pushing {} upstream from {} to {}", frame, self, self._prev)
+
                 if observer:
                     data = FramePushed(
                         source=self,
@@ -1266,7 +1272,8 @@ class FrameProcessor(BaseObject):
         self, frame: Frame, direction: FrameDirection, callback: FrameCallback | None
     ):
         try:
-            await self._call_event_handler("on_before_process_frame", frame)
+            if self._event_handlers["on_before_process_frame"].handlers:
+                await self._call_event_handler("on_before_process_frame", frame)
 
             # Process the frame.
             await self.process_frame(frame, direction)
@@ -1274,7 +1281,8 @@ class FrameProcessor(BaseObject):
             if callback:
                 await callback(self, frame, direction)
 
-            await self._call_event_handler("on_after_process_frame", frame)
+            if self._event_handlers["on_after_process_frame"].handlers:
+                await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
             # The frame callback runs inside this block, so the cause of an
             # unexpected failure can't be attributed.
