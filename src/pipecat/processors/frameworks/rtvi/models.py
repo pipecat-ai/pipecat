@@ -259,9 +259,19 @@ class LLMFunctionCallStartMessageData(BaseModel):
 
     Contains the function name being called. Fields may be omitted based on
     the configured function_call_report_level for security.
+
+    Parameters:
+        function_name: Name of the function called.
+        parent_tool_call_id: The ``tool_call_id`` of the call this one ran as
+            part of. A tool's work can involve function calls of its own,
+            made by another model on its behalf, e.g. a backend that a
+            ``delegate`` tool hands work to makes calls while the ``delegate``
+            call is in progress; each of them names it as its parent. Absent
+            for a call the bot's LLM made itself.
     """
 
     function_name: str | None = None
+    parent_tool_call_id: str | None = None
 
 
 class LLMFunctionCallStartMessage(BaseModel):
@@ -292,11 +302,23 @@ class LLMFunctionCallInProgressMessageData(BaseModel):
 
     Contains function call details including name, ID, and arguments.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        function_name: Name of the function called.
+        arguments: Arguments passed to the function.
+        parent_tool_call_id: The ``tool_call_id`` of the call this one ran as
+            part of. A tool's work can involve function calls of its own,
+            made by another model on its behalf, e.g. a backend that a
+            ``delegate`` tool hands work to makes calls while the ``delegate``
+            call is in progress; each of them names it as its parent. Absent
+            for a call the bot's LLM made itself.
     """
 
     tool_call_id: str
     function_name: str | None = None
     arguments: Mapping[str, Any] | None = None
+    parent_tool_call_id: str | None = None
 
 
 class LLMFunctionCallInProgressMessage(BaseModel):
@@ -316,12 +338,25 @@ class LLMFunctionCallStoppedMessageData(BaseModel):
     Contains details about the function call that stopped, including
     whether it was cancelled or completed with a result.
     Fields may be omitted based on the configured function_call_report_level for security.
+
+    Parameters:
+        tool_call_id: Unique identifier of the call.
+        cancelled: Whether the call was cancelled rather than completed.
+        function_name: Name of the function called.
+        result: The result, when the call completed with one.
+        parent_tool_call_id: The ``tool_call_id`` of the call this one ran as
+            part of. A tool's work can involve function calls of its own,
+            made by another model on its behalf, e.g. a backend that a
+            ``delegate`` tool hands work to makes calls while the ``delegate``
+            call is in progress; each of them names it as its parent. Absent
+            for a call the bot's LLM made itself.
     """
 
     tool_call_id: str
     cancelled: bool
     function_name: str | None = None
     result: Any | None = None
+    parent_tool_call_id: str | None = None
 
 
 class LLMFunctionCallStoppedMessage(BaseModel):

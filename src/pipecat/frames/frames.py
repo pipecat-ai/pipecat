@@ -1469,6 +1469,45 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
+class ExternalFunctionCallFrame(SystemFrame):
+    """A function call that ran outside this pipeline, for observers to report.
+
+    Nothing in the pipeline acts on it. The call ran elsewhere, e.g. in a
+    backend worker's pipeline on behalf of a tool here, and belongs to that
+    pipeline's conversation, not this one. Observers report it as they
+    report this pipeline's own calls, under the call it ran as part of when
+    it has one.
+
+    Parameters:
+        phase: Where the call is: ``started``, ``in_progress`` or ``stopped``,
+            matching the pipeline's own ``FunctionCallsStartedFrame``,
+            ``FunctionCallInProgressFrame`` and ``FunctionCallResultFrame`` /
+            ``FunctionCallCancelFrame``.
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function, once known.
+        result: The result, once the call has stopped with one.
+        cancelled: Whether the call stopped by cancellation rather than with a
+            result.
+        parent_tool_call_id: The ``tool_call_id`` of the function call this
+            one ran as part of. A tool's work can involve function calls of
+            its own, made by another model on its behalf, e.g. a backend that
+            a ``delegate`` tool hands work to makes calls while the
+            ``delegate`` call is in progress; each of them names it as its
+            parent. ``None`` for a call that ran as part of nothing this
+            pipeline knows as a call.
+    """
+
+    phase: Literal["started", "in_progress", "stopped"]
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any] | None = None
+    result: Any = None
+    cancelled: bool = False
+    parent_tool_call_id: str | None = None
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
