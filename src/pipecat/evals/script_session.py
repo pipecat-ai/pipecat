@@ -37,6 +37,7 @@ from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.services import stt_service_from_config, tts_service_from_config
 from pipecat.evals.session import EvalSession, EvalSessionParams, _params_with_deprecated_knobs
+from pipecat.evals.timing import EvalTimingObserver
 from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
 
@@ -91,6 +92,9 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
+        # When each turn's reply happened: measured on the client's pipeline,
+        # told by the driver when a turn's input went out.
+        self._timing = EvalTimingObserver()
         # The connection to the bot: the eval pipeline and the user's sends,
         # asking the bot for what the scenario's assertions need.
         self._client = EvalClient(
@@ -110,6 +114,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             trace=self._trace,
             user_tts=user_tts,
             bot_stt=bot_stt,
+            observers=[self._timing],
         )
         # What the user says next and how the outcome is scored: a scenario is
         # played by the eval driver.
@@ -121,6 +126,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             judge=judge,
             trace=self._trace,
             progress=self._progress,
+            timing=self._timing,
         )
         if on_progress is not None:
             self._add_legacy_progress_callback(on_progress)

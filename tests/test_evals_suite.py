@@ -337,6 +337,76 @@ class TestSimulationRecords(unittest.TestCase):
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
 
+    def test_a_scripted_turns_timing_round_trips_and_lands_in_results_jsonl(self):
+        import dataclasses
+
+        from pipecat.evals.results import (
+            EvalScriptResult,
+            EvalScriptTurnResult,
+            EvalTurnTiming,
+        )
+        from pipecat.evals.suite import _result_from_dict
+
+        timing = EvalTurnTiming(
+            input_duration_ms=1200,
+            llm_started_ms=300,
+            first_token_ms=500,
+            llm_response_ms=900,
+            bot_started_speaking_ms=800,
+            bot_speech_onset_ms=950,
+            bot_metrics=[
+                {"processor": "LLM#0", "ttfb_ms": 412, "processing_ms": None, "tokens": None}
+            ],
+        )
+        result = EvalScriptResult(
+            scenario_name="greet",
+            passed=True,
+            turns=[
+                EvalScriptTurnResult(
+                    turn_index=0, status="passed", duration_ms=1500, timing=timing
+                ),
+                EvalScriptTurnResult(turn_index=1),
+            ],
+        )
+        # The worker writes the result as JSON; the suite rebuilds it, timing included.
+        rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+        self.assertEqual(rebuilt.turns[0].timing.voice_to_voice_ms, 950)
+        self.assertIsNone(rebuilt.turns[1].timing)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="bot.py",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                duration_ms=2000,
+                result=result,
+            )
+            _append_result(base / "results.jsonl", run, "bot.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+        self.assertTrue(record["passed"])
+        self.assertEqual(
+            record["turns"][0]["timing"],
+            {
+                "input_duration_ms": 1200,
+                "llm_started_ms": 300,
+                "first_token_ms": 500,
+                "llm_response_ms": 900,
+                "function_call_ms": None,
+                "bot_started_speaking_ms": 800,
+                "bot_speech_onset_ms": 950,
+                "bot_stopped_speaking_ms": None,
+                "bot_metrics": [
+                    {"processor": "LLM#0", "ttfb_ms": 412, "processing_ms": None, "tokens": None}
+                ],
+                "voice_to_voice_ms": 950,
+                "speech_padding_ms": 150,
+            },
+        )
+        self.assertIsNone(record["turns"][1]["timing"])
+
     def test_results_jsonl_record_for_a_simulation_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

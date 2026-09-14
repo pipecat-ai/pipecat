@@ -15,10 +15,12 @@ Both speak RTVI. The eval adds messages of its own on top: ``eval-configure``,
 """
 
 import base64
+import contextlib
 import json
 from typing import Any
 
 from loguru import logger
+from pydantic import ValidationError
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
@@ -27,9 +29,17 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
+    MetricsFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+)
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    LLMUsageMetricsData,
+    MetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
@@ -265,6 +275,32 @@ class RTVIEvalSerializer(EvalSerializer):
     """
 
 
+def _metrics_frame(data: dict) -> MetricsFrame | None:
+    """The bot's ``metrics`` message as a ``MetricsFrame``, or ``None`` when it carries nothing usable.
+
+    The RTVI observer sends each metric type as a list of dumped models under
+    its own key; the ones a turn's timing keeps are rebuilt here. Token usage
+    comes without its processor's name, which stays empty.
+    """
+    parsed: list[MetricsData] = []
+    for item in data.get("ttfb") or []:
+        with contextlib.suppress(ValidationError, TypeError):
+            parsed.append(TTFBMetricsData.model_validate(item))
+    for item in data.get("processing") or []:
+        with contextlib.suppress(ValidationError, TypeError):
+            parsed.append(ProcessingMetricsData.model_validate(item))
+    for item in data.get("tokens") or []:
+        with contextlib.suppress(ValidationError, TypeError):
+            parsed.append(
+                LLMUsageMetricsData(
+                    processor=item.get("processor", ""),
+                    model=item.get("model"),
+                    value=LLMTokenUsage.model_validate(item),
+                )
+            )
+    return MetricsFrame(data=parsed) if parsed else None
+
+
 class EvalClientSerializer(RTVIClientSerializer):
     """The harness's serializer: RTVI client messages, plus the eval's own.
 
@@ -272,7 +308,8 @@ class EvalClientSerializer(RTVIClientSerializer):
     can transcribe what the bot actually said. The bot's reports about the
     harness (its transcription, VAD, and speaking messages) stay raw messages
     rather than becoming frames, so they cannot be mistaken for what the
-    harness computes from the bot's audio.
+    harness computes from the bot's audio. The bot's ``metrics`` become a
+    ``MetricsFrame``, as they were in the bot's own pipeline.
     """
 
     def __init__(self, **kwargs):
@@ -318,6 +355,9 @@ class EvalClientSerializer(RTVIClientSerializer):
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.
                 return InputTransportMessageFrame(message=message)
+            if msg_type == "metrics":
+                # The base serializer has no frame for these; the turn's timing reads them.
+                return _metrics_frame(message.get("data") or {})
 
         return await super().deserialize(data)
 

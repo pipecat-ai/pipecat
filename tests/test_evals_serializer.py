@@ -24,9 +24,16 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
+    MetricsFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
+)
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
 )
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
@@ -227,6 +234,39 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
         self.assertIsNone(await self.serializer.deserialize("not json"))
+
+    async def test_metrics_become_a_metrics_frame(self):
+        # The bot's own measurements come back as the frame its pipeline made
+        # them from, so the timing observer reads them like any MetricsFrame;
+        # token usage carries no processor name on the wire.
+        frame = await self.serializer.deserialize(
+            self._server(
+                "metrics",
+                {
+                    "ttfb": [{"processor": "OpenAILLMService#0", "model": "gpt", "value": 0.4}],
+                    "processing": [{"processor": "OpenAILLMService#0", "value": 1.2}],
+                    "tokens": [{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}],
+                    "characters": [{"processor": "CartesiaTTSService#0", "value": 42}],
+                },
+            )
+        )
+        self.assertIsInstance(frame, MetricsFrame)
+        self.assertEqual(
+            frame.data,
+            [
+                TTFBMetricsData(processor="OpenAILLMService#0", model="gpt", value=0.4),
+                ProcessingMetricsData(processor="OpenAILLMService#0", value=1.2),
+                LLMUsageMetricsData(
+                    processor="",
+                    value=LLMTokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                ),
+            ],
+        )
+
+    async def test_metrics_with_nothing_usable_are_dropped(self):
+        malformed = {"ttfb": [{"processor": "x"}], "characters": [{"value": 1}]}
+        self.assertIsNone(await self.serializer.deserialize(self._server("metrics", malformed)))
+        self.assertIsNone(await self.serializer.deserialize(self._server("metrics", {})))
 
     async def test_base_no_longer_maps_user_transcription_to_transcription(self):
         # Sanity: only the eval subclass diverts user-transcription; the generic

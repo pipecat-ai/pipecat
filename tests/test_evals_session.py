@@ -59,6 +59,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    MetricsFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
@@ -68,6 +69,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -278,9 +280,15 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_unmapped_message_ignored(self):
         msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": {}}
+            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": {}}
         )
         self.assertIsNone(_stream().frame_to_event(msg))
+
+    def test_the_bots_metrics_make_no_event(self):
+        # The serializer turns the bot's metrics into a MetricsFrame; the timing
+        # observer reads it on its way in, and the sink stops it without an event.
+        frame = MetricsFrame(data=[TTFBMetricsData(processor="OpenAILLMService#0", value=0.4)])
+        self.assertIsNone(_stream().frame_to_event(frame))
 
 
 class _FakeJudge:
@@ -1696,6 +1704,62 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         got = b"".join(base64.b64decode(m["data"]["base64Audio"]) for m in audio_msgs)
         self.assertIn(tone.tobytes(), got)
         self.assertTrue(all(m["data"]["sampleRate"] == sr for m in audio_msgs))
+        # A spoken turn's timing is anchored where its audio finished going out:
+        # the file is half a second (the output pads its last chunk), and the
+        # fake bot answers on the first silent frame after it.
+        timing = result.turns[0].timing
+        self.assertIsNotNone(timing)
+        self.assertGreaterEqual(timing.input_duration_ms, 500)
+        self.assertLess(timing.input_duration_ms, 600)
+        self.assertIsNotNone(timing.llm_started_ms)
+        self.assertGreaterEqual(timing.llm_started_ms, 0)
+        self.assertLess(timing.llm_started_ms, 1000)
+
+    async def test_turns_carry_their_timing_and_the_bots_metrics(self):
+        self.server.on_text(
+            "hi",
+            _rtvi("bot-llm-started"),
+            _rtvi("metrics", {"ttfb": [{"processor": "OpenAILLMService#0", "value": 0.2}]}),
+            _rtvi("bot-llm-text", {"text": "hello"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScriptScenario(
+            name="timing",
+            turns=[
+                EvalScriptTurn(
+                    user="hi",
+                    expect=[EvalExpectation(event="llm_response", within_ms=2000)],
+                ),
+                # An observing turn is timed too, from where it began.
+                EvalScriptTurn(user=None, expect=[]),
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+        timing = result.turns[0].timing
+        self.assertIsNotNone(timing)
+        self.assertEqual(timing.input_duration_ms, 0)
+        self.assertIsNotNone(timing.llm_started_ms)
+        self.assertLessEqual(timing.llm_started_ms, timing.first_token_ms)
+        self.assertLessEqual(timing.first_token_ms, timing.llm_response_ms)
+        self.assertLess(timing.llm_response_ms, 2000)
+        self.assertIsNone(timing.bot_started_speaking_ms)
+        self.assertIsNone(timing.voice_to_voice_ms)
+        self.assertEqual(
+            timing.bot_metrics,
+            [
+                {
+                    "processor": "OpenAILLMService#0",
+                    "ttfb_ms": 200,
+                    "processing_ms": None,
+                    "tokens": None,
+                }
+            ],
+        )
+        self.assertIsNotNone(result.turns[1].timing)
+        self.assertIsNot(result.turns[1].timing, timing)
+        self.assertTrue(any("timing: ttfb" in line for line in result.debug_log))
 
     async def test_context_sends_eval_context_message(self):
         self.server.on_text("hi", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
@@ -1783,8 +1847,16 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(source is session for source, _ in seen))
         self.assertEqual(
             [(p.event_name, p.status) for _, p in seen],
-            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+            [
+                ("hi", "turn"),
+                ("llm_started", "matched"),
+                ("llm_response", "matched"),
+                ("", "timing"),
+            ],
         )
+        # The turn's latency summary is the harness-measured time to the first
+        # token; a text turn has no voice-to-voice.
+        self.assertRegex(seen[-1][1].detail, r"^ttfb \d+ms$")
 
     async def test_records_are_delivered_before_run_returns(self):
         """Handlers dispatch as tasks, so run() waits them out before it returns."""
@@ -1798,7 +1870,7 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
 
         await session.run()
 
-        self.assertEqual(finished, ["hi", "llm_started", "llm_response"])
+        self.assertEqual(finished, ["hi", "llm_started", "llm_response", ""])
 
     async def test_callback_is_deprecated_and_still_called(self):
         seen = []
@@ -1815,7 +1887,12 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
         # The callback takes only the record, not the session an event handler gets.
         self.assertEqual(
             [(p.event_name, p.status) for p in seen],
-            [("hi", "turn"), ("llm_started", "matched"), ("llm_response", "matched")],
+            [
+                ("hi", "turn"),
+                ("llm_started", "matched"),
+                ("llm_response", "matched"),
+                ("", "timing"),
+            ],
         )
 
 

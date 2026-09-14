@@ -163,6 +163,10 @@ def _print_progress(session: EvalSession, p: EvalProgress) -> None:
     elif p.status == "turn":
         label = f'"{p.event_name}"' if p.event_name else "(observe)"
         print(f"      {_dim(f'turn {p.turn_index}')} → {label}")
+    elif p.status == "timing":
+        # The turn's latency, under its expectations: harness-measured time to
+        # the first LLM token and, for a spoken turn, voice-to-voice.
+        print(f"        {_dim(p.detail)}")
     else:
         badge = _green("✓") if p.status == "matched" else _red("✗")
         line = f"        {badge} {p.event_name}"

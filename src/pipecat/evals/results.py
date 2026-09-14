@@ -73,6 +73,77 @@ class EvalAssertionFailure:
 
 
 @dataclass
+class EvalTurnTiming:
+    """When the bot's reply to one turn happened, measured by the harness.
+
+    Every measure is milliseconds from the turn's *input anchor*: for a text
+    turn the moment the ``send-text`` message was sent; for a spoken turn
+    (synthesized or an ``audio:`` recording) the moment the last chunk of the
+    utterance went out to the bot, i.e. when the user stopped speaking. The
+    anchor is the end of speech when ``input_duration_ms`` is above zero and
+    the send otherwise. A turn that sends nothing is anchored where the
+    harness began observing it. A measure is ``None`` when its event did not
+    occur after the anchor.
+
+    This is not the clock an expectation's ``within_ms`` runs on: that budget
+    is anchored at the send for every turn, spoken or not (see
+    :mod:`pipecat.evals.script`).
+
+    Parameters:
+        input_duration_ms: Length of the user audio played for the turn; 0
+            for a text or DTMF turn.
+        llm_started_ms: The bot's LLM began a completion (``llm_started``).
+        first_token_ms: The first chunk of LLM text arrived.
+        llm_response_ms: The LLM response ended (``llm_response``).
+        function_call_ms: The turn's first function call (``function_call``).
+        bot_started_speaking_ms: The bot reported it started sending speech
+            (``bot_started_speaking``).
+        bot_speech_onset_ms: The harness's own VAD heard speech in the bot's
+            audio. Audio mode only; includes the VAD's start window.
+        bot_stopped_speaking_ms: The bot reported it stopped speaking
+            (``bot_stopped_speaking``); only counted after it started.
+        bot_metrics: The bot's own ``metrics`` reports that arrived during the
+            turn, in order, each a dict of ``processor``, ``ttfb_ms``,
+            ``processing_ms`` and ``tokens``, ``None`` for the parts a report
+            did not carry. The bot's token usage is reported without a
+            processor name.
+    """
+
+    input_duration_ms: int = 0
+    llm_started_ms: int | None = None
+    first_token_ms: int | None = None
+    llm_response_ms: int | None = None
+    function_call_ms: int | None = None
+    bot_started_speaking_ms: int | None = None
+    bot_speech_onset_ms: int | None = None
+    bot_stopped_speaking_ms: int | None = None
+    bot_metrics: list[dict] = field(default_factory=list)
+
+    @property
+    def voice_to_voice_ms(self) -> int | None:
+        """From the end of the user's speech to the bot's audible speech.
+
+        ``bot_speech_onset_ms`` when the turn was spoken (the anchor is then
+        the end of the utterance); ``None`` for a text turn, whose anchor is
+        the send, or when the bot's speech was not heard.
+        """
+        if not self.input_duration_ms:
+            return None
+        return self.bot_speech_onset_ms
+
+    @property
+    def speech_padding_ms(self) -> int | None:
+        """The silence the bot sent before audible speech.
+
+        The gap between the bot's own ``bot_started_speaking`` and the
+        harness hearing its speech; ``None`` unless both were seen.
+        """
+        if self.bot_speech_onset_ms is None or self.bot_started_speaking_ms is None:
+            return None
+        return self.bot_speech_onset_ms - self.bot_started_speaking_ms
+
+
+@dataclass
 class EvalScriptTurnResult:
     """Outcome of one turn within a scenario run.
 
@@ -86,14 +157,18 @@ class EvalScriptTurnResult:
             :attr:`~pipecat.evals.script.EvalScriptScenario.stop_on_failure`.
         failures: The turn's failed assertions, in order; empty unless ``status``
             is ``failed``.
-        duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the
-            turn was not run.
+        duration_ms: Wall-clock time the turn took, in milliseconds, judge
+            latency included; 0 when the turn was not run.
+        timing: When the bot's reply happened, relative to the turn's input
+            (see :class:`EvalTurnTiming`); ``None`` when the turn was not
+            driven to a send.
     """
 
     turn_index: int
     status: str = "not_run"
     failures: list[EvalAssertionFailure] = field(default_factory=list)
     duration_ms: int = 0
+    timing: EvalTurnTiming | None = None
 
 
 @deprecated(
@@ -289,8 +364,11 @@ class EvalScriptTurnProgress:
         expectation_index: Index of the expectation, or -1 for turn-level records
             (the turn header, or a ``send_after`` that never fired).
         event_name: The expectation's event (or the user text for a turn header).
-        status: ``turn`` (header), ``matched``, ``failed``, or ``timeout``.
-        detail: Optional extra text (failure reason, user utterance, ...).
+        status: ``turn`` (header), ``matched``, ``failed``, ``timeout``, or
+            ``timing`` (the turn's latency summary, once its expectations
+            resolved; ``expectation_index`` is -1 and ``event_name`` empty).
+        detail: Optional extra text (failure reason, user utterance, the
+            timing summary, ...).
     """
 
     turn_index: int

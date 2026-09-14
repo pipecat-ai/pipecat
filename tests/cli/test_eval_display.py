@@ -28,6 +28,7 @@ from pipecat.cli.commands.eval import (
 )
 from pipecat.evals.results import (
     EvalScriptResult,
+    EvalScriptTurnProgress,
     EvalScriptTurnResult,
     EvalSimulationProgress,
     EvalSimulationResult,
@@ -148,6 +149,25 @@ def _simulation_run(
         status="done",
         result=result,
     )
+
+
+class TestScriptedProgress(unittest.TestCase):
+    def test_a_turns_timing_is_one_dim_line_under_its_expectations(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_progress(None, EvalScriptTurnProgress(0, -1, "hi", "turn"))  # type: ignore[arg-type]
+            _print_progress(None, EvalScriptTurnProgress(0, 0, "response", "matched", "Hello!"))  # type: ignore[arg-type]
+            _print_progress(
+                None, EvalScriptTurnProgress(0, -1, "", "timing", "ttfb 412ms  v2v 890ms")
+            )  # type: ignore[arg-type]
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            [
+                '      turn 0 → "hi"',
+                '        ✓ response — "Hello!"',
+                "        ttfb 412ms  v2v 890ms",
+            ],
+        )
 
 
 class TestSimulationProgress(unittest.TestCase):
