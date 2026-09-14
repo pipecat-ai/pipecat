@@ -291,11 +291,19 @@ class _FakeConversationJudge:
         self.criteria: list[str] = []
         self.run_criteria: dict[str, str] = {}
 
-    async def evaluate_run(self, transcript, criteria: dict[str, str], success: str):
-        self.transcript = list(transcript)
+    def add_user_message(self, text):
+        self.transcript.append({"role": "user", "content": text})
+
+    def add_assistant_message(self, text):
+        self.transcript.append({"role": "assistant", "content": text})
+
+    def add_tool_call(self, text):
+        self.transcript.append({"role": "tool", "content": text})
+
+    async def evaluate_run(self, criteria: dict[str, str], success: str):
         self.criteria.append(success)
         self.run_criteria = dict(criteria)
-        turns = sum(1 for e in transcript if e["role"] == "assistant")
+        turns = sum(1 for e in self.transcript if e["role"] == "assistant")
         goal = JudgeVerdict(
             verdict=self.verdicts.pop(0), reason=f"because {success}", raw_response=""
         )

@@ -222,6 +222,43 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(v.passed)
 
 
+class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
+    async def test_the_run_is_judged_over_the_conversation_the_judge_kept(self):
+        """Reply segments merge into one numbered bot turn; tool calls sit inline."""
+        svc = _FakeLLMService(
+            [
+                '{"goal": {"verdict": "yes", "reason": "booked"}, "turns": {"polite": ["yes", "yes"]}}'
+            ]
+        )
+        judge = EvalJudge(svc)
+        judge.add_user_message("Book a table at six.")
+        judge.add_tool_call('book({"time": "6pm"})')
+        judge.add_assistant_message("Let me check.")
+        judge.add_assistant_message("Done, six o'clock.")
+        judge.add_user_message("Thanks.")
+        judge.add_assistant_message("You're welcome.")
+
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+
+        ask = svc.calls[0]["messages"][-1]["content"]
+        self.assertIn("User: Book a table at six.", ask)
+        self.assertIn('[tool call] book({"time": "6pm"})', ask)
+        self.assertIn("Bot turn 1: Let me check. Done, six o'clock.", ask)
+        self.assertIn("Bot turn 2: You're welcome.", ask)
+        self.assertIn("there are 2 bot turns", ask)
+        self.assertTrue(verdicts.goal.passed)
+        self.assertEqual([v.verdict for v in verdicts.turns["polite"]], ["yes", "yes"])
+
+    async def test_a_reply_is_judged_on_the_spoken_conversation_only(self):
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
+        judge = EvalJudge(svc)
+        judge.add_tool_call("lookup()")
+        judge.add_assistant_message("It's 72 and sunny.")
+        await judge.evaluate("describes the weather")
+        roles = [m["role"] for m in svc.calls[0]["messages"]]
+        self.assertEqual(roles, ["assistant", "user"])
+
+
 class TestJudgeVerdictDataclass(unittest.TestCase):
     def test_construction(self):
         v = JudgeVerdict(verdict="yes", reason="ok", raw_response="raw")

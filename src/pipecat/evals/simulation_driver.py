@@ -222,19 +222,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         """
         return list(self._lines)
 
-    def transcript(self) -> list[dict]:
-        """The conversation for the judge: the lines, each tool call in place before the line it preceded."""
-        entries: list[dict] = []
-        placed = 0
-        for line in self._lines:
-            for call in line["evidence"][placed:]:
-                entries.append({"role": "tool", "content": call})
-            placed = len(line["evidence"])
-            entries.append({"role": line["role"], "content": line["content"]})
-        for call in self._evidence[placed:]:
-            entries.append({"role": "tool", "content": call})
-        return entries
-
     def conversation(self) -> list[dict]:
         """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
         return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
@@ -291,7 +278,10 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 if text:
                     self._add_line("user", text)
             elif kind in ("function_call", "function_call_stopped"):
-                self._evidence.extend(self._evidence_line(event))
+                for call in self._evidence_line(event):
+                    self._evidence.append(call)
+                    if self._judge is not None:
+                        self._judge.add_tool_call(call)
 
     def _close_bot_turn(self) -> None:
         """End the bot's turn: what it said since the persona last spoke becomes a line."""
@@ -301,8 +291,14 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self._add_line("assistant", text)
 
     def _add_line(self, role: str, content: str) -> None:
-        """Append a line to the timeline."""
+        """Append a line to the timeline, and to the conversation the judge sees."""
         self._lines.append({"role": role, "content": content, "evidence": list(self._evidence)})
+        if self._judge is None:
+            return
+        if role == "user":
+            self._judge.add_user_message(content)
+        else:
+            self._judge.add_assistant_message(content)
 
     def _evidence_line(self, event: dict) -> list[str]:
         """The evidence line a function-call event contributes, if any."""
@@ -332,9 +328,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         evidence = self.tool_calls()
         if evidence:
             self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
-        judged = await self._judge.evaluate_run(
-            self.transcript(), self._criteria, self._simulation.success
-        )
+        judged = await self._judge.evaluate_run(self._criteria, self._simulation.success)
         for metric in self._simulation.metrics:
             if metric.name in measured:
                 self._metrics.append(measured[metric.name])
