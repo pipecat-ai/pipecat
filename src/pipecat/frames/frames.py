@@ -447,7 +447,7 @@ class AggregatedTextProgressFrame(DataFrame):
 
 
 @dataclass
-class TranscriptionFrame(TextFrame):
+class TranscriptionFrame(TextFrame, UninterruptibleFrame):
     """Text frame containing speech transcription data.
 
     A text frame with transcription-specific data. The `result` field
