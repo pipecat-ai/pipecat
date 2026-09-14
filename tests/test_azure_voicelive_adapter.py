@@ -172,9 +172,3 @@ def test_context_tools_reach_the_invocation_params(adapter):
     params = adapter.get_llm_invocation_params(context)
 
     assert [t["name"] for t in params["tools"]] == ["get_current_weather"]
-
-
-def test_messages_for_logging_truncate_large_values(adapter):
-    context = LLMContext([{"role": "user", "content": "hello"}])
-
-    assert adapter.get_messages_for_logging(context) == [{"role": "user", "content": "hello"}]

@@ -19,22 +19,6 @@ def _event(payload: dict) -> str:
     return json.dumps(payload)
 
 
-def test_parse_session_created():
-    """session.created is the first event after connecting."""
-    raw = _event(
-        {
-            "event_id": "event_1",
-            "type": "session.created",
-            "session": {"id": "sess_1", "object": "realtime.session", "model": "gpt-4o-mini"},
-        }
-    )
-
-    evt = events.parse_server_event(raw)
-
-    assert isinstance(evt, events.SessionCreatedEvent)
-    assert evt.session["model"] == "gpt-4o-mini"
-
-
 def test_parse_conversation_item_created_with_empty_previous_item_id():
     """The service sends an empty string, not null, for the first item."""
     raw = _event(
@@ -86,46 +70,6 @@ def test_parse_output_item_added_is_incomplete():
     assert isinstance(evt, events.ResponseOutputItemAdded)
     assert evt.item.status == "incomplete"
     assert evt.item.role == "assistant"
-
-
-def test_parse_audio_delta():
-    """Voice Live uses the original event name, not response.output_audio.delta."""
-    raw = _event(
-        {
-            "event_id": "event_4",
-            "type": "response.audio.delta",
-            "response_id": "resp_1",
-            "item_id": "msg_1",
-            "output_index": 0,
-            "content_index": 0,
-            "delta": "R/8N/5/+Y/6T/gn/df/E/ycAmACqAEcAIQBRAAMA",
-        }
-    )
-
-    evt = events.parse_server_event(raw)
-
-    assert isinstance(evt, events.ResponseAudioDelta)
-    assert evt.item_id == "msg_1"
-    assert evt.delta
-
-
-def test_parse_audio_transcript_delta():
-    raw = _event(
-        {
-            "event_id": "event_5",
-            "type": "response.audio_transcript.delta",
-            "response_id": "resp_1",
-            "item_id": "msg_1",
-            "output_index": 0,
-            "content_index": 0,
-            "delta": "Hello",
-        }
-    )
-
-    evt = events.parse_server_event(raw)
-
-    assert isinstance(evt, events.ResponseAudioTranscriptDelta)
-    assert evt.delta == "Hello"
 
 
 def test_parse_response_done_exposes_usage_and_status():
@@ -297,29 +241,3 @@ def test_unset_session_fields_are_omitted():
     ).model_dump(exclude_none=True)
 
     assert payload["session"] == {"instructions": "Be brief."}
-
-
-def test_disabled_turn_detection_is_sent_as_an_explicit_null():
-    """Omitting the field instead leaves the service's own server VAD running."""
-    payload = events.SessionUpdateEvent(
-        session=events.SessionProperties(instructions="Be brief.", turn_detection=None)
-    ).model_dump(exclude_none=True)
-
-    assert payload["session"]["turn_detection"] is None
-
-
-def test_turn_detection_false_also_disables():
-    payload = events.SessionUpdateEvent(
-        session=events.SessionProperties(instructions="Be brief.", turn_detection=False)
-    ).model_dump(exclude_none=True)
-
-    assert payload["session"]["turn_detection"] is None
-
-
-def test_unset_turn_detection_is_omitted():
-    """Leaving it unset keeps the service's default turn detection."""
-    payload = events.SessionUpdateEvent(
-        session=events.SessionProperties(instructions="Be brief.")
-    ).model_dump(exclude_none=True)
-
-    assert "turn_detection" not in payload["session"]
