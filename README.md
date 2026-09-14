@@ -43,7 +43,7 @@ Need predefined or dynamic conversation paths with state management? [Pipecat Fl
 
 ### 🪄 Beautiful UIs
 
-Want to build beautiful and engaging experiences? Checkout the [Voice UI Kit](https://github.com/pipecat-ai/voice-ui-kit), a collection of components, hooks and templates for building voice AI applications quickly.
+Want to build beautiful and engaging experiences? Check out [Pipecat UI](https://github.com/pipecat-ai/pipecat-ui), a shadcn registry of components for building voice AI applications. Browse the [documentation](https://ui.pipecat.ai/) for component previews and installation guides.
 
 ### 🛠️ Create and deploy projects
 
