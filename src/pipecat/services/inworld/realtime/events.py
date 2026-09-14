@@ -186,7 +186,7 @@ class SessionProperties(BaseModel):
 
     Parameters:
         type: Session type, always "realtime".
-        model: The LLM model to use (e.g. "openai/gpt-4.1-nano").
+        model: The LLM model to use (e.g. "openai/gpt-4.1-mini").
         instructions: System instructions for the assistant.
         output_modalities: Output modalities (e.g. ["audio", "text"]).
         audio: Audio configuration including input (transcription, turn detection)
