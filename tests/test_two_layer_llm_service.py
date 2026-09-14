@@ -13,11 +13,13 @@ advertised in the context, registered on the frontend, called, delegated
 over a job, and answered as tool results.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
 import pytest
 
 from pipecat.frames.frames import (
+    ExternalFunctionCallFrame,
     Frame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -47,6 +49,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
+from pipecat.workers.llm.backend_llm_worker import BackendToolCall
 from tests.test_backend_llm_worker import _ScriptedLLM, get_weather
 
 
@@ -120,14 +123,14 @@ def _params(context: LLMContext | None = None, arguments: dict | None = None) ->
         function_name="delegate",
         tool_call_id="call_1",
         arguments=arguments or {},
-        llm=None,  # type: ignore[arg-type]
+        llm=SimpleNamespace(push_frame=AsyncMock()),  # type: ignore[arg-type]
         pipeline_worker=None,  # type: ignore[arg-type]
         context=context or LLMContext(),
         result_callback=AsyncMock(),
     )
 
 
-def _stream(monkeypatch, *outputs: BackendOutput) -> list[dict]:
+def _stream(monkeypatch, *outputs: BackendOutput | BackendToolCall) -> list[dict]:
     """Fake the delegation stream; returns the requests it was given."""
     requests: list[dict] = []
 
@@ -277,6 +280,29 @@ async def test_final_only_drops_progress(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(monkeypatch):
+    _stream(
+        monkeypatch,
+        BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "Seattle"}),
+        _ANSWER,
+    )
+    params = _params()
+
+    await _bound(BackendConnector()).delegate(params)
+
+    (pushed,) = [c.args[0] for c in params.llm.push_frame.await_args_list]
+    assert isinstance(pushed, ExternalFunctionCallFrame)
+    assert (pushed.phase, pushed.function_name, pushed.tool_call_id) == (
+        "in_progress",
+        "get_weather",
+        "toolu_1",
+    )
+    assert pushed.parent_tool_call_id == "call_1"
+    # The call is reported, not delivered to the frontend as a result.
+    assert params.result_callback.await_args_list == [call("It's 62 and raining.")]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_a_delegation_without_an_answer_still_settles_the_call(monkeypatch):
     _stream(monkeypatch, _PROGRESS)
     params = _params()
@@ -381,3 +407,11 @@ async def test_a_local_backend_answers_through_the_delegate_tool():
     results = [f for f in down if isinstance(f, FunctionCallResultFrame)]
     assert [r.result for r in results] == [{"text": "Let me check."}, "It's 62 and raining."]
     assert results[0].properties == FunctionCallResultProperties(is_final=False, run_llm=False)
+    # The backend's own call reached the frontend's pipeline as a report only.
+    reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
+    assert [(f.phase, f.function_name) for f in reported] == [
+        ("started", "get_weather"),
+        ("in_progress", "get_weather"),
+        ("stopped", "get_weather"),
+    ]
+    assert {f.parent_tool_call_id for f in reported} == {"call_1"}

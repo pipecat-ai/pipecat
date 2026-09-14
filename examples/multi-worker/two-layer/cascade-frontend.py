@@ -181,8 +181,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         # Whether a client sees the handoff as a tool call is the app's call:
         # it is a real tool call, though it reports the handoff rather than the
-        # work behind it. This example hides it. (The backend's own calls run in
-        # its worker's pipeline, which this observer doesn't watch.)
+        # work behind it. This example hides it, so the backend's calls show at
+        # top level, as they do for OpenAI Live's client delegation.
+        # Remove the "delegate" entry to see the handoff itself as a call, with
+        # the backend's calls nested under it.
         rtvi_observer_params=RTVIObserverParams(
             function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
         ),

@@ -22,6 +22,7 @@ import pytest
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    ExternalFunctionCallFrame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -49,6 +50,7 @@ from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.workers.llm import BackendOutput
+from pipecat.workers.llm.backend_llm_worker import BackendToolCall
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -1221,6 +1223,26 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
     assert "timed out" not in append["content"]
     service.push_error.assert_awaited_once()
     assert "timed out" in service.push_error.await_args.kwargs["error_msg"]
+
+
+@pytest.mark.asyncio
+async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
+    async def fake_delegate_to_backend(*args, **kwargs):
+        yield BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "DC"})
+        yield BackendOutput(text="75 and nice.", is_final=True)
+
+    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service.push_frame = AsyncMock()
+
+    await service._run_client_delegation(_client_delegation("item_d1"))
+
+    (pushed,) = [c.args[0] for c in service.push_frame.await_args_list]
+    assert isinstance(pushed, ExternalFunctionCallFrame)
+    assert (pushed.function_name, pushed.tool_call_id, pushed.parent_tool_call_id) == (
+        "get_weather",
+        "toolu_1",
+        None,
+    )
 
 
 @pytest.mark.asyncio
