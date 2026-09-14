@@ -178,8 +178,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        # Remove the "delegate" entry to see the handoff itself as a call, with
-        # the backend's calls nested under it.
+        # The handoff is hidden, so the backend's calls show at top level, as
+        # they do for OpenAI Live's client delegation. Remove the "delegate"
+        # entry to see the handoff itself as a call, with the backend's calls
+        # nested under it.
         rtvi_observer_params=RTVIObserverParams(
             function_call_report_level={"delegate": RTVIFunctionCallReportLevel.DISABLED},
         ),
