@@ -40,4 +40,3 @@ metrics:
 
 max_turns: 12
 max_duration_s: 180
-runs: 3
