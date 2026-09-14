@@ -2863,5 +2863,58 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             assistant._require_paired_user_aggregator()
 
 
+class TestTurnStoppedSequence(unittest.IsolatedAsyncioTestCase):
+    """Turn-stopped messages carry a shared monotonic sequence across the pair."""
+
+    async def test_pair_assigns_monotonic_sequence_across_aggregators(self):
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(
+                            user_speech_timeout=TRANSCRIPTION_TIMEOUT,
+                        )
+                    ],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+        user, assistant = pair
+
+        recorded: list[tuple[str, int]] = []
+
+        @user.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+            recorded.append(("user", message.sequence))
+
+        @assistant.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            recorded.append(("assistant", message.sequence))
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hi!", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello there"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(Pipeline([user, assistant]), frames_to_send=frames_to_send)
+
+        self.assertEqual(recorded, [("user", 1), ("assistant", 2)])
+
+    async def test_pair_shares_one_sequence_counter(self):
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(context)
+        self.assertIs(
+            pair.user()._turn_stopped_sequence,
+            pair.assistant()._turn_stopped_sequence,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
