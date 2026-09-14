@@ -141,10 +141,11 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     """
 
     frontend_instruction = (
-        "Hand off to the backend as soon as you know a request is for it: it reads "
-        "the conversation itself, so you need not word the request. While it works, "
-        "keep the conversation going. When its result comes back, relay it in your "
-        "own words."
+        "Whenever the user asks for something the backend is for, call the delegate tool "
+        "at once, in that same reply, even if they also asked for something you can do "
+        "yourself; do the rest of the reply around it. The backend reads the "
+        "conversation itself, so you need not word the request. While it works, keep "
+        "the conversation going. When its result comes back, relay it in your own words."
     )
 
     def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
@@ -160,8 +161,9 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     def tool_description(self, backend_description: str) -> str:
         """Describe the tool: hand the conversation over, for what the backend is for."""
         return (
-            f"Hand the conversation to the backend, for {backend_description}. The backend "
-            "reads the conversation itself, so there is nothing to pass."
+            f"Delegate to the backend. Call this as soon as the user asks for "
+            f"{backend_description}; the backend reads the conversation itself, so it takes "
+            "no arguments. Keep talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
@@ -196,15 +198,21 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
     }
     tool_required = ["request"]
     frontend_instruction = (
-        "When you hand off to the backend, word the request so it stands on its own: "
-        "the user's goal, the exact details they gave and their latest correction. "
-        "While it works, keep the conversation going. When its result comes back, "
-        "relay it in your own words."
+        "Whenever the user asks for something the backend is for, call the delegate tool "
+        "at once, in that same reply, even if they also asked for something you can do "
+        "yourself; do the rest of the reply around it. Word the request so it stands on "
+        "its own: the user's goal, the exact details they gave and their latest "
+        "correction. While it works, keep the conversation going. When its result comes "
+        "back, relay it in your own words."
     )
 
     def tool_description(self, backend_description: str) -> str:
         """Describe the tool: hand a worded request over, for what the backend is for."""
-        return f"Hand a request to the backend, for {backend_description}."
+        return (
+            f"Delegate to the backend. Call this as soon as the user asks for "
+            f"{backend_description}, with the request worded to stand on its own. Keep "
+            "talking with the user while it works."
+        )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
         """Send the model's request as it stands."""
