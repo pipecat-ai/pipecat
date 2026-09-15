@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
@@ -71,6 +72,16 @@ DTMF_CODE_MAP = {
     "9": 9,
     "*": 10,
     "#": 11,
+}
+
+# Maps Pipecat's PIL-style color format strings (``OutputImageRawFrame.format``,
+# configured via ``TransportParams.video_out_color_format``) to LiveKit's
+# ``VideoBufferType`` enum used by ``rtc.VideoFrame``.
+LIVEKIT_VIDEO_BUFFER_TYPES = {
+    "RGB": proto_video_frame.VideoBufferType.RGB24,
+    "RGBA": proto_video_frame.VideoBufferType.RGBA,
+    "BGRA": proto_video_frame.VideoBufferType.BGRA,
+    "ARGB": proto_video_frame.VideoBufferType.ARGB,
 }
 
 
@@ -109,6 +120,16 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
 
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
+
+    Video output publishes a single ``"pipecat-video"`` camera track (mirroring how
+    audio output always publishes one ``"pipecat-audio"`` microphone track) when
+    ``video_out_enabled`` is set. The track is sized using
+    ``video_out_width``/``video_out_height`` and encodes frames according to
+    ``video_out_color_format`` (default ``"RGB"``); ``video_out_framerate``
+    governs how often ``BaseOutputTransport`` draws frames. Per-destination
+    video routing (multiple named output tracks, as supported by Daily's
+    ``camera_out_enabled``/``register_video_destination``) is not yet
+    implemented for LiveKit.
 
     Parameters:
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
@@ -192,6 +213,8 @@ class LiveKitTransportClient:
         # the owned native stream and cancel its producer task instead of
         # leaking both on every track republish.
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
+        self._video_source: rtc.VideoSource | None = None
+        self._video_track: rtc.LocalVideoTrack | None = None
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
         # Symmetric registry for video streams.
@@ -288,6 +311,21 @@ class LiveKitTransportClient:
                 options.source = rtc.TrackSource.SOURCE_MICROPHONE
                 await self.room.local_participant.publish_track(self._audio_track, options)
 
+                # Set up video source and track (only if video output is
+                # enabled; unlike audio, which is always published).
+                if self._params.video_out_enabled:
+                    self._video_source = rtc.VideoSource(
+                        self._params.video_out_width, self._params.video_out_height
+                    )
+                    self._video_track = rtc.LocalVideoTrack.create_video_track(
+                        "pipecat-video", self._video_source
+                    )
+                    video_options = rtc.TrackPublishOptions()
+                    video_options.source = rtc.TrackSource.SOURCE_CAMERA
+                    await self.room.local_participant.publish_track(
+                        self._video_track, video_options
+                    )
+
                 await self._callbacks.on_connected()
 
                 # Check if there are already participants in the room
@@ -381,6 +419,27 @@ class LiveKitTransportClient:
             # milliseconds, so we silently drop these frames.
             if "InvalidState" not in str(e):
                 logger.error(f"Error publishing audio: {e}")
+            return False
+
+    async def publish_video(self, video_frame: rtc.VideoFrame) -> bool:
+        """Publish a video frame to the room.
+
+        Args:
+            video_frame: The LiveKit video frame to publish.
+
+        Returns:
+            True if the video frame was published successfully, False otherwise.
+        """
+        if not self._connected or not self._video_source:
+            return False
+
+        try:
+            # Unlike ``AudioSource.capture_frame``, ``VideoSource.capture_frame``
+            # is synchronous in livekit-rtc.
+            self._video_source.capture_frame(video_frame)
+            return True
+        except Exception as e:
+            logger.error(f"Error publishing video: {e}")
             return False
 
     def get_participants(self) -> list[str]:
@@ -901,8 +960,10 @@ class LiveKitInputTransport(BaseInputTransport):
 class LiveKitOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to LiveKit rooms.
 
-    Manages sending audio frames and data messages to LiveKit room participants,
-    including audio format conversion for LiveKit compatibility.
+    Manages sending audio and video frames and data messages to LiveKit room
+    participants, including audio/video format conversion for LiveKit
+    compatibility. Video output publishes to a single default camera track
+    when ``LiveKitParams.video_out_enabled`` is set.
     """
 
     def __init__(
@@ -1019,6 +1080,26 @@ class LiveKitOutputTransport(BaseOutputTransport):
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
         return await self._client.publish_audio(livekit_audio)
 
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
+        """Write a video frame to the LiveKit room's published camera track.
+
+        Publishes to the single default video track set up in
+        ``LiveKitTransportClient.connect`` (mirroring how audio always
+        publishes to one microphone track). Per-destination routing to
+        multiple named video tracks is not supported yet, so
+        ``frame.transport_destination`` is ignored.
+
+        Args:
+            frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        livekit_video = self._convert_pipecat_video_to_livekit(frame)
+        if livekit_video is None:
+            return False
+        return await self._client.publish_video(livekit_video)
+
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
 
@@ -1053,6 +1134,25 @@ class LiveKitOutputTransport(BaseOutputTransport):
             num_channels=self._params.audio_out_channels,
             samples_per_channel=samples_per_channel,
         )
+
+    def _convert_pipecat_video_to_livekit(
+        self, frame: OutputImageRawFrame
+    ) -> rtc.VideoFrame | None:
+        """Convert a Pipecat output video frame to a LiveKit video frame.
+
+        Returns:
+            The converted ``rtc.VideoFrame``, or None if ``frame.format`` has
+            no known LiveKit ``VideoBufferType`` mapping.
+        """
+        buffer_type = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format)
+        if buffer_type is None:
+            logger.error(
+                f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
+            )
+            return None
+
+        width, height = frame.size
+        return rtc.VideoFrame(width, height, buffer_type, frame.image)
 
 
 class LiveKitTransport(BaseTransport):
