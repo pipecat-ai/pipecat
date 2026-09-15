@@ -45,7 +45,8 @@ A scenario can now be scripted or simulated.
   `success:`.
 - **Metrics.** A judged `criterion` is decided per bot turn, scored as the share of
   turns that passed. A `measure` is computed from the run, no judge.
-- **Runs.** `runs: N` and every run must pass. `--repeat` sweeps only measure.
+- **Runs.** `runs: N` and every run must pass, since one pass of a nondeterministic
+  caller proves little. `--repeat` sweeps only measure.
 - **CLI.** `pipecat eval run` takes either kind; `-k simulation` selects them in a
   suite.
 
@@ -79,26 +80,44 @@ says so in a trailing clause on the opening sentence.
 Length follows the reviewer, not the diff. Aim under 200 words. A small diff gets a
 small description.
 
-Every bullet is a fact a reviewer can check against the diff. Give a reason only
-where a reviewer would otherwise ask "why would you do that?", and give it as a
-clause rather than a bullet. `AGENTS.md` sets the same standard for comments, under
-"Writing for Future Readers".
+Every bullet is a fact a reviewer can check against the diff. When you know why a
+decision was made (from the conversation, the commit messages, or a comment in the
+code), say so in the bullet the decision belongs to, as a clause or a short second
+sentence: "backdated by the VAD's delay, since the frame arrives after the speech it
+reports". If the reason rules out an obvious alternative, name it in the same
+breath. Don't invent a reason you weren't given, and don't defend one: state it and
+move on. `AGENTS.md` sets the same standard for comments, under "Writing for Future
+Readers".
 
 Never include:
 
-- A sentence arguing the change is correct
+- A sentence arguing the change is correct, or answering an objection nobody raised
 - A second sentence that elaborates the first rather than adding a fact
-- Alternatives considered and rejected
+- A paragraph weighing alternatives
 - Test counts, coverage numbers, "all tests pass", which tests changed, or how to
   run the tests
 - Aphorism, metaphor where a plain noun works, or a fact restated more elegantly
 - A walk through the files changed
 
+## Voice
+
+Write it the way you'd explain the change to a teammate at your desk. Plain words,
+contractions, short sentences, the odd fragment. "Fixes", "adds", "now", "because".
+A plain sentence that says the thing beats a smooth one that's been worked over.
+
+Tells to avoid:
+
+- Matched triples, and bullets that all share one shape and length
+- "Not X, but Y" constructions
+- Em-dash asides where a comma or a new sentence would do
+- A closing sentence that sums up what the bullets already said
+
 ## Checklist
 
 - [ ] Opening sentence says what is different now
 - [ ] Every bullet has a noun label and is two sentences or fewer
-- [ ] No sentence argues, and no rejected alternatives
+- [ ] Reasons are stated where known, and none is defended
+- [ ] Reads like a person wrote it: no matched triples, no "not X but Y"
 - [ ] No Testing section, test counts, or coverage numbers
 - [ ] Breaking changes documented, if any
 - [ ] Under 200 words
