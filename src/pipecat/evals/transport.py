@@ -139,9 +139,10 @@ class EvalTransport(SingleClientWebsocketServerTransport):
         if serializer is not None and hasattr(serializer, "set_capture_audio"):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
 
-        if self._input is not None and _query_flag(websocket, SKIP_TTS_QUERY_PARAM):
-            logger.debug(f"{self}: eval client requested skip_tts; configuring LLM output")
-            await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=True))
+        if self._input is not None:
+            skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)
+            logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
+            await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
 
         await super()._on_client_connected(websocket)
 

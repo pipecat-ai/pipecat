@@ -1,0 +1,1 @@
+- Fixed audio eval sessions remaining silent after a text-mode session on the same bot by resetting `skip_tts` for each connection.
