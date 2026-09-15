@@ -52,6 +52,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     BackendLLMWorker,
     BackendOutput,
     BackendToolCall,
+    _BackendAnswer,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -233,12 +234,15 @@ class BackendReplyStrategy:
     #: Guidance appended to the frontend's system instruction, if any.
     frontend_instruction: str | None = None
 
-    async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
+    async def deliver(
+        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
+    ) -> None:
         """Deliver one output to the frontend.
 
         Args:
             params: The ``delegate`` call the output belongs to.
             output: The output.
+            is_final: Whether it is the backend's answer, which settles the call.
         """
         raise NotImplementedError
 
@@ -256,11 +260,13 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
         """Initialize the strategy."""
         self._progress: dict[str, list[str]] = {}
 
-    async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
+    async def deliver(
+        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
+    ) -> None:
         """Hold progress back; deliver it with the answer."""
         if output.is_thought:
             return
-        if not output.is_final:
+        if not is_final:
             self._progress.setdefault(params.tool_call_id, []).append(output.text)
             return
         progress = self._progress.pop(params.tool_call_id, [])
@@ -280,9 +286,11 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
 
     needs_intermediate_results = True
 
-    async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
+    async def deliver(
+        self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
+    ) -> None:
         """Record progress as an intermediate result, run the frontend as flagged."""
-        if output.is_final:
+        if is_final:
             await params.result_callback(output.text)
             return
         await params.result_callback(
@@ -447,8 +455,11 @@ class BackendConnector:
             if isinstance(event, BackendToolCall):
                 await self.report_tool_call(params, event)
                 continue
-            answered = answered or event.is_final
-            await self.reply.deliver(params, event)
+            if isinstance(event, _BackendAnswer):
+                answered = True
+                await self.reply.deliver(params, event.output, is_final=True)
+            else:
+                await self.reply.deliver(params, event, is_final=False)
         if not answered:
             logger.warning(f"Delegation to '{self._context.backend_name}' produced no answer")
             await params.result_callback({"error": "The backend finished without an answer."})
