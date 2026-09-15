@@ -291,10 +291,6 @@ class LiveKitTransportClient:
                     self._token,
                     options=rtc.RoomOptions(auto_subscribe=True),
                 )
-                self._connected = True
-                # Increment disconnect counter if we successfully connected.
-                self._disconnect_counter += 1
-
                 self._participant_id = self.room.local_participant.identity
                 logger.info(f"Connected to {self._room_name} as {self._participant_id}")
 
@@ -326,6 +322,13 @@ class LiveKitTransportClient:
                         self._video_track, video_options
                     )
 
+                # Only mark the client connected once its tracks are
+                # published, so a retry after a failed publish starts over
+                # instead of returning early without tracks.
+                self._connected = True
+                # Increment disconnect counter if we successfully connected.
+                self._disconnect_counter += 1
+
                 await self._callbacks.on_connected()
 
                 # Check if there are already participants in the room
@@ -335,7 +338,17 @@ class LiveKitTransportClient:
                     await self._callbacks.on_first_participant_joined(participants[0])
             except Exception as e:
                 logger.error(f"Error connecting to {self._room_name}: {e}")
+                if not self._connected:
+                    await self._rollback_partial_connect()
                 raise
+
+    async def _rollback_partial_connect(self):
+        """Undo a connection attempt that failed before it completed."""
+        await self._close_output_sources()
+        try:
+            await self.room.disconnect()
+        except Exception as e:
+            logger.warning(f"{self} error disconnecting after failed connect: {e}")
 
     async def disconnect(self):
         """Disconnect from the LiveKit room."""

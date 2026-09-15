@@ -787,6 +787,44 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result)
 
+    async def test_failed_publish_is_rolled_back_so_retry_publishes(self):
+        """A publish failure leaves the client disconnected, so a retry publishes again."""
+        client = self._create_client(video_out_enabled=True)
+        client.room.disconnect = AsyncMock()
+        # Fail the video publish on the first attempt only.
+        client.room.local_participant.publish_track = AsyncMock(
+            side_effect=[None, RuntimeError("publish failed"), None, None]
+        )
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+        video_source = MagicMock()
+        video_source.aclose = AsyncMock()
+        # Call the undecorated method so the test controls each attempt.
+        connect = LiveKitTransportClient.connect.__wrapped__
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(rtc, "VideoSource", return_value=video_source),
+            patch.object(rtc.LocalVideoTrack, "create_video_track", return_value=MagicMock()),
+        ):
+            with self.assertRaises(RuntimeError):
+                await connect(client)
+
+            self.assertFalse(client._connected)
+            self.assertEqual(client._disconnect_counter, 0)
+            client.room.disconnect.assert_awaited_once()
+            audio_source.aclose.assert_awaited_once()
+            video_source.aclose.assert_awaited_once()
+            client._callbacks.on_connected.assert_not_awaited()
+
+            await connect(client)
+
+        self.assertTrue(client._connected)
+        self.assertEqual(client._disconnect_counter, 1)
+        self.assertEqual(client.room.local_participant.publish_track.await_count, 4)
+        client._callbacks.on_connected.assert_awaited_once()
+
     async def test_disconnect_closes_output_sources(self):
         """Disconnecting closes the audio and video sources and forgets them."""
         client = self._create_client(video_out_enabled=True)
