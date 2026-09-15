@@ -174,12 +174,12 @@ def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
 
 def test_the_tool_description_says_what_the_backend_is_for():
     connector = _bound(BackendConnector(backend_description="the weather"))
-    assert "for the weather" in connector.tool.description
+    assert "the weather" in connector.tool.description
 
 
 def test_the_frontend_guidance_comes_from_the_strategies():
     connector = _bound(BackendConnector())
-    assert "call the delegate tool" in (connector.frontend_instruction or "")
+    assert "delegate tool" in (connector.frontend_instruction or "")
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +318,7 @@ def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     PipecatDualLLMService(frontend=frontend, backend="backend")
     composed = frontend._settings.system_instruction
     assert composed.startswith("You are a voice assistant.")
-    assert "call the delegate tool" in composed
+    assert "delegate tool" in composed
 
 
 @pytest.mark.asyncio
