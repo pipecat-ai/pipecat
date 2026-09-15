@@ -76,12 +76,12 @@ DTMF_CODE_MAP = {
 
 # Maps Pipecat's PIL-style color format strings (``OutputImageRawFrame.format``,
 # configured via ``TransportParams.video_out_color_format``) to LiveKit's
-# ``VideoBufferType`` enum used by ``rtc.VideoFrame``.
+# ``VideoBufferType`` enum used by ``rtc.VideoFrame`` and its bytes per pixel.
 LIVEKIT_VIDEO_BUFFER_TYPES = {
-    "RGB": proto_video_frame.VideoBufferType.RGB24,
-    "RGBA": proto_video_frame.VideoBufferType.RGBA,
-    "BGRA": proto_video_frame.VideoBufferType.BGRA,
-    "ARGB": proto_video_frame.VideoBufferType.ARGB,
+    "RGB": (proto_video_frame.VideoBufferType.RGB24, 3),
+    "RGBA": (proto_video_frame.VideoBufferType.RGBA, 4),
+    "BGRA": (proto_video_frame.VideoBufferType.BGRA, 4),
+    "ARGB": (proto_video_frame.VideoBufferType.ARGB, 4),
 }
 
 
@@ -1142,16 +1142,29 @@ class LiveKitOutputTransport(BaseOutputTransport):
 
         Returns:
             The converted ``rtc.VideoFrame``, or None if ``frame.format`` has
-            no known LiveKit ``VideoBufferType`` mapping.
+            no known LiveKit ``VideoBufferType`` mapping or the image length
+            does not match its size.
         """
-        buffer_type = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format)
-        if buffer_type is None:
+        buffer_info = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format) if frame.format else None
+        if buffer_info is None:
             logger.error(
                 f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
             )
             return None
 
+        buffer_type, bytes_per_pixel = buffer_info
         width, height = frame.size
+        # LiveKit reads ``width * height * bytes_per_pixel`` bytes from the
+        # buffer without checking its length, so a short buffer crashes the
+        # process.
+        expected_length = width * height * bytes_per_pixel
+        if len(frame.image) != expected_length:
+            logger.error(
+                f"{self} video frame of size {width}x{height} and format {frame.format!r} "
+                f"has {len(frame.image)} bytes, expected {expected_length}"
+            )
+            return None
+
         return rtc.VideoFrame(width, height, buffer_type, frame.image)
 
 

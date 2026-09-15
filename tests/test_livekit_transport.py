@@ -831,6 +831,16 @@ class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase
         self.assertFalse(result)
         output._client.publish_video.assert_not_awaited()
 
+    async def test_write_video_frame_wrong_length_does_not_publish(self):
+        """An image whose length does not match its size and format is rejected."""
+        output = self._create_output_transport()
+        frame = OutputImageRawFrame(image=b"\x00" * 10, size=(4, 4), format="RGB")
+
+        result = await output.write_video_frame(frame)
+
+        self.assertFalse(result)
+        output._client.publish_video.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
