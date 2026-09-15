@@ -39,7 +39,7 @@ from loguru import logger
 
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.dual_llm_service import BackendConnector, PipecatDualLLMService
+from pipecat.pipeline.dual_llm_service import PipecatDualLLMService
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -73,7 +73,6 @@ aloud, so keep them to one or two natural sentences without any formatting."""
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Use the available tools to
 answer questions about the weather and restaurants."""
 
-BACKEND_DESCRIPTION = "current information such as the weather or a restaurant recommendation"
 
 transport_params = {
     "eval": lambda: EvalTransportParams(
@@ -152,7 +151,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
             context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
         ),
-        connector=BackendConnector(backend_description=BACKEND_DESCRIPTION),
     )
 
     # The frontend's only tool, ``delegate``, is installed by the service;
