@@ -143,9 +143,10 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     frontend_instruction = (
         "Whenever the user asks for something the backend is for, call the delegate tool "
         "at once, in that same reply, even if they also asked for something you can do "
-        "yourself; do the rest of the reply around it. The backend reads the "
-        "conversation itself, so you need not word the request. While it works, keep "
-        "the conversation going. When its result comes back, relay it in your own words."
+        "yourself; do the rest of the reply around it. Call it once per reply: the "
+        "backend reads the conversation itself, so one call covers everything the user "
+        "has asked for and you need not word the request. While it works, keep the "
+        "conversation going. When its result comes back, relay it in your own words."
     )
 
     def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
@@ -162,8 +163,9 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         """Describe the tool: hand the conversation over, for what the backend is for."""
         return (
             f"Delegate to the backend. Call this as soon as the user asks for "
-            f"{backend_description}; the backend reads the conversation itself, so it takes "
-            "no arguments. Keep talking with the user while it works."
+            f"{backend_description}. The backend reads the conversation itself, so it takes "
+            "no arguments and one call covers everything the user has asked for; call it "
+            "once per reply. Keep talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
