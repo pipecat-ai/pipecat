@@ -510,8 +510,23 @@ class EvalScriptScenario:
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
-        data = _load_mapping(path)
+        return cls.from_mapping(_load_mapping(path), path)
 
+    @classmethod
+    def from_mapping(cls, data: dict, path: Path) -> "EvalScriptScenario":
+        """Parse a scenario's mapping, as read from ``path``, into an :class:`EvalScriptScenario`.
+
+        Args:
+            data: The scenario's top-level mapping.
+            path: The file it came from; error messages name it and the turns'
+                ``audio:`` and ``image:`` paths resolve relative to it.
+
+        Returns:
+            The parsed scenario.
+
+        Raises:
+            ValueError: If the mapping is invalid.
+        """
         name = data.get("name")
         if not name or not isinstance(name, str):
             raise ValueError(f"{path}: missing or invalid 'name:' field")

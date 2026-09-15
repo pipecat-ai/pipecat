@@ -219,7 +219,22 @@ class EvalSimulationScenario:
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
-        data = _load_mapping(path)
+        return cls.from_mapping(_load_mapping(path), path)
+
+    @classmethod
+    def from_mapping(cls, data: dict, path: Path) -> "EvalSimulationScenario":
+        """Parse a simulation's mapping, as read from ``path``, into an :class:`EvalSimulationScenario`.
+
+        Args:
+            data: The simulation's top-level mapping.
+            path: The file it came from, for error messages.
+
+        Returns:
+            The parsed simulation.
+
+        Raises:
+            ValueError: If the mapping is invalid.
+        """
 
         def text(key: str) -> str:
             value = data.get(key)

@@ -20,10 +20,44 @@ it. There are two kinds, and a file's top-level keys say which:
 
 Both carry the same ``user:`` and ``judge:`` blocks
 (:mod:`pipecat.evals.scenario_config`) and are read by the same YAML loader with
-``!include`` support (:mod:`pipecat.evals.scenario_loader`). This module gathers
-the public names of both kinds, :func:`load_scenario_file` loads a file as
-whichever kind it is, and :func:`is_scenario_file` tells a scenario from a
-fragment it includes.
+``!include`` support (:mod:`pipecat.evals.scenario_loader`).
+
+A file can also hold a *group* of scenarios under ``scenarios:``, for testing
+one behavior through many short conversations without a file per case. Every
+other top-level key is then a default for the entries, and an entry that sets
+the same key replaces it as a whole (a ``context:`` is restated in full, never
+appended to). Each entry needs a ``name:``, and is loaded as
+``<group name>/<entry name>``::
+
+    name: turn_completion
+    judge: !include ../judge_text.yaml
+    context:
+      - role: system
+        content: "You are a travel assistant."
+
+    scenarios:
+      - name: short_answer
+        turns:
+          - user: "Japan."
+            expect:
+              - event: response
+      - name: with_history
+        context:                      # replaces the header's context
+          - role: system
+            content: "You are a travel assistant."
+          - role: assistant
+            content: "Where would you go?"
+        turns:
+          - user: "Japan."
+            expect:
+              - event: response
+
+Entries are independent: each runs as its own scenario, against its own bot.
+
+This module gathers the public names of both kinds, :func:`load_scenarios`
+loads a file as the scenarios it holds, :func:`load_scenario_file` loads a file
+holding one, and :func:`is_scenario_file` tells a scenario from a fragment it
+includes.
 """
 
 from enum import StrEnum
@@ -68,6 +102,7 @@ __all__ = [
     "describe_simulation",
     "is_scenario_file",
     "load_scenario_file",
+    "load_scenarios",
 ]
 
 
@@ -78,12 +113,61 @@ class EvalKind(StrEnum):
     SIMULATION = "simulation"
 
 
-def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationScenario:
-    """Load a scenario file as whichever kind it is.
+EvalLoadedScenario = EvalScriptScenario | EvalSimulationScenario
 
-    A file with a ``persona:`` is a simulation; one with ``turns:`` is a
-    scripted scenario. Manifests and ``pipecat eval run`` load through here,
-    so the two kinds mix in one list.
+
+def load_scenarios(path: str | Path) -> list[EvalLoadedScenario]:
+    """Load the scenarios a file holds, each as whichever kind it is.
+
+    A file with ``scenarios:`` is a group (see the module docstring); any other
+    file holds one scenario. Manifests and ``pipecat eval run`` load through
+    here, so the two kinds mix in one list.
+
+    Args:
+        path: Path to a scenario, simulation, or group YAML file.
+
+    Returns:
+        The parsed scenarios, in file order.
+
+    Raises:
+        ValueError: If a scenario is neither kind, claims to be both, or is
+            invalid for its kind, or if a group is malformed.
+        FileNotFoundError: If the path doesn't exist.
+    """
+    path = Path(path)
+    data = _load_mapping(path)
+    entries = data.get("scenarios")
+    if entries is None:
+        return [_scenario_from_mapping(data, path)]
+
+    group = data.get("name")
+    if not group or not isinstance(group, str):
+        raise ValueError(f"{path}: a group of scenarios needs a 'name:'")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{path}: 'scenarios:' must be a non-empty list")
+    defaults = {key: value for key, value in data.items() if key != "scenarios"}
+
+    scenarios: list[EvalLoadedScenario] = []
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path}: scenario #{idx} must be a mapping")
+        if "scenarios" in entry:
+            raise ValueError(f"{path}: scenario #{idx} cannot hold a 'scenarios:' list of its own")
+        name = entry.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{path}: scenario #{idx} needs a 'name:'")
+        merged = {**defaults, **entry, "name": f"{group}/{name}"}
+        scenarios.append(_scenario_from_mapping(merged, path))
+
+    names = [scenario.name for scenario in scenarios]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"{path}: duplicate scenario names: {', '.join(duplicates)}")
+    return scenarios
+
+
+def load_scenario_file(path: str | Path) -> EvalLoadedScenario:
+    """Load a file holding one scenario, as whichever kind it is.
 
     Args:
         path: Path to a scenario or simulation YAML file.
@@ -93,20 +177,28 @@ def load_scenario_file(path: str | Path) -> EvalScriptScenario | EvalSimulationS
         :class:`~pipecat.evals.script.EvalScriptScenario`.
 
     Raises:
-        ValueError: If the file is neither kind, claims to be both, or is
-            invalid for its kind.
+        ValueError: If the file holds a group of several scenarios (load those
+            with :func:`load_scenarios`), or is invalid.
         FileNotFoundError: If the path doesn't exist.
     """
-    path = Path(path)
-    data = _load_mapping(path)
+    scenarios = load_scenarios(path)
+    if len(scenarios) != 1:
+        raise ValueError(
+            f"{path}: holds {len(scenarios)} scenarios; load a group with load_scenarios()"
+        )
+    return scenarios[0]
+
+
+def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
+    """Parse one scenario's mapping as a simulation (``persona:``) or a script (``turns:``)."""
     if "persona" in data and "turns" in data:
         raise ValueError(
             f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
         )
     if "persona" in data:
-        return EvalSimulationScenario.load(path)
+        return EvalSimulationScenario.from_mapping(data, path)
     if "turns" in data:
-        return EvalScriptScenario.load(path)
+        return EvalScriptScenario.from_mapping(data, path)
     raise ValueError(
         f"{path}: a scenario file needs 'turns:' (scripted) or 'persona:' (a simulation)"
     )

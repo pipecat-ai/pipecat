@@ -14,6 +14,9 @@ from pipecat.evals.scenario import (
     EvalScriptScenario,
     EvalScriptTurn,
     EvalSendAfter,
+    EvalSimulationScenario,
+    load_scenario_file,
+    load_scenarios,
 )
 
 
@@ -23,6 +26,120 @@ def _write(yaml_text: str) -> Path:
     f.write(yaml_text)
     f.close()
     return Path(f.name)
+
+
+GROUP = """
+name: turn_completion
+judge: {modality: text}
+context:
+  - role: system
+    content: "You are a travel assistant."
+stop_on_failure: false
+
+scenarios:
+  - name: short_answer
+    turns:
+      - user: "Japan."
+        expect: [{event: response}]
+  - name: with_history
+    stop_on_failure: true
+    context:
+      - role: system
+        content: "You are a travel assistant."
+      - role: assistant
+        content: "Where would you go?"
+    turns:
+      - user: "Japan."
+        expect: [{event: response}]
+"""
+
+
+class TestScenarioGroups(unittest.TestCase):
+    def test_a_plain_file_is_a_group_of_one(self):
+        scenarios = load_scenarios(_write("name: greet\nturns: [{user: hi}]\n"))
+        self.assertEqual([s.name for s in scenarios], ["greet"])
+        self.assertEqual(
+            load_scenario_file(_write("name: greet\nturns: [{user: hi}]\n")).name, "greet"
+        )
+
+    def test_entries_are_named_under_the_group(self):
+        scenarios = load_scenarios(_write(GROUP))
+        self.assertEqual(
+            [s.name for s in scenarios],
+            ["turn_completion/short_answer", "turn_completion/with_history"],
+        )
+        self.assertTrue(all(isinstance(s, EvalScriptScenario) for s in scenarios))
+
+    def test_header_keys_are_defaults_and_an_entry_replaces_a_whole_value(self):
+        short, history = load_scenarios(_write(GROUP))
+        # Inherited from the header.
+        self.assertEqual(
+            short.context, [{"role": "system", "content": "You are a travel assistant."}]
+        )
+        self.assertFalse(short.stop_on_failure)
+        self.assertFalse(short.bot_audio)
+        # Replaced as a whole, not merged.
+        self.assertEqual(len(history.context), 2)
+        self.assertEqual(history.context[1]["role"], "assistant")
+        self.assertTrue(history.stop_on_failure)
+        self.assertFalse(history.bot_audio)
+
+    def test_entries_can_be_simulations(self):
+        scenarios = load_scenarios(
+            _write(
+                """
+                name: diner
+                persona: "An impatient diner."
+                success: "the bot confirms"
+                scenarios:
+                  - name: book
+                    goal: "Book a table."
+                  - name: cancel
+                    goal: "Cancel a booking."
+                """
+            )
+        )
+        self.assertTrue(all(isinstance(s, EvalSimulationScenario) for s in scenarios))
+        self.assertEqual([s.goal for s in scenarios], ["Book a table.", "Cancel a booking."])
+        self.assertEqual(scenarios[0].persona, "An impatient diner.")
+
+    def test_load_scenario_file_refuses_a_group_of_several(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario_file(_write(GROUP))
+        self.assertIn("load_scenarios", str(cm.exception))
+
+    def test_group_needs_a_name(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(_write("scenarios: [{name: a, turns: []}]\n"))
+        self.assertIn("needs a 'name:'", str(cm.exception))
+
+    def test_group_needs_entries(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(_write("name: g\nscenarios: []\n"))
+        self.assertIn("non-empty list", str(cm.exception))
+
+    def test_entry_needs_a_name(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(_write("name: g\nscenarios: [{turns: []}]\n"))
+        self.assertIn("scenario #0 needs a 'name:'", str(cm.exception))
+
+    def test_entry_cannot_nest_a_group(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(_write("name: g\nscenarios: [{name: a, scenarios: []}]\n"))
+        self.assertIn("cannot hold a 'scenarios:'", str(cm.exception))
+
+    def test_duplicate_entry_names_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(
+                _write("name: g\nscenarios: [{name: a, turns: []}, {name: a, turns: []}]\n")
+            )
+        self.assertIn("duplicate scenario names: g/a", str(cm.exception))
+
+    def test_entry_errors_name_the_file(self):
+        path = _write("name: g\nscenarios: [{name: a, turns: [{user: hi, expect: nope}]}]\n")
+        with self.assertRaises(ValueError) as cm:
+            load_scenarios(path)
+        self.assertIn(str(path), str(cm.exception))
 
 
 class TestScenarioFacade(unittest.TestCase):
