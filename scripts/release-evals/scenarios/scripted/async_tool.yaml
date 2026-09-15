@@ -4,12 +4,11 @@ name: async_tool
 # after the conversation has moved on, so the bot has to deliver it as an
 # aside.
 
-judge: !include ../judge_text.yaml
-
 scenarios:
   # Text: the bot has to finish the turn it's on, then report the weather it
   # looked up earlier, unprompted.
   - name: delivery
+    judge: !include ../judge_text.yaml
     turns:
       # Match the bot's on-connect greeting first, so it isn't taken for a reply to
       # the turn below.

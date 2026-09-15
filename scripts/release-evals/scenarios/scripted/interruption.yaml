@@ -6,8 +6,6 @@ name: interruption
 # answer, so there's a real response to interrupt. The same turns run in text
 # and in audio.
 
-judge: !include ../judge_text.yaml
-
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into
   # it). The barge-in below anchors on the latest llm_started, which must be the
@@ -32,6 +30,7 @@ turns:
 
 scenarios:
   - name: text
+    judge: !include ../judge_text.yaml
 
   - name: audio
     user: !include ../user_audio.yaml

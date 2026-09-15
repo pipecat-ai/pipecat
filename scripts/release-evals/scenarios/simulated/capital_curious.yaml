@@ -8,8 +8,6 @@ name: capital_curious
 
 simulator: !include ../simulator.yaml
 
-judge: !include ../judge_text.yaml
-
 persona: |
   A friendly, curious traveler planning a trip to Europe. Polite and concise:
   asks one question at a time, and thanks the assistant once satisfied.
@@ -35,6 +33,7 @@ scenarios:
   # Text modality: the persona's turns go to the bot as text, and the judge
   # reads the LLM's text.
   - name: text
+    judge: !include ../judge_text.yaml
 
   # Audio modality: the persona's turns are synthesized and streamed to the
   # bot, and the bot's speech is transcribed for the persona to hear and for

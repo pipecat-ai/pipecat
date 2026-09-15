@@ -3,14 +3,13 @@ name: multi_worker_handoff
 # LLM workers on a bus handing the conversation between each other: a router
 # worker and a reservation worker.
 
-judge: !include ../judge_text.yaml
-
 scenarios:
   # The router hands off to the reservation worker, which books the table and
   # ends the call. The last turn asserts the function call only:
   # end_reservation tears the pipeline down before the farewell llm_response
   # reaches the harness.
   - name: reservation
+    judge: !include ../judge_text.yaml
     turns:
       - expect:
           - event: response
