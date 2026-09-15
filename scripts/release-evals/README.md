@@ -290,7 +290,7 @@ intake, place an order, quote a policy.
 ```sh
 ./run.sh -k simulation             # every simulation, nothing scripted
 ./run.sh -p flows                  # the Flows bots: their scripted scenarios and simulations
-./run.sh -s book_table_available   # one simulation, as many runs as its file says
+./run.sh -s book_table/available   # one simulation, as many runs as its file says
 ./run.sh -s order_pizza -r 5       # one simulation, five runs
 ```
 
@@ -335,9 +335,9 @@ neither side does anything for `max_silence_s` (30 s by default) ends as
 | ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
 | `capital_curious`         | `voice/voice-cartesia.py`                        | Asks the capital of Germany and hangs up, in text.               |
 | `capital_curious_audio`   | `voice/voice-cartesia.py`                        | The same caller, speaking and listening.                         |
-| `book_table_available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
-| `book_table_flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
-| `book_table_impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
+| `book_table/available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
+| `book_table/flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
+| `book_table/impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
 | `complete_patient_intake` | `flows/patient_intake.py`                        | Gives a birthday, a prescription, an allergy, and a condition.   |
 | `order_pizza`             | `flows/food_ordering.py`                         | Orders a large pepperoni pizza and asks about delivery time.     |
 | `order_sushi`             | `flows/food_ordering_advanced_functionschema.py` | Orders three California rolls.                                   |

@@ -443,7 +443,7 @@ suite:
   - bot: voice/voice-cartesia.py
     scenarios: [simulated/capital_curious, simulated/capital_curious_audio]
   - bot: flows/yaml/restaurant_reservation/bot.py
-    scenarios: [simulated/book_table_available, simulated/book_table_flexible, simulated/book_table_impossible]
+    scenarios: [simulated/book_table]
   - bot: flows/yaml/patient_intake/bot.py
     scenarios: [simulated/complete_patient_intake]
   - bot: flows/python/food_ordering.py
