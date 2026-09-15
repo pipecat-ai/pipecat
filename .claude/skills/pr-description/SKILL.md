@@ -12,118 +12,94 @@ Update a GitHub pull request description based on the changes in the PR.
 ```
 
 - `PR_NUMBER` (required): The pull request number to update
-- `--fixes` (optional): Comma-separated issue numbers that this PR fixes (e.g., `--fixes 123,456`)
+- `--fixes` (optional): Comma-separated issue numbers this PR fixes (e.g., `--fixes 123,456`)
 
 Examples:
 - `/pr-description 3534`
-- `/pr-description 3534 --fixes 123`
-- `/pr-description 3534 --fixes 123,456,789`
+- `/pr-description 3534 --fixes 123,456`
 
 ## Instructions
 
-1. First, gather information about the PR:
-   - Use GitHub plugin to get PR details (title, current description, base branch)
-   - Use local git to get commits: `git log main..HEAD --oneline`
-   - Use local git to get the diff: `git diff main..HEAD`
-   - Parse any `--fixes` argument for issue numbers
+1. Gather the change:
+   - GitHub plugin for PR details (title, current description, base branch)
+   - `git log main..HEAD --oneline` and `git diff main..HEAD`
+   - Issue numbers from `--fixes` and from commit messages (`Fixes #123`, `Closes #456`)
 
-2. Check the existing PR description:
-   - If it already has a complete, accurate description that reflects the changes, do nothing
-   - If it's missing sections, incomplete, or outdated compared to the actual changes, proceed to update
-   - If it only has the template placeholder text, generate a full description
+2. Check the existing description. If it is already complete and accurate, do
+   nothing. Update it if it is missing sections, outdated, or still the template
+   placeholder.
 
-3. Analyze the changes:
-   - Understand the purpose of each commit
-   - Identify any breaking changes (API changes, removed features, behavior changes)
-   - Look for new features, bug fixes, refactoring, or documentation changes
-   - Collect issue numbers from:
-     - The `--fixes` argument (if provided)
-     - Commit messages (patterns like "Fixes #123", "Closes #456", "Resolves #789")
+3. Decide the bullets before writing any. List the distinct things a reviewer has
+   to check — usually 3 to 6, rarely more than 8. One bullet each. A concern that
+   needs more than two sentences is two concerns.
 
-4. Generate or update the PR description with these sections:
+## Format
 
-## PR Description Format
-
-### Summary (always include)
-
-Brief bullet points describing what changed and why. Focus on the *purpose* and *impact*, not implementation details.
+An opening sentence, then labeled bullets. Headings only where shown.
 
 ```markdown
-## Summary
+A scenario can now be scripted or simulated.
 
-- Added X to enable Y
-- Fixed bug where Z would happen
-- Refactored W for better maintainability
-```
+- **Simulated scenarios.** `persona:` plus `goal:` lets an LLM play the caller and
+  hang up with an `end_call` tool. A judge reads the transcript and decides
+  `success:`.
+- **Metrics.** A judged `criterion` is decided per bot turn, scored as the share of
+  turns that passed. A `measure` is computed from the run, no judge.
+- **Runs.** `runs: N` and every run must pass. `--repeat` sweeps only measure.
+- **CLI.** `pipecat eval run` takes either kind; `-k simulation` selects them in a
+  suite.
 
-### Breaking Changes (include only if applicable)
-
-Document any changes that affect existing users or APIs.
-
-```markdown
 ## Breaking Changes
 
-- `ClassName.method()` now requires a `param` argument
-- Removed deprecated `old_function()` - use `new_function()` instead
-```
-
-### Testing (include when non-obvious)
-
-How to verify the changes work. Skip for trivial changes.
-
-```markdown
-## Testing
-
-- Run `uv run pytest tests/test_feature.py` to verify the fix
-- Example usage: `uv run examples/new_feature.py`
-```
-
-### Fixes (include if issues are provided or found in commits)
-
-List issues this PR fixes. GitHub will automatically close these issues when the PR is merged.
-
-```markdown
-## Fixes
-
-- Fixes #123
-- Fixes #456
-```
-
-Note: Use "Fixes #X" format (not "Closes" or "Resolves") for consistency. Each issue should be on its own line with "Fixes" to ensure GitHub auto-closes them.
-
-## Guidelines
-
-- **Be concise** - Reviewers should understand the PR in 30 seconds
-- **Focus on why** - The diff shows *what* changed, explain *why*
-- **Skip empty sections** - Only include sections that have content
-- **Use bullet points** - Easier to scan than paragraphs
-- **Don't duplicate the diff** - Avoid listing every file or line changed
-
-## Example Output
-
-```markdown
-## Summary
-
-- Added `/docstring` skill for documenting Python modules with Google-style docstrings
-- Skill finds classes by name and handles conflicts when multiple matches exist
-- Skips already-documented code to avoid unnecessary changes
-
-## Testing
-
-/docstring ClassName
+- `EvalSession.run()` returns `EvalScriptResult` or `EvalSimulationResult`
+- `RTVIEvalSerializer` is now `EvalSerializer` — the old name is a deprecated alias
 
 ## Fixes
 
 - Fixes #123
 ```
+
+- **Opening sentence.** What is different now, in one line, no heading. A reviewer
+  who reads only this should know what the PR is.
+- **Bullets.** Each opens with a bolded noun label naming a part of the system — a
+  class, a module, a surface, a behavior — so a reviewer can skip to the part they
+  own. Never label a bullet with a section of an essay: `Motivation`, `Rationale`,
+  `Background`, `Context`, `Tests`. Two sentences at most.
+- **Example.** At most one short fenced block, and only when the PR adds an API or
+  config surface a reviewer would otherwise have to reconstruct.
+- **Breaking Changes.** Include whenever behavior, signatures, or defaults change
+  for existing users. Never omit this section to save space.
+- **Fixes.** Use `Fixes #X`, one per line, so GitHub closes them on merge.
+
+Nothing else. No Testing section, no Context section. A PR that belongs to a series
+says so in a trailing clause on the opening sentence.
+
+## Rules
+
+Length follows the reviewer, not the diff. Aim under 200 words. A small diff gets a
+small description.
+
+Every bullet is a fact a reviewer can check against the diff. Give a reason only
+where a reviewer would otherwise ask "why would you do that?", and give it as a
+clause rather than a bullet. `AGENTS.md` sets the same standard for comments, under
+"Writing for Future Readers".
+
+Never include:
+
+- A sentence arguing the change is correct
+- A second sentence that elaborates the first rather than adding a fact
+- Alternatives considered and rejected
+- Test counts, coverage numbers, "all tests pass", which tests changed, or how to
+  run the tests
+- Aphorism, metaphor where a plain noun works, or a fact restated more elegantly
+- A walk through the files changed
 
 ## Checklist
 
-Before updating the PR:
-
-- [ ] Description documents the change for users, not the development process — the standard `/prose-review` applies, in `AGENTS.md` under "Writing for Future Readers"
-- [ ] Verified existing description needs updating (not already complete)
-- [ ] Summary accurately reflects the changes
-- [ ] Breaking changes are clearly documented (if any)
-- [ ] No unnecessary sections included
-- [ ] Description is concise and scannable
+- [ ] Opening sentence says what is different now
+- [ ] Every bullet has a noun label and is two sentences or fewer
+- [ ] No sentence argues, and no rejected alternatives
+- [ ] No Testing section, test counts, or coverage numbers
+- [ ] Breaking changes documented, if any
+- [ ] Under 200 words
+- [ ] A reviewer who has not opened the diff can say what to review
