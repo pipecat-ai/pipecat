@@ -194,15 +194,10 @@ class BackendToolCall:
 #: phases of the function calls it made on the way.
 @dataclass
 class _BackendFinalOutput:
-    """The backend's final output for a delegation, yielded last by :func:`_delegate_to_backend`.
-
-    Nothing sets it apart but its place: it is the output that settles the
-    delegation, and the reply strategies package output for the frontend
-    around it.
+    """The output that settles a delegation, yielded last by :func:`_delegate_to_backend`.
 
     Parameters:
-        output: The final output. It is the job's response, so no update can
-            pose as it.
+        output: The final output, from the job's response.
     """
 
     output: BackendOutput
@@ -398,7 +393,8 @@ class BackendLLMWorker(LLMContextWorker):
                 left is not sent. Without one, only the final output asks to be
                 spoken: a frontend filling the wait is usually mid-sentence
                 when progress arrives, and speaking it talks over them.
-                Outputs the app sends itself are not passed through it.
+                Outputs the app sends itself are not passed through it
+                unless the call asks.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -518,11 +514,10 @@ class BackendLLMWorker(LLMContextWorker):
         if run is None:
             logger.warning(f"Worker '{self.name}': no delegation in progress to send output on")
             return
-        # Past the transform by default, so the app can silence the model's
+        # Past the transform by default, so an app can silence the model's
         # progress with a transform_output that blanks it and still send
         # progress of its own, such as from a tool the model calls to talk to
-        # the user. The transform sees only what the model wrote unless the
-        # app asks otherwise, and nothing on an output says where it came from.
+        # the user.
         await self._emit(run, output, apply_transform_output=apply_transform_output)
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
@@ -646,7 +641,7 @@ async def _delegate_to_backend(
             signals a handoff without wording a request. A frontend whose
             model does word one can send it as it stands::
 
-                async for output in _delegate_to_backend(worker, "backend", request=task):
+                async for output in _delegate_to_backend(worker, "backend", request=request):
                     ...
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
