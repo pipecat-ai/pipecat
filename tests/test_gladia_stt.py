@@ -84,8 +84,9 @@ async def test_cancel_does_not_send_stop_recording():
 
 @pytest.mark.asyncio
 async def test_audio_chunk_not_acknowledged_reports_error():
-    """A rejected audio_chunk (e.g. quota exceeded) carries an ``error`` field
-    but no ``acknowledged: true`` — it used to be silently dropped.
+    """A rejected audio_chunk carries an ``error`` and no ``acknowledged: true``.
+
+    The rejection is reported upstream as an error.
     """
     service, _ = _connected_service(
         incoming=[
@@ -107,9 +108,10 @@ async def test_audio_chunk_not_acknowledged_reports_error():
 
 @pytest.mark.asyncio
 async def test_translation_addon_error_reports_error_instead_of_crashing():
-    """When the translation addon fails, Gladia sends ``data: null`` alongside
-    an ``error`` object. Indexing into ``data`` unconditionally used to raise
-    a TypeError, which tears down and reconnects the whole STT connection.
+    """A failed translation addon call arrives with ``error`` set and ``data: null``.
+
+    The failure is reported upstream as an error and the receive loop keeps
+    running, so the connection is not torn down.
     """
     service, _ = _connected_service(
         incoming=[
@@ -132,7 +134,7 @@ async def test_translation_addon_error_reports_error_instead_of_crashing():
 
 @pytest.mark.asyncio
 async def test_translation_without_error_still_pushes_translation_frame():
-    """Regression check: the new error guard must not affect the success path."""
+    """A translation with ``error: null`` pushes a ``TranslationFrame``."""
     service, _ = _connected_service(
         incoming=[
             {
