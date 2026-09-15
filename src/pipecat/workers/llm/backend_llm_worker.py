@@ -4,24 +4,43 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Backend LLM worker: the backend a conversational model delegates work to.
+"""Backend LLM worker for two-tier voice agents.
 
 A frontend holds the conversation and hands off requests that need tools or
-careful reasoning. A :class:`BackendLLMWorker` runs any Pipecat LLM service,
-with its own context and multi-step tool calling, to do that work: over the
-worker job API it streams back everything it produces and returns its final
-answer. ``OpenAILiveLLMService`` client delegation puts requests to one.
+careful reasoning. What the frontend is does not matter to this contract: a
+speech-to-speech model delegating on its own, or a pipeline calling a tool.
+A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
+and multi-step tool calling, to do that work: over the worker job API it
+streams back everything it produces, its final output last, along with the
+function calls it makes on the way, for the frontend to report.
+:func:`_delegate_to_backend` is the caller side of that contract, an async
+iterator over that stream.
+
+A request is text, so how a frontend words one is its own business.
+:func:`_render_transcript_request` renders the conversation as a labelled
+transcript, which is what a frontend hands over when its model signals a
+handoff without wording a request; a frontend whose model does word one sends
+that instead.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Protocol
 
 from loguru import logger
 
 from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.frames.frames import ErrorFrame, LLMContextFrame, LLMMessagesAppendFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    LLMContextFrame,
+    LLMMessagesAppendFrame,
+)
 from pipecat.pipeline.job_context import JobEvent, JobParams, JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import (
@@ -45,6 +64,20 @@ from pipecat.workers.llm.llm_context_worker import LLMContextWorker
 #: Name of the job a :class:`BackendLLMWorker` handles.
 BACKEND_JOB_NAME = "run"
 
+#: The ``type`` of a job update that carries a :class:`BackendOutput`.
+OUTPUT_UPDATE_TYPE = "output"
+
+#: The ``type`` of a job update that carries a :class:`BackendToolCall`.
+TOOL_CALL_UPDATE_TYPE = "tool_call"
+
+#: Appended to the backend LLM's system instruction: its output is relayed to
+#: a listener by the frontend, whatever the app's prompt says the backend does.
+BACKEND_OUTPUT_INSTRUCTIONS = (
+    "Your replies are relayed to a user by a voice assistant. Reply in concise, "
+    "conversational plain text it can say aloud: no Markdown, no raw JSON. Never claim "
+    "an action completed without a tool result confirming it."
+)
+
 
 @dataclass
 class BackendOutput:
@@ -53,8 +86,6 @@ class BackendOutput:
     Parameters:
         text: The text the backend produced.
         is_thought: Whether this is a reasoning summary rather than a response.
-        is_final: Whether this is the backend's answer to the delegation, as opposed
-            to progress on the way to it.
         prefers_spoken: Whether the backend would like the user to hear this.
             This is just a hint to the frontend: it may choose to follow it or not.
             ``OpenAILiveLLMService``'s live model takes it into consideration,
@@ -63,7 +94,6 @@ class BackendOutput:
 
     text: str
     is_thought: bool = False
-    is_final: bool = False
     prefers_spoken: bool = True
 
     def to_payload(self) -> dict[str, Any]:
@@ -73,9 +103,9 @@ class BackendOutput:
             The payload.
         """
         return {
+            "type": OUTPUT_UPDATE_TYPE,
             "text": self.text,
             "is_thought": self.is_thought,
-            "is_final": self.is_final,
             "prefers_spoken": self.prefers_spoken,
         }
 
@@ -94,18 +124,101 @@ class BackendOutput:
         # payload can arrive from another process.
         flags = {
             name: bool(payload[name])
-            for name in ("is_thought", "is_final", "prefers_spoken")
+            for name in ("is_thought", "prefers_spoken")
             if name in payload
         }
         return cls(text=str(payload.get("text") or ""), **flags)
 
 
-#: Called with each piece of output a backend produces, as it is produced.
-BackendUpdateCallback = Callable[[BackendOutput], Awaitable[None]]
+@dataclass
+class BackendToolCall:
+    """One phase of a function call the backend made while working, on its way to the frontend.
+
+    The call ran in the backend's own pipeline; the frontend reports it to
+    clients (as an ``ExternalFunctionCallFrame``) and does nothing else with it.
+
+    Parameters:
+        phase: ``started``, ``in_progress`` or ``stopped``.
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments passed to the function, once known.
+        result: The result, once the call has stopped with one.
+        cancelled: Whether the call stopped by cancellation rather than with a
+            result.
+    """
+
+    phase: Literal["started", "in_progress", "stopped"]
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any] | None = None
+    result: Any = None
+    cancelled: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        """Render the call phase as a job update payload.
+
+        Returns:
+            The payload.
+        """
+        return {
+            "type": TOOL_CALL_UPDATE_TYPE,
+            "phase": self.phase,
+            "function_name": self.function_name,
+            "tool_call_id": self.tool_call_id,
+            "arguments": dict(self.arguments) if self.arguments is not None else None,
+            "result": self.result,
+            "cancelled": self.cancelled,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "BackendToolCall":
+        """Rebuild a call phase from a job update payload.
+
+        Args:
+            payload: The update payload.
+
+        Returns:
+            The call phase.
+        """
+        return cls(
+            phase=payload.get("phase") or "in_progress",
+            function_name=str(payload.get("function_name") or ""),
+            tool_call_id=str(payload.get("tool_call_id") or ""),
+            arguments=payload.get("arguments"),
+            result=payload.get("result"),
+            cancelled=bool(payload.get("cancelled", False)),
+        )
+
+
+#: What :func:`_delegate_to_backend` yields: the backend's outputs and the
+#: phases of the function calls it made on the way.
+@dataclass
+class _BackendFinalOutput:
+    """The output that settles a delegation, yielded last by :func:`_delegate_to_backend`.
+
+    Parameters:
+        output: The final output, from the job's response.
+    """
+
+    output: BackendOutput
+
+
+BackendEvent = BackendOutput | BackendToolCall | _BackendFinalOutput
+
 
 #: Adjusts a backend output — its text, or whether the user may hear it —
 #: before it leaves the worker.
-BackendOutputTransform = Callable[[BackendOutput], Awaitable[BackendOutput]]
+class BackendOutputTransform(Protocol):
+    """Shapes one of the backend model's outputs before it is sent.
+
+    Called as ``transform_output(output, is_final=...)``; ``is_final`` is
+    true for the final output, which settles the delegation, and false for
+    the outputs before it.
+    """
+
+    async def __call__(self, output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        """Return the output to send in place of ``output``; blank its text to drop it."""
+        ...
 
 
 def _message_text(message: LLMStandardMessage) -> str:
@@ -195,7 +308,7 @@ class _BackendRun:
     job_id: str
     runs_requested: int = 0
     runs_completed: int = 0
-    final_text: str = ""
+    final_output: BackendOutput | None = None
     error: str = ""
     finished: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -207,24 +320,39 @@ class BackendLLMWorker(LLMContextWorker):
     aggregator pair, so multi-step tool calling works as it does in any
     pipeline. Each delegation arrives as a ``run`` job carrying the request
     text, which is appended to the context as one user message, and runs the
-    LLM until it produces a final answer.
+    LLM until it has nothing more to do.
+
+    Everything the backend's model produces reaches the frontend as
+    :class:`BackendOutput` updates, continually. :meth:`say` (and its general
+    form :meth:`send_output`) lets the app send one output of its own on the
+    same channel, e.g. from an ``on_delegation_started`` handler or a tool,
+    for a backend that knows its work is slow to tell the user so.
+
+    Event handlers available:
+
+    - on_delegation_started: Called with the request text when a delegation
+      arrives, before the model runs.
 
     Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
-      composed by the frontend.
-    - updates: a :class:`BackendOutput` payload for every piece of output —
-      reasoning summaries, what the backend says before calling tools, and its
-      final answer.
-    - response: ``{"text": str}`` — the final answer, or ``""`` if the
-      delegation ended without one. A backend LLM failure answers the job
+      composed by the frontend. What that text says is the application's
+      business: :func:`_render_transcript_request` renders the conversation as
+      a transcript, which is what a frontend whose model hands off without
+      wording a request needs, but a frontend that has a worded request can
+      simply send it.
+    - updates: a :class:`BackendOutput` payload for every piece of progress —
+      reasoning summaries and what the backend says before calling tools —
+      and a :class:`BackendToolCall` payload for each phase of each function
+      call the backend makes, so the frontend can report them.
+    - response: the final output as a :class:`BackendOutput` payload, or
+      ``{"text": ""}`` if the delegation ended without one. A backend LLM failure fails the job
       with ``JobStatus.ERROR``, so the frontend hears about it as soon as it
       happens.
 
-    The final answer arrives twice, as the last update and as the response, so
-    a caller uses one or the other: a frontend relaying output as it arrives
-    reads the updates, while one that needs a return value reads the response
-    and skips updates marked ``is_final``.
+    Progress arrives as updates and the final output as the response.
+    :func:`_delegate_to_backend` wraps the caller side and yields both, the
+    final output last.
 
     Example::
 
@@ -235,6 +363,10 @@ class BackendLLMWorker(LLMContextWorker):
                 tools=[get_weather],
             ),
         )
+
+        @backend.event_handler("on_delegation_started")
+        async def on_delegation_started(backend, request):
+            await backend.say("Let me look into that, this takes a moment.")
     """
 
     def __init__(
@@ -254,11 +386,15 @@ class BackendLLMWorker(LLMContextWorker):
             context: The backend's context, typically carrying its tools.
                 A fresh empty context when omitted.
             name: Worker name; auto-generated when omitted.
-            transform_output: Called with each :class:`BackendOutput` before it
-                is sent, to adjust its text or whether the user may hear it.
-                Without one, only the final answer asks to be spoken: a
-                frontend filling the wait is usually mid-sentence when
-                progress arrives, and speaking it talks over them.
+            transform_output: Called with each :class:`BackendOutput` the
+                model produces before it is sent, as
+                ``transform_output(output, is_final=...)``, to adjust its
+                text or whether the user may hear it; an output with no text
+                left is not sent. Without one, only the final output asks to be
+                spoken: a frontend filling the wait is usually mid-sentence
+                when progress arrives, and speaking it talks over them.
+                Outputs the app sends itself are not passed through it
+                unless the call asks.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -277,6 +413,8 @@ class BackendLLMWorker(LLMContextWorker):
         )
         self._run: _BackendRun | None = None
         self._transform_output = transform_output
+        self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
+        self._register_event_handler("on_delegation_started")
 
         # A delegation takes one or more LLM runs: the first for the request
         # itself, then one per round of tool results (the assistant aggregator
@@ -288,6 +426,12 @@ class BackendLLMWorker(LLMContextWorker):
         async def on_before_process_frame(llm, frame):
             if isinstance(frame, LLMContextFrame) and self._run is not None:
                 self._run.runs_requested += 1
+
+        # The backend's function calls are relayed as they pass the assistant
+        # aggregator, which every phase of a call reaches.
+        @self.assistant_aggregator.event_handler("on_before_process_frame")
+        async def on_before_aggregator_frame(aggregator, frame: Frame):
+            await self._on_function_call_frame(frame)
 
         @self.assistant_aggregator.event_handler("on_assistant_turn_stopped")
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
@@ -315,6 +459,7 @@ class BackendLLMWorker(LLMContextWorker):
             return
 
         run = self._run = _BackendRun(job_id=message.job_id)
+        await self._call_event_handler("on_delegation_started", request)
         await self.queue_frame(
             LLMMessagesAppendFrame(messages=[{"role": "user", "content": request}], run_llm=True)
         )
@@ -323,11 +468,57 @@ class BackendLLMWorker(LLMContextWorker):
         finally:
             self._run = None
         # An error fails the job only when it left the backend with nothing to say.
-        if run.error and not run.final_text:
+        if run.error and run.final_output is None:
             logger.warning(f"Worker '{self.name}': job {message.job_id} failed: {run.error}")
             await self.send_job_response(message.job_id, {"text": ""}, status=JobStatus.ERROR)
             return
-        await self.send_job_response(message.job_id, {"text": run.final_text})
+        await self.send_job_response(
+            message.job_id,
+            run.final_output.to_payload() if run.final_output else {"text": ""},
+        )
+
+    async def say(self, text: str, *, apply_transform_output: bool = False) -> None:
+        """Send one spoken line to the frontend, on the delegation in progress.
+
+        The line is a :class:`BackendOutput` flagged ``prefers_spoken``, so a
+        frontend following the flag says it right away while the backend keeps
+        working. For anything else, :meth:`send_output`.
+
+        Args:
+            text: What the frontend should say.
+            apply_transform_output: Whether to run the line through
+                ``transform_output`` as the model's outputs are; see
+                :meth:`send_output`.
+        """
+        await self.send_output(
+            BackendOutput(text=text, prefers_spoken=True),
+            apply_transform_output=apply_transform_output,
+        )
+
+    async def send_output(
+        self, output: BackendOutput, *, apply_transform_output: bool = False
+    ) -> None:
+        """Send one output of the app's own to the frontend, on the delegation in progress.
+
+        It reaches the frontend as the model's outputs do, but as given unless
+        asked: ``transform_output`` is not applied to it by default. Outside a
+        delegation there is nowhere for it to go, and it is dropped with a
+        warning.
+
+        Args:
+            output: The output.
+            apply_transform_output: Whether to run the output through
+                ``transform_output`` as the model's outputs are.
+        """
+        run = self._run
+        if run is None:
+            logger.warning(f"Worker '{self.name}': no delegation in progress to send output on")
+            return
+        # Past the transform by default, so an app can silence the model's
+        # progress with a transform_output that blanks it and still send
+        # progress of its own, such as from a tool the model calls to talk to
+        # the user.
+        await self._emit(run, output, apply_transform_output=apply_transform_output)
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         run = self._run
@@ -346,23 +537,57 @@ class BackendLLMWorker(LLMContextWorker):
             and not self.llm.has_queued_frame(LLMContextFrame)
         )
         text = (message.content or "").strip()
-        sent = None
-        if text:
-            # Default behavior: only the final answer asks to be spoken.
-            # This behavior can be adjusted by a transform_output callback.
-            sent = await self._emit(
-                run, BackendOutput(text=text, is_final=finished, prefers_spoken=finished)
-            )
+        # Default behavior: only the final output asks to be spoken.
+        # This behavior can be adjusted by a transform_output callback.
         if finished:
-            run.final_text = sent.text if sent else ""
+            # The final output is the job's response, not an update.
+            final = BackendOutput(text=text, prefers_spoken=True) if text else None
+            if final is not None:
+                final = await self._shape(final, is_final=True)
+            run.final_output = final if final and final.text else None
             run.finished.set()
+        elif text:
+            await self._emit(run, BackendOutput(text=text, prefers_spoken=False))
+
+    async def _on_function_call_frame(self, frame: Frame):
+        """Relay a phase of one of the backend's own function calls as a job update."""
+        run = self._run
+        if run is None:
+            return
+        calls: list[BackendToolCall] = []
+        if isinstance(frame, FunctionCallsStartedFrame):
+            calls = [
+                BackendToolCall("started", call.function_name, call.tool_call_id)
+                for call in frame.function_calls
+            ]
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            calls = [
+                BackendToolCall(
+                    "in_progress",
+                    frame.function_name,
+                    frame.tool_call_id,
+                    arguments=frame.arguments,
+                )
+            ]
+        elif isinstance(frame, FunctionCallResultFrame):
+            calls = [
+                BackendToolCall(
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                )
+            ]
+        elif isinstance(frame, FunctionCallCancelFrame):
+            calls = [
+                BackendToolCall("stopped", frame.function_name, frame.tool_call_id, cancelled=True)
+            ]
+        for call in calls:
+            await self.send_job_update(run.job_id, call.to_payload())
 
     async def _on_pipeline_error(self, frame: ErrorFrame):
-        """End the delegation in progress: the backend cannot answer it.
+        """End the delegation in progress: the backend cannot finish it.
 
         A tool handler that raises is the exception. The LLM service reports
         that as ``ErrorCategory.APPLICATION``, settles the call with an error
-        result and carries on, so the delegation still has an answer coming.
+        result and carries on, so the delegation still has a final output coming.
         """
         run = self._run
         if run is None or frame.category == ErrorCategory.APPLICATION:
@@ -376,14 +601,22 @@ class BackendLLMWorker(LLMContextWorker):
         if run is not None and text:
             await self._emit(run, BackendOutput(text=text, is_thought=True, prefers_spoken=False))
 
-    async def _emit(self, run: "_BackendRun", output: BackendOutput) -> BackendOutput:
+    async def _shape(self, output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        """Run an output through ``transform_output``, if there is one."""
+        if self._transform_output is None:
+            return output
+        return await self._transform_output(output, is_final=is_final)
+
+    async def _emit(
+        self, run: "_BackendRun", output: BackendOutput, *, apply_transform_output: bool = True
+    ) -> BackendOutput:
         """Send one output as a job update, after any configured transform.
 
         Returns:
             The output as it was sent, so a caller sees the transformed text.
         """
-        if self._transform_output is not None:
-            output = await self._transform_output(output)
+        if apply_transform_output:
+            output = await self._shape(output, is_final=False)
         if output.text:
             await self.send_job_update(run.job_id, output.to_payload())
         return output
@@ -394,26 +627,30 @@ async def _delegate_to_backend(
     backend_name: str,
     *,
     request: str,
-    on_update: BackendUpdateCallback | None = None,
     timeout_secs: float | None = None,
-) -> str:
-    """Put a request to a :class:`BackendLLMWorker` and return its final text.
+) -> AsyncIterator[BackendEvent]:
+    """Put a request to a :class:`BackendLLMWorker` and yield what it produces.
 
     Args:
-        worker: The worker making the request.
+        worker: The worker making the request (for a pipeline processor,
+            ``self.pipeline_worker``).
         backend_name: Name of the backend worker.
         request: The text to put to the backend, as its user message.
             :func:`_render_transcript_request` composes one from a
-            conversation.
-        on_update: Called with each :class:`BackendOutput` the backend
-            produces, the final answer included. A caller using the return
-            value should skip outputs marked ``is_final`` to avoid handling
-            the answer twice.
+            conversation, which is what a frontend hands over when its model
+            signals a handoff without wording a request. A frontend whose
+            model does word one can send it as it stands::
+
+                async for output in _delegate_to_backend(worker, "backend", request=request):
+                    ...
         timeout_secs: How long to wait for the backend, including the wait for
             it to become ready.
 
-    Returns:
-        The backend's final response text (``""`` if it produced none).
+    Yields:
+        Each :class:`BackendOutput` as the backend produces it, the final
+        output last as a :class:`_BackendFinalOutput`, and each
+        :class:`BackendToolCall` phase as the backend's calls run. A delegation
+        that ends with nothing to say yields no final output.
 
     Raises:
         JobError: If the backend fails, is cancelled, or times out.
@@ -425,9 +662,15 @@ async def _delegate_to_backend(
     )
     async with worker.job(backend_name, params=params) as backend_job:
         async for event in backend_job:
-            if event.type != JobEvent.UPDATE or not event.data or not on_update:
+            if event.type != JobEvent.UPDATE or not event.data:
                 continue
-            output = BackendOutput.from_payload(event.data)
-            if output.text:
-                await on_update(output)
-    return str(backend_job.response.get("text", ""))
+            update_type = event.data.get("type", OUTPUT_UPDATE_TYPE)
+            if update_type == OUTPUT_UPDATE_TYPE:
+                output = BackendOutput.from_payload(event.data)
+                if output.text:
+                    yield output
+            elif update_type == TOOL_CALL_UPDATE_TYPE:
+                yield BackendToolCall.from_payload(event.data)
+        final = BackendOutput.from_payload(backend_job.response)
+        if final.text:
+            yield _BackendFinalOutput(final)

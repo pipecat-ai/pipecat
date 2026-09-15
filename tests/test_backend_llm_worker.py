@@ -15,9 +15,11 @@ WorkerRunner.
 import asyncio
 from dataclasses import replace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -29,6 +31,7 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
 )
 from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.job_decorator import job
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
@@ -36,7 +39,10 @@ from pipecat.services.settings import LLMSettings
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker
 from pipecat.workers.llm.backend_llm_worker import (
+    BACKEND_JOB_NAME,
     BackendOutput,
+    BackendToolCall,
+    _BackendFinalOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -161,21 +167,26 @@ async def _run_backend(
     await runner.add_workers(requester, backend)
 
     updates: list[BackendOutput] = []
-    result: dict[str, str] = {}
-
-    async def on_update(output: BackendOutput):
-        updates.append(output)
+    finals: list[BackendOutput] = []
+    backend.tool_calls = []  # type: ignore[attr-defined]  # the BackendToolCall phases seen
 
     async def body():
         try:
-            result["text"] = await _delegate_to_backend(
-                requester, "backend", request=request, on_update=on_update, timeout_secs=10
-            )
+            async for event in _delegate_to_backend(
+                requester, "backend", request=request, timeout_secs=10
+            ):
+                if isinstance(event, BackendToolCall):
+                    backend.tool_calls.append(event)  # type: ignore[attr-defined]
+                elif isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
+                    updates.append(event.output)
+                else:
+                    updates.append(event)
         finally:
             await runner.cancel()
 
     await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
-    return result["text"], updates, backend
+    return (finals[-1].text if finals else ""), updates, backend
 
 
 @pytest.mark.asyncio
@@ -199,10 +210,18 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     )
 
     assert text == "It's 62 and raining in Seattle."
+    # The backend's own call is relayed phase by phase, for the frontend to report.
+    assert [(c.phase, c.function_name, c.tool_call_id) for c in backend.tool_calls] == [
+        ("started", "get_weather", "call_1"),
+        ("in_progress", "get_weather", "call_1"),
+        ("stopped", "get_weather", "call_1"),
+    ]
+    assert backend.tool_calls[1].arguments == {"location": "Seattle"}
+    assert backend.tool_calls[2].result == {"temp": 62, "conditions": "rain"}
     # Only the answer is prefers_spoken; what the backend says on the way is not.
     assert updates == [
-        BackendOutput(text="Let me check.", is_final=False, prefers_spoken=False),
-        BackendOutput(text="It's 62 and raining in Seattle.", is_final=True, prefers_spoken=True),
+        BackendOutput(text="Let me check.", prefers_spoken=False),
+        BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True),
     ]
 
     # The backend saw the rendered request first, then the tool result.
@@ -233,9 +252,9 @@ async def test_fast_tool_result_before_response_end_does_not_finish_the_run_earl
     text, updates, _ = await _run_backend(llm)
 
     assert text == "Rain, 62 degrees."
-    assert [(u.text, u.is_final) for u in updates] == [
-        ("Checking.", False),
-        ("Rain, 62 degrees.", True),
+    assert [u.text for u in updates] == [
+        "Checking.",
+        "Rain, 62 degrees.",
     ]
 
 
@@ -259,11 +278,11 @@ async def test_a_chained_request_finishes_on_the_last_round_not_an_earlier_one()
 
     assert text == "Taxi booked for 12:30."
     assert len(llm.contexts_seen) == 3
-    # What the backend says between rounds is progress; only the last round answers.
-    assert [(u.text, u.is_thought, u.is_final) for u in updates] == [
-        ("Check the flight first.", True, False),
-        ("It's delayed, so I'm booking a taxi for 12:30.", False, False),
-        ("Taxi booked for 12:30.", False, True),
+    # What the backend says between rounds is progress; the last round's is the final output.
+    assert [(u.text, u.is_thought) for u in updates] == [
+        ("Check the flight first.", True),
+        ("It's delayed, so I'm booking a taxi for 12:30.", False),
+        ("Taxi booked for 12:30.", False),
     ]
 
 
@@ -280,7 +299,7 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
 
     assert text == "It's raining."
     # The tool-only response produces no text; only the final answer is sent.
-    assert [(u.text, u.is_final) for u in updates] == [("It's raining.", True)]
+    assert [u.text for u in updates] == ["It's raining."]
 
 
 @pytest.mark.asyncio
@@ -303,7 +322,7 @@ async def test_a_tool_handler_that_raises_leaves_the_delegation_running():
     text, updates, _ = await _run_backend(llm, tools=[raise_an_error])
 
     assert text == "That did not work, sorry."
-    assert [(u.text, u.is_final) for u in updates] == [("That did not work, sorry.", True)]
+    assert [u.text for u in updates] == ["That did not work, sorry."]
 
 
 @pytest.mark.asyncio
@@ -336,21 +355,17 @@ async def test_follow_up_tasks_render_only_the_turns_since_the_last_one():
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
 
+    async def delegate(request: str):
+        async for _ in _delegate_to_backend(requester, "backend", request=request):
+            pass
+
     async def body():
         try:
-            await _delegate_to_backend(
-                requester,
-                "backend",
-                request=_render_transcript_request(
-                    [{"role": "user", "content": "one"}], first=True
-                ),
+            await delegate(
+                _render_transcript_request([{"role": "user", "content": "one"}], first=True)
             )
-            await _delegate_to_backend(
-                requester,
-                "backend",
-                request=_render_transcript_request(
-                    [{"role": "user", "content": "two"}], first=False
-                ),
+            await delegate(
+                _render_transcript_request([{"role": "user", "content": "two"}], first=False)
             )
         finally:
             await runner.cancel()
@@ -404,7 +419,7 @@ async def test_transform_output_can_rewrite_text_and_speakability():
         ]
     )
 
-    async def transform_output(output: BackendOutput) -> BackendOutput:
+    async def transform_output(output: BackendOutput, *, is_final: bool) -> BackendOutput:
         if output.text.startswith(">>"):
             return replace(output, text=output.text[2:].lstrip(), prefers_spoken=True)
         return replace(output, prefers_spoken=False)
@@ -418,17 +433,199 @@ async def test_transform_output_can_rewrite_text_and_speakability():
 
 
 @pytest.mark.asyncio
-async def test_the_response_carries_the_transformed_answer():
+async def test_the_response_carries_the_transformed_final_output():
     """The final update and the return value are the same answer, transform included."""
     llm = _ScriptedLLM([[("text", "raw answer")]])
 
-    async def transform_output(output: BackendOutput) -> BackendOutput:
+    async def transform_output(output: BackendOutput, *, is_final: bool) -> BackendOutput:
         return replace(output, text=output.text.upper())
 
     text, updates, _ = await _run_backend(llm, transform_output=transform_output)
 
     assert [u.text for u in updates] == ["RAW ANSWER"]
     assert text == "RAW ANSWER"
+
+
+@pytest.mark.asyncio
+async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
+    """An app's own spoken line rides the same channel as the model's outputs."""
+    llm = _ScriptedLLM([[("text", "Done.")]])
+    backend = BackendLLMWorker(llm=llm, name="backend", context=LLMContext())
+    requests: list[str] = []
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        requests.append(request)
+        await worker.say("Let me look into that.")
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
+                    updates.append(event.output)
+                elif isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert requests == ["Do it"]
+    assert updates == [
+        BackendOutput(text="Let me look into that.", prefers_spoken=True),
+        BackendOutput(text="Done.", prefers_spoken=True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_apps_own_output_is_sent_as_given_past_the_transform():
+    """A transform that silences the model's progress leaves the app's outputs alone."""
+    llm = _ScriptedLLM(
+        [
+            [("text", "Checking."), ("call", "report", "call_1", {"text": "Seattle is up."})],
+            [("text", "Done.")],
+        ]
+    )
+
+    async def report(params: FunctionCallParams, text: str):
+        """Tell the user something.
+
+        Args:
+            text: What to tell them.
+        """
+        await backend.send_output(BackendOutput(text=text, prefers_spoken=False))
+        await params.result_callback("told")
+
+    async def silence_progress(output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        return output if is_final else replace(output, text="")
+
+    backend = BackendLLMWorker(
+        llm=llm,
+        name="backend",
+        context=LLMContext(tools=[report]),
+        transform_output=silence_progress,
+    )
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        await worker.say("Let me look into that.")
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
+                    updates.append(event.output)
+                elif isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert updates == [
+        BackendOutput(text="Let me look into that.", prefers_spoken=True),
+        BackendOutput(text="Seattle is up.", prefers_spoken=False),
+        BackendOutput(text="Done.", prefers_spoken=True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_apps_own_output_can_ask_for_the_transform():
+    llm = _ScriptedLLM([[("text", "Done.")]])
+
+    async def shout(output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        return replace(output, text=output.text.upper())
+
+    backend = BackendLLMWorker(
+        llm=llm, name="backend", context=LLMContext(), transform_output=shout
+    )
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        await worker.say("as given")
+        await worker.say("shaped", apply_transform_output=True)
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
+                    updates.append(event.output)
+                elif isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert [u.text for u in updates] == ["as given", "SHAPED", "DONE."]
+
+
+@pytest.mark.asyncio
+async def test_an_output_sent_outside_a_delegation_is_dropped():
+    backend = BackendLLMWorker(llm=_ScriptedLLM([]), name="backend", context=LLMContext())
+    backend.send_job_update = AsyncMock()  # type: ignore[method-assign]
+
+    await backend.say("Nobody is listening.")
+
+    backend.send_job_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_updates_of_another_type_are_not_outputs():
+    """The stream may carry update types the iterator does not know; those are skipped.
+
+    The backend here is a plain worker speaking the job contract, which is
+    also what a backend registered by name may be.
+    """
+
+    class _ContractBackend(BaseWorker):
+        @job(name=BACKEND_JOB_NAME, sequential=True)
+        async def run_delegation(self, message: BusJobRequestMessage):
+            await self.send_job_update(message.job_id, {"type": "progress", "percent": 50})
+            await self.send_job_response(message.job_id, BackendOutput(text="Done.").to_payload())
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, _ContractBackend("backend"))
+    outputs: list = []
+
+    async def body():
+        try:
+            async for output in _delegate_to_backend(requester, "backend", request="Do it"):
+                outputs.append(output)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert outputs == [_BackendFinalOutput(BackendOutput(text="Done."))]
+
+
+def test_a_payload_names_its_type():
+    assert BackendOutput(text="hello").to_payload()["type"] == "output"
+    assert BackendToolCall("started", "f", "c1").to_payload()["type"] == "tool_call"
+
+
+def test_a_tool_call_phase_survives_the_payload_round_trip():
+    call = BackendToolCall("stopped", "get_weather", "c1", arguments={"a": 1}, result={"t": 62})
+    assert BackendToolCall.from_payload(call.to_payload()) == call
 
 
 def test_a_payload_leaves_the_flags_it_omits_at_their_defaults():
@@ -438,10 +635,8 @@ def test_a_payload_leaves_the_flags_it_omits_at_their_defaults():
 
 def test_a_payload_coerces_the_flags_it_carries():
     """Flags cross a bus, so what arrives may not be a bool."""
-    rebuilt = BackendOutput.from_payload(
-        {"text": "hello", "is_thought": 1, "is_final": "", "prefers_spoken": 0}
-    )
-    assert (rebuilt.is_thought, rebuilt.is_final, rebuilt.prefers_spoken) == (True, False, False)
+    rebuilt = BackendOutput.from_payload({"text": "hello", "is_thought": 1, "prefers_spoken": 0})
+    assert (rebuilt.is_thought, rebuilt.prefers_spoken) == (True, False)
 
 
 def test_render_transcript_request_flattens_what_a_transcript_can_hold():

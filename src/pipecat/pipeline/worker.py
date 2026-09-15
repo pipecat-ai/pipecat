@@ -880,6 +880,7 @@ class PipelineWorker(BaseWorker):
             logger.debug(f"Pipeline worker {self} is finishing...")
             await self._cancel_tasks()
             self._print_dangling_tasks()
+            await self._cancel_children()
             self._finished = True
             logger.debug(f"Pipeline worker {self} has finished")
 
@@ -1343,6 +1344,21 @@ class PipelineWorker(BaseWorker):
 
         # Nothing left to answer a probe we are still holding.
         self._foreign_probes.clear()
+
+    async def _cancel_children(self) -> None:
+        """Cancel the children once this worker's pipeline is over.
+
+        A pipeline that ends on its own (an ``EndFrame`` it queued itself, an
+        idle timeout, a fatal error) is never told to end over the bus, so
+        nothing has passed the end on to its children. A child that has
+        already finished takes no notice.
+        """
+        for child in self._children:
+            await self.send_bus_message(
+                BusCancelWorkerMessage(
+                    source=self.name, target=child.name, reason=f"{self.name} finished"
+                )
+            )
 
     async def _handle_worker_end(self, message: BusEndWorkerMessage) -> None:
         """End the pipeline after propagating end to children.
