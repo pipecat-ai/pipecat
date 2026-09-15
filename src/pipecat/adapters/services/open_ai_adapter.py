@@ -237,6 +237,10 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             self.get_messages(context, truncate_large_values=True),
         )
 
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """OpenAI Chat Completions fetches image URLs itself; other files must be inlined."""
+        return mime_type.startswith("image/") and url.startswith(("http://", "https://"))
+
     def _from_universal_context_messages(
         self,
         messages: list[LLMContextMessage],
@@ -256,7 +260,12 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                         if item["type"] == "file_base64":
                             f_data = item["file"]
                             mime_type = f_data["mime_type"]
-                            if mime_type == "application/pdf":
+                            if mime_type.startswith("image/"):
+                                item = {
+                                    "type": "image_url",
+                                    "image_url": {"url": f_data["file_data"]},
+                                }
+                            elif mime_type == "application/pdf":
                                 item = {
                                     "type": "file",
                                     "file": {

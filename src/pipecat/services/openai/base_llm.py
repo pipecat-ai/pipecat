@@ -435,6 +435,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
+        await self.resolve_context_files(context)
+
         functions_list = []
         arguments_list = []
         tool_id_list = []

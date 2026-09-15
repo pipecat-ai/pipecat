@@ -185,6 +185,30 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(content[0]["type"], "image_url")
         self.assertEqual(content[0]["image_url"]["url"], "https://example.com/photo.jpg")
 
+    def test_image_file_base64_converted_to_image_url(self):
+        """Test that an inline image file becomes image_url content with a data URL.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        data_url = "data:image/png;base64,aGVsbG8="
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {"file_data": data_url, "filename": "a.png", "mime_type": "image/png"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        content = params["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], data_url)
+
     def test_standard_messages_passed_through_unchanged(self):
         """Test that LLMStandardMessage objects are passed through unchanged to OpenAI params."""
         # Create standard messages (OpenAI format)
@@ -710,6 +734,38 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         part = params["messages"][0].parts[0]
         self.assertEqual(part.file_data.file_uri, "https://example.com/report.pdf")
         self.assertEqual(part.file_data.mime_type, "application/pdf")
+
+    def test_file_base64_uses_cached_raw_bytes(self):
+        """Test that conversion consumes bytes cached by the file resolution pass.
+
+        The cache exists so the file's base64 isn't re-decoded on every
+        conversational turn; using it must take precedence over decoding
+        the data URL.
+        """
+        cached = b"cached raw bytes"
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_base64",
+                        "file": {
+                            "file_data": "data:application/pdf;base64,aGVsbG8=",
+                            "filename": "a.pdf",
+                            "mime_type": "application/pdf",
+                            "_raw_bytes": cached,
+                        },
+                    },
+                ],
+            }
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        part = params["messages"][0].parts[0]
+        self.assertEqual(part.inline_data.data, cached)
+        self.assertEqual(part.inline_data.mime_type, "application/pdf")
 
     def test_single_system_instruction_converted_to_user(self):
         """Test that when there's only a system instruction, it gets converted to user message."""
@@ -1306,6 +1362,36 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
             self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         self.assertIn("Unsupported 'file' MIME type", str(ctx.exception))
+
+    def test_image_file_base64_converted_to_image_block(self):
+        """Test that an inline image file becomes an Anthropic base64 image block.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:image/png;base64,aGVsbG8=",
+                        "filename": "a.png",
+                        "mime_type": "image/png",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        item = params["messages"][0]["content"][0]
+        self.assertEqual(item["type"], "image")
+        self.assertEqual(
+            item["source"],
+            {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="},
+        )
 
     def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
@@ -1965,6 +2051,35 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         image = params["messages"][0]["content"][0]["image"]
         self.assertEqual(image["format"], "png")
         self.assertEqual(image["source"]["bytes"], base64.b64decode("aGVsbG8="))
+
+    def test_file_base64_uses_cached_raw_bytes(self):
+        """Test that conversion consumes bytes cached by the file resolution pass.
+
+        The cache exists so the file's base64 isn't re-decoded on every
+        conversational turn; using it must take precedence over decoding
+        the data URL.
+        """
+        cached = b"cached raw bytes"
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:application/pdf;base64,aGVsbG8=",
+                        "filename": "a.pdf",
+                        "mime_type": "application/pdf",
+                        "_raw_bytes": cached,
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["source"]["bytes"], cached)
 
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
@@ -3120,6 +3235,35 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         content = params["input"][0]["content"]
         self.assertEqual(content[0]["type"], "input_file")
         self.assertEqual(content[0]["file_url"], "https://example.com/doc.pdf")
+
+    def test_image_file_base64_converted_to_input_image(self):
+        """An inline image file becomes input_image content with a data URL.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        data_url = "data:image/png;base64,aGVsbG8="
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_base64",
+                        "file": {
+                            "file_data": data_url,
+                            "filename": "a.png",
+                            "mime_type": "image/png",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_image")
+        self.assertEqual(content[0]["image_url"], data_url)
 
     def test_tools_schema_flattening(self):
         """Tools schema with nested function dict is flattened to Responses API format."""
