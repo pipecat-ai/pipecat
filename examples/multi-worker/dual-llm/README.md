@@ -17,7 +17,7 @@ How a delegation crosses is the `BackendConnector`'s business, built from two st
 |                    | request (frontend → backend)                                        | reply (backend → frontend)                                   |
 | ------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------ |
 | text frontend      | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says |
-| realtime frontend  | `ExplicitBackendRequestStrategy`: a request the model words itself   | `OneShotBackendReplyStrategy`: progress and answer together, when done             |
+| realtime frontend  | `ExplicitBackendRequestStrategy`: a request the model words itself   | `OneShotBackendReplyStrategy`: every output at once, when done             |
 
 ## Examples
 

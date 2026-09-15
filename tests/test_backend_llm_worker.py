@@ -42,7 +42,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     BACKEND_JOB_NAME,
     BackendOutput,
     BackendToolCall,
-    _BackendAnswer,
+    _BackendFinalOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -167,7 +167,7 @@ async def _run_backend(
     await runner.add_workers(requester, backend)
 
     updates: list[BackendOutput] = []
-    answers: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
     backend.tool_calls = []  # type: ignore[attr-defined]  # the BackendToolCall phases seen
 
     async def body():
@@ -177,8 +177,8 @@ async def _run_backend(
             ):
                 if isinstance(event, BackendToolCall):
                     backend.tool_calls.append(event)  # type: ignore[attr-defined]
-                elif isinstance(event, _BackendAnswer):
-                    answers.append(event.output)
+                elif isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
                     updates.append(event.output)
                 else:
                     updates.append(event)
@@ -186,7 +186,7 @@ async def _run_backend(
             await runner.cancel()
 
     await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
-    return (answers[-1].text if answers else ""), updates, backend
+    return (finals[-1].text if finals else ""), updates, backend
 
 
 @pytest.mark.asyncio
@@ -278,7 +278,7 @@ async def test_a_chained_request_finishes_on_the_last_round_not_an_earlier_one()
 
     assert text == "Taxi booked for 12:30."
     assert len(llm.contexts_seen) == 3
-    # What the backend says between rounds is progress; only the last round answers.
+    # What the backend says between rounds is progress; the last round's is the final output.
     assert [(u.text, u.is_thought) for u in updates] == [
         ("Check the flight first.", True),
         ("It's delayed, so I'm booking a taxi for 12:30.", False),
@@ -433,7 +433,7 @@ async def test_transform_output_can_rewrite_text_and_speakability():
 
 
 @pytest.mark.asyncio
-async def test_the_response_carries_the_transformed_answer():
+async def test_the_response_carries_the_transformed_final_output():
     """The final update and the return value are the same answer, transform included."""
     llm = _ScriptedLLM([[("text", "raw answer")]])
 
@@ -462,13 +462,13 @@ async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
     updates: list[BackendOutput] = []
-    answers: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
 
     async def body():
         try:
             async for event in _delegate_to_backend(requester, "backend", request="Do it"):
-                if isinstance(event, _BackendAnswer):
-                    answers.append(event.output)
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
                     updates.append(event.output)
                 elif isinstance(event, BackendOutput):
                     updates.append(event)
@@ -520,13 +520,13 @@ async def test_an_apps_own_output_is_sent_as_given_past_the_transform():
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
     updates: list[BackendOutput] = []
-    answers: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
 
     async def body():
         try:
             async for event in _delegate_to_backend(requester, "backend", request="Do it"):
-                if isinstance(event, _BackendAnswer):
-                    answers.append(event.output)
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
                     updates.append(event.output)
                 elif isinstance(event, BackendOutput):
                     updates.append(event)
@@ -561,13 +561,13 @@ async def test_an_apps_own_output_can_ask_for_the_transform():
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(requester, backend)
     updates: list[BackendOutput] = []
-    answers: list[BackendOutput] = []
+    finals: list[BackendOutput] = []
 
     async def body():
         try:
             async for event in _delegate_to_backend(requester, "backend", request="Do it"):
-                if isinstance(event, _BackendAnswer):
-                    answers.append(event.output)
+                if isinstance(event, _BackendFinalOutput):
+                    finals.append(event.output)
                     updates.append(event.output)
                 elif isinstance(event, BackendOutput):
                     updates.append(event)
@@ -615,7 +615,7 @@ async def test_updates_of_another_type_are_not_outputs():
             await runner.cancel()
 
     await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
-    assert outputs == [_BackendAnswer(BackendOutput(text="Done."))]
+    assert outputs == [_BackendFinalOutput(BackendOutput(text="Done."))]
 
 
 def test_a_payload_names_its_type():

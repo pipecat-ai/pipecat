@@ -20,7 +20,7 @@ frontend calls and turns a call into the request the backend receives, and a
 the frontend hears about it. The connector picks defaults by frontend kind:
 a text frontend hands over the conversation and relays the backend's
 progress as it comes; a speech-to-speech frontend words the request itself
-and takes progress and answer together, since its function calls accept one
+and takes every output at once, since its function calls accept one
 result.
 """
 
@@ -52,7 +52,7 @@ from pipecat.workers.llm.backend_llm_worker import (
     BackendLLMWorker,
     BackendOutput,
     BackendToolCall,
-    _BackendAnswer,
+    _BackendFinalOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -242,7 +242,7 @@ class BackendReplyStrategy:
         Args:
             params: The ``delegate`` call the output belongs to.
             output: The output.
-            is_final: Whether it is the backend's answer, which settles the call.
+            is_final: Whether it is the backend's final output, which settles the call.
         """
         raise NotImplementedError
 
@@ -250,10 +250,10 @@ class BackendReplyStrategy:
 class OneShotBackendReplyStrategy(BackendReplyStrategy):
     """Delivers everything the backend produced at once, when it is done.
 
-    The ``delegate`` call's one result carries the backend's progress, in
-    order, and its final output as the answer; the final text alone when
-    there was no progress. Reasoning summaries are left out. The default for
-    a speech-to-speech frontend, whose function calls accept one result.
+    The ``delegate`` call's one result carries every output, in order; the
+    text alone when there was only one. Reasoning summaries are left out.
+    The default for a speech-to-speech frontend, whose function calls accept
+    one result.
     """
 
     def __init__(self):
@@ -263,7 +263,7 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
     async def deliver(
         self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
     ) -> None:
-        """Hold progress back; deliver it with the answer."""
+        """Hold outputs back; deliver them all with the last."""
         if output.is_thought:
             return
         if not is_final:
@@ -271,7 +271,7 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
             return
         progress = self._progress.pop(params.tool_call_id, [])
         if progress:
-            await params.result_callback({"progress": progress, "answer": output.text})
+            await params.result_callback({"outputs": [*progress, output.text]})
         else:
             await params.result_callback(output.text)
 
@@ -279,7 +279,7 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
 class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
     """Relays the backend's progress as it comes, spoken as the backend's flag says.
 
-    Each output before the answer is recorded as an intermediate tool result;
+    Each output before the final one is recorded as an intermediate tool result;
     the frontend is run on it, and so speaks it, exactly when the output's
     ``prefers_spoken`` flag asks. The default for a text frontend.
     """
@@ -320,7 +320,7 @@ class BackendConnector:
     +------------------+------------------------------------+--------------------------------------+
 
     A delegation that fails raises out of the tool handler, which the frontend
-    service settles as an error result; one that ends without an answer settles
+    service settles as an error result; one that ends with nothing to say settles
     the call by saying so. The function calls the backend makes on the way are
     reported in the frontend's pipeline as children of the ``delegate`` call,
     for clients to show; nothing else in the pipeline sees them.
@@ -445,7 +445,7 @@ class BackendConnector:
         assert self._context is not None, "connector not bound"
         request = await self.request.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
-        answered = False
+        finished = False
         async for event in _delegate_to_backend(
             params.pipeline_worker,
             self._context.backend_name,
@@ -455,14 +455,14 @@ class BackendConnector:
             if isinstance(event, BackendToolCall):
                 await self.report_tool_call(params, event)
                 continue
-            if isinstance(event, _BackendAnswer):
-                answered = True
+            if isinstance(event, _BackendFinalOutput):
+                finished = True
                 await self.reply.deliver(params, event.output, is_final=True)
             else:
                 await self.reply.deliver(params, event, is_final=False)
-        if not answered:
-            logger.warning(f"Delegation to '{self._context.backend_name}' produced no answer")
-            await params.result_callback({"error": "The backend finished without an answer."})
+        if not finished:
+            logger.warning(f"Delegation to '{self._context.backend_name}' produced no final output")
+            await params.result_callback({"error": "The backend finished without saying anything."})
 
     async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
         """Report a function call the backend made, as the ``delegate`` call's child.
