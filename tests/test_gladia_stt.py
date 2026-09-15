@@ -17,10 +17,11 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:
-    def __init__(self, *, state=State.OPEN):
+    def __init__(self, *, state=State.OPEN, incoming=None):
         self.state = state
         self.sent = []
         self.closed = False
+        self._incoming = incoming or []
 
     async def send(self, payload):
         self.sent.append(json.loads(payload))
@@ -33,15 +34,15 @@ class _FakeWebsocket:
         return self._iter_messages()
 
     async def _iter_messages(self):
-        if False:
-            yield None
+        for message in self._incoming:
+            yield json.dumps(message)
 
 
-def _connected_service():
+def _connected_service(incoming=None):
     """Build a service holding an open fake socket, without touching the network."""
     service = GladiaSTTService(api_key="test-key")
     service._setup = frame_processor_setup(TaskManager())
-    websocket = _FakeWebsocket()
+    websocket = _FakeWebsocket(incoming=incoming)
     service._websocket = websocket
     service._connection_active = True
     return service, websocket
@@ -79,3 +80,77 @@ async def test_cancel_does_not_send_stop_recording():
 
     assert _message_types(websocket) == []
     assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_audio_chunk_not_acknowledged_reports_error():
+    """A rejected audio_chunk (e.g. quota exceeded) carries an ``error`` field
+    but no ``acknowledged: true`` — it used to be silently dropped.
+    """
+    service, _ = _connected_service(
+        incoming=[
+            {
+                "type": "audio_chunk",
+                "acknowledged": False,
+                "error": {"message": "quota exceeded"},
+                "data": None,
+            }
+        ]
+    )
+    service.push_error = AsyncMock()
+
+    await service._receive_messages()
+
+    service.push_error.assert_awaited_once()
+    assert "quota exceeded" in service.push_error.call_args.kwargs["error_msg"]
+
+
+@pytest.mark.asyncio
+async def test_translation_addon_error_reports_error_instead_of_crashing():
+    """When the translation addon fails, Gladia sends ``data: null`` alongside
+    an ``error`` object. Indexing into ``data`` unconditionally used to raise
+    a TypeError, which tears down and reconnects the whole STT connection.
+    """
+    service, _ = _connected_service(
+        incoming=[
+            {
+                "type": "translation",
+                "error": {"message": "translation addon failed"},
+                "data": None,
+            }
+        ]
+    )
+    service.push_error = AsyncMock()
+    service.push_frame = AsyncMock()
+
+    await service._receive_messages()
+
+    service.push_error.assert_awaited_once()
+    assert "translation addon failed" in service.push_error.call_args.kwargs["error_msg"]
+    service.push_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_translation_without_error_still_pushes_translation_frame():
+    """Regression check: the new error guard must not affect the success path."""
+    service, _ = _connected_service(
+        incoming=[
+            {
+                "type": "translation",
+                "error": None,
+                "data": {
+                    "original_language": "en",
+                    "translated_utterance": {"language": "fr", "text": "Bonjour"},
+                },
+            }
+        ]
+    )
+    service.push_error = AsyncMock()
+    service.push_frame = AsyncMock()
+
+    await service._receive_messages()
+
+    service.push_error.assert_not_awaited()
+    service.push_frame.assert_awaited_once()
+    pushed_frame = service.push_frame.call_args.args[0]
+    assert pushed_frame.text == "Bonjour"
