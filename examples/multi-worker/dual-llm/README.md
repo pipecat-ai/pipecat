@@ -1,9 +1,9 @@
-# Two-layer LLM
+# Dual LLM
 
-A conversational **frontend** holds the conversation with a fast model and no tools of its own. Anything that needs tools, current information or careful reasoning it hands to a **backend**: a `BackendLLMWorker` running a heavier model with the tools. `TwoLayerLLMService` wraps the frontend so the pair drops into a pipeline where an LLM goes, installs the `delegate` tool that joins them, and runs the backend as a worker of its own.
+A conversational **frontend** holds the conversation with a fast model and no tools of its own. Anything that needs tools, current information or careful reasoning it hands to a **backend**: a `BackendLLMWorker` running a heavier model with the tools. `PipecatDualLLMService` wraps the frontend so the pair drops into a pipeline where an LLM goes, installs the `delegate` tool that joins them, and runs the backend as a worker of its own.
 
 ```python
-llm = TwoLayerLLMService(
+llm = PipecatDualLLMService(
     frontend=OpenAILLMService(...),
     backend=BackendLLMWorker(
         llm=AnthropicLLMService(...),
@@ -41,12 +41,12 @@ pipecat eval run ../../../scripts/release-evals/scenarios/scripted/weather_funct
 
 ## A backend in another process
 
-The service addresses the backend by name over the bus, so it need not run in the same process. Give `TwoLayerLLMService` the worker's name instead of the worker, and run the backend under its own `WorkerRunner` on a shared network bus. See [`distributed-handoff`](../distributed-handoff/) for the bus setup.
+The service addresses the backend by name over the bus, so it need not run in the same process. Give `PipecatDualLLMService` the worker's name instead of the worker, and run the backend under its own `WorkerRunner` on a shared network bus. See [`distributed-handoff`](../distributed-handoff/) for the bus setup.
 
 Backend process:
 
 ```python
-bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:two-layer")
+bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:dual-llm")
 
 backend = BackendLLMWorker(
     name="backend",
@@ -62,9 +62,9 @@ await runner.run()
 Frontend process:
 
 ```python
-bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:two-layer")
+bus = RedisBus(redis=Redis.from_url(REDIS_URL), channel="pipecat:dual-llm")
 
-llm = TwoLayerLLMService(
+llm = PipecatDualLLMService(
     frontend=OpenAILLMService(...),
     backend="backend",  # registered in the other process
 )
