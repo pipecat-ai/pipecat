@@ -19,8 +19,10 @@ from loguru import logger
 # isn't installed.
 pytest.importorskip("mcp")
 
+import anyio  # noqa: E402
 from mcp.client.session_group import StreamableHttpParameters  # noqa: E402
 
+from pipecat.services import mcp_service  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
@@ -73,6 +75,9 @@ class _FakeSession:
         self._fail_initializes = fail_initializes
         self._cancel_initialize = cancel_initialize
         self.calls = []
+        # Errors the next tool calls raise, in order. An empty result has no content.
+        self.call_errors = []
+        self.empty_results = False
 
     async def __aenter__(self):
         return self
@@ -95,6 +100,10 @@ class _FakeSession:
 
     async def call_tool(self, name, arguments=None):
         self.calls.append((name, arguments))
+        if self.call_errors:
+            raise self.call_errors.pop(0)
+        if self.empty_results:
+            return SimpleNamespace(content=[])
         return SimpleNamespace(content=[SimpleNamespace(text=f"{name}-RESULT")])
 
 
@@ -277,6 +286,64 @@ class TestToolsArguments(MCPClientTestBase):
         # ...but the argument is still injected at call time.
         await self._call_via_handler(tools_schema, "other", {"x": "y"})
         self.assertEqual(session.calls, [("other", {"x": "y", "hidden": 1})])
+        await client.close()
+
+
+class TestCallErrors(MCPClientTestBase):
+    """A failed tool call: the error the call raised reaches the model."""
+
+    async def test_a_failed_call_returns_the_error_to_the_model(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(RuntimeError("upstream unavailable"))
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: upstream unavailable"
+        )
+        await client.close()
+
+    async def test_an_error_with_no_message_gives_its_class_name(self):
+        # str(ClosedResourceError()) is empty, so the model would otherwise read
+        # a line that ends at the colon.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(anyio.ClosedResourceError())
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: ClosedResourceError"
+        )
+        await client.close()
+
+    async def test_a_group_of_one_gives_the_cause_it_wraps(self):
+        # The group itself says only that a task group failed.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(
+            ExceptionGroup("unhandled errors in a TaskGroup", [anyio.BrokenResourceError()])
+        )
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            "Error calling mcp tool tool_a: BrokenResourceError"
+        )
+        await client.close()
+
+    async def test_a_long_error_is_cut_to_size(self):
+        # The line goes into the LLM context, so it is cut to a fixed length.
+        client, session, record = self._make_client([_tool("tool_a")])
+        tools_schema = await client.tools()
+        session.call_errors.append(ValueError("x" * (mcp_service._MAX_ERROR_DETAIL * 2)))
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with(
+            f"Error calling mcp tool tool_a: {'x' * mcp_service._MAX_ERROR_DETAIL}..."
+        )
+        await client.close()
+
+    async def test_an_empty_result_still_reads_as_the_stock_line(self):
+        client, session, record = self._make_client([_tool("tool_a")])
+        session.empty_results = True
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with("Sorry, could not call the mcp tool")
         await client.close()
 
 
