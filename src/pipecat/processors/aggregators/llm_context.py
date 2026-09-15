@@ -20,7 +20,14 @@ import copy
 import io
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    TypeAlias,
+    cast,
+    overload,
+)
 
 from loguru import logger
 from PIL import Image
@@ -29,7 +36,7 @@ from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import pcm_to_wav
-from pipecat.frames.frames import AudioRawFrame
+from pipecat.frames.frames import AudioRawFrame, FileSourceType
 
 # The sentinel is part of LLMContext's public surface — tools and tool_choice
 # default to it — so it is re-exported here for callers. The redundant aliases
@@ -125,6 +132,9 @@ class LLMContext:
             url: The URL of the image.
             text: Optional text to include with the image.
         """
+        # TODO: Deprecate support for a non-data `url` here now that `create_file_url_message`
+        #       exists — a URL-referenced image and a URL-referenced file should go through the
+        #       same path instead of two.
         content: list[dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
@@ -171,6 +181,69 @@ class LLMContext:
         url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
+    @staticmethod
+    async def create_file_message(
+        *,
+        role: str = "user",
+        type: FileSourceType,
+        format: str,
+        file: str,
+        name: str | None = None,
+        text: str | None = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing a file.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            type: The type of the file.
+            format: MIME type of the file (e.g., "application/pdf").
+            file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
+            name: Optional name of the file.
+            text: Optional text to include with the file.
+        """
+        # Format is a public url. It is expected that the llm service will fetch the file from the url.
+        # The url is passed as is to the llm service.
+        if type == "url":
+            return LLMContext.create_file_url_message(
+                role=role, format=format, url=file, filename=name, text=text
+            )
+
+        content: list[dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        file_m = {"file_data": file, "filename": name if name else "", "mime_type": format}
+        content.append({"type": "file_base64", "file": file_m})
+
+        return cast(LLMContextMessage, {"role": role, "content": content})
+
+    @staticmethod
+    def create_file_url_message(
+        *,
+        role: str = "user",
+        format: str,
+        url: str,
+        filename: str | None = None,
+        text: str | None = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing a image or file URL.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            format: The MIME type of the file (e.g., 'application/pdf').
+            url: The URL of the image or file.
+            filename: Optional name of the file.
+            text: Optional text to include with the image or file.
+        """
+        content: list[dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        file_m = {"url": url, "filename": filename if filename else "", "mime_type": format}
+        content.append({"type": "file_url", "file": file_m})
+
+        return cast(LLMContextMessage, {"role": role, "content": content})
 
     @staticmethod
     async def create_audio_message(
@@ -304,6 +377,9 @@ class LLMContext:
                     elif item_type == "audio":
                         if "audio" in item:
                             item["audio"] = "..."
+                    elif item_type == "file_base64":
+                        if "file" in item:
+                            item["file"]["file_data"] = "..."
 
             if msg.get("mime_type", "").startswith("image/"):
                 msg["data"] = "..."
@@ -437,6 +513,33 @@ class LLMContext:
         )
         self.add_message(message)
 
+    async def add_file_frame_message(
+        self,
+        *,
+        type: FileSourceType,
+        format: str,
+        file: str,
+        text: str | None = None,
+        name: str | None = None,
+        role: str = "user",
+    ):
+        """Add a message containing a file frame.
+
+        Args:
+            type: File source type.
+            format: MIME type of the file (e.g., 'application/pdf').
+            file: Base64 data URL (``data:<mime>;base64,...``) or plain URL string.
+                URL fetching for providers that require bytes is handled by the
+                provider adapter during message conversion.
+            text: Optional text to accompany the file.
+            name: Optional file name.
+            role: Message role (defaults to 'user').
+        """
+        message = await LLMContext.create_file_message(
+            role=role, type=type, format=format, file=file, name=name, text=text
+        )
+        self.add_message(message)
+
     async def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ):
@@ -448,6 +551,54 @@ class LLMContext:
         """
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
+
+    def remove_invalid_file_message(self) -> bool:
+        """Remove the oldest file message added since the model's last successful reply.
+
+        Best-effort cleanup for an LLM service to call once it's determined
+        (from a provider-specific error) that a request was rejected due to
+        unsupported or malformed file content — e.g. an unsupported MIME type
+        or corrupt bytes. Removing it prevents the context from getting
+        permanently stuck retrying the same failure.
+
+        Providers don't say which message or content item triggered the
+        rejection, so there's no way to identify the exact culprit — this is
+        a heuristic, not a precise fix. An assistant message proves
+        everything before it was already accepted by a prior successful
+        completion (assistant messages are only ever appended after a
+        completion succeeds), so only file messages added since the last one
+        are candidates — a file from an earlier, already-successful turn is
+        never at risk. If several files are candidates (e.g. sent in quick
+        succession before either went through a completion), only the oldest
+        is removed: if it wasn't the actual culprit, the next retry fails
+        again and removes the next-oldest, converging on the bad file within
+        a few retries without ever knowing which one the provider meant.
+
+        Returns:
+            True if a file message was found and removed.
+        """
+        since_index = 0
+        for i in range(len(self._messages) - 1, -1, -1):
+            message = self._messages[i]
+            if not isinstance(message, LLMSpecificMessage) and message.get("role") == "assistant":
+                since_index = i + 1
+                break
+
+        for i in range(since_index, len(self._messages)):
+            message = self._messages[i]
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and any(
+                isinstance(item, dict) and item.get("type") in ("file_base64", "file_url")
+                for item in content
+            ):
+                logger.warning(
+                    "Removing message with file content from context due to invalid response."
+                )
+                self._messages.pop(i)
+                return True
+        return False
 
     @overload
     @staticmethod
