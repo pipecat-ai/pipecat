@@ -15,6 +15,7 @@ WorkerRunner.
 import asyncio
 from dataclasses import replace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -439,6 +440,49 @@ async def test_the_response_carries_the_transformed_answer():
 
     assert [u.text for u in updates] == ["RAW ANSWER"]
     assert text == "RAW ANSWER"
+
+
+@pytest.mark.asyncio
+async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
+    """An app's own spoken line rides the same channel as the model's outputs."""
+    llm = _ScriptedLLM([[("text", "Done.")]])
+    backend = BackendLLMWorker(llm=llm, name="backend", context=LLMContext())
+    requests: list[str] = []
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        requests.append(request)
+        await worker.say("Let me look into that.")
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert requests == ["Do it"]
+    assert updates == [
+        BackendOutput(text="Let me look into that.", prefers_spoken=True),
+        BackendOutput(text="Done.", is_final=True, prefers_spoken=True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_output_sent_outside_a_delegation_is_dropped():
+    backend = BackendLLMWorker(llm=_ScriptedLLM([]), name="backend", context=LLMContext())
+    backend.send_job_update = AsyncMock()  # type: ignore[method-assign]
+
+    await backend.say("Nobody is listening.")
+
+    backend.send_job_update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
