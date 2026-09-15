@@ -55,8 +55,8 @@ appended to). Each entry needs a ``name:``, and is loaded as
 Entries are independent: each runs as its own scenario, against its own bot.
 
 This module gathers the public names of both kinds, :func:`load_scenarios`
-loads a file as the scenarios it holds, :func:`load_scenario_file` loads a file
-holding one, and :func:`is_scenario_file` tells a scenario from a fragment it
+loads a file as the scenarios it holds, :func:`load_scenario` picks one of
+them, and :func:`is_scenario_file` tells a scenario from a fragment it
 includes.
 """
 
@@ -83,6 +83,7 @@ from pipecat.evals.simulation import (
     EvalSimulationScenario,
     describe_simulation,
 )
+from pipecat.utils.deprecation import deprecated
 
 __all__ = [
     "FUNCTION_CALL_EVENTS",
@@ -101,6 +102,7 @@ __all__ = [
     "describe_config",
     "describe_simulation",
     "is_scenario_file",
+    "load_scenario",
     "load_scenario_file",
     "load_scenarios",
 ]
@@ -166,27 +168,56 @@ def load_scenarios(path: str | Path) -> list[EvalLoadedScenario]:
     return scenarios
 
 
-def load_scenario_file(path: str | Path) -> EvalLoadedScenario:
-    """Load a file holding one scenario, as whichever kind it is.
+def load_scenario(path: str | Path, name: str | None = None) -> EvalLoadedScenario:
+    """Load one scenario of a file: the one called ``name``, or the only one.
+
+    A file holding one scenario is returned whatever ``name`` says, since a
+    manifest names such a run after the file rather than the scenario.
 
     Args:
-        path: Path to a scenario or simulation YAML file.
+        path: Path to a scenario, simulation, or group YAML file.
+        name: The scenario to pick from a group, as :func:`load_scenarios`
+            names it (``<group>/<entry>``).
 
     Returns:
         The parsed :class:`~pipecat.evals.simulation.EvalSimulationScenario` or
         :class:`~pipecat.evals.script.EvalScriptScenario`.
 
     Raises:
-        ValueError: If the file holds a group of several scenarios (load those
-            with :func:`load_scenarios`), or is invalid.
+        ValueError: If the file is invalid, holds several scenarios and no
+            ``name`` picks one, or holds none called ``name``.
         FileNotFoundError: If the path doesn't exist.
     """
     scenarios = load_scenarios(path)
-    if len(scenarios) != 1:
-        raise ValueError(
-            f"{path}: holds {len(scenarios)} scenarios; load a group with load_scenarios()"
-        )
-    return scenarios[0]
+    if len(scenarios) == 1:
+        return scenarios[0]
+    if name is None:
+        raise ValueError(f"{path}: holds {len(scenarios)} scenarios; pick one by name")
+    for scenario in scenarios:
+        if scenario.name == name:
+            return scenario
+    names = ", ".join(scenario.name for scenario in scenarios)
+    raise ValueError(f"{path}: no scenario called {name!r} (has {names})")
+
+
+@deprecated(
+    "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+    "Use `load_scenarios` instead."
+)
+def load_scenario_file(path: str | Path) -> EvalLoadedScenario:
+    """Load a file holding one scenario, as whichever kind it is.
+
+    .. deprecated:: 1.11.0
+        Use :func:`load_scenarios` instead, which returns every scenario a file
+        holds; :func:`load_scenario` picks one. Will be removed in 2.0.0.
+
+    Args:
+        path: Path to a scenario or simulation YAML file.
+
+    Returns:
+        The parsed scenario.
+    """
+    return load_scenario(path)
 
 
 def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:

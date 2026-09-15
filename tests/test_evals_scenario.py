@@ -15,6 +15,7 @@ from pipecat.evals.scenario import (
     EvalScriptTurn,
     EvalSendAfter,
     EvalSimulationScenario,
+    load_scenario,
     load_scenario_file,
     load_scenarios,
 )
@@ -103,10 +104,28 @@ class TestScenarioGroups(unittest.TestCase):
         self.assertEqual([s.goal for s in scenarios], ["Book a table.", "Cancel a booking."])
         self.assertEqual(scenarios[0].persona, "An impatient diner.")
 
-    def test_load_scenario_file_refuses_a_group_of_several(self):
+    def test_load_scenario_picks_an_entry_by_name(self):
+        path = _write(GROUP)
+        self.assertEqual(
+            load_scenario(path, "turn_completion/with_history").name,
+            "turn_completion/with_history",
+        )
         with self.assertRaises(ValueError) as cm:
-            load_scenario_file(_write(GROUP))
-        self.assertIn("load_scenarios", str(cm.exception))
+            load_scenario(path)
+        self.assertIn("pick one by name", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            load_scenario(path, "turn_completion/nope")
+        self.assertIn("no scenario called", str(cm.exception))
+
+    def test_load_scenario_returns_a_lone_scenario_whatever_the_name(self):
+        path = _write("name: greet\nturns: [{user: hi}]\n")
+        self.assertEqual(load_scenario(path).name, "greet")
+        self.assertEqual(load_scenario(path, "something-else").name, "greet")
+
+    def test_load_scenario_file_is_deprecated(self):
+        with self.assertWarns(DeprecationWarning):
+            scenario = load_scenario_file(_write("name: greet\nturns: [{user: hi}]\n"))
+        self.assertEqual(scenario.name, "greet")
 
     def test_group_needs_a_name(self):
         with self.assertRaises(ValueError) as cm:

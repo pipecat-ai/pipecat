@@ -306,6 +306,23 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual(manifest.runs[0].kind, "script")
         self.assertEqual(manifest.runs[0].attempts, 1)
 
+    def test_a_group_contributes_a_run_per_entry(self):
+        """Entries run under their own names, each of its own kind; a plain file keeps the manifest's."""
+        (self.base / "scenarios" / "mixed.yaml").write_text(
+            "name: mixed\n"
+            "scenarios:\n"
+            "  - name: hi\n    turns: []\n"
+            "  - name: call\n    persona: p\n    goal: g\n    success: s\n    runs: 2\n"
+        )
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, mixed]\n")
+        first = [r for r in manifest.runs if r.attempt == 1]
+        self.assertEqual([r.scenario for r in first], ["greet", "mixed/hi", "mixed/call"])
+        self.assertEqual([r.kind for r in first], ["script", "script", "simulation"])
+        self.assertEqual([r.attempts for r in first], [1, 1, 2])
+        self.assertTrue(all(r.scenario_path.name == "mixed.yaml" for r in first[1:]))
+        # A group entry's name is a file stem without the slash.
+        self.assertEqual(first[1].stem, "mixed__hi")
+
 
 class TestSimulationRecords(unittest.TestCase):
     def test_result_roundtrips_through_the_worker_json(self):

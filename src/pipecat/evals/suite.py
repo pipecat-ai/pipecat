@@ -36,10 +36,11 @@ Manifest format (YAML)::
 
 A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
 simulation, and the file says which (see
-:func:`~pipecat.evals.scenario.load_scenario_file`). A name resolves under
+:func:`~pipecat.evals.scenario.load_scenarios`). A name resolves under
 ``scenarios_dir`` with ``.yaml`` added and may carry a folder, as
 ``scripted/greeting``; a name ending in ``.yaml`` is a path relative to the
-manifest instead. A simulation runs as many
+manifest instead. A file holding a group of scenarios contributes one run per
+entry, named ``<group>/<entry>``. A simulation runs as many
 times as its ``runs:`` says, and every run must pass.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
@@ -83,7 +84,7 @@ from pipecat.evals.results import (
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
-from pipecat.evals.scenario import EvalKind, load_scenario_file
+from pipecat.evals.scenario import EvalKind, load_scenarios
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
@@ -372,6 +373,11 @@ class EvalRun:
     started_at: float | None = None
     duration_ms: int | None = None
 
+    @property
+    def stem(self) -> str:
+        """The scenario name as a file name stem: a group entry's ``/`` becomes ``__``."""
+        return self.scenario.replace("/", "__")
+
 
 @dataclass(frozen=True)
 class _ManifestSettings:
@@ -573,26 +579,33 @@ class EvalManifest:
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
-                kind, attempts = EvalKind.SCRIPT, settings.repeat
+                # A file holding one scenario runs under the manifest's name for
+                # it; a group's entries run under their own ``<group>/<entry>``.
                 try:
-                    loaded = load_scenario_file(scenario_path)
+                    loaded = load_scenarios(scenario_path)
                 except (ValueError, FileNotFoundError):
-                    loaded = None
-                if isinstance(loaded, EvalSimulationScenario):
-                    kind = EvalKind.SIMULATION
-                    attempts = settings.repeat if settings.repeat_given else loaded.runs
-                runs.append(
-                    EvalRun(
-                        bot=bot,
-                        scenario=name,
-                        bot_path=bot_path,
-                        scenario_path=scenario_path,
-                        runner_body_path=runner_body_path,
-                        kind=kind,
-                        attempts=attempts,
-                        sweep=settings.repeat_given,
+                    loaded = []
+                if len(loaded) > 1:
+                    named = [(one.name, one) for one in loaded]
+                else:
+                    named = [(name, loaded[0] if loaded else None)]
+                for run_name, one in named:
+                    kind, attempts = EvalKind.SCRIPT, settings.repeat
+                    if isinstance(one, EvalSimulationScenario):
+                        kind = EvalKind.SIMULATION
+                        attempts = settings.repeat if settings.repeat_given else one.runs
+                    runs.append(
+                        EvalRun(
+                            bot=bot,
+                            scenario=run_name,
+                            bot_path=bot_path,
+                            scenario_path=scenario_path,
+                            runner_body_path=runner_body_path,
+                            kind=kind,
+                            attempts=attempts,
+                            sweep=settings.repeat_given,
+                        )
                     )
-                )
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -634,7 +647,7 @@ class _RunFiles:
         at once; the attempt number joins it when the suite repeats, so no
         attempt writes over another's artifacts.
         """
-        prefix = f"{run.bot.replace('/', '_')}__{run.scenario}"
+        prefix = f"{run.bot.replace('/', '_')}__{run.stem}"
         if run.attempts > 1:
             prefix += f"__{run.attempt:03d}"
         return cls(

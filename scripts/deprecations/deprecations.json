@@ -135,6 +135,17 @@
       "location": "pipecat/evals/results.py"
     },
     {
+      "subject": "load_scenario_file",
+      "module": "pipecat.evals.scenario",
+      "kind": "function",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "load_scenarios",
+      "message": "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `load_scenarios` instead.",
+      "location": "pipecat/evals/scenario.py"
+    },
+    {
       "subject": "EvalScenario",
       "module": "pipecat.evals.script",
       "kind": "class",

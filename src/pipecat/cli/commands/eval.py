@@ -42,7 +42,8 @@ from pipecat.evals.scenario import (
     describe_config,
     describe_simulation,
     is_scenario_file,
-    load_scenario_file,
+    load_scenario,
+    load_scenarios,
 )
 from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
@@ -248,7 +249,7 @@ def _expand_scenario_paths(paths: list[Path]) -> list[Path]:
 
 
 def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
-    """Build an EvalRun per scenario file, scripted or a simulation, run against ``bot_url``.
+    """Build an EvalRun per scenario in each file, scripted or a simulation, run against ``bot_url``.
 
     A file that fails to load becomes an EvalRun already marked done with an
     error, so it shows in the dashboard and the final tally like any other failure.
@@ -256,21 +257,28 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            loaded = load_scenario_file(path)
+            scenarios = load_scenarios(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        kind = (
-            EvalKind.SIMULATION if isinstance(loaded, EvalSimulationScenario) else EvalKind.SCRIPT
-        )
-        runs.append(
-            EvalRun(
-                bot=bot_url, scenario=loaded.name, scenario_path=path, bot_url=bot_url, kind=kind
+        for loaded in scenarios:
+            kind = (
+                EvalKind.SIMULATION
+                if isinstance(loaded, EvalSimulationScenario)
+                else EvalKind.SCRIPT
             )
-        )
+            runs.append(
+                EvalRun(
+                    bot=bot_url,
+                    scenario=loaded.name,
+                    scenario_path=path,
+                    bot_url=bot_url,
+                    kind=kind,
+                )
+            )
     return runs
 
 
@@ -284,7 +292,7 @@ async def _execute_scenario(
     debug: bool,
     verbose: bool,
 ) -> None:
-    """Run one scenario file, scripted or a simulation, against its ``bot_url``.
+    """Run one scenario, scripted or a simulation, against its ``bot_url``.
 
     Updates ``run`` in place.
 
@@ -297,9 +305,9 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        loaded = load_scenario_file(run.scenario_path)
-        record_path = _record_path(record_dir, run.scenario) if audio else None
-        with capture_pipeline_logs(Path(logs_dir), run.scenario, name=run.scenario, enabled=debug):
+        loaded = load_scenario(run.scenario_path, run.scenario)
+        record_path = _record_path(record_dir, run.stem) if audio else None
+        with capture_pipeline_logs(Path(logs_dir), run.stem, name=run.scenario, enabled=debug):
             session = EvalSession.from_scenario(
                 loaded, url, params=params.model_copy(update={"record_path": record_path})
             )
@@ -310,7 +318,7 @@ async def _execute_scenario(
             run.result = await session.run()
         if run.result.debug_log:
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
                 "\n".join(run.result.debug_log) + "\n"
             )
     except Exception as e:  # noqa: BLE001
@@ -321,7 +329,7 @@ async def _execute_scenario(
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.scenario}.eval.log").write_text(traceback.format_exc())
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(traceback.format_exc())
     finally:
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
@@ -865,14 +873,15 @@ def _audio_runs(runs: list[EvalRun]) -> int:
     A run whose scenario fails to load counts as text: it fails before it could
     record anyway.
     """
-    bot_audio: dict[Path, bool] = {}
+    bot_audio: dict[tuple[Path, str], bool] = {}
     for r in runs:
-        if r.scenario_path not in bot_audio:
+        key = (r.scenario_path, r.scenario)
+        if key not in bot_audio:
             try:
-                bot_audio[r.scenario_path] = load_scenario_file(r.scenario_path).bot_audio
+                bot_audio[key] = load_scenario(r.scenario_path, r.scenario).bot_audio
             except Exception:  # noqa: BLE001
-                bot_audio[r.scenario_path] = False
-    return sum(bot_audio[r.scenario_path] for r in runs)
+                bot_audio[key] = False
+    return sum(bot_audio[(r.scenario_path, r.scenario)] for r in runs)
 
 
 def _recording_setting(runs: list[EvalRun], record: bool) -> str:
@@ -942,7 +951,7 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
                 print(heading)
             seen.add(r.scenario)
             try:
-                loaded = load_scenario_file(r.scenario_path)
+                loaded = load_scenario(r.scenario_path, r.scenario)
                 if isinstance(loaded, EvalSimulationScenario):
                     cfg = describe_simulation(loaded, color=sys.stdout.isatty())
                 else:
