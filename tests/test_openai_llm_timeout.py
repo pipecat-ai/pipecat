@@ -267,7 +267,7 @@ async def test_openai_llm_removes_file_message_on_context_conversion_error():
         context = LLMContext()
         context.add_message({"role": "user", "content": "hello"})
         await context.add_file_frame_message(
-            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
         )
         frame = LLMContextFrame(context=context)
 
@@ -301,7 +301,7 @@ async def test_openai_llm_removes_file_message_on_bad_request_error():
         context = LLMContext()
         context.add_message({"role": "user", "content": "hello"})
         await context.add_file_frame_message(
-            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
         )
         frame = LLMContextFrame(context=context)
 
@@ -334,7 +334,7 @@ async def test_openai_llm_removes_file_message_despite_newer_message():
 
         context = LLMContext()
         await context.add_file_frame_message(
-            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
         )
         context.add_message({"role": "user", "content": "what does it say?"})
         frame = LLMContextFrame(context=context)
@@ -366,7 +366,7 @@ async def test_openai_llm_leaves_a_confirmed_file_message_alone():
 
         context = LLMContext()
         await context.add_file_frame_message(
-            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
         )
         # Simulates an earlier, separate completion that succeeded with this file.
         context.add_message({"role": "assistant", "content": "Here's a summary."})
@@ -396,7 +396,7 @@ async def test_openai_llm_leaves_context_alone_on_unrelated_error():
         context = LLMContext()
         context.add_message({"role": "user", "content": "hello"})
         await context.add_file_frame_message(
-            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
         )
         frame = LLMContextFrame(context=context)
 

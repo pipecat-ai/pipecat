@@ -729,6 +729,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         accumulated_text = ""
 
         try:
+            await self.resolve_context_files(context)
+
             await self.start_ttfb_metrics()
 
             function_calls = []

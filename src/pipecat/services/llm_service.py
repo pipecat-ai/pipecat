@@ -79,6 +79,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.file_resolver import FileResolver
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
@@ -316,6 +317,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         function_call_timeout_secs: float | None = None,
         enable_async_tool_cancellation: bool = False,
         settings: LLMSettings | None = None,
+        file_resolver: FileResolver | None = None,
         **kwargs,
     ):
         """Initialize the LLM service.
@@ -342,6 +344,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     can be trusted to decide its result is unwanted, are per-tool
                     questions rather than ones answered for every tool at once.
             settings: The runtime-updatable settings for the LLM service.
+            file_resolver: Resolves file URLs in the context that this provider
+                can't fetch itself (see
+                :class:`~pipecat.utils.file_resolver.FileResolver`). Pass one
+                configured with a ``file_storage`` to resolve uploaded-file
+                URLs (e.g. ``FileResolver(file_storage=runner_file_storage())``
+                with the development runner). Defaults to a resolver that
+                handles ``data:`` and ``http(s)`` URLs only.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
@@ -355,6 +364,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._run_in_parallel = run_in_parallel
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
+        self._file_resolver = file_resolver or FileResolver()
         if enable_async_tool_cancellation:
             warnings.warn(
                 "`enable_async_tool_cancellation` is deprecated since 1.8.0 and will be "
@@ -436,6 +446,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    async def resolve_context_files(self, context: LLMContext) -> None:
+        """Resolve the context's file content items into forms this provider can consume.
+
+        Called before each completion. File URLs the provider can't fetch
+        itself are downloaded via the service's file resolver and inlined —
+        see :meth:`~pipecat.adapters.base_llm_adapter.BaseLLMAdapter.resolve_file_items`.
+
+        Args:
+            context: The LLM context whose messages to resolve.
+        """
+        await self.get_llm_adapter().resolve_file_items(context, self._file_resolver)
 
     def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
         """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
