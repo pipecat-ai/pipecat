@@ -11,9 +11,11 @@ a simulation's ``success:`` and metrics, with a one-shot inference outside
 the pipeline, so any Pipecat LLM service with ``run_inference()`` works:
 OpenAI, Ollama, Together, and others.
 
-The judge keeps the conversation, so a terse reply ("That's four") is judged
-in context. Verdicts are cached by criterion and conversation, so re-runs
-are stable and a scenario never pays twice for the same question.
+The judge keeps the conversation, fed as it happens: the user's turns, the
+bot's replies, and the tool calls the bot makes. A terse reply ("That's
+four") is judged in context, and a whole run is judged over the same record.
+Verdicts are cached by criterion and conversation, so re-runs are stable and
+a scenario never pays twice for the same question.
 
 Example::
 
@@ -31,9 +33,10 @@ Example::
 import hashlib
 import json
 import re
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -170,8 +173,10 @@ class EvalJudge:
         self._service = service
         self._max_tokens = max_tokens
         # The conversation the judge evaluates against, grown by the harness over
-        # the scenario (one EvalJudge per scenario, so this starts empty).
-        self._context = LLMContext()
+        # the scenario (one EvalJudge per scenario, so this starts empty): dicts
+        # with a ``role`` of ``user``, ``assistant`` (a segment of a reply), or
+        # ``tool`` (a call the bot made, one line), and the ``content``.
+        self._transcript: list[dict] = []
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
 
@@ -214,16 +219,29 @@ class EvalJudge:
             text: The user's utterance, or ``None`` for a bot-first turn (ignored).
         """
         if text and text.strip():
-            self._context.add_message({"role": "user", "content": text})
+            self._transcript.append({"role": "user", "content": text})
 
     def add_assistant_message(self, text: str | None) -> None:
         """Add a segment of the bot's current reply to the conversation the judge sees.
+
+        Consecutive segments are one reply: a judged run counts them as one
+        bot turn.
 
         Args:
             text: The new reply segment; empty or ``None`` is ignored.
         """
         if text and text.strip():
-            self._context.add_message({"role": "assistant", "content": text})
+            self._transcript.append({"role": "assistant", "content": text})
+
+    def add_tool_call(self, text: str | None) -> None:
+        """Record a tool call the bot made, as evidence for a judged run.
+
+        Args:
+            text: The call on one line, e.g. ``book({"time": "6pm"})`` or
+                ``book was cancelled``; empty or ``None`` is ignored.
+        """
+        if text and text.strip():
+            self._transcript.append({"role": "tool", "content": text})
 
     async def evaluate(self, criterion: str) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
@@ -240,29 +258,57 @@ class EvalJudge:
         return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
 
     async def evaluate_run(
-        self, transcript: Sequence[dict], criteria: dict[str, str], success: str
+        self,
+        criteria: dict[str, str],
+        success: str,
+        transcript: Sequence[dict] | None = None,
     ) -> "RunVerdicts":
-        """Judge a whole conversation in one call: every bot turn on every criterion, and the goal.
+        """Judge the whole conversation in one call: every bot turn on every criterion, and the goal.
 
-        The transcript goes in the question, turns numbered and tool calls inline.
+        The conversation goes in the question, bot turns numbered and tool
+        calls inline. A bot turn is a run of reply segments with nothing else
+        between them.
 
         Args:
-            transcript: The conversation in order: dicts with a ``role`` of
-                ``assistant`` (a bot turn), ``user`` (the persona), or ``tool``
-                (a tool call the bot made, one line as :func:`str`), and the
-                ``content``.
             criteria: The per-turn criteria to decide, by name.
             success: The goal criterion, decided over the whole conversation.
+            transcript: A conversation to judge in place of the one the judge
+                kept: dicts with a ``role`` of ``user``, ``assistant`` or
+                ``tool`` and the ``content``. Also accepted first, before
+                ``criteria`` and ``success``.
+
+                .. deprecated:: 1.11.0
+                    Feed the judge with :meth:`add_user_message`,
+                    :meth:`add_assistant_message` and :meth:`add_tool_call`
+                    instead. Will be removed in 2.0.0.
 
         Returns:
             The goal's verdict and, per criterion, a verdict per bot turn in
             order. A verdict of ``none`` is one the judge did not give: a turn
             it left out, a goal it did not answer, or a call that failed.
         """
-        lines = []
+        if not isinstance(criteria, dict):
+            # The (transcript, criteria, success) order of the deprecated form.
+            transcript, criteria, success = (
+                cast("Sequence[dict]", criteria),
+                cast("dict[str, str]", success),
+                cast("str", transcript),
+            )
+        if transcript is not None:
+            warnings.warn(
+                "`transcript` parameter of `EvalJudge.evaluate_run` is deprecated since 1.11.0 "
+                "and will be removed in 2.0.0. Feed the judge with `add_user_message`, "
+                "`add_assistant_message` and `add_tool_call` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        lines: list[str] = []
         turn = 0
-        for entry in transcript:
+        for entry in self._transcript if transcript is None else transcript:
             if entry["role"] == "assistant":
+                if lines and lines[-1].startswith(f"Bot turn {turn}:"):
+                    lines[-1] += f" {entry['content']}"
+                    continue
                 turn += 1
                 lines.append(f"Bot turn {turn}: {entry['content']}")
             elif entry["role"] == "tool":
@@ -288,7 +334,8 @@ class EvalJudge:
         return self._run_cache[key]
 
     async def _evaluate(self, criterion: str, instruction: str, ask: str) -> JudgeVerdict:
-        messages = self._context.get_messages()
+        # The spoken conversation only: a reply is judged on what was said.
+        messages = [e for e in self._transcript if e["role"] != "tool"]
         key = _cache_key(ask, messages)
         if key in self._cache:
             return self._cache[key]

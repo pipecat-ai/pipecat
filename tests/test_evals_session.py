@@ -1884,11 +1884,19 @@ class _YesJudge:
         self.criteria: list[str] = []
         self.run_criteria: dict[str, str] = {}
 
-    async def evaluate_run(self, transcript, criteria, success):
-        self.transcript = list(transcript)
+    def add_user_message(self, text):
+        self.transcript.append({"role": "user", "content": text})
+
+    def add_assistant_message(self, text):
+        self.transcript.append({"role": "assistant", "content": text})
+
+    def add_tool_call(self, text):
+        self.transcript.append({"role": "tool", "content": text})
+
+    async def evaluate_run(self, criteria, success):
         self.criteria.append(success)
         self.run_criteria = dict(criteria)
-        turns = sum(1 for e in transcript if e["role"] == "assistant")
+        turns = sum(1 for e in self.transcript if e["role"] == "assistant")
         yes = JudgeVerdict(verdict="yes", reason="", raw_response="")
         return RunVerdicts(goal=yes, turns={name: [yes] * turns for name in criteria})
 
