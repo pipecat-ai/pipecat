@@ -50,10 +50,8 @@ suite:
       - scripted/capital_question
       - scripted/capital_question_recording
       - scripted/multi_turn
-      - scripted/interruption_audio
-      - scripted/interruption_text
+      - scripted/interruption
       - scripted/language_switch
-      - scripted/language_switch_audio
   - bot: voice/voice-cartesia-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-cartesia-turns.py
@@ -261,33 +259,25 @@ suite:
   #
   - bot: function-calling/function-calling-anthropic-async.py
     scenarios:
-      - scripted/async_tool_delivery
-      - scripted/async_tool_deferred_delivery_audio
+      - scripted/async_tool
       - scripted/async_tool_cancellation
-      - scripted/async_tool_cancellation_concurrent
       - scripted/function_call_timeout
   - bot: function-calling/function-calling-google-async.py
     scenarios:
-      - scripted/async_tool_delivery
-      - scripted/async_tool_deferred_delivery_audio
+      - scripted/async_tool
       - scripted/async_tool_cancellation
-      - scripted/async_tool_cancellation_concurrent
       - scripted/function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
-      - scripted/async_tool_delivery
-      - scripted/async_tool_deferred_delivery_audio
+      - scripted/async_tool
       - scripted/function_call_timeout
       # gpt-4.1 answers that it is working on the report without calling
       # write_report, so neither cancellation scenario reaches what it tests.
-      # - async_tool_cancellation
-      # - async_tool_cancellation_concurrent
+      # - scripted/async_tool_cancellation
   - bot: function-calling/function-calling-openai-responses-async.py
     scenarios:
-      - scripted/async_tool_delivery
-      - scripted/async_tool_deferred_delivery_audio
+      - scripted/async_tool
       - scripted/async_tool_cancellation
-      - scripted/async_tool_cancellation_concurrent
       - scripted/function_call_timeout
 
   #
@@ -399,7 +389,7 @@ suite:
   - bot: flows/yaml/insurance_quote/bot.py
     scenarios: [scripted/insurance_quote]
   - bot: flows/python/multi_worker_handoff.py
-    scenarios: [scripted/multi_worker_handoff, scripted/multi_worker_handoff_back_and_forth]
+    scenarios: [scripted/multi_worker_handoff]
   - bot: flows/yaml/patient_intake/bot.py
     scenarios: [scripted/patient_intake]
   - bot: flows/yaml/restaurant_reservation/bot.py
@@ -413,9 +403,7 @@ suite:
   # search tool, and reads a specific URL with its page-fetch tool.
   #
   - bot: features/features-keenable-web-search.py
-    scenarios:
-      - scripted/keenable_web_search
-      - scripted/keenable_fetch_page
+    scenarios: [scripted/keenable]
 
   #
   # Multi-worker: LLM workers on a bus handing the conversation between each
@@ -441,7 +429,7 @@ suite:
   # one run as a verdict.
   #
   - bot: voice/voice-cartesia.py
-    scenarios: [simulated/capital_curious, simulated/capital_curious_audio]
+    scenarios: [simulated/capital_curious]
   - bot: flows/yaml/restaurant_reservation/bot.py
     scenarios: [simulated/book_table]
   - bot: flows/yaml/patient_intake/bot.py

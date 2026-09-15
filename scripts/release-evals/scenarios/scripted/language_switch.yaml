@@ -1,12 +1,14 @@
 name: language_switch
 
-# Text modality: switch languages mid-conversation. Tests that the bot follows a
-# language instruction and responds in the requested language.
+# Switch languages mid-conversation: the user asks (in English) for Spanish
+# replies. Text judges the LLM's text; audio judges the transcription of the
+# bot's actual Spanish speech, the end-to-end check that a non-English answer
+# survives the bot's TTS and the harness's STT.
 
 judge: !include ../judge_text.yaml
 
 scenarios:
-  - name: language_switch
+  - name: text
     turns:
       # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
       - expect:
@@ -22,3 +24,35 @@ scenarios:
         expect:
           - event: response
             eval: "the response is written in Spanish (Catalan place or dish names such as 'pa amb tomàquet' are acceptable)"
+
+  # One transcriber serves the whole run, and this one is Spanish. The bot's
+  # English greeting is therefore asserted on `tts_response` (the text the TTS
+  # reports speaking) rather than `response` (the transcription), which would be
+  # English decoded as Spanish. Only the post-switch turn asserts on `response`.
+  - name: audio
+    user: !include ../user_audio.yaml
+    judge:
+      modality: audio
+      eval:
+        service: ollama
+        model: gemma4:12b
+        extra:
+          reasoning_effort: none
+      transcription:
+        # Whisper rather than the default Moonshine: Moonshine's Spanish model
+        # returns nothing on the bot's synthesized Spanish. `tiny` because Whisper's
+        # own default model is English-only, and it is the smallest multilingual one
+        # (75MB) that transcribes this reply cleanly.
+        service: whisper
+        model: tiny
+        language: es
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: tts_response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "From now on, reply only in Spanish. Where is La Sagrada Familia?"
+        expect:
+          - event: response
+            eval: "the response is written in Spanish and says that La Sagrada Familia is in Barcelona"
