@@ -45,7 +45,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
-from pipecat.workers.llm.backend_llm_worker import BackendToolCall
+from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendAnswer
 from tests.test_backend_llm_worker import _ScriptedLLM, get_weather
 
 
@@ -126,7 +126,7 @@ def _params(context: LLMContext | None = None, arguments: dict | None = None) ->
     )
 
 
-def _stream(monkeypatch, *outputs: BackendOutput | BackendToolCall) -> list[dict]:
+def _stream(monkeypatch, *outputs: BackendOutput | BackendToolCall | _BackendAnswer) -> list[dict]:
     """Fake the delegation stream; returns the requests it was given."""
     requests: list[dict] = []
 
@@ -187,7 +187,7 @@ def test_the_frontend_guidance_comes_from_the_strategies():
 
 @pytest.mark.asyncio
 async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(monkeypatch):
-    requests = _stream(monkeypatch, BackendOutput(text="ok", is_final=True))
+    requests = _stream(monkeypatch, _BackendAnswer(BackendOutput(text="ok")))
     connector = _bound(BackendConnector(timeout_secs=7))
     context = LLMContext([{"role": "user", "content": "weather in seattle?"}])
 
@@ -209,7 +209,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(m
 
 @pytest.mark.asyncio
 async def test_the_explicit_request_sends_the_model_words(monkeypatch):
-    requests = _stream(monkeypatch, BackendOutput(text="ok", is_final=True))
+    requests = _stream(monkeypatch, _BackendAnswer(BackendOutput(text="ok")))
     connector = _bound(BackendConnector(request=ExplicitBackendRequestStrategy()))
 
     await connector.delegate(_params(arguments={"request": "Weather in Seattle, Fahrenheit."}))
@@ -223,7 +223,7 @@ async def test_the_explicit_request_sends_the_model_words(monkeypatch):
 
 _PROGRESS = BackendOutput(text="Let me check.", prefers_spoken=False)
 _SPOKEN_PROGRESS = BackendOutput(text="Almost there.", prefers_spoken=True)
-_ANSWER = BackendOutput(text="It's 62 and raining.", is_final=True)
+_ANSWER = _BackendAnswer(BackendOutput(text="It's 62 and raining."))
 _THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
 
 
