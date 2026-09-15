@@ -394,8 +394,10 @@ class LiveKitTransportClient:
 
             logger.info(f"Disconnecting from {self._room_name}")
             await self._callbacks.on_before_disconnect()
-            await self.room.disconnect()
+            # Mark the client disconnected before the room disconnects, so the
+            # room's own "disconnected" event does not report it a second time.
             self._connected = False
+            await self.room.disconnect()
             await self._close_output_sources()
             # Close any remaining per-participant streams and cancel their
             # producer tasks so they do not outlive the connection.
@@ -779,7 +781,14 @@ class LiveKitTransportClient:
         await self._callbacks.on_connected()
 
     async def _async_on_disconnected(self, reason=None):
-        """Handle disconnected events."""
+        """Handle disconnected events.
+
+        Only a disconnect of a connected client is reported. ``disconnect()``
+        and a failed ``connect()`` clear the connected flag before disconnecting
+        the room, so the room's event for those is ignored.
+        """
+        if not self._connected:
+            return
         self._connected = False
         logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()

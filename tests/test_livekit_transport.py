@@ -854,6 +854,57 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.room.local_participant.publish_track.await_count, 4)
         client._callbacks.on_connected.assert_awaited_once()
 
+    async def test_room_disconnect_event_reports_disconnect_of_connected_client(self):
+        """A disconnect the client did not start is reported once."""
+        client = self._create_client(video_out_enabled=False)
+        client._connected = True
+
+        await client._async_on_disconnected()
+
+        self.assertFalse(client._connected)
+        client._callbacks.on_disconnected.assert_awaited_once()
+
+    async def test_disconnect_reports_disconnect_once(self):
+        """The room's event during disconnect() does not report a second disconnect."""
+        client = self._create_client(video_out_enabled=False)
+        client._connected = True
+        client._disconnect_counter = 1
+
+        async def room_disconnect():
+            # LiveKit emits its "disconnected" event while disconnecting.
+            await client._async_on_disconnected()
+
+        client.room.disconnect = AsyncMock(side_effect=room_disconnect)
+
+        await client.disconnect()
+
+        client.room.disconnect.assert_awaited_once()
+        client._callbacks.on_disconnected.assert_awaited_once()
+
+    async def test_failed_connect_does_not_report_disconnect(self):
+        """Rolling back a failed connect does not report a disconnect."""
+        client = self._create_client(video_out_enabled=False)
+        client.room.local_participant.publish_track = AsyncMock(
+            side_effect=RuntimeError("publish failed")
+        )
+
+        async def room_disconnect():
+            await client._async_on_disconnected()
+
+        client.room.disconnect = AsyncMock(side_effect=room_disconnect)
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+        ):
+            with self.assertRaises(RuntimeError):
+                await LiveKitTransportClient.connect.__wrapped__(client)
+
+        client.room.disconnect.assert_awaited_once()
+        client._callbacks.on_disconnected.assert_not_awaited()
+
     async def test_disconnect_closes_output_sources(self):
         """Disconnecting closes the audio and video sources and forgets them."""
         client = self._create_client(video_out_enabled=True)
