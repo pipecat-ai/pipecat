@@ -287,6 +287,31 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                         "detail": image_url_obj.get("detail", "auto"),
                     }
                 )
+            elif part_type == "file_base64":
+                f_data = part["file"]
+                result.append(
+                    {
+                        "type": "input_file",
+                        "filename": f_data["filename"],
+                        "file_data": f_data["file_data"],
+                    }
+                )
+            elif part_type == "file_url":
+                f_data = part["file"]
+                if f_data["mime_type"].startswith("image/"):
+                    result.append(
+                        {
+                            "type": "input_image",
+                            "image_url": f_data["url"],
+                        }
+                    )
+                else:
+                    result.append(
+                        {
+                            "type": "input_file",
+                            "file_url": f_data["url"],
+                        }
+                    )
             else:
                 # Pass through other types as-is. Note: "input_audio" is not
                 # yet supported by the Responses API (coming soon per OpenAI
