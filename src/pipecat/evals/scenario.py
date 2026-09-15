@@ -20,8 +20,10 @@ and a scenario's keys say which kind it is:
     (:mod:`pipecat.evals.simulation`).
 
 Both carry the same ``user:`` and ``judge:`` blocks
-(:mod:`pipecat.evals.scenario_config`) and are read by the same YAML loader with
-``!include`` support (:mod:`pipecat.evals.scenario_loader`).
+(:mod:`pipecat.evals.scenario_config`). A file is read by a ``SafeLoader`` that
+resolves only plain-decimal integers, so a DTMF ``012`` keeps its digits, with
+an ``!include <path>`` tag that splices in another YAML file relative to the
+including one, so files can share their ``user:`` and ``judge:`` blocks.
 
 The file's other top-level keys are defaults for its scenarios, and a scenario
 that sets the same key replaces the value as a whole (a ``context:`` is restated
@@ -61,20 +63,20 @@ own bot.
     scenario under the file's ``name:``, with a ``DeprecationWarning``. Will be
     removed in 2.0.0.
 
-This module gathers the public names of both kinds, :func:`load_scenarios`
-loads a file as the scenarios it holds, :func:`load_scenario` picks one of
-them, and :func:`is_scenario_file` tells a scenario from a fragment it
-includes.
+This module gathers the public names of both kinds, :class:`EvalScenarioFile`
+loads a file as the scenarios it holds, and :func:`is_scenario_file` tells a
+scenario from a fragment it includes.
 """
 
+import re
 import warnings
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 import yaml
 
 from pipecat.evals.scenario_config import EvalConfigured, describe_config
-from pipecat.evals.scenario_loader import _load_mapping
 from pipecat.evals.script import (
     FUNCTION_CALL_EVENTS,
     JUDGEABLE_EVENTS,
@@ -85,13 +87,16 @@ from pipecat.evals.script import (
     EvalScriptTurn,
     EvalSendAfter,
     EvalTurn,
+    _parse_script,
 )
 from pipecat.evals.simulation import (
     EvalSimulationMetric,
     EvalSimulationScenario,
+    _parse_simulation,
     describe_simulation,
 )
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.yaml import include_loader
 
 __all__ = [
     "FUNCTION_CALL_EVENTS",
@@ -101,6 +106,7 @@ __all__ = [
     "EvalExpectation",
     "EvalFunctionCall",
     "EvalScenario",
+    "EvalScenarioFile",
     "EvalScriptScenario",
     "EvalScriptTurn",
     "EvalSendAfter",
@@ -110,10 +116,33 @@ __all__ = [
     "describe_config",
     "describe_simulation",
     "is_scenario_file",
-    "load_scenario",
     "load_scenario_file",
-    "load_scenarios",
 ]
+
+
+class _ScenarioLoader(yaml.SafeLoader):
+    """A SafeLoader that reads only plain decimal numbers as ints.
+
+    YAML 1.1 would read ``010`` as octal and ``0x10`` as hex, which rewrites a
+    DTMF sequence before the scenario sees it. With those resolvers dropped,
+    ``dtmf: 123`` still loads as an int and ``dtmf: 012`` stays a string.
+    """
+
+
+# Strip the inherited int resolvers (which match octal/hex/binary/sexagesimal)
+# and register a decimal-only replacement. Underscores stay allowed to match
+# YAML's grouping syntax (e.g. ``1_000``); a leading zero (``012``) no longer
+# matches, so such tokens load as strings.
+_ScenarioLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:int"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+yaml.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^[-+]?(?:0|[1-9][0-9_]*)$"),
+    list("-+0123456789"),
+    Loader=_ScenarioLoader,
+)
 
 
 class EvalKind(StrEnum):
@@ -126,111 +155,142 @@ class EvalKind(StrEnum):
 EvalLoadedScenario = EvalScriptScenario | EvalSimulationScenario
 
 
-def load_scenarios(path: str | Path) -> list[EvalLoadedScenario]:
-    """Load the scenarios a file holds, each as whichever kind it is.
+@dataclass
+class EvalScenarioFile:
+    """A scenario file: what it is called, where it is, and the scenarios it holds.
 
-    Manifests and ``pipecat eval run`` load through here, so the two kinds mix
-    in one list. A file in the deprecated shape, a scenario's own keys at the
-    top level and no ``scenarios:``, loads as that one scenario under the
-    file's ``name:`` and warns.
+    Manifests and ``pipecat eval run`` load files through :meth:`load`, so the
+    two kinds of scenario mix in one list. ``file[name]`` picks a scenario by
+    its ``<file name>/<scenario name>``.
 
-    Args:
-        path: Path to a scenario YAML file.
-
-    Returns:
-        The parsed scenarios, in file order.
-
-    Raises:
-        ValueError: If the file is malformed, or a scenario is neither kind,
-            claims to be both, or is invalid for its kind.
-        FileNotFoundError: If the path doesn't exist.
+    Parameters:
+        name: The file's ``name:``.
+        path: The file it was read from.
+        scenarios: The scenarios it holds, in file order.
     """
-    path = Path(path)
-    data = _load_mapping(path)
-    entries = data.get("scenarios")
-    if entries is None:
-        warnings.warn(
-            f"{path}: a scenario file's top level holding 'turns:' or 'persona:' is deprecated "
-            "since 1.11.0 and will be removed in 2.0.0. Put the scenario under a 'scenarios:' "
-            "list instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return [_scenario_from_mapping(data, path)]
 
-    group = data.get("name")
-    if not group or not isinstance(group, str):
-        raise ValueError(f"{path}: missing or invalid 'name:' field")
-    if not isinstance(entries, list) or not entries:
-        raise ValueError(f"{path}: 'scenarios:' must be a non-empty list")
-    defaults = {key: value for key, value in data.items() if key != "scenarios"}
+    name: str
+    path: Path
+    scenarios: list[EvalLoadedScenario]
 
-    scenarios: list[EvalLoadedScenario] = []
-    for idx, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            raise ValueError(f"{path}: scenario #{idx} must be a mapping")
-        if "scenarios" in entry:
-            raise ValueError(f"{path}: scenario #{idx} cannot hold a 'scenarios:' list of its own")
-        name = entry.get("name")
+    @classmethod
+    def load(cls, path: str | Path) -> "EvalScenarioFile":
+        """Read a scenario file, parsing each scenario as whichever kind it is.
+
+        A file in the deprecated shape, a scenario's own keys at the top level
+        and no ``scenarios:``, loads as that one scenario under the file's
+        ``name:`` and warns.
+
+        Args:
+            path: Path to a scenario YAML file.
+
+        Returns:
+            The loaded file.
+
+        Raises:
+            ValueError: If the file is malformed, or a scenario is neither kind,
+                claims to be both, or is invalid for its kind.
+            FileNotFoundError: If the path doesn't exist.
+        """
+        path = Path(path)
+        data = _load_mapping(path)
+        name = data.get("name")
         if not name or not isinstance(name, str):
-            raise ValueError(f"{path}: scenario #{idx} needs a 'name:'")
-        merged = {**defaults, **entry, "name": f"{group}/{name}"}
-        scenarios.append(_scenario_from_mapping(merged, path))
+            raise ValueError(f"{path}: missing or invalid 'name:' field")
 
-    names = [scenario.name for scenario in scenarios]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise ValueError(f"{path}: duplicate scenario names: {', '.join(duplicates)}")
-    return scenarios
+        entries = data.get("scenarios")
+        if entries is None:
+            warnings.warn(
+                f"{path}: a scenario file's top level holding 'turns:' or 'persona:' is "
+                "deprecated since 1.11.0 and will be removed in 2.0.0. Put the scenario under a "
+                "'scenarios:' list instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return cls(name=name, path=path, scenarios=[_scenario_from_mapping(data, path)])
 
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"{path}: 'scenarios:' must be a non-empty list")
+        defaults = {key: value for key, value in data.items() if key != "scenarios"}
 
-def load_scenario(path: str | Path, name: str | None = None) -> EvalLoadedScenario:
-    """Load one scenario of a file: the one called ``name``, or the only one.
+        scenarios: list[EvalLoadedScenario] = []
+        for idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(f"{path}: scenario #{idx} must be a mapping")
+            if "scenarios" in entry:
+                raise ValueError(
+                    f"{path}: scenario #{idx} cannot hold a 'scenarios:' list of its own"
+                )
+            entry_name = entry.get("name")
+            if not entry_name or not isinstance(entry_name, str):
+                raise ValueError(f"{path}: scenario #{idx} needs a 'name:'")
+            merged = {**defaults, **entry, "name": f"{name}/{entry_name}"}
+            scenarios.append(_scenario_from_mapping(merged, path))
 
-    Args:
-        path: Path to a scenario YAML file.
-        name: The scenario to pick, as :func:`load_scenarios` names it
-            (``<file name>/<scenario name>``); ``None`` for a file holding one.
+        names = [scenario.name for scenario in scenarios]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(f"{path}: duplicate scenario names: {', '.join(duplicates)}")
+        return cls(name=name, path=path, scenarios=scenarios)
 
-    Returns:
-        The parsed :class:`~pipecat.evals.simulation.EvalSimulationScenario` or
-        :class:`~pipecat.evals.script.EvalScriptScenario`.
+    def __getitem__(self, name: str) -> EvalLoadedScenario:
+        """The scenario called ``name``.
 
-    Raises:
-        ValueError: If the file is invalid, holds several scenarios and no
-            ``name`` picks one, or holds none called ``name``.
-        FileNotFoundError: If the path doesn't exist.
-    """
-    scenarios = load_scenarios(path)
-    if name is None:
-        if len(scenarios) == 1:
-            return scenarios[0]
-        raise ValueError(f"{path}: holds {len(scenarios)} scenarios; pick one by name")
-    for scenario in scenarios:
-        if scenario.name == name:
-            return scenario
-    names = ", ".join(scenario.name for scenario in scenarios)
-    raise ValueError(f"{path}: no scenario called {name!r} (has {names})")
+        Raises:
+            KeyError: If the file holds no scenario of that name.
+        """
+        for scenario in self.scenarios:
+            if scenario.name == name:
+                return scenario
+        names = ", ".join(scenario.name for scenario in self.scenarios)
+        raise KeyError(f"{self.path}: no scenario called {name!r} (has {names})")
+
+    def __iter__(self):
+        """Iterate over the scenarios, in file order."""
+        return iter(self.scenarios)
+
+    def __len__(self) -> int:
+        """How many scenarios the file holds."""
+        return len(self.scenarios)
 
 
 @deprecated(
     "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. "
-    "Use `load_scenarios` instead."
+    "Use `EvalScenarioFile.load` instead."
 )
 def load_scenario_file(path: str | Path) -> EvalLoadedScenario:
     """Load a file holding one scenario, as whichever kind it is.
 
     .. deprecated:: 1.11.0
-        Use :func:`load_scenarios` instead, which returns every scenario a file
-        holds; :func:`load_scenario` picks one. Will be removed in 2.0.0.
+        Use :meth:`EvalScenarioFile.load` instead, which returns every scenario
+        a file holds. Will be removed in 2.0.0.
 
     Args:
         path: Path to a scenario or simulation YAML file.
 
     Returns:
         The parsed scenario.
+
+    Raises:
+        ValueError: If the file holds several scenarios, or is invalid.
     """
-    return load_scenario(path)
+    scenarios = EvalScenarioFile.load(path).scenarios
+    if len(scenarios) != 1:
+        raise ValueError(f"{path}: holds {len(scenarios)} scenarios; use EvalScenarioFile.load()")
+    return scenarios[0]
+
+
+def _load_mapping(path: Path) -> dict:
+    """Load a scenario file's top-level mapping, resolving ``!include`` tags relative to the file.
+
+    Raises:
+        ValueError: If the top level is not a mapping.
+    """
+    with path.open() as f:
+        data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+    return data
 
 
 def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
@@ -240,9 +300,9 @@ def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
             f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
         )
     if "persona" in data:
-        return EvalSimulationScenario.from_mapping(data, path)
+        return _parse_simulation(data, path)
     if "turns" in data:
-        return EvalScriptScenario.from_mapping(data, path)
+        return _parse_script(data, path)
     raise ValueError(f"{path}: a scenario needs 'turns:' (scripted) or 'persona:' (a simulation)")
 
 

@@ -38,12 +38,11 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import (
     EvalKind,
+    EvalScenarioFile,
     EvalSimulationScenario,
     describe_config,
     describe_simulation,
     is_scenario_file,
-    load_scenario,
-    load_scenarios,
 )
 from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import (
@@ -257,14 +256,14 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
     runs: list[EvalRun] = []
     for path in paths:
         try:
-            scenarios = load_scenarios(path)
+            file = EvalScenarioFile.load(path)
         except (ValueError, FileNotFoundError) as e:
             run = EvalRun(bot=bot_url, scenario=path.stem, scenario_path=path, bot_url=bot_url)
             run.status = "done"
             run.error = f"failed to load: {e}"
             runs.append(run)
             continue
-        for loaded in scenarios:
+        for loaded in file:
             kind = (
                 EvalKind.SIMULATION
                 if isinstance(loaded, EvalSimulationScenario)
@@ -274,6 +273,7 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
                 EvalRun(
                     bot=bot_url,
                     scenario=loaded.name,
+                    loaded=loaded,
                     scenario_path=path,
                     bot_url=bot_url,
                     kind=kind,
@@ -305,7 +305,7 @@ async def _execute_scenario(
     url = run.bot_url
     assert url is not None  # always set by _build_scenario_runs
     try:
-        loaded = load_scenario(run.scenario_path, run.scenario)
+        loaded = run.load()
         record_path = _record_path(record_dir, run.stem) if audio else None
         with capture_pipeline_logs(Path(logs_dir), run.stem, name=run.scenario, enabled=debug):
             session = EvalSession.from_scenario(
@@ -878,7 +878,7 @@ def _audio_runs(runs: list[EvalRun]) -> int:
         key = (r.scenario_path, r.scenario)
         if key not in bot_audio:
             try:
-                bot_audio[key] = load_scenario(r.scenario_path, r.scenario).bot_audio
+                bot_audio[key] = r.load().bot_audio
             except Exception:  # noqa: BLE001
                 bot_audio[key] = False
     return sum(bot_audio[(r.scenario_path, r.scenario)] for r in runs)
@@ -951,7 +951,7 @@ def _print_scenario_configs(runs: list[EvalRun]) -> None:
                 print(heading)
             seen.add(r.scenario)
             try:
-                loaded = load_scenario(r.scenario_path, r.scenario)
+                loaded = r.load()
                 if isinstance(loaded, EvalSimulationScenario):
                     cfg = describe_simulation(loaded, color=sys.stdout.isatty())
                 else:

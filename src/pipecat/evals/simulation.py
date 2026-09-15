@@ -121,8 +121,8 @@ from pipecat.evals.scenario_config import (
     _parse_user_block,
     _user_segments,
 )
-from pipecat.evals.scenario_loader import _load_mapping
 from pipecat.evals.script import EvalFunctionCall
+from pipecat.utils.deprecation import deprecated
 
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_DURATION_S = 300.0
@@ -208,74 +208,80 @@ class EvalSimulationScenario:
     source_path: Path | None = None
 
     @classmethod
+    @deprecated(
+        "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in "
+        "2.0.0. Use `EvalScenarioFile.load` instead."
+    )
     def load(cls, path: str | Path) -> "EvalSimulationScenario":
-        """Parse a simulation YAML file into an :class:`EvalSimulationScenario`.
+        """Parse a YAML file holding a simulation's own keys at its top level.
+
+        .. deprecated:: 1.11.0
+            Use :meth:`~pipecat.evals.scenario.EvalScenarioFile.load` instead.
+            Will be removed in 2.0.0.
 
         Args:
             path: Path to a YAML file with the simulation schema.
 
         Returns:
             The parsed simulation.
-
-        Raises:
-            ValueError: If the file structure is invalid.
-            FileNotFoundError: If the path doesn't exist.
         """
+        from pipecat.evals.scenario import _load_mapping
+
         path = Path(path)
-        return cls.from_mapping(_load_mapping(path), path)
+        return _parse_simulation(_load_mapping(path), path)
 
-    @classmethod
-    def from_mapping(cls, data: dict, path: Path) -> "EvalSimulationScenario":
-        """Parse a simulation's mapping, as read from ``path``, into an :class:`EvalSimulationScenario`.
 
-        Args:
-            data: The simulation's top-level mapping.
-            path: The file it came from, for error messages.
+def _parse_simulation(data: dict, path: Path) -> EvalSimulationScenario:
+    """Parse a simulation's mapping, as read from ``path``.
 
-        Returns:
-            The parsed simulation.
+    Args:
+        data: The simulation's top-level mapping.
+        path: The file it came from, for error messages.
 
-        Raises:
-            ValueError: If the mapping is invalid.
-        """
+    Returns:
+        The parsed simulation.
 
-        def text(key: str) -> str:
-            value = data.get(key)
-            if not value or not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{path}: missing or invalid '{key}:' field (a non-empty string)")
-            return value.strip()
+    Raises:
+        ValueError: If the mapping is invalid.
+    """
 
-        simulator = data.get("simulator") or {}
-        if not isinstance(simulator, dict):
-            raise ValueError(f"{path}: 'simulator:' must be a mapping naming the persona LLM")
+    def text(key: str) -> str:
+        value = data.get(key)
+        if not value or not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{path}: missing or invalid '{key}:' field (a non-empty string)")
+        return value.strip()
 
-        user_audio, user_speech = _parse_user_block(data.get("user"), path)
-        if user_audio and user_speech is None:
-            raise ValueError(
-                f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
-                "(TTS service + voice) to synthesize the persona's turns"
-            )
-        bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
+    simulator = data.get("simulator") or {}
+    if not isinstance(simulator, dict):
+        raise ValueError(f"{path}: 'simulator:' must be a mapping naming the persona LLM")
 
-        return cls(
-            name=text("name"),
-            persona=text("persona"),
-            goal=text("goal"),
-            simulator=simulator,
-            success=text("success"),
-            metrics=_parse_metrics(data.get("metrics"), path),
-            judge=judge,
-            bot_audio=bot_audio,
-            transcriber=transcriber,
-            user_audio=user_audio,
-            user_speech=user_speech,
-            max_turns=_positive_int(data, "max_turns", DEFAULT_MAX_TURNS, path),
-            max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
-            max_silence_s=_positive_number(data, "max_silence_s", DEFAULT_MAX_SILENCE_S, path),
-            runs=_positive_int(data, "runs", 1, path),
-            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
-            source_path=path,
+    user_audio, user_speech = _parse_user_block(data.get("user"), path)
+    if user_audio and user_speech is None:
+        raise ValueError(
+            f"{path}: 'user.modality: audio' requires a 'user.speech:' block "
+            "(TTS service + voice) to synthesize the persona's turns"
         )
+    bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
+
+    return EvalSimulationScenario(
+        name=text("name"),
+        persona=text("persona"),
+        goal=text("goal"),
+        simulator=simulator,
+        success=text("success"),
+        metrics=_parse_metrics(data.get("metrics"), path),
+        judge=judge,
+        bot_audio=bot_audio,
+        transcriber=transcriber,
+        user_audio=user_audio,
+        user_speech=user_speech,
+        max_turns=_positive_int(data, "max_turns", DEFAULT_MAX_TURNS, path),
+        max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
+        max_silence_s=_positive_number(data, "max_silence_s", DEFAULT_MAX_SILENCE_S, path),
+        runs=_positive_int(data, "runs", 1, path),
+        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        source_path=path,
+    )
 
 
 def _parse_metrics(raw: Any, path: Path) -> list[EvalSimulationMetric]:

@@ -238,7 +238,6 @@ from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.evals.scenario_config import _DEFAULT_JUDGE, _parse_judge_block, _parse_user_block
-from pipecat.evals.scenario_loader import _load_mapping
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
@@ -502,83 +501,27 @@ class EvalScriptScenario:
     source_path: Path | None = None
 
     @classmethod
+    @deprecated(
+        "`EvalScriptScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+        "Use `EvalScenarioFile.load` instead."
+    )
     def load(cls, path: str | Path) -> "EvalScriptScenario":
-        """Parse a scenario YAML file into an :class:`EvalScriptScenario`.
+        """Parse a YAML file holding a scenario's own keys at its top level.
+
+        .. deprecated:: 1.11.0
+            Use :meth:`~pipecat.evals.scenario.EvalScenarioFile.load` instead.
+            Will be removed in 2.0.0.
 
         Args:
             path: Path to a YAML file with the scenario schema.
 
         Returns:
             The parsed scenario.
-
-        Raises:
-            ValueError: If the file structure is invalid.
-            FileNotFoundError: If the path doesn't exist.
         """
+        from pipecat.evals.scenario import _load_mapping
+
         path = Path(path)
-        return cls.from_mapping(_load_mapping(path), path)
-
-    @classmethod
-    def from_mapping(cls, data: dict, path: Path) -> "EvalScriptScenario":
-        """Parse a scenario's mapping, as read from ``path``, into an :class:`EvalScriptScenario`.
-
-        Args:
-            data: The scenario's top-level mapping.
-            path: The file it came from; error messages name it and the turns'
-                ``audio:`` and ``image:`` paths resolve relative to it.
-
-        Returns:
-            The parsed scenario.
-
-        Raises:
-            ValueError: If the mapping is invalid.
-        """
-        name = data.get("name")
-        if not name or not isinstance(name, str):
-            raise ValueError(f"{path}: missing or invalid 'name:' field")
-
-        raw_turns = data.get("turns")
-        if not isinstance(raw_turns, list):
-            raise ValueError(f"{path}: 'turns:' must be a list")
-
-        turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
-
-        raw_context = data.get("context")
-        if raw_context is None:
-            context: list[dict] = []
-        elif isinstance(raw_context, list):
-            context = raw_context
-        else:
-            raise ValueError(f"{path}: 'context:' must be a list of message dicts")
-
-        # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
-        # turn via TTS (exercising the bot's STT); text sends it as text.
-        user_audio, user_speech = _parse_user_block(data.get("user"), path)
-        _check_user_audio(turns, user_audio, user_speech, path)
-
-        # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
-        # means the bot speaks and the judge evaluates the transcription of its
-        # actual audio (tts_response); text means the bot's LLM text directly
-        # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
-        bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
-
-        # Resolve the modality-agnostic `response` event and check event/modality
-        # consistency now that the judge modality is known.
-        _resolve_response_events(turns, bot_audio, path)
-
-        return cls(
-            name=name,
-            turns=turns,
-            context=context,
-            judge=judge,
-            bot_audio=bot_audio,
-            transcriber=transcriber,
-            user_audio=user_audio,
-            user_speech=user_speech,
-            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
-            stop_on_failure=bool(data.get("stop_on_failure", True)),
-            source_path=path,
-        )
+        return _parse_script(_load_mapping(path), path)
 
     def wants_response(self) -> bool:
         """Whether any expectation asserts on the transcription of the bot's audio."""
@@ -613,6 +556,68 @@ class EvalScriptScenario:
     def needs_marker_events(self) -> bool:
         """Whether the scenario asserts on the LLM's markers, which the bot emits only on request."""
         return any(exp.event == "llm_marker" for turn in self.turns for exp in turn.expect)
+
+
+def _parse_script(data: dict, path: Path) -> EvalScriptScenario:
+    """Parse a scripted scenario's mapping, as read from ``path``.
+
+    Args:
+        data: The scenario's top-level mapping.
+        path: The file it came from; error messages name it and the turns'
+            ``audio:`` and ``image:`` paths resolve relative to it.
+
+    Returns:
+        The parsed scenario.
+
+    Raises:
+        ValueError: If the mapping is invalid.
+    """
+    name = data.get("name")
+    if not name or not isinstance(name, str):
+        raise ValueError(f"{path}: missing or invalid 'name:' field")
+
+    raw_turns = data.get("turns")
+    if not isinstance(raw_turns, list):
+        raise ValueError(f"{path}: 'turns:' must be a list")
+
+    turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
+
+    raw_context = data.get("context")
+    if raw_context is None:
+        context: list[dict] = []
+    elif isinstance(raw_context, list):
+        context = raw_context
+    else:
+        raise ValueError(f"{path}: 'context:' must be a list of message dicts")
+
+    # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
+    # turn via TTS (exercising the bot's STT); text sends it as text.
+    user_audio, user_speech = _parse_user_block(data.get("user"), path)
+    _check_user_audio(turns, user_audio, user_speech, path)
+
+    # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
+    # means the bot speaks and the judge evaluates the transcription of its
+    # actual audio (tts_response); text means the bot's LLM text directly
+    # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
+    bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
+
+    # Resolve the modality-agnostic `response` event and check event/modality
+    # consistency now that the judge modality is known.
+    _resolve_response_events(turns, bot_audio, path)
+
+    return EvalScriptScenario(
+        name=name,
+        turns=turns,
+        context=context,
+        judge=judge,
+        bot_audio=bot_audio,
+        transcriber=transcriber,
+        user_audio=user_audio,
+        user_speech=user_speech,
+        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        stop_on_failure=bool(data.get("stop_on_failure", True)),
+        source_path=path,
+    )
 
 
 @deprecated(

@@ -345,6 +345,23 @@ class TestManifestSimulations(unittest.TestCase):
         )
         self.assertEqual(names(EvalSuite(manifest).filter(scenario="greet")), ["greet/greet"])
 
+    def test_a_run_loads_its_own_scenario(self):
+        (self.base / "scenarios" / "mixed.yaml").write_text(
+            "name: mixed\nscenarios:\n  - name: hi\n    turns: []\n  - name: bye\n    turns: []\n"
+        )
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [mixed]\n")
+        # Built from a loaded file, the runs hold their scenarios already.
+        self.assertTrue(all(r.loaded is not None for r in manifest.runs))
+        self.assertEqual([r.load().name for r in manifest.runs], ["mixed/hi", "mixed/bye"])
+        # A run that only knows its file and name reads the file.
+        path = manifest.runs[0].scenario_path
+        self.assertEqual(
+            EvalRun(bot="b", scenario="mixed/bye", scenario_path=path).load().name, "mixed/bye"
+        )
+        with self.assertRaises(KeyError) as cm:
+            EvalRun(bot="b", scenario="mixed/nope", scenario_path=path).load()
+        self.assertIn("no scenario called 'mixed/nope'", str(cm.exception))
+
     def test_a_flat_file_still_loads_and_warns(self):
         (self.base / "scenarios" / "old.yaml").write_text("name: old\nturns: []\n")
         with self.assertWarns(DeprecationWarning):

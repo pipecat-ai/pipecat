@@ -36,7 +36,7 @@ Manifest format (YAML)::
 
 A ``scenarios:`` entry names a scenario file, and the file contributes one run
 per scenario it holds, scripted or a simulation as each says (see
-:func:`~pipecat.evals.scenario.load_scenarios`), named
+:class:`~pipecat.evals.scenario.EvalScenarioFile`), named
 ``<file name>/<scenario name>``. A name resolves under ``scenarios_dir`` with
 ``.yaml`` added and may carry a folder, as ``scripted/greeting``; a name ending
 in ``.yaml`` is a path relative to the manifest instead. A simulation runs as
@@ -83,7 +83,8 @@ from pipecat.evals.results import (
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
-from pipecat.evals.scenario import EvalKind, load_scenarios
+from pipecat.evals.scenario import EvalKind, EvalScenarioFile
+from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
@@ -353,11 +354,14 @@ class EvalRun:
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
         duration_ms: Wall-clock time the run took, in milliseconds.
+        loaded: The scenario, when the run was built from a loaded file;
+            :meth:`load` returns it, or reads the file when it is ``None``.
     """
 
     bot: str
     scenario: str
     scenario_path: Path
+    loaded: EvalScriptScenario | EvalSimulationScenario | None = None
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
@@ -376,6 +380,19 @@ class EvalRun:
     def stem(self) -> str:
         """The scenario name as a file name stem: a group entry's ``/`` becomes ``__``."""
         return self.scenario.replace("/", "__")
+
+    def load(self) -> EvalScriptScenario | EvalSimulationScenario:
+        """The run's scenario: as loaded when the run was built, else read from its file.
+
+        Raises:
+            ValueError: If the file is invalid.
+            KeyError: If the file holds no scenario of this name.
+            FileNotFoundError: If the file doesn't exist.
+        """
+        loaded = self.loaded
+        if loaded is None:
+            loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+        return loaded
 
 
 @dataclass(frozen=True)
@@ -581,7 +598,7 @@ class EvalManifest:
                 # A file that fails to load still gets a run, under the
                 # manifest's name for it, so the failure is reported.
                 try:
-                    named = [(one.name, one) for one in load_scenarios(scenario_path)]
+                    named = [(one.name, one) for one in EvalScenarioFile.load(scenario_path)]
                 except (ValueError, FileNotFoundError):
                     named = [(name, None)]
                 for run_name, one in named:
@@ -593,6 +610,7 @@ class EvalManifest:
                         EvalRun(
                             bot=bot,
                             scenario=run_name,
+                            loaded=one,
                             bot_path=bot_path,
                             scenario_path=scenario_path,
                             runner_body_path=runner_body_path,

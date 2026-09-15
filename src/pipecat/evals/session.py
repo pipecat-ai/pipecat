@@ -15,10 +15,11 @@ session kinds build the client and the driver for their kind of scenario;
 
 Example::
 
-    scenario = load_scenario("scenarios/greeting.yaml")
     params = EvalSessionParams(stop_bot=True)
-    result = await EvalSession.from_scenario(scenario, "ws://localhost:7860", params=params).run()
-    print("PASS" if result.passed else "FAIL")
+    for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
+        session = EvalSession.from_scenario(scenario, "ws://localhost:7860", params=params)
+        result = await session.run()
+        print(scenario.name, "PASS" if result.passed else "FAIL")
 """
 
 import time
