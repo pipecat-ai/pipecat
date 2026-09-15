@@ -16,6 +16,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterruptionFrame,
+    LLMMessagesAppendFrame,
+    LLMMessagesUpdateFrame,
+    LLMSetToolsFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     StopFrame,
@@ -445,6 +448,154 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         # Verify StopFrame was received (survived interruption)
         stop_frames = [f for f in received_frames if isinstance(f, StopFrame)]
         self.assertEqual(len(stop_frames), 1, "StopFrame should survive interruption")
+
+    async def test_llm_set_tools_frame_survives_interruption(self):
+        """Test that LLMSetToolsFrame survives interruption (it is uninterruptible).
+
+        A Flows node transition queues this frame to advertise the new node's tools. Losing it
+        leaves the LLM advertising the previous node's tools for the rest of the call, with
+        nothing logged: the transition has already reported success.
+        """
+        received_frames: list[Frame] = []
+
+        class DelayAndInterruptProcessor(FrameProcessor):
+            """This processor delays processing and then generates an interruption."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Delay to allow LLMSetToolsFrame to be queued
+                    await asyncio.sleep(0.1)
+                    # Broadcast an interruption, which resets pending queues. This should
+                    # NOT discard the LLMSetToolsFrame.
+                    await self.broadcast_interruption()
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayAndInterruptProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+            LLMSetToolsFrame(tools=["some_tool"]),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+            LLMSetToolsFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        tools_frames = [f for f in received_frames if isinstance(f, LLMSetToolsFrame)]
+        self.assertEqual(len(tools_frames), 1, "LLMSetToolsFrame should survive interruption")
+
+    async def test_llm_messages_append_frame_survives_interruption(self):
+        """Test that LLMMessagesAppendFrame survives interruption (it is uninterruptible).
+
+        Queued alongside LLMSetToolsFrame on a Flows node transition, carrying the new node's
+        prompt. Losing it leaves the LLM running the new node without the instructions that
+        define it.
+        """
+        received_frames: list[Frame] = []
+
+        class DelayAndInterruptProcessor(FrameProcessor):
+            """This processor delays processing and then generates an interruption."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Delay to allow LLMMessagesAppendFrame to be queued
+                    await asyncio.sleep(0.1)
+                    # Broadcast an interruption, which resets pending queues. This should
+                    # NOT discard the LLMMessagesAppendFrame.
+                    await self.broadcast_interruption()
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayAndInterruptProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+            LLMMessagesAppendFrame(messages=[{"role": "developer", "content": "new node"}]),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+            LLMMessagesAppendFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        append_frames = [f for f in received_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual(
+            len(append_frames), 1, "LLMMessagesAppendFrame should survive interruption"
+        )
+
+    async def test_llm_messages_update_frame_survives_interruption(self):
+        """Test that LLMMessagesUpdateFrame survives interruption (it is uninterruptible).
+
+        Sent instead of LLMMessagesAppendFrame when a Flows node uses a RESET context
+        strategy. Losing it is worse than losing an append: it REPLACES the context, so a
+        drop leaves the previous node's prompt in place entirely.
+        """
+        received_frames: list[Frame] = []
+
+        class DelayAndInterruptProcessor(FrameProcessor):
+            """This processor delays processing and then generates an interruption."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Delay to allow LLMMessagesUpdateFrame to be queued
+                    await asyncio.sleep(0.1)
+                    # Broadcast an interruption, which resets pending queues. This should
+                    # NOT discard the LLMMessagesUpdateFrame.
+                    await self.broadcast_interruption()
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayAndInterruptProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+            LLMMessagesUpdateFrame(messages=[{"role": "developer", "content": "new node"}]),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+            LLMMessagesUpdateFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        update_frames = [f for f in received_frames if isinstance(f, LLMMessagesUpdateFrame)]
+        self.assertEqual(
+            len(update_frames), 1, "LLMMessagesUpdateFrame should survive interruption"
+        )
 
     async def test_broadcast_interruption_allows_subsequent_code(self):
         """Test that broadcast_interruption() returns immediately, allowing the
