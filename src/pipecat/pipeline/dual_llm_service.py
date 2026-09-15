@@ -135,12 +135,13 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     """
 
     frontend_instruction = (
-        "Whenever the user asks for something the backend is for, call the delegate tool "
-        "at once, in that same reply, even if they also asked for something you can do "
-        "yourself; do the rest of the reply around it. Call it once per reply: the "
-        "backend reads the conversation itself, so one call covers everything the user "
-        "has asked for and you need not word the request. While it works, keep the "
-        "conversation going. When its result comes back, relay it in your own words."
+        "Whenever the user asks for something the backend is for, hand the conversation "
+        "over with the delegate tool at once, in that same reply, even if they also asked "
+        "for something you can do yourself; do the rest of the reply around it. A handoff "
+        "is of the whole conversation, not of one item: the backend reads it and does "
+        "everything in it, so hand over once per reply however many things the user asked "
+        "for, and do not word the request. While it works, keep the conversation going. "
+        "When its result comes back, relay it in your own words."
     )
 
     def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
@@ -156,10 +157,10 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     def tool_description(self, backend_description: str) -> str:
         """Describe the tool: hand the conversation over, for what the backend is for."""
         return (
-            f"Delegate to the backend. Call this as soon as the user asks for "
-            f"{backend_description}. The backend reads the conversation itself, so it takes "
-            "no arguments and one call covers everything the user has asked for; call it "
-            "once per reply. Keep talking with the user while it works."
+            "Hand the conversation over to the backend, which reads it and does everything "
+            f"in it that needs {backend_description}. One handoff per reply, however many "
+            "things the user asked for: two questions, or one question about two places, "
+            "is one handoff. It takes no arguments. Keep talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
