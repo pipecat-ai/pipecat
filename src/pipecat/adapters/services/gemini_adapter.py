@@ -366,6 +366,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # When thinking is enabled, merge parallel tool calls into single messages
         messages = self._merge_parallel_tool_calls_for_thinking(thought_signature_dicts, messages)
 
+        # Remove any empty messages
+        messages = [m for m in messages if m.parts]
+
+        self._ensure_function_call_is_anchored(messages)
+
         # Check if we only have function-related messages (no regular text)
         effective_system = extracted_system or system_instruction
         has_regular_messages = any(
@@ -381,13 +386,32 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         if effective_system and not has_regular_messages:
             messages.append(Content(role="user", parts=[Part(text=effective_system)]))
 
-        # Remove any empty messages
-        messages = [m for m in messages if m.parts]
-
         return self.ConvertedMessages(
             messages=messages,
             system_instruction=extracted_system,
         )
+
+    @staticmethod
+    def _ensure_function_call_is_anchored(messages: list[Content]) -> list[Content]:
+        """Ensure the message list does not begin with a function call.
+
+        Gemini requires a function-call turn to come immediately after a user
+        turn or a function-response turn, so it rejects a message list that
+        opens with one. When the first message carries a function call, a
+        minimal user message is prepended so that the API request is accepted.
+        "." represents a language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with a prepended user message.
+        """
+        if messages and any(
+            getattr(part, "function_call", None) for part in messages[0].parts or []
+        ):
+            messages.insert(0, Content(role="user", parts=[Part(text=".")]))
+        return messages
 
     def _from_standard_message(
         self, message: LLMStandardMessage, *, params: MessageConversionParams
