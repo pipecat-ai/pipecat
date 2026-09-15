@@ -787,6 +787,33 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result)
 
+    async def test_disconnect_closes_output_sources(self):
+        """Disconnecting closes the audio and video sources and forgets them."""
+        client = self._create_client(video_out_enabled=True)
+        client.room.disconnect = AsyncMock()
+
+        audio_source = MagicMock()
+        audio_source.aclose = AsyncMock()
+        video_source = MagicMock()
+        video_source.aclose = AsyncMock()
+
+        with (
+            patch.object(rtc, "AudioSource", return_value=audio_source),
+            patch.object(rtc.LocalAudioTrack, "create_audio_track", return_value=MagicMock()),
+            patch.object(rtc, "VideoSource", return_value=video_source),
+            patch.object(rtc.LocalVideoTrack, "create_video_track", return_value=MagicMock()),
+        ):
+            await client.connect()
+        await client.disconnect()
+
+        audio_source.aclose.assert_awaited_once()
+        video_source.aclose.assert_awaited_once()
+        self.assertIsNone(client._audio_source)
+        self.assertIsNone(client._audio_track)
+        self.assertIsNone(client._video_source)
+        self.assertIsNone(client._video_track)
+        self.assertFalse(await client.publish_video(MagicMock()))
+
 
 @unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
 class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase):

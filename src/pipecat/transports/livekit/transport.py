@@ -350,11 +350,28 @@ class LiveKitTransportClient:
             await self._callbacks.on_before_disconnect()
             await self.room.disconnect()
             self._connected = False
+            await self._close_output_sources()
             # Close any remaining per-participant streams and cancel their
             # producer tasks so they do not outlive the connection.
             await self._close_all_streams()
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
+
+    async def _close_output_sources(self):
+        """Close the published audio and video sources.
+
+        ``room.disconnect()`` does not release the native source handles, so
+        each connection would otherwise leave them behind.
+        """
+        audio_source, self._audio_source, self._audio_track = self._audio_source, None, None
+        video_source, self._video_source, self._video_track = self._video_source, None, None
+        for source in (audio_source, video_source):
+            if source is None:
+                continue
+            try:
+                await source.aclose()
+            except Exception as e:
+                logger.warning(f"{self} error closing output source: {e}")
 
     async def send_data(self, data: bytes, participant_id: str | None = None):
         """Send data to participants in the room.
