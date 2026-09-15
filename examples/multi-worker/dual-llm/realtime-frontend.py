@@ -8,13 +8,13 @@
 
 The frontend is OpenAI Realtime, holding the spoken conversation with no
 tools of its own. Anything that needs tools or careful reasoning it hands to
-a backend running Claude, and relays the answer. ``PipecatDualLLMService`` wires
+a backend running Claude, and relays what comes back. ``PipecatDualLLMService`` wires
 the two together: it installs the ``delegate`` tool on the frontend and runs
 the backend as a worker of its own.
 
 With a speech-to-speech frontend the defaults have the model word the
 request itself (its context can lag the audio, so the backend cannot read the
-conversation) and deliver the backend's answer only, since a realtime
+conversation) and deliver everything the backend produced at once, since a realtime
 function call takes one result. ``cascade-frontend.py`` puts a cascade
 pipeline in the frontend's place, against the same backend and the same
 prompts.

@@ -45,7 +45,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
-from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendAnswer
+from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendFinalOutput
 from tests.test_backend_llm_worker import _ScriptedLLM, get_weather
 
 
@@ -126,7 +126,9 @@ def _params(context: LLMContext | None = None, arguments: dict | None = None) ->
     )
 
 
-def _stream(monkeypatch, *outputs: BackendOutput | BackendToolCall | _BackendAnswer) -> list[dict]:
+def _stream(
+    monkeypatch, *outputs: BackendOutput | BackendToolCall | _BackendFinalOutput
+) -> list[dict]:
     """Fake the delegation stream; returns the requests it was given."""
     requests: list[dict] = []
 
@@ -158,7 +160,7 @@ def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
     assert connector.tool.handler is not None
 
 
-def test_a_realtime_frontend_words_the_request_and_takes_the_answer_only():
+def test_a_realtime_frontend_words_the_request_and_takes_every_output_at_once():
     connector = _bound(BackendConnector(), realtime=True)
     assert isinstance(connector.request, ExplicitBackendRequestStrategy)
     assert isinstance(connector.reply, OneShotBackendReplyStrategy)
@@ -187,7 +189,7 @@ def test_the_frontend_guidance_comes_from_the_strategies():
 
 @pytest.mark.asyncio
 async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(monkeypatch):
-    requests = _stream(monkeypatch, _BackendAnswer(BackendOutput(text="ok")))
+    requests = _stream(monkeypatch, _BackendFinalOutput(BackendOutput(text="ok")))
     connector = _bound(BackendConnector(timeout_secs=7))
     context = LLMContext([{"role": "user", "content": "weather in seattle?"}])
 
@@ -209,7 +211,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(m
 
 @pytest.mark.asyncio
 async def test_the_explicit_request_sends_the_model_words(monkeypatch):
-    requests = _stream(monkeypatch, _BackendAnswer(BackendOutput(text="ok")))
+    requests = _stream(monkeypatch, _BackendFinalOutput(BackendOutput(text="ok")))
     connector = _bound(BackendConnector(request=ExplicitBackendRequestStrategy()))
 
     await connector.delegate(_params(arguments={"request": "Weather in Seattle, Fahrenheit."}))
@@ -223,7 +225,7 @@ async def test_the_explicit_request_sends_the_model_words(monkeypatch):
 
 _PROGRESS = BackendOutput(text="Let me check.", prefers_spoken=False)
 _SPOKEN_PROGRESS = BackendOutput(text="Almost there.", prefers_spoken=True)
-_ANSWER = _BackendAnswer(BackendOutput(text="It's 62 and raining."))
+_FINAL = _BackendFinalOutput(BackendOutput(text="It's 62 and raining."))
 _THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
 
 
@@ -231,7 +233,7 @@ _THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=
 async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_flagged(
     monkeypatch,
 ):
-    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _ANSWER)
+    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _FINAL)
     params = _params()
 
     await _bound(BackendConnector()).delegate(params)
@@ -250,20 +252,20 @@ async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_
 
 
 @pytest.mark.asyncio
-async def test_one_shot_delivers_progress_and_answer_together(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _ANSWER)
+async def test_one_shot_delivers_every_output_together(monkeypatch):
+    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _FINAL)
     params = _params()
 
     await _bound(BackendConnector(), realtime=True).delegate(params)
 
     assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call({"progress": ["Let me check.", "Almost there."], "answer": "It's 62 and raining."})
+        call({"outputs": ["Let me check.", "Almost there.", "It's 62 and raining."]})
     ]
 
 
 @pytest.mark.asyncio
-async def test_one_shot_delivers_an_answer_without_progress_alone(monkeypatch):
-    _stream(monkeypatch, _ANSWER)
+async def test_one_shot_delivers_a_lone_output_as_text(monkeypatch):
+    _stream(monkeypatch, _FINAL)
     params = _params()
 
     await _bound(BackendConnector(), realtime=True).delegate(params)
@@ -276,7 +278,7 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
     _stream(
         monkeypatch,
         BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "Seattle"}),
-        _ANSWER,
+        _FINAL,
     )
     params = _params()
 
@@ -295,14 +297,14 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
 
 
 @pytest.mark.asyncio
-async def test_a_delegation_without_an_answer_still_settles_the_call(monkeypatch):
+async def test_a_delegation_with_nothing_to_say_still_settles_the_call(monkeypatch):
     _stream(monkeypatch, _PROGRESS)
     params = _params()
 
     await _bound(BackendConnector()).delegate(params)
 
     assert params.result_callback.await_args_list[-1] == call(  # type: ignore[attr-defined]
-        {"error": "The backend finished without an answer."}
+        {"error": "The backend finished without saying anything."}
     )
 
 
@@ -347,7 +349,7 @@ async def test_a_tool_change_keeps_the_tool_in_the_frame_and_the_context():
 
 
 @pytest.mark.asyncio
-async def test_a_local_backend_answers_through_the_delegate_tool():
+async def test_a_local_backend_is_heard_through_the_delegate_tool():
     """The whole path, with the backend worker added by the service itself."""
     backend = BackendLLMWorker(
         name="backend",
