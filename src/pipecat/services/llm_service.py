@@ -97,9 +97,7 @@ class FunctionCallResultCallback(Protocol):
     Used for both final results and intermediate updates. Pass
     ``properties=FunctionCallResultProperties(is_final=False)`` to send an
     intermediate update (only valid for async function calls registered with
-    ``cancel_on_interruption=False``). An intermediate update doesn't settle the
-    call, so it leaves any ``timeout_secs`` deadline running: the handler still
-    has to finish inside the budget it was given.
+    ``cancel_on_interruption=False``).
     """
 
     async def __call__(
