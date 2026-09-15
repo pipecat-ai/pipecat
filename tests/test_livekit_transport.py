@@ -915,6 +915,26 @@ class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase
         self.assertEqual(livekit_frame.height, 4)
         self.assertEqual(bytes(livekit_frame.data), image_bytes)
 
+    async def test_write_video_frame_maps_four_byte_formats(self):
+        """RGBA, BGRA and ARGB images map to the matching LiveKit buffer types."""
+        expected_types = {
+            "RGBA": rtc.VideoBufferType.RGBA,
+            "BGRA": rtc.VideoBufferType.BGRA,
+            "ARGB": rtc.VideoBufferType.ARGB,
+        }
+        for color_format, buffer_type in expected_types.items():
+            with self.subTest(color_format=color_format):
+                output = self._create_output_transport()
+                image_bytes = bytes(range(4 * 4 * 4))
+                frame = OutputImageRawFrame(image=image_bytes, size=(4, 4), format=color_format)
+
+                result = await output.write_video_frame(frame)
+
+                self.assertTrue(result)
+                (livekit_frame,) = output._client.publish_video.await_args.args
+                self.assertEqual(livekit_frame.type, buffer_type)
+                self.assertEqual(bytes(livekit_frame.data), image_bytes)
+
     async def test_write_video_frame_unsupported_format_does_not_publish(self):
         """An unknown color format is rejected without touching the client."""
         output = self._create_output_transport()
