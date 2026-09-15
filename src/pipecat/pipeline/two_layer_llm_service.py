@@ -35,18 +35,13 @@ from pipecat.frames.frames import (
     ExternalFunctionCallFrame,
     Frame,
     FunctionCallResultProperties,
-    InterruptionFrame,
     LLMContextFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
     LLMSetToolsFrame,
-    LLMTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import (
     FrameDirection,
-    FrameProcessor,
     FrameProcessorSetup,
 )
 from pipecat.services.llm_service import FunctionCallParams, LLMService
@@ -65,9 +60,6 @@ DELEGATE_TOOL_NAME = "delegate"
 
 #: What the ``delegate`` tool says the backend is for, unless the app says.
 DEFAULT_BACKEND_DESCRIPTION = "anything needing tools, current information or careful reasoning"
-
-#: What a frontend answers, alone, when it decides to say nothing.
-SILENCE_MARKER = "∅"
 
 
 @dataclass
@@ -239,9 +231,6 @@ class BackendReplyStrategy:
     needs_intermediate_results: bool = False
     #: Guidance appended to the frontend's system instruction, if any.
     frontend_instruction: str | None = None
-    #: A marker the frontend answers with, alone, to say nothing; ``None``
-    #: when the strategy gives it no such choice.
-    skip_marker: str | None = None
 
     async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
         """Deliver one output to the frontend.
@@ -283,36 +272,6 @@ class StrictSpeechFlagBackendReplyStrategy(BackendReplyStrategy):
         )
 
 
-class AdvisorySpeechFlagBackendReplyStrategy(BackendReplyStrategy):
-    """Relays the backend's progress and lets the frontend decide what to say.
-
-    Each output before the answer is recorded as an intermediate tool result
-    carrying the backend's ``prefers_spoken`` flag, and the frontend is run on
-    every one. The frontend model weighs the flag against the conversation and
-    either speaks or answers with :data:`SILENCE_MARKER` alone, which
-    :class:`TwoLayerLLMService` drops so nothing is said. Text frontends only.
-    """
-
-    needs_intermediate_results = True
-    skip_marker = SILENCE_MARKER
-    frontend_instruction = (
-        "Partial results from the backend carry a prefers_spoken flag: whether the backend "
-        "would like the user to hear that text now. It is advice, not an order. Speak a "
-        f"partial result when it helps the conversation; when it does not, reply with {SILENCE_MARKER} "
-        "and nothing else, and nothing will be said. The final result is always for the user."
-    )
-
-    async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
-        """Record progress with its flag and run the frontend on it."""
-        if output.is_final:
-            await params.result_callback(output.text)
-            return
-        await params.result_callback(
-            {"text": output.text, "prefers_spoken": output.prefers_spoken},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=True),
-        )
-
-
 # ---------------------------------------------------------------------------
 # The connector
 # ---------------------------------------------------------------------------
@@ -342,7 +301,7 @@ class BackendConnector:
     Example::
 
         connector = BackendConnector(
-            reply=AdvisorySpeechFlagBackendReplyStrategy(),
+            reply=FinalOnlyBackendReplyStrategy(),
             backend_description="current information such as the weather",
         )
     """
@@ -398,11 +357,6 @@ class BackendConnector:
         parts = [self.request.frontend_instruction, self.reply.frontend_instruction]
         return "\n\n".join(p for p in parts if p) or None
 
-    @property
-    def skip_marker(self) -> str | None:
-        """The reply strategy's silence marker, if it gives the frontend one."""
-        return self.reply.skip_marker
-
     def bind(self, context: ConnectorContext) -> None:
         """Settle the strategies for the layers being joined and build the tool.
 
@@ -437,8 +391,7 @@ class BackendConnector:
         """Build the ``delegate`` tool from the request strategy.
 
         Override to install a tool of another shape entirely; the service reads
-        nothing else from the connector but :attr:`frontend_instruction` and
-        :attr:`skip_marker`.
+        nothing else from the connector but :attr:`frontend_instruction`.
 
         Returns:
             The tool, carrying its handler.
@@ -510,64 +463,6 @@ class BackendConnector:
 # ---------------------------------------------------------------------------
 
 
-class _SilenceFilter(FrameProcessor):
-    """Drops a frontend response that opens with the silence marker.
-
-    Text is held back until the response's first non-blank character says
-    whether the marker is coming; a response that opens with it loses its
-    text, so the TTS says nothing and the assistant aggregator records no
-    turn. Inert without a marker.
-    """
-
-    def __init__(self, marker: str | None, **kwargs):
-        super().__init__(**kwargs)
-        self._marker = marker
-        self._buffer = ""
-        self._skipping: bool | None = None  # None: undecided for this response
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if self._marker is None or direction != FrameDirection.DOWNSTREAM:
-            await self.push_frame(frame, direction)
-            return
-        if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
-            self._reset()
-        elif isinstance(frame, LLMTextFrame):
-            await self._handle_text(frame)
-            return
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            if self._skipping is None and self._buffer.strip():
-                # Whitespace, then a marker prefix that never completed.
-                await self.push_frame(LLMTextFrame(self._buffer))
-            self._reset()
-        await self.push_frame(frame, direction)
-
-    async def _handle_text(self, frame: LLMTextFrame):
-        if self._skipping is True:
-            return
-        if self._skipping is False:
-            await self.push_frame(frame)
-            return
-        assert self._marker is not None
-        self._buffer += frame.text
-        opening = self._buffer.lstrip()
-        if opening.startswith(self._marker):
-            self._skipping = True
-        elif not opening or self._marker.startswith(opening):
-            return  # nothing decisive yet
-        else:
-            self._skipping = False
-        if self._skipping:
-            logger.debug(f"{self}: the frontend chose to say nothing")
-        else:
-            await self.push_frame(LLMTextFrame(self._buffer))
-        self._buffer = ""
-
-    def _reset(self):
-        self._buffer = ""
-        self._skipping = None
-
-
 def _with_tool(tools: ToolsSchema | NotGiven | None, tool: FunctionSchema) -> ToolsSchema | None:
     """Return ``tools`` with ``tool`` added, or ``None`` if it is already there."""
     if tools is None or not is_given(tools):
@@ -632,9 +527,8 @@ class TwoLayerLLMService(Pipeline):
         )
         if instruction := self._connector.frontend_instruction:
             frontend.append_system_instruction(instruction)
-        self._filter = _SilenceFilter(self._connector.skip_marker)
         self._context: LLMContext | None = None
-        super().__init__([frontend, self._filter])
+        super().__init__([frontend])
 
     @property
     def frontend(self) -> LLMService[Any]:

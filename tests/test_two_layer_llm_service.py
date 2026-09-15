@@ -28,12 +28,9 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
-    LLMTextFrame,
 )
 from pipecat.pipeline import two_layer_llm_service
 from pipecat.pipeline.two_layer_llm_service import (
-    SILENCE_MARKER,
-    AdvisorySpeechFlagBackendReplyStrategy,
     BackendConnector,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
@@ -41,7 +38,6 @@ from pipecat.pipeline.two_layer_llm_service import (
     StrictSpeechFlagBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
     TwoLayerLLMService,
-    _SilenceFilter,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -179,12 +175,9 @@ def test_the_tool_description_says_what_the_backend_is_for():
     assert "for the weather" in connector.tool.description
 
 
-def test_the_frontend_guidance_comes_from_both_strategies():
-    connector = _bound(BackendConnector(reply=AdvisorySpeechFlagBackendReplyStrategy()))
-    instruction = connector.frontend_instruction or ""
-    assert "call the delegate tool" in instruction
-    assert SILENCE_MARKER in instruction
-    assert connector.skip_marker == SILENCE_MARKER
+def test_the_frontend_guidance_comes_from_the_strategies():
+    connector = _bound(BackendConnector())
+    assert "call the delegate tool" in (connector.frontend_instruction or "")
 
 
 # ---------------------------------------------------------------------------
@@ -254,22 +247,6 @@ async def test_strict_relays_progress_and_runs_the_frontend_as_flagged(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_advisory_passes_the_flag_on_and_always_runs_the_frontend(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _ANSWER)
-    params = _params()
-
-    await _bound(BackendConnector(reply=AdvisorySpeechFlagBackendReplyStrategy())).delegate(params)
-
-    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
-        call(
-            {"text": "Let me check.", "prefers_spoken": False},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=True),
-        ),
-        call("It's 62 and raining."),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_final_only_drops_progress(monkeypatch):
     _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _ANSWER)
     params = _params()
@@ -312,35 +289,6 @@ async def test_a_delegation_without_an_answer_still_settles_the_call(monkeypatch
     assert params.result_callback.await_args_list[-1] == call(  # type: ignore[attr-defined]
         {"error": "The backend finished without an answer."}
     )
-
-
-# ---------------------------------------------------------------------------
-# The silence filter
-# ---------------------------------------------------------------------------
-
-
-async def _texts_through(filter_: _SilenceFilter, *texts: str) -> list[str]:
-    frames: list[Frame] = [LLMFullResponseStartFrame()]
-    frames += [LLMTextFrame(t) for t in texts]
-    frames.append(LLMFullResponseEndFrame())
-    down, _ = await run_test(filter_, frames_to_send=frames)
-    return [f.text for f in down if isinstance(f, LLMTextFrame)]
-
-
-@pytest.mark.asyncio
-async def test_a_response_that_is_the_marker_says_nothing():
-    assert await _texts_through(_SilenceFilter(SILENCE_MARKER), " ", SILENCE_MARKER) == []
-    assert await _texts_through(_SilenceFilter(SILENCE_MARKER), f"{SILENCE_MARKER} ok") == []
-
-
-@pytest.mark.asyncio
-async def test_a_response_that_speaks_passes_whole():
-    assert await _texts_through(_SilenceFilter(SILENCE_MARKER), " Hel", "lo") == [" Hel", "lo"]
-
-
-@pytest.mark.asyncio
-async def test_the_filter_is_inert_without_a_marker():
-    assert await _texts_through(_SilenceFilter(None), SILENCE_MARKER) == [SILENCE_MARKER]
 
 
 # ---------------------------------------------------------------------------
