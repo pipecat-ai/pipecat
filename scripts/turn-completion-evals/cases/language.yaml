@@ -1,0 +1,41 @@
+# The instructions are English; the conversation is not.
+category: language
+cases:
+  - name: lang_es_complete
+    system: "Eres un asistente útil en una conversación de voz. Tus respuestas se leerán en voz alta, así que evita emojis, viñetas u otro formato que no se pueda pronunciar. Responde de forma breve y natural."
+    turns:
+      - bot: "Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?"
+      - user: "Iría a Japón porque me encanta la comida."
+        expect: complete
+
+  - name: lang_es_cutoff
+    system: "Eres un asistente útil en una conversación de voz. Tus respuestas se leerán en voz alta, así que evita emojis, viñetas u otro formato que no se pueda pronunciar. Responde de forma breve y natural."
+    turns:
+      - bot: "Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?"
+      - user: "Iría a Japón porque me encanta la"
+        expect: short
+
+  - name: lang_es_think
+    system: "Eres un asistente útil en una conversación de voz. Tus respuestas se leerán en voz alta, así que evita emojis, viñetas u otro formato que no se pueda pronunciar. Responde de forma breve y natural."
+    turns:
+      - bot: "Si pudieras viajar a cualquier parte del mundo ahora mismo, ¿adónde irías y por qué?"
+      - user: "Déjame pensarlo un momento."
+        expect: long
+
+  - name: lang_fr_short_complete
+    turns:
+      - bot: "Voulez-vous que je réserve la table pour vous ?"
+      - user: "Oui."
+        expect: complete
+
+  - name: lang_de_cutoff
+    turns:
+      - bot: "Wenn du jetzt überall hinreisen könntest, wohin würdest du fahren und warum?"
+      - user: "Ich würde nach Japan fahren, weil ich"
+        expect: short
+
+  - name: lang_ja_complete
+    turns:
+      - bot: "今すぐ世界のどこにでも旅行できるとしたら、どこに行きたいですか？"
+      - user: "日本に行きたいです。食べ物が大好きだからです。"
+        expect: complete

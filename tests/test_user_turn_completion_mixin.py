@@ -711,9 +711,9 @@ class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
             ):
                 self.assertNotIn(default, prompt)
 
-        self.assertIn("Mark as COMPLETE (Y) when:", config.completion_instructions)
-        self.assertIn("`N`", config.completion_instructions)
-        self.assertIn("`W`", config.completion_instructions)
+        self.assertIn("Write Y, a space, then your full reply", config.completion_instructions)
+        self.assertIn("Respond with only N", config.completion_instructions)
+        self.assertIn("Respond with only W", config.completion_instructions)
         self.assertIn("respond with Y", config.short_prompt)
         self.assertIn("respond with Y", config.long_prompt)
 

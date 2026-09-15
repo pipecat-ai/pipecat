@@ -1,0 +1,247 @@
+# Models the turn-completion eval sweeps: every text LLM service in Pipecat,
+# each with its default model plus weaker, smaller or older ones, since those
+# are where marker adherence breaks down.
+#
+# provider:
+#   service:     dotted path of the Pipecat LLM service class
+#   kwargs:      constructor keyword arguments; "$NAME" reads the environment,
+#                and a provider whose variable is unset is skipped
+#   concurrency: concurrent inferences against this provider (default 4)
+#   system_suffix: appended to the system instruction for every model here
+#   tools:       false to skip the function-calling cases (default true)
+#   models:
+#     - model:    the model id passed as Settings(model=...)
+#       label:    optional display id (default provider/model)
+#       settings: extra Settings(...) fields, e.g. thinking or reasoning config
+#       system_suffix / tools: per-model overrides of the provider's
+
+providers:
+  openai:
+    service: pipecat.services.openai.llm.OpenAILLMService
+    kwargs: { api_key: $OPENAI_API_KEY }
+    concurrency: 8
+    models:
+      - model: gpt-4.1
+      - model: gpt-4.1-mini
+      - model: gpt-4o
+      - model: gpt-4o-mini
+      - model: gpt-5-mini
+        settings: { extra: { reasoning_effort: minimal } }
+      - model: gpt-5.4
+        settings: { extra: { reasoning_effort: none } }
+
+  openai-responses:
+    service: pipecat.services.openai.responses.llm.OpenAIResponsesLLMService
+    kwargs: { api_key: $OPENAI_API_KEY }
+    concurrency: 8
+    models:
+      - model: gpt-4.1
+      - model: gpt-5.4
+        settings: { reasoning: { effort: none } }
+
+  anthropic:
+    service: pipecat.services.anthropic.llm.AnthropicLLMService
+    kwargs: { api_key: $ANTHROPIC_API_KEY }
+    concurrency: 6
+    models:
+      - model: claude-sonnet-4-6
+      - model: claude-haiku-4-5-20251001
+        label: anthropic/claude-haiku-4-5
+      - model: claude-sonnet-5
+
+  google:
+    service: pipecat.services.google.llm.GoogleLLMService
+    kwargs: { api_key: $GOOGLE_API_KEY }
+    concurrency: 6
+    models:
+      - model: gemini-3.6-flash
+        settings: { thinking: { thinking_level: minimal } }
+      - model: gemini-3.5-flash-lite
+        settings: { thinking: { thinking_level: minimal } }
+      - model: gemini-2.5-flash
+        settings: { thinking: { thinking_budget: 0 } }
+
+  vertex:
+    service: pipecat.services.google.vertex.llm.GoogleVertexLLMService
+    kwargs:
+      credentials: $GOOGLE_VERTEX_TEST_CREDENTIALS
+      project_id: $GOOGLE_CLOUD_PROJECT_ID
+    concurrency: 4
+    models:
+      - model: gemini-3.6-flash
+        settings: { thinking: { thinking_level: minimal } }
+
+  aws:
+    service: pipecat.services.aws.llm.AWSBedrockLLMService
+    kwargs: { aws_region: $AWS_REGION }
+    concurrency: 4
+    models:
+      - model: us.amazon.nova-lite-v1:0
+      - model: us.amazon.nova-pro-v1:0
+      - model: us.meta.llama3-3-70b-instruct-v1:0
+        tools: false
+
+  azure:
+    service: pipecat.services.azure.llm.AzureLLMService
+    kwargs: { api_key: $AZURE_CHATGPT_API_KEY, endpoint: $AZURE_CHATGPT_ENDPOINT }
+    concurrency: 4
+    models:
+      - model: $AZURE_CHATGPT_MODEL
+
+  groq:
+    service: pipecat.services.groq.llm.GroqLLMService
+    kwargs: { api_key: $GROQ_API_KEY }
+    concurrency: 2
+    models:
+      - model: openai/gpt-oss-120b
+        settings: { reasoning_effort: low }
+      - model: openai/gpt-oss-20b
+        settings: { reasoning_effort: low }
+      - model: qwen/qwen3.6-27b
+        settings: { reasoning_effort: none }
+        developer_role: false
+
+  cerebras:
+    service: pipecat.services.cerebras.llm.CerebrasLLMService
+    kwargs: { api_key: $CEREBRAS_API_KEY }
+    concurrency: 4
+    models:
+      - model: gpt-oss-120b
+      - model: qwen-3.8-27b
+        developer_role: false
+
+  crusoe:
+    service: pipecat.services.crusoe.llm.CrusoeLLMService
+    kwargs: { api_key: $CRUSOE_API_KEY }
+    models:
+      - model: openai/gpt-oss-120b
+
+  deepseek:
+    service: pipecat.services.deepseek.llm.DeepSeekLLMService
+    kwargs: { api_key: $DEEPSEEK_API_KEY }
+    models:
+      - model: deepseek-flash
+
+  fireworks:
+    service: pipecat.services.fireworks.llm.FireworksLLMService
+    kwargs: { api_key: $FIREWORKS_API_KEY }
+    models:
+      - model: accounts/fireworks/models/nemotron-3-ultra-nvfp4
+        label: fireworks/nemotron-3-ultra
+      - model: accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b
+        label: fireworks/nemotron-3.5-lightning-30b
+
+  inception:
+    service: pipecat.services.inception.llm.InceptionLLMService
+    kwargs: { api_key: $INCEPTION_API_KEY }
+    models:
+      - model: mercury-2
+
+  mistral:
+    service: pipecat.services.mistral.llm.MistralLLMService
+    kwargs: { api_key: $MISTRAL_API_KEY }
+    models:
+      - model: mistral-small-latest
+      - model: mistral-large-latest
+      - model: ministral-8b-latest
+
+  nebius:
+    service: pipecat.services.nebius.llm.NebiusLLMService
+    kwargs: { api_key: $NEBIUS_API_KEY }
+    models:
+      - model: Qwen/Qwen3-30B-A3B-Instruct-2507
+      - model: google/gemma-3-27b-it
+      - model: meta-llama/Llama-3.3-70B-Instruct
+      - model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+        system_suffix: "/no_think"
+
+  novita:
+    service: pipecat.services.novita.llm.NovitaLLMService
+    kwargs: { api_key: $NOVITA_API_KEY }
+    tools: false
+    models:
+      - model: moonshotai/kimi-k2.5
+      - model: mistralai/mistral-nemo
+        developer_role: false
+      - model: qwen/qwen3.8-flash
+        developer_role: false
+
+  nvidia:
+    service: pipecat.services.nvidia.llm.NvidiaLLMService
+    kwargs: { api_key: $NVIDIA_API_KEY }
+    concurrency: 2
+    models:
+      - model: nvidia/nemotron-3-super-120b-a12b
+        system_suffix: "/no_think"
+      - model: nvidia/nemotron-3.5-lightning-30b-a3b
+        system_suffix: "/no_think"
+      - model: openai/gpt-oss-20b
+
+  ollama:
+    service: pipecat.services.ollama.llm.OLLamaLLMService
+    kwargs: {}
+    concurrency: 2
+    models:
+      - model: gemma4:12b
+        settings: { extra: { reasoning_effort: none } }
+      - model: gemma2:9b
+        tools: false
+
+  openrouter:
+    service: pipecat.services.openrouter.llm.OpenRouterLLMService
+    kwargs: { api_key: $OPENROUTER_API_KEY }
+    models:
+      - model: meta-llama/llama-3.3-70b-instruct
+      - model: meta-llama/llama-3.1-8b-instruct
+      - model: meta-llama/llama-3.2-3b-instruct
+        tools: false
+      - model: google/gemma-2-27b-it
+        tools: false
+      - model: microsoft/phi-4
+        tools: false
+
+  perplexity:
+    service: pipecat.services.perplexity.llm.PerplexityLLMService
+    kwargs: { api_key: $PERPLEXITY_API_KEY }
+    tools: false
+    models:
+      - model: sonar
+
+  qwen:
+    service: pipecat.services.qwen.llm.QwenLLMService
+    kwargs: { api_key: $QWEN_API_KEY }
+    models:
+      - model: qwen-plus
+      - model: qwen-turbo
+
+  sambanova:
+    service: pipecat.services.sambanova.llm.SambaNovaLLMService
+    kwargs: { api_key: $SAMBANOVA_API_KEY }
+    models:
+      - model: Meta-Llama-3.3-70B-Instruct
+      - model: gemma-4-31B-it
+
+  sarvam:
+    service: pipecat.services.sarvam.llm.SarvamLLMService
+    kwargs: { api_key: $SARVAM_API_KEY }
+    models:
+      - model: sarvam-105b
+
+  together:
+    service: pipecat.services.together.llm.TogetherLLMService
+    kwargs: { api_key: $TOGETHER_API_KEY }
+    models:
+      - model: zai-org/GLM-5.2
+      - model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+
+  xai:
+    service: pipecat.services.xai.llm.GrokLLMService
+    kwargs: { api_key: $XAI_API_KEY }
+    models:
+      - model: grok-4.20-non-reasoning
+
+  baseten:
+    service: pipecat.services.baseten.llm.BasetenLLMService
+    kwargs: { api_key: $BASETEN_API_KEY }
+    models:
+      - model: zai-org/GLM-5.3

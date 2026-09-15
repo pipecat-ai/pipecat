@@ -1,0 +1,89 @@
+# Long histories that condition the model toward the wrong output: many bare
+# markers before a complete input (the failure in pipecat-ai/pipecat#5151), or
+# many complete exchanges before a cutoff.
+category: drift
+cases:
+  - name: drift_many_short_then_complete
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to"
+      - bot: "◐"
+      - user: "well, I was thinking"
+      - bot: "◐"
+      - user: "maybe somewhere in"
+      - bot: "◐"
+      - user: "Europe, like"
+      - bot: "◐"
+      - user: "Italy or"
+      - bot: "◐"
+      - user: "Spain, because of the"
+      - bot: "◐"
+      - user: "food and the"
+      - bot: "◐"
+      - user: "history, I guess."
+        expect: complete
+        eval: "the reply engages with the user wanting to visit Italy or Spain for the food and history"
+
+  - name: drift_many_long_then_complete
+    turns:
+      - bot: "What would you say is your biggest strength?"
+      - user: "Hmm."
+      - bot: "○"
+      - user: "That's a good question."
+      - bot: "○"
+      - user: "Let me think."
+      - bot: "○"
+      - user: "Well..."
+      - bot: "○"
+      - user: "I'd say it's patience. I don't get rattled easily."
+        expect: complete
+
+  - name: drift_bare_complete_history
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the capital of France?"
+      - bot: "●"
+      - user: "Okay, and Germany?"
+      - bot: "●"
+      - user: "And what about Spain?"
+      - bot: "●"
+      - user: "Fine. What's the capital of Italy?"
+        expect: complete
+        eval: "the reply says the capital of Italy is Rome"
+
+  - name: drift_many_complete_then_cutoff
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the capital of France?"
+      - bot: "The capital of France is Paris."
+      - user: "And Germany?"
+      - bot: "Germany's capital is Berlin."
+      - user: "What about Spain?"
+      - bot: "That would be Madrid."
+      - user: "Italy?"
+      - bot: "Rome is the capital of Italy."
+      - user: "Portugal?"
+      - bot: "Lisbon."
+      - user: "And the capital of"
+        expect: short
+
+  - name: drift_many_complete_then_time
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the capital of France?"
+      - bot: "The capital of France is Paris."
+      - user: "And Germany?"
+      - bot: "Germany's capital is Berlin."
+      - user: "What about Spain?"
+      - bot: "That would be Madrid."
+      - user: "Hmm, hold on, let me think of another one."
+        expect: long
+
+  - name: drift_interrupted_assistant
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Tell me a long story about the history of Paris."
+      - bot: "Paris began as a small settlement of the Parisii, a Celtic tribe, on the Île de la Cité around the third century"
+      - user: "Actually never mind that. What's the capital of Japan?"
+        expect: complete
+        eval: "the reply says the capital of Japan is Tokyo instead of continuing the Paris story"

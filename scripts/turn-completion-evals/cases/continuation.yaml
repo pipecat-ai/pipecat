@@ -1,0 +1,46 @@
+# Multi-turn: a fragment, a ◐/○ in the context, then the user finishes. The
+# model must answer the whole thought, not the last fragment.
+category: continuation
+cases:
+  - name: continuation_travel
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan because I love"
+        expect: short
+      - user: "the culture and the food."
+        expect: complete
+        eval: "the reply engages with the user wanting to visit Japan for its culture and food, rather than asking them to continue or finish their thought"
+
+  - name: continuation_request
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Can you help me book"
+        expect: short
+      - user: "a flight to New York next week?"
+        expect: complete
+        eval: "the reply takes up the request to book a flight to New York (offering to help, asking for details such as dates or the departure city, or explaining what it can do), rather than asking the user to finish their sentence"
+
+  - name: continuation_after_long
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "Let me think about that for a moment."
+        expect: long
+      - user: "Okay. I'd go to Iceland, to see the northern lights."
+        expect: complete
+        eval: "the reply engages with the user wanting to visit Iceland for the northern lights"
+
+  - name: continuation_still_incomplete
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to"
+        expect: short
+      - user: "Japan, because"
+        expect: short
+
+  - name: continuation_preamble_then_short_answer
+    turns:
+      - bot: "Which day works best for you?"
+      - user: "Hmm, let me see."
+        expect: long
+      - user: "Tuesday."
+        expect: complete

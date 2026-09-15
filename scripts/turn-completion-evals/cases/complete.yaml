@@ -1,0 +1,65 @@
+# The user says something whole. The model must answer with ● and speech.
+category: complete
+cases:
+  - name: complete_answer_travel
+    turns:
+      - bot: "Let me start with a fun one. If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan because I love the culture."
+        expect: complete
+        eval: "the reply engages with the user's wish to visit Japan"
+
+  - name: complete_request_flight
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Can you help me book a flight to New York next week?"
+        expect: complete
+
+  - name: complete_question_capital
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the capital of Germany?"
+        expect: complete
+        eval: "the reply says the capital of Germany is Berlin"
+
+  - name: complete_statement
+    turns:
+      - bot: "Hi there. What's on your mind?"
+      - user: "I'm planning a trip to Japan next spring."
+        expect: complete
+
+  - name: complete_with_filler_prefix
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "Hmm, I'd go to Japan, mostly for the food."
+        expect: complete
+
+  - name: complete_ends_with_question_back
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd pick Italy, for the history. What about you?"
+        expect: complete
+
+  - name: complete_two_sentences
+    turns:
+      - bot: "What do you do for work?"
+      - user: "I'm a nurse. I work nights at a hospital downtown."
+        expect: complete
+
+  - name: complete_correction
+    turns:
+      - bot: "Got it, a table for two on Friday."
+      - user: "Actually, make it Saturday instead."
+        expect: complete
+
+  - name: complete_repeat_request
+    turns:
+      - bot: "Your appointment is confirmed for Tuesday at three in the afternoon."
+      - user: "Sorry, can you say that again?"
+        expect: complete
+        eval: "the reply repeats or restates the appointment details"
+
+  - name: complete_favor_question
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Can you do me a favor?"
+        expect: complete

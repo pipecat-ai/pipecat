@@ -1,0 +1,62 @@
+# Edge cases where the right marker is arguable, so models disagree.
+category: hard
+cases:
+  - name: hard_i_think
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I think..."
+        expect: incomplete
+
+  - name: hard_complete_with_trailing_yeah
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan, definitely. Yeah."
+        expect: complete
+
+  - name: hard_complete_with_trailing_um
+    turns:
+      - bot: "Which day works best for you?"
+      - user: "Tuesday works. Um."
+        expect: incomplete
+
+  - name: hard_question_with_hedge
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "I'm not sure this is the right place to ask, but do you handle billing questions?"
+        expect: complete
+
+  - name: hard_answer_then_new_thought_cutoff
+    turns:
+      - bot: "Which day works best for you?"
+      - user: "Tuesday. Oh, and also, could you"
+        expect: short
+
+  - name: hard_listing_done
+    turns:
+      - bot: "What can I get for you?"
+      - user: "A large pepperoni pizza, a garden salad, and two cokes. That's it."
+        expect: complete
+
+  - name: hard_listing_and
+    turns:
+      - bot: "What can I get for you?"
+      - user: "A large pepperoni pizza, a garden salad, and"
+        expect: short
+
+  - name: hard_ok_alone
+    turns:
+      - bot: "Your total comes to twenty four dollars. Should I place the order?"
+      - user: "Okay."
+        expect: complete
+
+  - name: hard_ok_trailing
+    turns:
+      - bot: "Your total comes to twenty four dollars. Should I place the order?"
+      - user: "Okay, but"
+        expect: short
+
+  - name: hard_thinking_aloud
+    turns:
+      - bot: "What's your account number?"
+      - user: "It's um, it starts with a four, I think, four seven"
+        expect: short

@@ -1,0 +1,25 @@
+# No user content yet: the bot speaks first, or the user only says hello.
+category: greeting
+cases:
+  - name: greeting_developer_intro
+    turns:
+      - developer: "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go and why?'"
+        expect: complete
+        eval: "the reply asks the user where they would travel"
+
+  - name: greeting_user_hello
+    turns:
+      - user: "Hello?"
+        expect: complete
+
+  - name: greeting_user_hi_there
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Hi there."
+        expect: complete
+
+  - name: greeting_are_you_there
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Are you there?"
+        expect: complete
