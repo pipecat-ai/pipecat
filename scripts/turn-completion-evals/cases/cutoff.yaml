@@ -1,0 +1,76 @@
+# The user stopped mid-sentence. The model must answer with ◐ and nothing else.
+category: cutoff
+cases:
+  - name: cutoff_preposition
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan because I love"
+        expect: short
+
+  - name: cutoff_article
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "I need help with the"
+        expect: short
+
+  - name: cutoff_mid_request
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "I need help with"
+        expect: short
+
+  - name: cutoff_conjunction
+    turns:
+      - bot: "When would you like to fly?"
+      - user: "I'd like to fly out on Tuesday and"
+        expect: short
+
+  - name: cutoff_list_comma
+    # Without punctuation the trailing comma, the only cue, is gone.
+    stt_variant: false
+    turns:
+      - bot: "What can I get for you?"
+      - user: "I'd like a large pepperoni pizza, a garden salad,"
+        expect: short
+
+  - name: cutoff_phone_number
+    turns:
+      - bot: "What's the best phone number to reach you?"
+      - user: "It's five five five,"
+        expect: short
+
+  - name: cutoff_question_no_object
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Can you tell me the weather in"
+        expect: short
+
+  - name: cutoff_subject_only
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "So the thing I wanted to ask about was"
+        expect: short
+
+  - name: cutoff_disfluent
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I was thinking maybe, uh,"
+        expect: short
+
+  - name: cutoff_the_reason
+    turns:
+      - bot: "Why do you want to cancel the subscription?"
+      - user: "The main reason is that"
+        expect: short
+
+  - name: cutoff_infinitive
+    turns:
+      - bot: "What would you like to do next?"
+      - user: "I want to"
+        expect: short
+
+  - name: cutoff_so
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan, so"
+        expect: short

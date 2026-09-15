@@ -1,0 +1,57 @@
+# One or two words that fully answer the question. The trap is treating
+# brevity as incompleteness.
+category: short_complete
+cases:
+  - name: short_yes
+    turns:
+      - bot: "Would you like me to book that for you?"
+      - user: "Yes."
+        expect: complete
+
+  - name: short_no_thanks
+    turns:
+      - bot: "Would you like me to add anything else to the order?"
+      - user: "No thanks."
+        expect: complete
+
+  - name: short_one_word_place
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go?"
+      - user: "Japan."
+        expect: complete
+
+  - name: short_number
+    turns:
+      - bot: "How many people will be joining you?"
+      - user: "Four."
+        expect: complete
+
+  - name: short_name
+    turns:
+      - bot: "Great, and what's your name?"
+      - user: "Mark."
+        expect: complete
+
+  - name: short_goodbye
+    turns:
+      - bot: "Anything else I can help with?"
+      - user: "Nope, that's all. Bye."
+        expect: complete
+
+  - name: short_sure
+    turns:
+      - bot: "Should I go ahead and send the confirmation email?"
+      - user: "Sure."
+        expect: complete
+
+  - name: short_day
+    turns:
+      - bot: "Which day works best for you?"
+      - user: "Tuesday."
+        expect: complete
+
+  - name: short_thanks
+    turns:
+      - bot: "Done. Your flight is booked for next Wednesday."
+      - user: "Thanks!"
+        expect: complete

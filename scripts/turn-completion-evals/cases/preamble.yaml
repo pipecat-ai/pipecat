@@ -1,0 +1,45 @@
+# Grammatically complete, conversationally empty: the user has acknowledged
+# the question but not answered it. ○, nothing else.
+category: preamble
+cases:
+  - name: preamble_good_question
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "That's a good question."
+        expect: long
+
+  - name: preamble_hmm
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "Hmm."
+        expect: long
+
+  - name: preamble_well
+    turns:
+      - bot: "What would you say is your biggest strength?"
+      - user: "Well..."
+        expect: long
+
+  - name: preamble_interesting
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "That's interesting..."
+        expect: long
+
+  - name: preamble_so_um
+    turns:
+      - bot: "Why are you calling today?"
+      - user: "So, okay, um."
+        expect: long
+
+  - name: preamble_let_me_see
+    turns:
+      - bot: "What's the address for the delivery?"
+      - user: "Let me see."
+        expect: long
+
+  - name: preamble_oh_wow
+    turns:
+      - bot: "Congratulations, you've been selected for the beta. Do you have any questions?"
+      - user: "Oh wow, okay."
+        expect: long

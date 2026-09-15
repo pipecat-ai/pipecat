@@ -1,0 +1,22 @@
+# Long user turns: the marker has to be the first character no matter how
+# much there is to respond to.
+category: long
+cases:
+  - name: long_complete_paragraph
+    turns:
+      - bot: "Tell me about the project you're working on."
+      - user: "So it's a voice agent for a dental office. Patients call in, the bot checks their insurance, finds an open slot, and books them. The hard part has been turn-taking, because people pause a lot when they're reading their insurance card, and the bot keeps jumping in. We tried a longer silence timeout but then it feels sluggish for everyone else. So now I'm looking at having the model itself decide whether the caller is done."
+        expect: complete
+        eval: "the reply engages with the dental-office voice agent and its turn-taking problem"
+
+  - name: long_cutoff_paragraph
+    turns:
+      - bot: "Tell me about the project you're working on."
+      - user: "So it's a voice agent for a dental office. Patients call in, the bot checks their insurance, finds an open slot, and books them. The hard part has been turn-taking, because people pause a lot when they're reading their insurance card, and the bot keeps jumping in. We tried a longer silence timeout but then it feels sluggish, so what I'm thinking now is that we could"
+        expect: short
+
+  - name: long_complete_then_time
+    turns:
+      - bot: "Tell me about the project you're working on."
+      - user: "So it's a voice agent for a dental office. Patients call in, the bot checks their insurance, finds an open slot, and books them. The hard part has been turn-taking. Actually, hold on, let me think about how to explain this."
+        expect: long

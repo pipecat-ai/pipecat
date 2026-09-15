@@ -1,0 +1,54 @@
+# Function calling. A complete request that needs a tool should produce the
+# call (● optional); a cut-off one must be ◐ with no call.
+category: tools
+cases:
+  - name: tool_weather_complete
+    tools: [get_current_weather]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the weather in Los Angeles right now?"
+        expect: tool:get_current_weather
+
+  - name: tool_weather_cutoff
+    tools: [get_current_weather]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the weather in"
+        expect: short
+
+  - name: tool_weather_hmm
+    tools: [get_current_weather]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the weather in... hmm"
+        expect: incomplete
+
+  - name: tool_weather_continuation
+    tools: [get_current_weather]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the weather in"
+        expect: short
+      - user: "Los Angeles, California?"
+        expect: tool:get_current_weather
+
+  - name: tool_appointment_partial
+    tools: [book_appointment]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Book me an appointment for Tuesday at"
+        expect: short
+
+  - name: tool_appointment_complete
+    tools: [book_appointment]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "Book me an appointment for Tuesday at three in the afternoon."
+        expect: tool:book_appointment
+
+  - name: tool_unrelated_complete
+    tools: [get_current_weather, book_appointment]
+    turns:
+      - bot: "Hi! How can I help you today?"
+      - user: "What's the capital of Germany?"
+        expect: complete

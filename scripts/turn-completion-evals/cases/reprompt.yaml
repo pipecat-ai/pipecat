@@ -1,0 +1,42 @@
+# The incomplete-turn timeout expired and the framework appended its developer
+# re-prompt. The model must answer ● plus a one-sentence nudge, never ◐/○.
+category: reprompt
+cases:
+  - name: reprompt_short
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan because I love"
+      - bot: "◐"
+      - developer: $reprompt_short
+        expect: complete
+        eval: "the reply is a single short sentence gently inviting the user to continue"
+
+  - name: reprompt_long
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "Let me think about that for a moment."
+      - bot: "○"
+      - developer: $reprompt_long
+        expect: complete
+        eval: "the reply is a single brief, friendly check-in that offers to continue whenever the user is ready"
+
+  - name: reprompt_then_user_answers
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "I'd go to Japan because I love"
+      - bot: "◐"
+      - developer: $reprompt_short
+      - bot: "Go ahead, I'm listening."
+      - user: "the food, mostly. And the temples."
+        expect: complete
+        eval: "the reply engages with the user wanting to visit Japan for the food and temples"
+
+  - name: reprompt_then_user_still_thinking
+    turns:
+      - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+      - user: "Let me think about that for a moment."
+      - bot: "○"
+      - developer: $reprompt_long
+      - bot: "No rush! Let me know when you're ready."
+      - user: "Still thinking, hang on."
+        expect: long
