@@ -63,7 +63,7 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
     BackendToolCall,
-    _BackendAnswer,
+    _BackendFinalOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -980,7 +980,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                         )
                     )
                     continue
-                if isinstance(event, _BackendAnswer):
+                if isinstance(event, _BackendFinalOutput):
                     event = event.output
                 answered = True
                 await self._send_context_append(

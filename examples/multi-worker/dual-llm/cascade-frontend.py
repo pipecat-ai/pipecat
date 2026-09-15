@@ -8,7 +8,7 @@
 
 The frontend keeps the conversation moving with a small, fast model and no
 tools of its own. Anything that needs tools or careful reasoning it hands to
-a backend running Claude, and relays the answer. ``PipecatDualLLMService`` wires
+a backend running Claude, and relays what comes back. ``PipecatDualLLMService`` wires
 the two together: it installs the ``delegate`` tool on the frontend and runs
 the backend as a worker of its own.
 
@@ -148,7 +148,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Uncomment, together with the delay in get_current_weather, to see a
     # backend that knows its work is slow say so the moment work is handed to
     # it: the frontend says the line while the backend works, instead of
-    # waiting for the answer in silence.
+    # waiting in silence.
     # @backend.event_handler("on_delegation_started")
     # async def on_delegation_started(backend, request):
     #     await backend.say("Let me look into that, this takes a moment.")
