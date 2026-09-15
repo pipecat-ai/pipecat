@@ -25,6 +25,7 @@ from speechmatics.agent_stt import AudioEncoding, Model, Segment  # noqa: E402
 
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame  # noqa: E402
 from pipecat.services.speechmatics.stt import (  # noqa: E402
+    DEFAULT_TURN_DETECTION_MODE,
     SpeechmaticsSTTService,
     TurnDetectionMode,
     _is_auth_rejection,
@@ -203,10 +204,11 @@ def test_missing_api_key_raises():
         SpeechmaticsSTTService(api_key=None, sample_rate=16000)
 
 
-def test_default_turn_detection_mode_is_vad():
-    """The service must default to detecting turns itself (VAD); this default drives
-    turn-frame emission and endpointing behavior downstream."""
-    assert _service()._settings.turn_detection_mode == TurnDetectionMode.VAD
+def test_default_turn_detection_mode():
+    """The default drives turn-frame emission and endpointing behavior downstream, so it
+    is pinned here rather than left to whatever the settings dataclass happens to hold."""
+    assert _service()._settings.turn_detection_mode == DEFAULT_TURN_DETECTION_MODE
+    assert DEFAULT_TURN_DETECTION_MODE == TurnDetectionMode.EXTERNAL
 
 
 def test_settings_take_precedence_over_deprecated_params():
@@ -280,7 +282,10 @@ def test_service_closes_turns_false_for_external():
 def test_metadata_frame_routes_should_interrupt_to_external_strategies():
     """When the service closes turns it proposes the boundaries, and the strategies it
     recommends own the interruption, so `should_interrupt` must reach them."""
-    frame = _service(should_interrupt=False).service_metadata_frame()
+    frame = _service(
+        should_interrupt=False,
+        settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.VAD),
+    ).service_metadata_frame()
     assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
     assert frame.user_turn_strategies.enable_interruptions is False
 
