@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A two-layer LLM: a conversational frontend delegating to a backend.
+"""A dual LLM: a conversational frontend delegating to a backend.
 
 The frontend is any LLM service, text or speech-to-speech, and holds the
 conversation. The backend is a :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker`
 running a heavier model with the tools, and does the work the frontend hands
-off. :class:`TwoLayerLLMService` wraps the frontend so the pair drops into a
+off. :class:`PipecatDualLLMService` wraps the frontend so the pair drops into a
 pipeline where an LLM goes, and installs the ``delegate`` tool that joins
 them.
 
@@ -499,7 +499,7 @@ def _with_tool(tools: ToolsSchema | NotGiven | None, tool: FunctionSchema) -> To
     return ToolsSchema(standard_tools=standard, custom_tools=tools.custom_tools)
 
 
-class TwoLayerLLMService(Pipeline):
+class PipecatDualLLMService(Pipeline):
     """A conversational frontend LLM with a backend it delegates to, in one processor.
 
     Put it where the LLM goes in a pipeline. It wraps the frontend service,
@@ -510,7 +510,7 @@ class TwoLayerLLMService(Pipeline):
 
     Example::
 
-        llm = TwoLayerLLMService(
+        llm = PipecatDualLLMService(
             frontend=OpenAILLMService(...),
             backend=BackendLLMWorker(
                 llm=AnthropicLLMService(...),
