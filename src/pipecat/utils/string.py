@@ -10,64 +10,39 @@ This module provides utilities for natural language text processing including
 sentence boundary detection, email and number pattern handling, and XML-style
 tag parsing for structured text content.
 
-Dependencies:
-    This module uses NLTK (Natural Language Toolkit) for robust sentence
-    tokenization. NLTK is licensed under the Apache License 2.0.
-    See: https://www.nltk.org/
-    Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
-
-    The tokenizer and its ``punkt_tab`` data load on first use, and the data is
-    downloaded if it isn't already present. Deployments that build their own
-    image should bundle it at build time (``python -m nltk.downloader
-    punkt_tab``) or point ``NLTK_DATA`` at a directory that already has it, so
-    that a slow or unavailable network can't delay the first bot turn.
+Sentence boundaries use sentencex's embedded language rules without external data.
 """
 
 import re
-import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cache
 
-from loguru import logger
-
-_load_lock = threading.Lock()
+# The native extension does not publish Python type stubs.
+from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
 
 @cache
 def _sent_tokenizer() -> Callable[[str], list[str]]:
-    """Load NLTK's sentence tokenizer and its ``punkt_tab`` data.
+    """Return a sentence splitter that preserves source offsets before whitespace.
 
-    NLTK reaches scikit-learn through its optional classifier backends, so
-    importing it costs a few hundred milliseconds. Loading it here rather than
-    at module import keeps that cost off the startup path of pipelines that
-    never tokenize.
-
-    A caller arriving while the pipeline's background warming is still loading
-    waits on the lock rather than loading alongside it, so the one-time
-    ``punkt_tab`` download cannot run twice at once. The cache keeps the lock
-    off the path once the tokenizer is loaded.
+    Paragraph separators belong to the following sentence. Trailing whitespace
+    stays in the aggregation buffer until that sentence is emitted.
     """
-    with _load_lock:
-        import nltk
-        from nltk.tokenize import sent_tokenize
+    code = "en"
 
-        try:
-            nltk.data.find("tokenizers/punkt_tab")
-        except LookupError:
-            try:
-                nltk.download("punkt_tab", quiet=True)
-            except (OSError, PermissionError) as e:
-                logger.error(
-                    f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-                    "This data is required for sentence tokenization features. "
-                    "The download failed due to filesystem permissions. "
-                    "To resolve: pre-install the data in a location with appropriate read "
-                    "permissions, or set the NLTK_DATA environment variable to point to a "
-                    "writable directory. See https://www.nltk.org/data.html for more information."
-                )
+    def tokenize(text: str) -> list[str]:
+        sentences = []
+        pending = ""
+        for span in segment(code, text):
+            pending += span
+            if span.strip():
+                sentence = pending.rstrip()
+                sentences.append(sentence)
+                pending = pending[len(sentence) :]
+        return sentences
 
-        return sent_tokenize
+    return tokenize
 
 
 SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
@@ -115,13 +90,12 @@ SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
     }
 )
 
-# Latin punctuation that NLTK handles well — these need NLTK's disambiguation
+# Latin punctuation that sentencex handles well — these need sentencex's disambiguation
 # because "." can appear in abbreviations, decimals, etc.
 _LATIN_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset({".", "!", "?", ";", "…"})
 
 # Non-Latin sentence-ending punctuation that is always unambiguous and never needs
-# NLTK's disambiguation logic. Used as a fallback when NLTK doesn't support the
-# language (e.g., Japanese, Chinese, Korean, Hindi, Arabic).
+# the tokenizer's disambiguation logic. Used for punctuation outside its rules.
 UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = (
     SENTENCE_ENDING_PUNCTUATION - _LATIN_SENTENCE_ENDING_PUNCTUATION
 )
@@ -151,7 +125,7 @@ def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
 def match_endofsentence(text: str) -> int:
     """Find the position of the end of a sentence in the provided text.
 
-    This function uses NLTK's sentence tokenizer to detect sentence boundaries
+    This function uses sentencex's sentence tokenizer to detect sentence boundaries
     in the input text, combined with punctuation verification to ensure that
     single tokens without proper sentence endings aren't considered complete sentences.
 
@@ -166,7 +140,6 @@ def match_endofsentence(text: str) -> int:
     if not text:
         return 0
 
-    # Use NLTK's sentence tokenizer to find sentence boundaries
     sentences = _sent_tokenizer()(text)
 
     if not sentences:
@@ -174,31 +147,19 @@ def match_endofsentence(text: str) -> int:
 
     first_sentence = sentences[0]
 
-    # If there's only one sentence that equals the entire text,
-    # verify it actually ends with sentence-ending punctuation.
-    # This is required as NLTK may return a single sentence for
-    # text that's a single word. In the case of LLM tokens, it's
-    # common for text to be single words, so we need to ensure
-    # sentence-ending punctuation is present.
+    # A single span can be an incomplete fragment; require terminal punctuation.
     if len(sentences) == 1 and first_sentence == text:
         if text and text[-1] in SENTENCE_ENDING_PUNCTUATION:
             return len(text)
-        # Fallback for languages not supported by NLTK (e.g., Japanese, Chinese,
-        # Korean, Hindi, Arabic). NLTK returned the entire text as a single
-        # sentence, and the last character is not sentence-ending punctuation
-        # (it's a lookahead character). Scan for unambiguous non-Latin sentence-
-        # ending punctuation that doesn't need NLTK's disambiguation.
+        # Additional punctuation can delimit sentences outside the selected rules.
         for i, ch in enumerate(text):
             if ch in UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION:
                 return i + 1
         return 0
 
-    # If there are multiple sentences, the first one is complete by definition
-    # (NLTK found a boundary, so there must be proper punctuation)
     if len(sentences) > 1:
         return len(first_sentence)
 
-    # Single sentence that doesn't equal the full text means incomplete
     return 0
 
 

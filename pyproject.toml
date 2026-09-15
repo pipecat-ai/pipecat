@@ -27,7 +27,7 @@ dependencies = [
     "loguru~=0.7.3",
     "loudness>=0.2.0,<1",
     "Markdown>=3.7,<4",
-    "nltk>=3.10.0,<4",
+    "sentencex==1.0.31",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<13",
     "protobuf>=5.29.6,<7",

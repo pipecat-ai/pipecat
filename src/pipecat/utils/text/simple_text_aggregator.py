@@ -51,7 +51,7 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         In SENTENCE mode, processes the input text character-by-character. When
         sentence-ending punctuation is detected, it waits for non-whitespace
-        lookahead before calling NLTK.
+        lookahead before calling sentencex.
 
         In TOKEN mode, yields the text immediately without buffering.
 
@@ -80,7 +80,7 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         This method implements the core sentence detection logic with lookahead.
         When sentence-ending punctuation is detected, it waits for the next
-        non-whitespace character before calling NLTK. This disambiguates cases
+        non-whitespace character before calling sentencex. This disambiguates cases
         like "$29." (not a sentence) vs "$29. Next" (sentence ends at period).
         Whitespace alone is not meaningful lookahead since it appears in both
         cases. Instead, the first non-whitespace character after the punctuation
@@ -99,12 +99,12 @@ class SimpleTextAggregator(BaseTextAggregator):
         if self._needs_lookahead:
             # Check if the new character is non-whitespace
             if char.strip():
-                # We have meaningful lookahead, call NLTK
+                # We have meaningful lookahead, call sentencex
                 self._needs_lookahead = False
                 eos_marker = match_endofsentence(self._text)
 
                 if eos_marker:
-                    # NLTK confirmed a sentence - return it
+                    # sentencex confirmed a sentence - return it
                     result = self._text[:eos_marker]
                     self._text = self._text[eos_marker:]
                     return Aggregation(text=result.strip(" "), type=AggregationType.SENTENCE)
@@ -115,7 +115,7 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         # Check if we just added sentence-ending punctuation
         if self._text and self._text[-1] in SENTENCE_ENDING_PUNCTUATION:
-            # Mark that we need lookahead (don't call NLTK yet)
+            # Mark that we need lookahead (don't call sentencex yet)
             self._needs_lookahead = True
 
         return None
