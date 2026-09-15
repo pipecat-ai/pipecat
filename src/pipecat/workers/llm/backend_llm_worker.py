@@ -369,11 +369,13 @@ class BackendLLMWorker(LLMContextWorker):
             context: The backend's context, typically carrying its tools.
                 A fresh empty context when omitted.
             name: Worker name; auto-generated when omitted.
-            transform_output: Called with each :class:`BackendOutput` before it
-                is sent, to adjust its text or whether the user may hear it.
-                Without one, only the final answer asks to be spoken: a
-                frontend filling the wait is usually mid-sentence when
-                progress arrives, and speaking it talks over them.
+            transform_output: Called with each :class:`BackendOutput` the
+                model produces before it is sent, to adjust its text or
+                whether the user may hear it; an output with no text left is
+                not sent. Without one, only the final answer asks to be
+                spoken: a frontend filling the wait is usually mid-sentence
+                when progress arrives, and speaking it talks over them.
+                Outputs the app sends itself are not passed through it.
             user_params: Optional parameters for the user aggregator. Defaults
                 to external turn strategies: the backend has no audio, so the
                 default VAD and turn-analysis strategies (and the model the
@@ -453,7 +455,7 @@ class BackendLLMWorker(LLMContextWorker):
             return
         await self.send_job_response(message.job_id, {"text": run.final_text})
 
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, *, apply_transform_output: bool = False) -> None:
         """Send one spoken line to the frontend, on the delegation in progress.
 
         The line is a :class:`BackendOutput` flagged ``prefers_spoken``, so a
@@ -462,24 +464,40 @@ class BackendLLMWorker(LLMContextWorker):
 
         Args:
             text: What the frontend should say.
+            apply_transform_output: Whether to run the line through
+                ``transform_output`` as the model's outputs are; see
+                :meth:`send_output`.
         """
-        await self.send_output(BackendOutput(text=text, prefers_spoken=True))
+        await self.send_output(
+            BackendOutput(text=text, prefers_spoken=True),
+            apply_transform_output=apply_transform_output,
+        )
 
-    async def send_output(self, output: BackendOutput) -> None:
+    async def send_output(
+        self, output: BackendOutput, *, apply_transform_output: bool = False
+    ) -> None:
         """Send one output of the app's own to the frontend, on the delegation in progress.
 
-        It travels as the model's outputs do, ``transform_output`` included,
-        and reaches the frontend the same way. Outside a delegation there is
-        nowhere for it to go, and it is dropped with a warning.
+        It reaches the frontend as the model's outputs do, but as given unless
+        asked: ``transform_output`` is not applied to it by default. Outside a
+        delegation there is nowhere for it to go, and it is dropped with a
+        warning.
 
         Args:
             output: The output.
+            apply_transform_output: Whether to run the output through
+                ``transform_output`` as the model's outputs are.
         """
         run = self._run
         if run is None:
             logger.warning(f"Worker '{self.name}': no delegation in progress to send output on")
             return
-        await self._emit(run, output)
+        # Past the transform by default, so the app can silence the model's
+        # progress with a transform_output that blanks it and still send
+        # progress of its own, such as from a tool the model calls to talk to
+        # the user. The transform sees only what the model wrote unless the
+        # app asks otherwise, and nothing on an output says where it came from.
+        await self._emit(run, output, apply_transform_output=apply_transform_output)
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         run = self._run
@@ -561,13 +579,15 @@ class BackendLLMWorker(LLMContextWorker):
         if run is not None and text:
             await self._emit(run, BackendOutput(text=text, is_thought=True, prefers_spoken=False))
 
-    async def _emit(self, run: "_BackendRun", output: BackendOutput) -> BackendOutput:
+    async def _emit(
+        self, run: "_BackendRun", output: BackendOutput, *, apply_transform_output: bool = True
+    ) -> BackendOutput:
         """Send one output as a job update, after any configured transform.
 
         Returns:
             The output as it was sent, so a caller sees the transformed text.
         """
-        if self._transform_output is not None:
+        if apply_transform_output and self._transform_output is not None:
             output = await self._transform_output(output)
         if output.text:
             await self.send_job_update(run.job_id, output.to_payload())
