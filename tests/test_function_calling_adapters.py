@@ -427,6 +427,186 @@ class TestFunctionAdapters(unittest.TestCase):
         ]
         assert OpenAIResponsesLLMAdapter().to_provider_tools_format(self.tools_def) == expected
 
+    def test_openai_responses_adapter_strict(self):
+        """Test that a strict schema is sent as strict, with its objects sealed."""
+        function_def = FunctionSchema(
+            name="search",
+            description="Search the index",
+            properties={
+                "query": {"type": "string"},
+                "filter": {
+                    "type": "object",
+                    "properties": {"tag": {"type": "string"}},
+                    "required": ["tag"],
+                },
+                # An optional parameter, spelled as a nullable type.
+                "scope": {
+                    "type": ["object", "null"],
+                    "properties": {"team": {"type": "string"}},
+                    "required": ["team"],
+                },
+                # An object that says for itself what it accepts.
+                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                # Objects reached through a keyword other than "properties".
+                "hits": {"type": "array", "items": {"type": "object", "properties": {}}},
+                "target": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {}}]},
+                # A parameter named like a schema keyword.
+                "additionalProperties": {"type": "string"},
+            },
+            required=[
+                "query",
+                "filter",
+                "scope",
+                "headers",
+                "hits",
+                "target",
+                "additionalProperties",
+            ],
+            strict=True,
+        )
+        expected = [
+            {
+                "type": "function",
+                "name": "search",
+                "description": "Search the index",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "filter": {
+                            "type": "object",
+                            "properties": {"tag": {"type": "string"}},
+                            "required": ["tag"],
+                            "additionalProperties": False,
+                        },
+                        "scope": {
+                            "type": ["object", "null"],
+                            "properties": {"team": {"type": "string"}},
+                            "required": ["team"],
+                            "additionalProperties": False,
+                        },
+                        "headers": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "hits": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {},
+                                "additionalProperties": False,
+                            },
+                        },
+                        "target": {
+                            "anyOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "object",
+                                    "properties": {},
+                                    "additionalProperties": False,
+                                },
+                            ]
+                        },
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "required": [
+                        "query",
+                        "filter",
+                        "scope",
+                        "headers",
+                        "hits",
+                        "target",
+                        "additionalProperties",
+                    ],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }
+        ]
+        tools_def = ToolsSchema(standard_tools=[function_def])
+
+        assert OpenAIResponsesLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_adapters_strict_unset_and_opted_out(self):
+        """Test that a tool only carries strict once it asks for one."""
+        unset = ToolsSchema(standard_tools=[self.tools_def.standard_tools[0]])
+        opted_out = ToolsSchema(
+            standard_tools=[
+                FunctionSchema(
+                    name="get_weather",
+                    description="Get the weather in a given location",
+                    properties={"location": {"type": "string"}},
+                    required=["location"],
+                    strict=False,
+                )
+            ]
+        )
+
+        assert unset.standard_tools[0].strict is None
+        assert "strict" not in OpenAILLMAdapter().to_provider_tools_format(unset)[0]["function"]
+        assert (
+            OpenAILLMAdapter().to_provider_tools_format(opted_out)[0]["function"]["strict"] is False
+        )
+        # Only strict mode needs the schema sealed.
+        for adapter in (OpenAILLMAdapter(), OpenAIResponsesLLMAdapter()):
+            tools = adapter.to_provider_tools_format(opted_out)
+            parameters = tools[0].get("parameters") or tools[0]["function"]["parameters"]
+            assert "additionalProperties" not in parameters
+
+    def test_openai_adapter_strict(self):
+        """Test that Chat Completions carries strict and seals the schema too."""
+        function_def = FunctionSchema(
+            name="search",
+            description="Search the index",
+            properties={"query": {"type": "string"}},
+            required=["query"],
+            strict=True,
+        )
+        expected = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "search",
+                    "description": "Search the index",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                },
+            )
+        ]
+        tools_def = ToolsSchema(standard_tools=[function_def])
+
+        assert OpenAILLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_responses_adapter_strict_leaves_the_schema_untouched(self):
+        """Test that sealing a strict schema doesn't write back to its author's properties."""
+        properties = {"query": {"type": "string"}}
+        function_def = FunctionSchema(
+            name="search",
+            description="Search the index",
+            properties=properties,
+            required=["query"],
+            strict=True,
+        )
+        tools_def = ToolsSchema(standard_tools=[function_def])
+        adapter = OpenAIResponsesLLMAdapter()
+
+        adapter.to_provider_tools_format(tools_def)
+
+        # Tools are converted on every inference, and the properties dict is shared
+        # with the other adapters.
+        assert properties == {"query": {"type": "string"}}
+        assert adapter.to_provider_tools_format(tools_def)[0]["parameters"] == {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+
     def test_openai_realtime_adapter_with_custom_tools(self):
         """Test OpenAI Realtime adapter appends custom tools."""
         tool_search = {"type": "tool_search"}
