@@ -60,8 +60,18 @@ from pipecat.workers.llm.backend_llm_worker import (
 #: Name of the tool the frontend calls to delegate.
 DELEGATE_TOOL_NAME = "delegate"
 
-#: What the ``delegate`` tool says the backend is for, unless the app says.
-DEFAULT_BACKEND_DESCRIPTION = "anything needing tools, current information or careful reasoning"
+#: When the frontend delegates and when it does not, ahead of each request
+#: strategy's own guidance. The frontend's own system instruction is the place
+#: to say what the backend can do, in plain words, when this is not enough.
+_DELEGATION_POLICY = (
+    "Delegate to the backend when any part of what the user asks needs a backend tool or "
+    "careful reasoning, or a correction changes work already requested. Do not delegate "
+    "when you can answer from the conversation or a result you already have, or when you "
+    "need a brief clarification first. Delegate before giving any answer that depends on "
+    "backend work, and do not guess the result while waiting. To delegate, call the "
+    "delegate tool at once, in that same reply, and do the rest of the reply yourself "
+    "around it. "
+)
 
 
 @dataclass
@@ -99,11 +109,8 @@ class BackendRequestStrategy:
     #: Guidance appended to the frontend's system instruction, if any.
     frontend_instruction: str | None = None
 
-    def tool_description(self, backend_description: str) -> str:
+    def tool_description(self) -> str:
         """Describe the ``delegate`` tool to the frontend model.
-
-        Args:
-            backend_description: What the backend is for, in the app's words.
 
         Returns:
             The description.
@@ -134,14 +141,12 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     runs.
     """
 
-    frontend_instruction = (
-        "Whenever the user asks for something the backend is for, hand the conversation "
-        "over with the delegate tool at once, in that same reply, even if they also asked "
-        "for something you can do yourself; do the rest of the reply around it. A handoff "
-        "is of the whole conversation, not of one item: the backend reads it and does "
-        "everything in it, so hand over once per reply however many things the user asked "
-        "for, and do not word the request. While it works, keep the conversation going. "
-        "When its result comes back, relay it in your own words."
+    frontend_instruction = _DELEGATION_POLICY + (
+        "A delegation hands over the whole conversation, not one item: the backend reads "
+        "it and does everything in it that is its job, so delegate once per reply however "
+        "many things the user asked for, and do not word the request. While it works, "
+        "keep the conversation going. When its result comes back, relay it in your own "
+        "words."
     )
 
     def __init__(self, *, instruction: str = _DEFAULT_TRANSCRIPT_INSTRUCTION):
@@ -154,13 +159,15 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
         self._instruction = instruction
         self._delegated_through = 0
 
-    def tool_description(self, backend_description: str) -> str:
-        """Describe the tool: hand the conversation over, for what the backend is for."""
+    def tool_description(self) -> str:
+        """Describe the tool: hand the conversation over."""
         return (
             "Hand the conversation over to the backend, which reads it and does everything "
-            f"in it that needs {backend_description}. One handoff per reply, however many "
-            "things the user asked for: two questions, or one question about two places, "
-            "is one handoff. It takes no arguments. Keep talking with the user while it works."
+            "in it that needs a backend tool or careful reasoning. Call this as soon as any "
+            "part of what the user asks needs that, and do the rest yourself. One handoff "
+            "per reply, however many things the user asked for: two questions, or one "
+            "question about two places, is one handoff. It takes no arguments. Keep "
+            "talking with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
@@ -194,21 +201,23 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
         }
     }
     tool_required = ["request"]
-    frontend_instruction = (
-        "Whenever the user asks for something the backend is for, call the delegate tool "
-        "at once, in that same reply, even if they also asked for something you can do "
-        "yourself; do the rest of the reply around it. Word the request so it stands on "
-        "its own: the user's goal, the exact details they gave and their latest "
-        "correction. While it works, keep the conversation going. When its result comes "
-        "back, relay it in your own words."
+    frontend_instruction = _DELEGATION_POLICY + (
+        "Word the request so it stands on its own: the user's goal, the exact details "
+        "they gave and their latest correction, with everything they asked for in the one "
+        "request, so you delegate once per reply however many things that is. While it "
+        "works, keep the conversation going. When its result comes back, relay it in your "
+        "own words."
     )
 
-    def tool_description(self, backend_description: str) -> str:
-        """Describe the tool: hand a worded request over, for what the backend is for."""
+    def tool_description(self) -> str:
+        """Describe the tool: hand a worded request over."""
         return (
-            f"Delegate to the backend. Call this as soon as the user asks for "
-            f"{backend_description}, with the request worded to stand on its own. Keep "
-            "talking with the user while it works."
+            "Hand a request to the backend, which does everything in it that needs a "
+            "backend tool or careful reasoning. Call this as soon as any part of what the "
+            "user asks needs that, with the request worded to stand on its own, and do the "
+            "rest yourself. One call per reply, however many things the user asked for: two "
+            "questions, or one question about two places, go in one request. Keep talking "
+            "with the user while it works."
         )
 
     async def compose_request(self, params: FunctionCallParams) -> str:
@@ -328,10 +337,7 @@ class BackendConnector:
 
     Example::
 
-        connector = BackendConnector(
-            reply=OneShotBackendReplyStrategy(),
-            backend_description="current information such as the weather",
-        )
+        connector = BackendConnector(reply=OneShotBackendReplyStrategy())
     """
 
     def __init__(
@@ -339,7 +345,6 @@ class BackendConnector:
         *,
         request: BackendRequestStrategy | None = None,
         reply: BackendReplyStrategy | None = None,
-        backend_description: str = DEFAULT_BACKEND_DESCRIPTION,
         timeout_secs: float | None = 120,
     ):
         """Initialize the connector.
@@ -349,14 +354,11 @@ class BackendConnector:
                 Picked by frontend kind when omitted.
             reply: How the backend's outputs reach the frontend. Picked by
                 frontend kind when omitted.
-            backend_description: What the backend is for, as the ``delegate``
-                tool's description tells the frontend model.
             timeout_secs: How long a delegation may take, including the wait
                 for the backend to become ready.
         """
         self._request = request
         self._reply = reply
-        self._backend_description = backend_description
         self._timeout_secs = timeout_secs
         self._context: ConnectorContext | None = None
         self._tool: FunctionSchema | None = None
@@ -431,7 +433,7 @@ class BackendConnector:
 
         return FunctionSchema(
             name=DELEGATE_TOOL_NAME,
-            description=self.request.tool_description(self._backend_description),
+            description=self.request.tool_description(),
             properties=self.request.tool_parameters,
             required=self.request.tool_required,
             handler=delegate,
@@ -517,6 +519,11 @@ class PipecatDualLLMService(Pipeline):
     context's tools as they pass, and to any tool change), appends the
     connector's guidance to the frontend's system instruction, and adds a local
     backend worker to the pipeline worker so the app never wires it up.
+
+    The guidance says when to delegate in general terms. The frontend's own
+    system instruction is the place to say what the backend can do, in plain
+    words, when a frontend needs steering: a short list of capabilities, no
+    tool names.
 
     Example::
 

@@ -172,9 +172,9 @@ def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
         _bound(BackendConnector(reply=SpeakOnPrefersSpokenBackendReplyStrategy()), realtime=True)
 
 
-def test_the_tool_description_says_what_the_backend_is_for():
-    connector = _bound(BackendConnector(backend_description="the weather"))
-    assert "the weather" in connector.tool.description
+def test_the_tool_description_frames_a_handoff():
+    connector = _bound(BackendConnector())
+    assert "One handoff per reply" in connector.tool.description
 
 
 def test_the_frontend_guidance_comes_from_the_strategies():
