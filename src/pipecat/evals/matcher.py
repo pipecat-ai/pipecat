@@ -380,6 +380,20 @@ class ExpectationMatcher:
                     f"text {content!r} does not contain {expectation.text_contains!r}",
                     "text_mismatch",
                 )
+        if expectation.marker is not None:
+            kind = event.get("kind")
+            wanted = (
+                ("short", "long") if expectation.marker == "incomplete" else (expectation.marker,)
+            )
+            if kind not in wanted:
+                return self._failure(
+                    expectation,
+                    turn_idx,
+                    exp_idx,
+                    f"marker {self._event_text(event)!r} is {kind or 'of no known kind'}, "
+                    f"expected {expectation.marker}",
+                    "marker_mismatch",
+                )
         return None
 
     async def _check_judge(

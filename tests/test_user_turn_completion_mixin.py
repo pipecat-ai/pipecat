@@ -67,6 +67,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
         self.assertEqual(len(marker_frames), 1)
         self.assertEqual(marker_frames[0].marker, USER_TURN_COMPLETE_MARKER)
+        self.assertEqual(marker_frames[0].kind, "complete")
         self.assertFalse(marker_frames[0].append_to_context_immediately)
 
         # UserTurnInferenceCompletedFrame broadcast in both directions.
@@ -93,6 +94,7 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         marker_frames = [f for f in pushed_frames if isinstance(f, LLMMarkerFrame)]
         self.assertEqual(len(marker_frames), 1)
         self.assertEqual(marker_frames[0].marker, USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertEqual(marker_frames[0].kind, "short")
         self.assertTrue(marker_frames[0].append_to_context_immediately)
 
         # Incomplete markers do not emit UserTurnInferenceCompletedFrame.

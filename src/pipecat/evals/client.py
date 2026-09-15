@@ -255,6 +255,8 @@ class EvalClientParams(BaseModel):
         report_level: Function-call report level to ask of the bot, or ``None``
             for its default.
         vad_events: Whether to ask the bot for its raw VAD events.
+        marker_events: Whether to ask the bot for the sideband markers its LLM
+            emits.
         context: Messages the bot's context starts from, sent right after the
             handshake; empty sends nothing.
         trigger_disconnect: Whether the scenario itself asks for the bot's
@@ -269,6 +271,7 @@ class EvalClientParams(BaseModel):
     capture_bot_audio: bool = False
     report_level: str | None = None
     vad_events: bool = False
+    marker_events: bool = False
     context: list[dict] = Field(default_factory=list)
     trigger_disconnect: bool = False
 
@@ -429,13 +432,15 @@ class EvalClient:
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
         # transport understands this): raise the function-call report level if it
-        # asserts on call name/args, and enable raw VAD speaking events if it uses
-        # them.
+        # asserts on call name/args, and enable raw VAD speaking events and LLM
+        # markers if it uses them.
         config: dict = {}
         if self._params.report_level is not None:
             config["function_call_report_level"] = {"*": self._params.report_level}
         if self._params.vad_events:
             config["vad_user_speaking"] = True
+        if self._params.marker_events:
+            config["llm_markers"] = True
         if config:
             await self._send_eval(EVAL_CONFIGURE_MESSAGE_TYPE, config)
 

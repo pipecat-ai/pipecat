@@ -25,10 +25,30 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
-``tts_response``, ``function_call``, ``function_call_stopped``. The
+``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
 ``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+
+``llm_marker`` is a sideband marker the bot's LLM emitted, such as the
+turn-completion markers of ``filter_incomplete_user_turns``. ``marker:`` says
+which one: ``complete`` (the turn was finished and the bot answers), ``short``
+(the user was cut off and the bot waits), ``long`` (the user asked for time),
+or ``incomplete`` (either of the last two). A bare ``llm_marker`` asserts only
+that a marker arrived. Markers never reach clients by default; a scenario that
+asserts on one asks the bot to report them::
+
+    turns:
+      - user: "Let me think about it, hmmm"
+        expect:
+          - event: llm_marker
+            marker: incomplete        # the bot held the turn open
+      - user: "I think I'd go to Japan."
+        expect:
+          - event: llm_marker
+            marker: complete          # ... and answered this one
+          - event: response
+            eval: "engages with the user's answer about Japan"
 
 The bot's reply can be asserted three ways:
 
@@ -55,6 +75,10 @@ Supported expectation fields (per event):
 
 ``text_contains: <str>``
     substring check on the event's text content, ignoring whitespace differences
+
+``marker: <str>``
+    for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
+    or ``incomplete`` for either of the last two
 
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by
@@ -224,6 +248,11 @@ JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 # (its ``args`` say whether it was cancelled or ran to completion).
 FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
+# What a ``marker:`` may name on an ``llm_marker`` expectation. The first three
+# are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
+# accepts ``short`` or ``long``.
+MARKER_KINDS = ("complete", "short", "long", "incomplete")
+
 
 @dataclass
 class EvalFunctionCall:
@@ -271,11 +300,14 @@ class EvalExpectation:
             must satisfy. Evaluated by a judge LLM. Only meaningful on the
             bot-generated text events: ``response``, ``llm_response``, and
             ``tts_response``.
+        marker: For an ``llm_marker`` event, the meaning the marker must have:
+            one of :data:`MARKER_KINDS`, where ``incomplete`` accepts ``short``
+            or ``long``.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``eval``, and ``calls`` are not allowed alongside
-            it.
+            ``text_contains``, ``eval``, ``calls`` and ``marker`` are not allowed
+            alongside it.
     """
 
     event: str
@@ -283,6 +315,7 @@ class EvalExpectation:
     text_contains: str | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
+    marker: str | None = None
     absent: bool = False
 
     @property
@@ -556,6 +589,10 @@ class EvalScriptScenario:
                 return True
         return False
 
+    def needs_marker_events(self) -> bool:
+        """Whether the scenario asserts on the LLM's markers, which the bot emits only on request."""
+        return any(exp.event == "llm_marker" for turn in self.turns for exp in turn.expect)
+
 
 @deprecated(
     "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. "
@@ -746,7 +783,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
         conflicting = [
-            key for key in ("text_contains", "eval", "calls", "name", "args") if key in e
+            key for key in ("text_contains", "eval", "calls", "name", "args", "marker") if key in e
         ]
         if conflicting:
             raise ValueError(
@@ -756,12 +793,26 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
 
     calls = _parse_function_calls(e, event, path, turn_idx, exp_idx) if not absent else None
 
+    marker = e.get("marker")
+    if marker is not None:
+        if event != "llm_marker":
+            raise ValueError(
+                f"{path}: turn #{turn_idx} expectation #{exp_idx} 'marker:' only applies to "
+                f"the 'llm_marker' event, not {event!r}"
+            )
+        if marker not in MARKER_KINDS:
+            raise ValueError(
+                f"{path}: turn #{turn_idx} expectation #{exp_idx} 'marker:' must be one of "
+                f"{', '.join(MARKER_KINDS)}, not {marker!r}"
+            )
+
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
         calls=calls,
         eval=criterion,
+        marker=marker,
         absent=absent,
     )
 
