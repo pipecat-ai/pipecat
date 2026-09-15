@@ -170,6 +170,8 @@ suite:
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-azure.py
     scenarios: [scripted/weather_function_call_audio]
+  - bot: realtime/realtime-azure-voice-live.py
+    scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-gemini-live.py
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-grok.py

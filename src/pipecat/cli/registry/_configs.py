@@ -641,6 +641,22 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        '    model="gpt-4o-mini",\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
     "gemini_live_realtime": (
         "llm = GeminiLiveLLMService(\n"
         '    api_key=os.getenv("GOOGLE_API_KEY"),\n'
