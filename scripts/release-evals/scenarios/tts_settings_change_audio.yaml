@@ -1,0 +1,39 @@
+name: tts_settings_change_audio
+
+# Audio modality: the bot switches its TTS language to Spanish on its own after
+# the opening turn (a runtime TTSUpdateSettingsFrame, not a user instruction).
+# The turn that follows must still arrive as intelligible speech — the check
+# that a runtime settings change rotates the TTS context without dropping audio.
+#
+# The user's question stays in English so the bot's own STT transcribes it
+# correctly; only the bot's reply is expected in Spanish.
+#
+# One transcriber serves the whole run, and this one is Spanish. The bot's
+# English greeting is therefore asserted on `tts_response` (the text the TTS
+# reports speaking) rather than `response` (the transcription), which would be
+# English decoded as Spanish. Only the post-switch turn asserts on `response`.
+
+user: !include user_audio.yaml
+
+judge:
+  modality: audio
+  eval:
+    service: ollama
+    model: gemma4:12b
+    extra:
+      reasoning_effort: none
+  transcription:
+    service: whisper
+    model: tiny
+    language: es
+
+turns:
+  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+  - expect:
+      - event: tts_response
+        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+  - user: "What is the capital of France?"
+    expect:
+      - event: response
+        eval: "the response is written in Spanish and says that the capital of France is Paris"
