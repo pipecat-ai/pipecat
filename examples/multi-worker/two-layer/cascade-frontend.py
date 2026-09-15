@@ -97,7 +97,8 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         location: The city and state, e.g. "San Francisco, CA".
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
-    # Uncomment to exercise longer-running backend work.
+    # Uncomment to exercise longer-running backend work, with the
+    # on_delegation_started handler below.
     # import asyncio
     # await asyncio.sleep(6)
     temperature = 75 if format == "fahrenheit" else 24
@@ -131,25 +132,33 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
+    # Thinking summaries stream back to the frontend as "thought" outputs.
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
+        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+    )
+
+    # Uncomment, together with the delay in get_current_weather, to see a
+    # backend that knows its work is slow say so the moment work is handed to
+    # it: the frontend says the line while the backend works, instead of
+    # waiting for the answer in silence.
+    # @backend.event_handler("on_delegation_started")
+    # async def on_delegation_started(backend, request):
+    #     await backend.say("Let me look into that, this takes a moment.")
+
     llm = TwoLayerLLMService(
         frontend=OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
-        # Thinking summaries stream back to the frontend as "thought" outputs.
-        backend=BackendLLMWorker(
-            name="backend",
-            llm=AnthropicLLMService(
-                api_key=os.environ["ANTHROPIC_API_KEY"],
-                settings=AnthropicLLMService.Settings(
-                    system_instruction=BACKEND_INSTRUCTIONS,
-                    thinking=AnthropicLLMService.ThinkingConfig(
-                        type="adaptive", display="summarized"
-                    ),
-                ),
-            ),
-            context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
-        ),
+        backend=backend,
         connector=BackendConnector(backend_description=BACKEND_DESCRIPTION),
     )
 
