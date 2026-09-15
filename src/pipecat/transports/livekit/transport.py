@@ -984,6 +984,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._transport = transport
         self._client = client
+        # Formats already reported as unsupported, so the error is logged once
+        # per format instead of once per frame.
+        self._unsupported_video_formats: set[str | None] = set()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
@@ -1147,9 +1150,11 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         buffer_info = LIVEKIT_VIDEO_BUFFER_TYPES.get(frame.format) if frame.format else None
         if buffer_info is None:
-            logger.error(
-                f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
-            )
+            if frame.format not in self._unsupported_video_formats:
+                self._unsupported_video_formats.add(frame.format)
+                logger.error(
+                    f"{self} unsupported video color format for LiveKit output: {frame.format!r}"
+                )
             return None
 
         buffer_type, bytes_per_pixel = buffer_info

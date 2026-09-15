@@ -831,6 +831,17 @@ class TestLiveKitOutputTransportWriteVideoFrame(unittest.IsolatedAsyncioTestCase
         self.assertFalse(result)
         output._client.publish_video.assert_not_awaited()
 
+    async def test_unsupported_format_error_is_logged_once(self):
+        """Repeated frames with the same unsupported format log a single error."""
+        output = self._create_output_transport()
+        frame = OutputImageRawFrame(image=b"\x00" * 16, size=(4, 4), format="I420")
+
+        with patch("pipecat.transports.livekit.transport.logger") as mock_logger:
+            await output.write_video_frame(frame)
+            await output.write_video_frame(frame)
+
+        mock_logger.error.assert_called_once()
+
     async def test_write_video_frame_wrong_length_does_not_publish(self):
         """An image whose length does not match its size and format is rejected."""
         output = self._create_output_transport()
