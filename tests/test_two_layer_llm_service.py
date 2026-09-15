@@ -34,8 +34,8 @@ from pipecat.pipeline.two_layer_llm_service import (
     BackendConnector,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
-    FinalOnlyBackendReplyStrategy,
-    StrictSpeechFlagBackendReplyStrategy,
+    OneShotBackendReplyStrategy,
+    SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
     TwoLayerLLMService,
 )
@@ -152,7 +152,7 @@ def _bound(connector: BackendConnector, realtime: bool = False) -> BackendConnec
 def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
     connector = _bound(BackendConnector())
     assert isinstance(connector.request, TranscriptBackendRequestStrategy)
-    assert isinstance(connector.reply, StrictSpeechFlagBackendReplyStrategy)
+    assert isinstance(connector.reply, SpeakOnPrefersSpokenBackendReplyStrategy)
     assert connector.tool.name == "delegate"
     assert connector.tool.properties == {}
     assert connector.tool.handler is not None
@@ -161,13 +161,13 @@ def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
 def test_a_realtime_frontend_words_the_request_and_takes_the_answer_only():
     connector = _bound(BackendConnector(), realtime=True)
     assert isinstance(connector.request, ExplicitBackendRequestStrategy)
-    assert isinstance(connector.reply, FinalOnlyBackendReplyStrategy)
+    assert isinstance(connector.reply, OneShotBackendReplyStrategy)
     assert connector.tool.required == ["request"]
 
 
 def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
     with pytest.raises(ValueError, match="one result"):
-        _bound(BackendConnector(reply=StrictSpeechFlagBackendReplyStrategy()), realtime=True)
+        _bound(BackendConnector(reply=SpeakOnPrefersSpokenBackendReplyStrategy()), realtime=True)
 
 
 def test_the_tool_description_says_what_the_backend_is_for():
@@ -224,10 +224,13 @@ async def test_the_explicit_request_sends_the_model_words(monkeypatch):
 _PROGRESS = BackendOutput(text="Let me check.", prefers_spoken=False)
 _SPOKEN_PROGRESS = BackendOutput(text="Almost there.", prefers_spoken=True)
 _ANSWER = BackendOutput(text="It's 62 and raining.", is_final=True)
+_THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
 
 
 @pytest.mark.asyncio
-async def test_strict_relays_progress_and_runs_the_frontend_as_flagged(monkeypatch):
+async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_flagged(
+    monkeypatch,
+):
     _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _ANSWER)
     params = _params()
 
@@ -247,8 +250,20 @@ async def test_strict_relays_progress_and_runs_the_frontend_as_flagged(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_final_only_drops_progress(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _ANSWER)
+async def test_one_shot_delivers_progress_and_answer_together(monkeypatch):
+    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _ANSWER)
+    params = _params()
+
+    await _bound(BackendConnector(), realtime=True).delegate(params)
+
+    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+        call({"progress": ["Let me check.", "Almost there."], "answer": "It's 62 and raining."})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_one_shot_delivers_an_answer_without_progress_alone(monkeypatch):
+    _stream(monkeypatch, _ANSWER)
     params = _params()
 
     await _bound(BackendConnector(), realtime=True).delegate(params)
