@@ -11,7 +11,7 @@ careful reasoning. What the frontend is does not matter to this contract: a
 speech-to-speech model delegating on its own, or a pipeline calling a tool.
 A :class:`BackendLLMWorker` runs any Pipecat LLM service, with its own context
 and multi-step tool calling, to do that work: over the worker job API it
-streams back everything it produces, its final answer last, along with the
+streams back everything it produces, its final output last, along with the
 function calls it makes on the way, for the frontend to report.
 :func:`_delegate_to_backend` is the caller side of that contract, an async
 iterator over that stream.
@@ -193,17 +193,22 @@ class BackendToolCall:
 #: What :func:`_delegate_to_backend` yields: the backend's outputs and the
 #: phases of the function calls it made on the way.
 @dataclass
-class _BackendAnswer:
-    """The backend's answer to a delegation, yielded last by :func:`_delegate_to_backend`.
+class _BackendFinalOutput:
+    """The backend's final output for a delegation, yielded last by :func:`_delegate_to_backend`.
+
+    Nothing sets it apart but its place: it is the output that settles the
+    delegation, and the reply strategies package output for the frontend
+    around it.
 
     Parameters:
-        output: The answer. It is the job's response, so no update can pose as it.
+        output: The final output. It is the job's response, so no update can
+            pose as it.
     """
 
     output: BackendOutput
 
 
-BackendEvent = BackendOutput | BackendToolCall | _BackendAnswer
+BackendEvent = BackendOutput | BackendToolCall | _BackendFinalOutput
 
 
 #: Adjusts a backend output — its text, or whether the user may hear it —
@@ -212,7 +217,8 @@ class BackendOutputTransform(Protocol):
     """Shapes one of the backend model's outputs before it is sent.
 
     Called as ``transform_output(output, is_final=...)``; ``is_final`` is
-    true for the answer, false for progress on the way to it.
+    true for the final output, which settles the delegation, and false for
+    the outputs before it.
     """
 
     async def __call__(self, output: BackendOutput, *, is_final: bool) -> BackendOutput:
@@ -319,7 +325,7 @@ class BackendLLMWorker(LLMContextWorker):
     aggregator pair, so multi-step tool calling works as it does in any
     pipeline. Each delegation arrives as a ``run`` job carrying the request
     text, which is appended to the context as one user message, and runs the
-    LLM until it produces a final answer.
+    LLM until it has nothing more to do.
 
     Everything the backend's model produces reaches the frontend as
     :class:`BackendOutput` updates, continually. :meth:`say` (and its general
@@ -344,14 +350,14 @@ class BackendLLMWorker(LLMContextWorker):
       reasoning summaries and what the backend says before calling tools —
       and a :class:`BackendToolCall` payload for each phase of each function
       call the backend makes, so the frontend can report them.
-    - response: the answer as a :class:`BackendOutput` payload, or
-      ``{"text": ""}`` if the delegation ended without one. A backend LLM failure answers the job
+    - response: the final output as a :class:`BackendOutput` payload, or
+      ``{"text": ""}`` if the delegation ended without one. A backend LLM failure fails the job
       with ``JobStatus.ERROR``, so the frontend hears about it as soon as it
       happens.
 
-    The final answer arrives twice, as the last update and as the response, so
-    a caller uses one or the other. :func:`_delegate_to_backend` wraps the
-    caller side and reads the updates.
+    Progress arrives as updates and the final output as the response.
+    :func:`_delegate_to_backend` wraps the caller side and yields both, the
+    final output last.
 
     Example::
 
@@ -389,7 +395,7 @@ class BackendLLMWorker(LLMContextWorker):
                 model produces before it is sent, as
                 ``transform_output(output, is_final=...)``, to adjust its
                 text or whether the user may hear it; an output with no text
-                left is not sent. Without one, only the final answer asks to be
+                left is not sent. Without one, only the final output asks to be
                 spoken: a frontend filling the wait is usually mid-sentence
                 when progress arrives, and speaking it talks over them.
                 Outputs the app sends itself are not passed through it.
@@ -536,14 +542,14 @@ class BackendLLMWorker(LLMContextWorker):
             and not self.llm.has_queued_frame(LLMContextFrame)
         )
         text = (message.content or "").strip()
-        # Default behavior: only the final answer asks to be spoken.
+        # Default behavior: only the final output asks to be spoken.
         # This behavior can be adjusted by a transform_output callback.
         if finished:
-            # The answer is the job's response, not an update.
-            answer = BackendOutput(text=text, prefers_spoken=True) if text else None
-            if answer is not None:
-                answer = await self._shape(answer, is_final=True)
-            run.final_output = answer if answer and answer.text else None
+            # The final output is the job's response, not an update.
+            final = BackendOutput(text=text, prefers_spoken=True) if text else None
+            if final is not None:
+                final = await self._shape(final, is_final=True)
+            run.final_output = final if final and final.text else None
             run.finished.set()
         elif text:
             await self._emit(run, BackendOutput(text=text, prefers_spoken=False))
@@ -582,11 +588,11 @@ class BackendLLMWorker(LLMContextWorker):
             await self.send_job_update(run.job_id, call.to_payload())
 
     async def _on_pipeline_error(self, frame: ErrorFrame):
-        """End the delegation in progress: the backend cannot answer it.
+        """End the delegation in progress: the backend cannot finish it.
 
         A tool handler that raises is the exception. The LLM service reports
         that as ``ErrorCategory.APPLICATION``, settles the call with an error
-        result and carries on, so the delegation still has an answer coming.
+        result and carries on, so the delegation still has a final output coming.
         """
         run = self._run
         if run is None or frame.category == ErrorCategory.APPLICATION:
@@ -647,9 +653,9 @@ async def _delegate_to_backend(
 
     Yields:
         Each :class:`BackendOutput` as the backend produces it, the final
-        answer last as a :class:`_BackendAnswer`, and each :class:`BackendToolCall`
-        phase as the backend's calls run. A delegation that ends without an
-        answer yields no final output.
+        output last as a :class:`_BackendFinalOutput`, and each
+        :class:`BackendToolCall` phase as the backend's calls run. A delegation
+        that ends with nothing to say yields no final output.
 
     Raises:
         JobError: If the backend fails, is cancelled, or times out.
@@ -670,6 +676,6 @@ async def _delegate_to_backend(
                     yield output
             elif update_type == TOOL_CALL_UPDATE_TYPE:
                 yield BackendToolCall.from_payload(event.data)
-        answer = BackendOutput.from_payload(backend_job.response)
-        if answer.text:
-            yield _BackendAnswer(answer)
+        final = BackendOutput.from_payload(backend_job.response)
+        if final.text:
+            yield _BackendFinalOutput(final)
