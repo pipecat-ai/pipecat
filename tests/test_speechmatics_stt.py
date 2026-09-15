@@ -25,7 +25,7 @@ from speechmatics.agent_stt import AudioEncoding, Model, Segment  # noqa: E402
 
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame  # noqa: E402
 from pipecat.services.speechmatics.stt import (  # noqa: E402
-    DEFAULT_TURN_DETECTION_MODE,
+    _DEFAULT_TURN_DETECTION_MODE,
     SpeechmaticsSTTService,
     TurnDetectionMode,
     _is_auth_rejection,
@@ -207,8 +207,8 @@ def test_missing_api_key_raises():
 def test_default_turn_detection_mode():
     """The default drives turn-frame emission and endpointing behavior downstream, so it
     is pinned here rather than left to whatever the settings dataclass happens to hold."""
-    assert _service()._settings.turn_detection_mode == DEFAULT_TURN_DETECTION_MODE
-    assert DEFAULT_TURN_DETECTION_MODE == TurnDetectionMode.EXTERNAL
+    assert _service()._settings.turn_detection_mode == _DEFAULT_TURN_DETECTION_MODE
+    assert _DEFAULT_TURN_DETECTION_MODE == TurnDetectionMode.EXTERNAL
 
 
 def test_settings_take_precedence_over_deprecated_params():

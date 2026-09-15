@@ -171,7 +171,7 @@ class TurnDetectionMode(StrEnum):
     EXTERNAL = AgentTurnDetectionMode.EXTERNAL.value
 
 
-DEFAULT_TURN_DETECTION_MODE = TurnDetectionMode.EXTERNAL
+_DEFAULT_TURN_DETECTION_MODE = TurnDetectionMode.EXTERNAL
 
 
 def _handle_turn_detection_mode(mode: TurnDetectionMode) -> AgentTurnDetectionMode:
@@ -362,7 +362,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = DEFAULT_TURN_DETECTION_MODE
+        turn_detection_mode: TurnDetectionMode = _DEFAULT_TURN_DETECTION_MODE
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -457,7 +457,7 @@ class SpeechmaticsSTTService(STTService):
             model=None,  # Resolved from model / operating_point below
             language=Language.EN,
             domain=None,
-            turn_detection_mode=DEFAULT_TURN_DETECTION_MODE,
+            turn_detection_mode=_DEFAULT_TURN_DETECTION_MODE,
             speaker_active_format="{text}",
             known_speakers=[],
             additional_vocab=[],
