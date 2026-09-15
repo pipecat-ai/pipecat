@@ -22,7 +22,10 @@ from pipecat.cli.commands.eval import (
     _finalize_evals,
     _fmt_duration,
     _group_outcome,
+    _grouped_runs,
+    _print_failures,
     _print_progress,
+    _print_repeat_summary,
     _rate_level,
     _turn_tally,
 )
@@ -215,6 +218,52 @@ class TestDurations(unittest.TestCase):
         self.assertEqual(_fmt_duration(59.94), "59.9s")
         self.assertEqual(_fmt_duration(59.96), "1m 00s")
         self.assertEqual(_fmt_duration(124.4), "2m 04s")
+
+
+class TestLabels(unittest.TestCase):
+    """A run shows as its label, so two configurations of one bot file are told apart."""
+
+    def _labelled(self, label: str, passed: bool = True) -> EvalRun:
+        run = _run(["passed"] if passed else ["failed"])
+        run.label = label
+        run.status = "done"
+        run.duration_ms = 10
+        return run
+
+    def test_the_dashboard_shows_the_label_not_the_path(self):
+        runs = [self._labelled("claude (low)"), self._labelled("claude (high)")]
+        console = Console(width=100, height=24, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0))
+        text = console.export_text()
+        self.assertIn("claude (low)", text)
+        self.assertIn("claude (high)", text)
+        self.assertNotRegex(text, r"\bbot\b")
+
+    def test_two_labels_for_one_bot_are_two_rows_of_the_grouped_dashboard(self):
+        runs = [self._labelled("claude (low)"), self._labelled("claude (high)")]
+        self.assertEqual(list(_grouped_runs(runs)), [("claude (low)", "s"), ("claude (high)", "s")])
+        console = Console(width=100, height=24, record=True, force_terminal=False)
+        console.print(_EvalDashboard(runs, 0.0, grouped=True))
+        lines = console.export_text().splitlines()
+        self.assertEqual(len([line for line in lines if "claude" in line]), 2)
+
+    def test_the_failure_and_repeat_summaries_show_the_label(self):
+        failed = self._labelled("claude (low)", passed=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_failures([failed], 2, show_attempt=False)
+        self.assertIn("claude (low)", out.getvalue())
+        self.assertNotRegex(out.getvalue(), r"\bbot\b")
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_repeat_summary(
+                [failed, self._labelled("claude (high)")], [failed], show_rates=True
+            )
+        text = out.getvalue()
+        self.assertIn("claude (low)", text)
+        self.assertIn("claude (high)", text)
+        self.assertNotRegex(text, r"\bbot\b")
 
 
 class TestDashboard(unittest.TestCase):
@@ -461,6 +510,7 @@ class TestGroupedDashboard(unittest.TestCase):
         for i in range(12):
             run = _simulation_run(True, attempt=1, attempts=1)
             run.bot = f"function-calling/function-calling-openai-responses-async-{i:02d}.py"
+            run.label = run.bot
             run.scenario = f"async_tool_deferred_delivery_audio_{i:02d}"
             runs.append(run)
         text = self._render(runs, width=60, height=12)

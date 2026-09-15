@@ -56,6 +56,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     InterruptionFrame,
     InterruptionWorkerFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     MetricsFrame,
     PipelineFlushFrame,
     StartFrame,
@@ -63,6 +65,7 @@ from pipecat.frames.frames import (
     StopWorkerFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    TTSTextFrame,
     UserSpeakingFrame,
     UserStartedSpeakingFrame,
 )
@@ -301,7 +304,10 @@ class PipelineWorker(BaseWorker):
         idle_timeout_frames: tuple[type[Frame], ...] = (
             BotSpeakingFrame,
             InterimTranscriptionFrame,
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
             TranscriptionFrame,
+            TTSTextFrame,
             UserSpeakingFrame,
             UserStartedSpeakingFrame,
         ),
@@ -379,7 +385,11 @@ class PipelineWorker(BaseWorker):
             idle_timeout_frames: A tuple with the frames that should trigger an idle
                 timeout if not received within `idle_timeout_secs`. The default
                 pairs the VAD-only `UserSpeakingFrame` with the turn and
-                transcription frames a provider-driven pipeline reports instead.
+                transcription frames a provider-driven pipeline reports instead,
+                and counts an LLM response being generated (`LLMFullResponseStartFrame`,
+                `LLMTextFrame`, `TTSTextFrame`) as activity too, so a pipeline
+                with no speech on either side, such as a text-only conversation,
+                is not idle while it is answering.
             idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
                 None. If a pipeline is idle the pipeline worker will be cancelled
                 automatically.

@@ -98,25 +98,82 @@ flags:
 uv run python -m pipecat.evals suite -d manifest.yaml [-p PATTERN] [-s SCENARIO] [-c N] [-n NAME] [-t SECS] [-a] [--no-cache] [--repeat N]
 ```
 
-Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
+Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted). The
+`<label>` in the filenames is the entry's `label:` (its bot path unless set — see
+[One bot, several configurations](#one-bot-several-configurations)) made
+filesystem-safe: `voice/voice-cartesia.py` becomes `voice_voice-cartesia.py`.
 
-- `logs/<bot>__<scenario>.log` — the bot subprocess output.
-- `logs/<bot>__<scenario>.eval.log` — the harness's decision trace (always
+- `logs/<label>__<scenario>.log` — the bot subprocess output.
+- `logs/<label>__<scenario>.eval.log` — the harness's decision trace (always
   written; invaluable for diagnosing a flake).
-- `logs/<bot>__<scenario>.debug.log` — the harness's full per-pipeline logs
+- `logs/<label>__<scenario>.debug.log` — the harness's full per-pipeline logs
   (user speech / bot speech transcription / judge / harness), one section per
   pipeline. Written whenever `-d/--debug` is passed, which `run.sh` always does.
-- `recordings/<bot>__<scenario>.wav` — the conversation audio for audio-mode
+- `recordings/<label>__<scenario>.wav` — the conversation audio for audio-mode
   scenarios. The manifest sets `record: true`, so these are produced by default;
   pass `-a/--audio` to force recording on if a manifest has it off.
 
 Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
-timeout in seconds, for expectations without their own `within_ms`), and
-`--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
+timeout in seconds, for expectations without their own `within_ms`),
+`-w/--worker-timeout` (seconds a run's harness worker may take before the suite
+kills it and reports an error; by default derived from the scenario, see below),
+and `--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
 Everything in the manifest header except the `suite:` list can also be overridden
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
-`--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
-can be just a `suite:` list with the rest supplied as flags.
+`--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python`,
+`--worker-timeout` — so a manifest can be just a `suite:` list with the rest
+supplied as flags.
+
+### Manifest keys
+
+The header (everything but `suite:`):
+
+| Key              | Default        | Meaning                                                                                  |
+| ---------------- | -------------- | ---------------------------------------------------------------------------------------- |
+| `bots_dir`       | `.`            | Bot paths in `suite:` are relative to it (itself relative to the manifest).              |
+| `scenarios_dir`  | `scenarios`    | A bare scenario name resolves to `<scenarios_dir>/<name>.yaml`.                          |
+| `runs_dir`       | `eval-runs`    | Where `<name>/logs/` and `<name>/recordings/` go.                                        |
+| `spawn`          | `{python} {bot} -t eval --port {port}` | How a bot is started; `{port}` is assigned per run.              |
+| `python`         | the suite's    | The interpreter `{python}` stands for.                                                   |
+| `concurrency`    | `4`            | Runs at a time.                                                                          |
+| `repeat`         | `1`            | Attempts per (bot, scenario); see [Measuring flakiness](#measuring-flakiness).           |
+| `base_port`      | `7900`         | First port; each run gets the next one.                                                  |
+| `record`         | `false`        | Record conversation audio (audio-mode runs only).                                        |
+| `cache_dir`      | user cache     | Where synthesized user audio is cached.                                                  |
+| `worker_timeout` | derived        | Seconds a run's harness worker may take before it is killed and the run reported as an error. Unset, the cap is the scenario's own budget with a 600 s floor, plus 60 s: a scripted scenario's turn budgets summed (each turn's largest `within_ms`, or `-t/--timeout` when none is set), or a simulation's `max_duration_s`. Set it when a run is legitimately longer than the harness can tell from the file, or shorter to fail a wedged run faster. |
+
+A `suite:` entry:
+
+| Key           | Required | Meaning                                                                                     |
+| ------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `bot`         | yes      | The bot file, relative to `bots_dir`.                                                       |
+| `scenarios`   | yes      | Scenario names (`scripted/<name>`, `simulated/<name>`) or `.yaml` paths relative to the manifest. |
+| `label`       | no       | Display name, in the dashboard, the failure summary, `results.jsonl` (`"label"`; `"bot"` stays the path) and the artifact filenames. Default: the bot path. `-p/--pattern` matches it as well as the path. |
+| `env`         | no       | Environment variables added to the spawned bot's, over the suite's own.                    |
+| `runner_body` | no       | A JSON file passed to the bot as `--runner-body`; see [Vision](#vision-image-input).         |
+
+### One bot, several configurations
+
+A benchmark often runs one bot file under several configurations — a model, a
+reasoning effort, a sampling setting — that the bot reads from its environment.
+Rather than a file per configuration, list the entry once per configuration with
+a `label:` telling them apart and the `env:` that selects it:
+
+```yaml
+suite:
+  - bot: voice/voice-anthropic.py
+    label: claude (low effort)
+    env: {ANTHROPIC_EFFORT: low}
+    scenarios: [scripted/multi_turn]
+  - bot: voice/voice-anthropic.py
+    label: claude (high effort)
+    env: {ANTHROPIC_EFFORT: high}
+    scenarios: [scripted/multi_turn]
+```
+
+Each is its own row in the dashboard and its own line in `results.jsonl`, and
+their logs are `claude_low_effort__multi_turn.log` and
+`claude_high_effort__multi_turn.log` rather than one overwriting the other.
 
 ### Measuring flakiness
 
@@ -348,7 +405,8 @@ which prints the conversation as it happens.
 
 ## Adding coverage
 
-- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
+- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run;
+  a `label:` and `env:` when the same file runs under more than one configuration).
 - New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
   manifest as `scripted/<name>`.
 - New goal to reach: add a `scenarios/simulated/<name>.yaml` with a `persona:` and reference
