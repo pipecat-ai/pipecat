@@ -97,8 +97,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
         location: The city and state, e.g. "San Francisco, CA".
         format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
     """
-    # Uncomment to exercise longer-running backend work, with the
-    # on_delegation_started handler below.
+    # Uncomment to exercise longer-running backend work.
     # import asyncio
     # await asyncio.sleep(6)
     temperature = 75 if format == "fahrenheit" else 24
@@ -145,13 +144,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
     )
 
-    # Uncomment, together with the delay in get_current_weather, to see a
-    # backend that knows its work is slow say so the moment work is handed to
+    # A backend that takes a while can say so the moment work is handed to
     # it: the frontend says the line while the backend works, instead of
-    # waiting in silence.
-    # @backend.event_handler("on_delegation_started")
-    # async def on_delegation_started(backend, request):
-    #     await backend.say("Let me look into that, this takes a moment.")
+    # waiting in silence. Even a quick lookup here is a few model round trips,
+    # so the line is worth it; drop it for a backend that answers at once.
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(backend, request):
+        await backend.say("Let me look into that, this takes a moment.")
 
     llm = PipecatDualLLMService(
         frontend=OpenAILLMService(
