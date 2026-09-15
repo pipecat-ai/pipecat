@@ -305,6 +305,17 @@ class BackendLLMWorker(LLMContextWorker):
     text, which is appended to the context as one user message, and runs the
     LLM until it produces a final answer.
 
+    Everything the backend's model produces reaches the frontend as
+    :class:`BackendOutput` updates, continually. :meth:`say` (and its general
+    form :meth:`send_output`) lets the app send one output of its own on the
+    same channel, e.g. from an ``on_delegation_started`` handler or a tool,
+    for a backend that knows its work is slow to tell the user so.
+
+    Event handlers available:
+
+    - on_delegation_started: Called with the request text when a delegation
+      arrives, before the model runs.
+
     Job contract (``@job(name="run")``, one delegation at a time):
 
     - request payload: ``{"request": str}`` — the text to put to the backend,
@@ -335,6 +346,10 @@ class BackendLLMWorker(LLMContextWorker):
                 tools=[get_weather],
             ),
         )
+
+        @backend.event_handler("on_delegation_started")
+        async def on_delegation_started(backend, request):
+            await backend.say("Let me look into that, this takes a moment.")
     """
 
     def __init__(
@@ -378,6 +393,7 @@ class BackendLLMWorker(LLMContextWorker):
         self._run: _BackendRun | None = None
         self._transform_output = transform_output
         self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
+        self._register_event_handler("on_delegation_started")
 
         # A delegation takes one or more LLM runs: the first for the request
         # itself, then one per round of tool results (the assistant aggregator
@@ -422,6 +438,7 @@ class BackendLLMWorker(LLMContextWorker):
             return
 
         run = self._run = _BackendRun(job_id=message.job_id)
+        await self._call_event_handler("on_delegation_started", request)
         await self.queue_frame(
             LLMMessagesAppendFrame(messages=[{"role": "user", "content": request}], run_llm=True)
         )
@@ -435,6 +452,34 @@ class BackendLLMWorker(LLMContextWorker):
             await self.send_job_response(message.job_id, {"text": ""}, status=JobStatus.ERROR)
             return
         await self.send_job_response(message.job_id, {"text": run.final_text})
+
+    async def say(self, text: str) -> None:
+        """Send one spoken line to the frontend, on the delegation in progress.
+
+        The line is a :class:`BackendOutput` flagged ``prefers_spoken``, so a
+        frontend following the flag says it right away while the backend keeps
+        working. For anything else, :meth:`send_output`.
+
+        Args:
+            text: What the frontend should say.
+        """
+        await self.send_output(BackendOutput(text=text, prefers_spoken=True))
+
+    async def send_output(self, output: BackendOutput) -> None:
+        """Send one output of the app's own to the frontend, on the delegation in progress.
+
+        It travels as the model's outputs do, ``transform_output`` included,
+        and reaches the frontend the same way. Outside a delegation there is
+        nowhere for it to go, and it is dropped with a warning.
+
+        Args:
+            output: The output.
+        """
+        run = self._run
+        if run is None:
+            logger.warning(f"Worker '{self.name}': no delegation in progress to send output on")
+            return
+        await self._emit(run, output)
 
     async def _on_assistant_turn_stopped(self, message: AssistantTurnStoppedMessage):
         run = self._run
