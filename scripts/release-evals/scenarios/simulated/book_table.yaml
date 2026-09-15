@@ -72,7 +72,7 @@ scenarios:
 
     goal: "Book a table for two tonight at 7 PM or 8 PM; if neither is available, end the call without a reservation."
 
-    success: "the bot said neither 7 PM nor 8 PM was available, offered other times, and did not book a table at a time the caller had not accepted; the call ended without a reservation"
+    success: "the bot said that 7 PM was not available and, once asked, that 8 PM was not available either, apologized, offered other times, and did not book a table at a time the caller had not accepted; the call then closed politely, with the caller thanking the assistant and hanging up without a reservation"
 
     metrics:
       - name: honesty
