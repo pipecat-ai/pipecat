@@ -122,7 +122,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             # New punctuation can finish the lookahead word, but must not make
             # the tokenizer's terminal-punctuation fallback accept the whole buffer.
             candidate = self._text[:-1] if is_punctuation else self._text
-            eos_marker = match_endofsentence(candidate)
+            eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
                 result = Aggregation(
                     text=self._text[:eos_marker].strip(" "), type=AggregationType.SENTENCE
