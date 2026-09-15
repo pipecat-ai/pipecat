@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for TwoLayerLLMService, BackendConnector and the strategies.
+"""Unit tests for PipecatDualLLMService, BackendConnector and the strategies.
 
 The connector and strategies are exercised directly with a faked delegation
 stream. The service is exercised through ``run_test`` with a scripted
@@ -29,15 +29,15 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
 )
-from pipecat.pipeline import two_layer_llm_service
-from pipecat.pipeline.two_layer_llm_service import (
+from pipecat.pipeline import dual_llm_service
+from pipecat.pipeline.dual_llm_service import (
     BackendConnector,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
     OneShotBackendReplyStrategy,
+    PipecatDualLLMService,
     SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
-    TwoLayerLLMService,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -135,7 +135,7 @@ def _stream(monkeypatch, *outputs: BackendOutput | BackendToolCall) -> list[dict
         for output in outputs:
             yield output
 
-    monkeypatch.setattr(two_layer_llm_service, "_delegate_to_backend", fake)
+    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
     return requests
 
 
@@ -313,7 +313,7 @@ async def test_a_delegation_without_an_answer_still_settles_the_call(monkeypatch
 
 def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     frontend = _TextFrontend()
-    TwoLayerLLMService(frontend=frontend, backend="backend")
+    PipecatDualLLMService(frontend=frontend, backend="backend")
     composed = frontend._settings.system_instruction
     assert composed.startswith("You are a voice assistant.")
     assert "call the delegate tool" in composed
@@ -322,7 +322,7 @@ def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
 @pytest.mark.asyncio
 async def test_the_service_advertises_the_tool_and_keeps_the_frontend_tools_working():
     frontend = _TextFrontend()
-    service = TwoLayerLLMService(frontend=frontend, backend="backend")
+    service = PipecatDualLLMService(frontend=frontend, backend="backend")
     context = LLMContext(tools=[get_current_time])
 
     await run_test(service, frames_to_send=[LLMContextFrame(context)])
@@ -336,7 +336,7 @@ async def test_the_service_advertises_the_tool_and_keeps_the_frontend_tools_work
 @pytest.mark.asyncio
 async def test_a_tool_change_keeps_the_tool_in_the_frame_and_the_context():
     frontend = _RealtimeFrontend()
-    service = TwoLayerLLMService(frontend=frontend, backend="backend")
+    service = PipecatDualLLMService(frontend=frontend, backend="backend")
     context = LLMContext(tools=[get_current_time])
     set_tools = LLMSetToolsFrame(tools=[get_weather])
 
@@ -360,7 +360,7 @@ async def test_a_local_backend_answers_through_the_delegate_tool():
         context=LLMContext(tools=[get_weather]),
     )
     frontend = _DelegatingFrontend()
-    service = TwoLayerLLMService(frontend=frontend, backend=backend)
+    service = PipecatDualLLMService(frontend=frontend, backend=backend)
 
     down, _ = await run_test(
         service,
