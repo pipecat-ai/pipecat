@@ -199,9 +199,12 @@ Three things worth knowing when authoring:
 
 - **Several scenarios per file.** A file's `scenarios:` list can hold many,
   which suits testing one behavior through short conversations, such as the
-  turn-completion cases. The file's other keys (`user:`, `judge:`, `context:`,
-  `stop_on_failure:`) are defaults for all of them, and a scenario that sets
-  one replaces it whole: a `context:` is restated in full, never appended to.
+  turn-completion cases. Any key a scenario can have may also sit at the top
+  of the file as the default for all of them; a scenario that sets the same
+  key replaces it whole, so a `context:` is written out in full, never added
+  to. `turns:` at the top with one entry per judge or modality runs the same
+  conversation under each (`interruption`, `capital_curious`); `persona:` at
+  the top with a `goal:` per entry sends the same caller on different errands.
   Each runs as its own run, against its own bot; `-s <file>` selects them all
   and `-s <file>/<scenario>` one.
 - **Modality.** `judge:` and `user:` blocks select audio vs text. In audio mode

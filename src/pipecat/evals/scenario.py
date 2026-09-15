@@ -25,10 +25,12 @@ resolves only plain-decimal integers, so a DTMF ``012`` keeps its digits, with
 an ``!include <path>`` tag that splices in another YAML file relative to the
 including one, so files can share their ``user:`` and ``judge:`` blocks.
 
-The file's other top-level keys are defaults for its scenarios, and a scenario
-that sets the same key replaces the value as a whole (a ``context:`` is restated
-in full, never appended to). A scenario is named ``<file name>/<scenario name>``.
-Most files hold one scenario; a file holds several to test one behavior
+Any key a scenario can have may also sit at the top of the file. There it is
+the default for every scenario in the file. A scenario that sets the same key
+replaces the whole value; nothing is merged, so a ``context:`` is written out in
+full, never added to. A scenario is named ``<file name>/<scenario name>``.
+
+Most files hold one scenario. A file holds several when they test one behavior
 through many short conversations::
 
     name: turn_completion
@@ -53,6 +55,46 @@ through many short conversations::
           - user: "Japan."
             expect:
               - event: response
+
+``turns:`` and ``persona:`` may sit at the top too. That is for a file whose
+scenarios hold the same conversation and differ in one thing only. Two common
+shapes:
+
+The same turns, judged differently. The turns are written once, and each
+scenario names its own judge or modality, so every judge sees exactly the same
+conversation::
+
+    name: interruption
+    turns:
+      - user: "Tell me a long story about Paris."
+        expect:
+          - event: llm_started
+      - user: "Actually, what's the capital of Japan?"
+        send_after: {event: llm_started, delay_ms: 2000}
+        expect:
+          - event: bot_interrupted
+          - event: response
+            eval: "says Tokyo instead of continuing the story"
+
+    scenarios:
+      - name: text
+        judge: !include ../judge_text.yaml
+      - name: audio
+        user: !include ../user_audio.yaml
+        judge: !include ../judge_audio.yaml
+
+The same caller, with different goals. The persona and what counts as success
+are written once, and each scenario gives the caller a different errand::
+
+    name: diner
+    persona: "Jamie, calling a restaurant. Friendly and to the point."
+    success: "the bot did what the caller asked and confirmed it"
+
+    scenarios:
+      - name: book
+        goal: "Book a table for two at 6 PM tonight, then end the call."
+      - name: cancel
+        goal: "Cancel tonight's booking under the name Jamie, then end the call."
 
 The scenarios of a file are independent: each runs on its own, against its
 own bot.
