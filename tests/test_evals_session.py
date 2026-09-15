@@ -58,6 +58,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
@@ -131,6 +132,30 @@ class TestFramesToEvents(unittest.TestCase):
         s.frame_to_event(LLMFullResponseStartFrame())
         event = s.frame_to_event(LLMFullResponseEndFrame())
         self.assertNotIn("started_at", event)
+
+    def test_llm_marker_is_its_own_event(self):
+        s = _stream(bot_audio=False)
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertEqual(
+            s.frame_to_event(LLMMarkerFrame(marker="●", kind="complete")),
+            {"type": "llm_marker", "text": "●", "kind": "complete"},
+        )
+        # The marker is not part of the reply's text.
+        s.frame_to_event(LLMTextFrame(text="Hello"))
+        self.assertEqual(
+            self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
+            {"type": "llm_response", "text": "Hello"},
+        )
+
+    def test_llm_marker_before_the_reply_starts_is_dropped(self):
+        s = _stream(bot_audio=False)
+        s.input_sent()
+        self.assertIsNone(s.frame_to_event(LLMMarkerFrame(marker="◐")))
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertEqual(
+            s.frame_to_event(LLMMarkerFrame(marker="◐", kind="short")),
+            {"type": "llm_marker", "text": "◐", "kind": "short"},
+        )
 
     def test_llm_lifecycle_aggregates_text(self):
         s = _stream(bot_audio=False)
@@ -629,6 +654,22 @@ class TestNeedsVadEvents(unittest.TestCase):
         )
 
 
+class TestNeedsMarkerEvents(unittest.TestCase):
+    """The harness asks for the LLM's markers only when a scenario asserts on one."""
+
+    def _needs(self, *expects) -> bool:
+        scenario = EvalScriptScenario(
+            name="t", turns=[EvalScriptTurn(user="x", expect=list(expects))]
+        )
+        return scenario.needs_marker_events()
+
+    def test_false_without_marker_expectation(self):
+        self.assertFalse(self._needs(EvalExpectation(event="response")))
+
+    def test_true_when_expected(self):
+        self.assertTrue(self._needs(EvalExpectation(event="llm_marker", marker="complete")))
+
+
 class TestConnectURL(unittest.TestCase):
     """The harness signals skip-TTS via the connect URL in text mode."""
 
@@ -706,6 +747,33 @@ class TestTextContainsResolution(unittest.TestCase):
         failure = self._check({"type": "user_transcription", "transcript": "bye"}, exp)
         self.assertIsNotNone(failure)
         self.assertIn("does not contain", failure.reason)
+
+
+class TestMarkerCheck(unittest.TestCase):
+    """``marker:`` matches the kind the bot stamped on the marker, not its text."""
+
+    def _check(self, kind: str | None, exp: EvalExpectation):
+        event = {"type": "llm_marker", "text": "?", "kind": kind}
+        return _matcher()._check_payload(event, exp, 0, 0)
+
+    def test_exact_kind(self):
+        exp = EvalExpectation(event="llm_marker", marker="complete")
+        self.assertIsNone(self._check("complete", exp))
+        failure = self._check("short", exp)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.kind, "marker_mismatch")
+
+    def test_incomplete_accepts_short_or_long(self):
+        exp = EvalExpectation(event="llm_marker", marker="incomplete")
+        self.assertIsNone(self._check("short", exp))
+        self.assertIsNone(self._check("long", exp))
+        self.assertIsNotNone(self._check("complete", exp))
+
+    def test_marker_of_no_kind_fails(self):
+        exp = EvalExpectation(event="llm_marker", marker="complete")
+        failure = self._check(None, exp)
+        self.assertIsNotNone(failure)
+        self.assertIn("no known kind", failure.reason)
 
 
 class _Collector(FrameProcessor):

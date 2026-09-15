@@ -102,6 +102,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 capture_bot_audio=scenario.wants_response(),
                 report_level=scenario.required_report_level(),
                 vad_events=scenario.needs_vad_events(),
+                marker_events=scenario.needs_marker_events(),
                 context=list(scenario.context or []),
                 trigger_disconnect=scenario.trigger_disconnect,
             ),

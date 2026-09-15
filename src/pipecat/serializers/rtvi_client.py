@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMTextFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -129,6 +130,8 @@ class RTVIClientSerializer(FrameSerializer):
                 return LLMFullResponseStartFrame()
             case "bot-llm-text":
                 return LLMTextFrame(text=payload.get("text", ""))
+            case "bot-llm-marker":
+                return LLMMarkerFrame(marker=payload.get("text", ""), kind=payload.get("kind"))
             case "bot-llm-stopped":
                 return LLMFullResponseEndFrame()
             case "bot-tts-text":

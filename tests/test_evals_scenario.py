@@ -271,6 +271,69 @@ class TestEvalsScenarioParser(unittest.TestCase):
         )
         self.assertEqual(s.turns[0].expect[0].calls, [EvalFunctionCall(name=None)])
 
+    def test_llm_marker_expectation(self):
+        s = EvalScriptScenario.load(
+            _write(
+                """
+                name: markers
+                turns:
+                  - user: "Let me think, hmmm"
+                    expect:
+                      - event: llm_marker
+                        marker: incomplete
+                  - user: "Japan."
+                    expect:
+                      - event: llm_marker
+                        marker: complete
+                      - event: response
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].marker, "incomplete")
+        self.assertEqual(s.turns[1].expect[0].marker, "complete")
+        self.assertTrue(s.needs_marker_events())
+
+    def test_llm_marker_unknown_kind_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            EvalScriptScenario.load(
+                _write(
+                    """
+                    name: bad_marker
+                    turns:
+                      - user: "x"
+                        expect: [{event: llm_marker, marker: done}]
+                    """
+                )
+            )
+        self.assertIn("'marker:' must be one of", str(ctx.exception))
+
+    def test_marker_on_other_event_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            EvalScriptScenario.load(
+                _write(
+                    """
+                    name: bad_marker_event
+                    turns:
+                      - user: "x"
+                        expect: [{event: response, marker: complete}]
+                    """
+                )
+            )
+        self.assertIn("only applies to the 'llm_marker' event", str(ctx.exception))
+
+    def test_absent_rejects_marker(self):
+        with self.assertRaises(ValueError):
+            EvalScriptScenario.load(
+                _write(
+                    """
+                    name: absent_marker
+                    turns:
+                      - user: "x"
+                        expect: [{event: llm_marker, absent: true, marker: complete}]
+                    """
+                )
+            )
+
     def test_send_after_parsed(self):
         s = EvalScriptScenario.load(
             _write(

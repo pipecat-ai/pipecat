@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMTextFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -46,6 +47,12 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(
             await self.s.deserialize(_server("bot-llm-stopped")), LLMFullResponseEndFrame
         )
+
+    async def test_llm_marker(self):
+        frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "◐", "kind": "short"}))
+        self.assertIsInstance(frame, LLMMarkerFrame)
+        self.assertEqual(frame.marker, "◐")
+        self.assertEqual(frame.kind, "short")
 
     async def test_tts_text(self):
         frame = await self.s.deserialize(_server("bot-tts-text", {"text": "Hello there!"}))
