@@ -108,6 +108,9 @@ autodoc_mock_imports = [
     "mlx_whisper",  # Note: might need underscore format too
     # pocket-tts dependencies (torch is mocked above)
     "pocket_tts",
+    # Qwen3-ASR - the qwen-asr extra is excluded from the docs environment
+    # because it pulls in torch, which is mocked above
+    "qwen_asr",
     # Pydantic v2 compatibility issues in third-party SDKs
     "hume",
     "hume.tts",
