@@ -7,17 +7,22 @@ from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
 @pytest.mark.parametrize(
-    ("text", "prefix"),
+    ("text", "language", "prefix"),
     [
-        ("Hello.   Next", "Hello."),
-        ("Hello.\n\nNext", "Hello."),
-        ("\n\nHello. Next", "\n\nHello."),
-        ("👋 Hello. 😀 Next", "👋 Hello."),
-        ("Café is open. Next", "Café is open."),
+        ("Hello.   Next", "en", "Hello."),
+        ("Hello.\n\nNext", "en", "Hello."),
+        ("\n\nHello. Next", "en", "\n\nHello."),
+        ("👋 Hello. 😀 Next", "en", "👋 Hello."),
+        ("Cafe\u0301 is open. Next", "en", "Cafe\u0301 is open."),
+        ("こんにちは。次", "ja", "こんにちは。"),
+        ("你好。下一句", "zh", "你好。"),
+        ("नमस्ते। यह", "hi", "नमस्ते।"),
+        ("هل أنت بخير؟ نعم", "ar", "هل أنت بخير؟"),
+        ("Hello. Next", "unrecognized", "Hello."),
     ],
 )
-def test_source_character_offsets(text, prefix):
-    boundary = match_endofsentence(text)
+def test_source_character_offsets(text, language, prefix):
+    boundary = match_endofsentence(text, language=language)
     assert boundary == len(prefix)
     assert text[:boundary] == prefix
 
@@ -25,14 +30,21 @@ def test_source_character_offsets(text, prefix):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("chunk_size", [1, 3, 1000])
 @pytest.mark.parametrize(
-    "sentences",
+    ("language", "sentences"),
     [
-        ["Dr. Smith is here.", "It costs $29.95."],
+        ("en", ["Dr. Smith is here.", "It costs $29.95."]),
+        ("de-DE", ["Das ist z.B. wichtig.", "Weiter geht es."]),
+        ("pt-BR", ["O Sr. Silva chegou.", "Depois saiu."]),
+        ("fr", ["Voir p. 12 pour les détails.", "Ensuite continuez."]),
+        ("pl", ["Prof. Kowalski przyszedł.", "Potem wyszedł."]),
+        ("it", ["Il dott. Rossi arriva.", "Poi parte."]),
+        ("nl", ["Dr. Jansen komt.", "Daarna vertrekt hij."]),
+        ("ja", ["こんにちは。", "次の文です。"]),
     ],
 )
-async def test_chunk_boundaries_do_not_change_sentences(chunk_size, sentences):
+async def test_chunk_boundaries_do_not_change_sentences(chunk_size, language, sentences):
     text = " ".join(sentences)
-    aggregator = SimpleTextAggregator()
+    aggregator = SimpleTextAggregator(language=language)
     actual = []
     for start in range(0, len(text), chunk_size):
         actual.extend(
@@ -46,7 +58,7 @@ async def test_chunk_boundaries_do_not_change_sentences(chunk_size, sentences):
 
 @pytest.mark.asyncio
 async def test_pronoun_boundary_with_streamed_sentence_starter():
-    aggregator = SimpleTextAggregator()
+    aggregator = SimpleTextAggregator(language="en")
     actual = [
         a.text
         async for a in aggregator.aggregate("We make a good team, you and I. Did you see him?")
@@ -72,7 +84,7 @@ async def test_pronoun_boundary_with_streamed_sentence_starter():
     ],
 )
 async def test_lookahead_retry_preserves_sentences(chunk_size, sentences):
-    await test_chunk_boundaries_do_not_change_sentences(chunk_size, sentences)
+    await test_chunk_boundaries_do_not_change_sentences(chunk_size, "en", sentences)
 
 
 @pytest.mark.asyncio
@@ -118,7 +130,7 @@ async def test_unbroken_lookahead_has_bounded_tokenizer_work(monkeypatch):
 
     calls = []
 
-    def unresolved(text):
+    def unresolved(text, *, language):
         calls.append(text)
         return 0
 
@@ -157,7 +169,7 @@ async def test_open_quote_preserves_abbreviations_without_waiting_for_close(quot
     ],
 )
 async def test_quotation_probe_preserves_other_boundaries(sentences):
-    await test_chunk_boundaries_do_not_change_sentences(1, sentences)
+    await test_chunk_boundaries_do_not_change_sentences(1, "en", sentences)
 
 
 @pytest.mark.parametrize("quote", ['"', "“", "'", "«"])

@@ -24,14 +24,30 @@ from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 _QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
 
 
+def resolve_sentence_tokenizer_language(language: str | None) -> str:
+    """Normalize a language code for sentencex's language fallback map.
+
+    Args:
+        language: Language code, optionally with a region. None, empty, and
+            automatic language selections use English.
+
+    Returns:
+        A lowercase base language code. Sentencex resolves unsupported codes.
+    """
+    if not isinstance(language, str):
+        return "en"
+    normalized = language.strip().lower().replace("_", "-").split("-")[0]
+    return "en" if normalized in ("", "auto") else normalized
+
+
 @cache
-def _sent_tokenizer() -> Callable[[str], list[str]]:
+def _sent_tokenizer(language: str = "en") -> Callable[[str], list[str]]:
     """Return a sentence splitter that preserves source offsets before whitespace.
 
     Paragraph separators belong to the following sentence. Trailing whitespace
     stays in the aggregation buffer until that sentence is emitted.
     """
-    code = "en"
+    code = resolve_sentence_tokenizer_language(language)
 
     def tokenize(text: str) -> list[str]:
         sentences = []
@@ -124,7 +140,7 @@ def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
     return text
 
 
-def match_endofsentence(text: str) -> int:
+def match_endofsentence(text: str, *, language: str | None = None) -> int:
     """Find the position of the end of a sentence in the provided text.
 
     This function uses sentencex's sentence tokenizer to detect sentence boundaries
@@ -133,6 +149,7 @@ def match_endofsentence(text: str) -> int:
 
     Args:
         text: The input text in which to find the end of the sentence.
+        language: Language code. Defaults to English.
 
     Returns:
         The position of the end of the sentence if found, otherwise 0.
@@ -142,7 +159,7 @@ def match_endofsentence(text: str) -> int:
     if not text:
         return 0
 
-    sentences = _sent_tokenizer()(text)
+    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(text)
 
     if not sentences:
         return 0
@@ -159,7 +176,7 @@ def match_endofsentence(text: str) -> int:
         # Boundary offsets still refer to the original text, which keeps its quotes.
         start, end = quote.span(1)
         tokenizer_text = text[:start] + " " * (end - start) + text[end:]
-        sentences = _sent_tokenizer()(tokenizer_text)
+        sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
         first_sentence = sentences[0]
 
     # A single span can be an incomplete fragment; require terminal punctuation.

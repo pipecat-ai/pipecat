@@ -132,7 +132,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             # Including "?" could make the terminal-punctuation fallback accept
             # the whole buffer. This temporary slice does not discard the "?".
             candidate = self._text[:-1] if is_punctuation else self._text
-            eos_marker = match_endofsentence(candidate)
+            eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
                 result = Aggregation(
                     text=self._text[:eos_marker].strip(" "), type=AggregationType.SENTENCE
