@@ -770,3 +770,103 @@ async def test_update_settings_unrelated_field_leaves_model_untouched():
 
     assert service._settings.model == "linden-1"
     assert service._settings.domain == "finance"
+
+
+# ---------------------------------------------------------------------------
+# Sample rate: Agent STT accepts 16 kHz only
+# ---------------------------------------------------------------------------
+
+
+def _service_with_recording_client(pipeline_rate: int, **kwargs):
+    """A service set up on a pipeline running at `pipeline_rate`, with a client that
+    records what it is sent. The two rates are assigned the way setup() resolves them."""
+    sent: list[bytes] = []
+
+    class _RecordingClient:
+        is_ready_for_audio = True
+        session_error = None
+
+        async def send_audio(self, audio: bytes):
+            sent.append(audio)
+
+    service = SpeechmaticsSTTService(api_key="test-key", **kwargs)
+    service._sample_rate = kwargs.get("sample_rate") or pipeline_rate
+    service._input_sample_rate = pipeline_rate
+    service._client = _RecordingClient()
+    return service, sent
+
+
+@pytest.mark.asyncio
+async def test_run_stt_resamples_audio_from_a_pipeline_at_another_rate():
+    """Agent STT accepts 16 kHz only, so audio from an 8 kHz pipeline has to be converted
+    rather than sent under a rate it does not have. Upsampling roughly doubles the sample
+    count, less what the resampler still holds."""
+    service, sent = _service_with_recording_client(8000)
+    audio = b"\x11\x22" * 800
+
+    for _ in range(10):
+        async for _ in service.run_stt(audio):
+            pass
+
+    converted = b"".join(sent)
+    assert converted != audio * 10
+    assert 1.5 < len(converted) / (len(audio) * 10) <= 2.0
+
+
+@pytest.mark.asyncio
+async def test_run_stt_resamples_from_the_pipeline_rate_not_the_sample_rate_override():
+    """`sample_rate` says what rate the caller believes the audio is, and a caller can set
+    it to one the pipeline does not deliver. Converting from the pipeline rate instead
+    keeps an override from declaring 16 kHz over audio that is not."""
+    from pipecat.services.speechmatics.stt import _SPEECHMATICS_SAMPLE_RATE
+
+    service, sent = _service_with_recording_client(8000, sample_rate=_SPEECHMATICS_SAMPLE_RATE)
+    audio = b"\x11\x22" * 800
+
+    for _ in range(10):
+        async for _ in service.run_stt(audio):
+            pass
+
+    converted = b"".join(sent)
+    assert converted != audio * 10
+    assert 1.5 < len(converted) / (len(audio) * 10) <= 2.0
+
+
+@pytest.mark.asyncio
+async def test_run_stt_does_not_send_a_chunk_the_resampler_buffered_away():
+    """The resampler emits nothing until its filter fills, so the chunks opening a session
+    convert to no bytes at all. Those must not reach the client as empty sends."""
+    service, sent = _service_with_recording_client(8000)
+
+    async for _ in service.run_stt(b"\x11\x22" * 160):
+        pass
+
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_open_connection_declares_the_fixed_rate_not_the_pipeline_rate(monkeypatch):
+    """The declared rate has to be the rate the audio is resampled to. Declaring
+    `self.sample_rate` would open a session Agent STT rejects on an 8 kHz pipeline."""
+    from pipecat.services.speechmatics.stt import _SPEECHMATICS_SAMPLE_RATE
+
+    captured = {}
+
+    class _Client:
+        def __init__(self, **kwargs):
+            captured["audio_format"] = kwargs["audio_format"]
+
+        def on(self, *args, **kwargs):
+            return None
+
+        async def connect(self):
+            return None
+
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", _Client)
+
+    service = SpeechmaticsSTTService(api_key="test-key")
+    service._input_sample_rate = 8000
+    service._stt_msg_task = Mock()  # the message pump needs a task manager; skip it
+
+    assert await service._open_connection() is True
+    assert captured["audio_format"].sample_rate == _SPEECHMATICS_SAMPLE_RATE
