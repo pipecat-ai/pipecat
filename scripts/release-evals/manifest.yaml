@@ -403,7 +403,7 @@ suite:
   - bot: flows/yaml/patient_intake/bot.py
     scenarios: [scripted/patient_intake]
   - bot: flows/yaml/restaurant_reservation/bot.py
-    scenarios: [scripted/restaurant_reservation_available, scripted/restaurant_reservation_no_availability]
+    scenarios: [scripted/restaurant_reservation]
   # Constructs and switches between OpenAI, Google, and Anthropic, so all
   # three API keys must be set.
   - bot: flows/python/llm_switching.py
