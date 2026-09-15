@@ -19,8 +19,9 @@ frontend calls and turns a call into the request the backend receives, and a
 :class:`BackendReplyStrategy` turns each thing the backend produces into what
 the frontend hears about it. The connector picks defaults by frontend kind:
 a text frontend hands over the conversation and relays the backend's
-progress; a speech-to-speech frontend words the request itself and takes only
-the answer, since its function calls accept one result.
+progress as it comes; a speech-to-speech frontend words the request itself
+and takes progress and answer together, since its function calls accept one
+result.
 """
 
 from dataclasses import dataclass
@@ -221,8 +222,9 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
 class BackendReplyStrategy:
     """Turns each :class:`BackendOutput` into what the frontend hears about it.
 
-    The final output settles the ``delegate`` call as its result; what
-    happens to the outputs before it is what strategies differ on.
+    The final output settles the ``delegate`` call; what the frontend hears
+    of the outputs before it, and when, is what strategies differ on. The
+    base delivers the final output's text alone.
     """
 
     #: Whether the strategy reports outputs before the final one as
@@ -243,16 +245,35 @@ class BackendReplyStrategy:
             await params.result_callback(output.text)
 
 
-class FinalOnlyBackendReplyStrategy(BackendReplyStrategy):
-    """Delivers the backend's answer and nothing before it.
+class OneShotBackendReplyStrategy(BackendReplyStrategy):
+    """Delivers everything the backend produced at once, when it is done.
 
-    The default for a speech-to-speech frontend, whose function calls accept
-    one result.
+    The ``delegate`` call's one result carries the backend's progress, in
+    order, and its final output as the answer; the final text alone when
+    there was no progress. Reasoning summaries are left out. The default for
+    a speech-to-speech frontend, whose function calls accept one result.
     """
 
+    def __init__(self):
+        """Initialize the strategy."""
+        self._progress: dict[str, list[str]] = {}
 
-class StrictSpeechFlagBackendReplyStrategy(BackendReplyStrategy):
-    """Relays the backend's progress, spoken or not as the backend's flag says.
+    async def deliver(self, params: FunctionCallParams, output: BackendOutput) -> None:
+        """Hold progress back; deliver it with the answer."""
+        if output.is_thought:
+            return
+        if not output.is_final:
+            self._progress.setdefault(params.tool_call_id, []).append(output.text)
+            return
+        progress = self._progress.pop(params.tool_call_id, [])
+        if progress:
+            await params.result_callback({"progress": progress, "answer": output.text})
+        else:
+            await params.result_callback(output.text)
+
+
+class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
+    """Relays the backend's progress as it comes, spoken as the backend's flag says.
 
     Each output before the answer is recorded as an intermediate tool result;
     the frontend is run on it, and so speaks it, exactly when the output's
@@ -287,9 +308,9 @@ class BackendConnector:
     +------------------+------------------------------------+--------------------------------------+
     |                  | request                            | reply                                |
     +==================+====================================+======================================+
-    | text frontend    | ``TranscriptBackendRequestStrategy`` | ``StrictSpeechFlagBackendReplyStrategy`` |
+    | text frontend    | ``TranscriptBackendRequestStrategy`` | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
     +------------------+------------------------------------+--------------------------------------+
-    | realtime frontend| ``ExplicitBackendRequestStrategy``   | ``FinalOnlyBackendReplyStrategy``      |
+    | realtime frontend| ``ExplicitBackendRequestStrategy``   | ``OneShotBackendReplyStrategy``      |
     +------------------+------------------------------------+--------------------------------------+
 
     A delegation that fails raises out of the tool handler, which the frontend
@@ -301,7 +322,7 @@ class BackendConnector:
     Example::
 
         connector = BackendConnector(
-            reply=FinalOnlyBackendReplyStrategy(),
+            reply=OneShotBackendReplyStrategy(),
             backend_description="current information such as the weather",
         )
     """
@@ -376,9 +397,9 @@ class BackendConnector:
             )
         if self._reply is None:
             self._reply = (
-                FinalOnlyBackendReplyStrategy()
+                OneShotBackendReplyStrategy()
                 if context.frontend_is_realtime
-                else StrictSpeechFlagBackendReplyStrategy()
+                else SpeakOnPrefersSpokenBackendReplyStrategy()
             )
         if context.frontend_is_realtime and self._reply.needs_intermediate_results:
             raise ValueError(
