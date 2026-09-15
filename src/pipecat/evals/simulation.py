@@ -8,21 +8,24 @@
 
 A simulation describes a caller rather than a script: who they are, what
 they want, and how the outcome is judged. A persona LLM holds the
-conversation with the bot on its own. A file with a ``persona:`` is a
-simulation, and a manifest lists them under ``scenarios:`` like scripted
-ones. Example::
+conversation with the bot on its own. A scenario with a ``persona:`` is a
+simulation; it lives in a scenario file's ``scenarios:`` list
+(:mod:`pipecat.evals.scenario`) and a manifest lists the file like any other.
+Example::
 
     name: capital_curious
-    persona: |
-      A curious, polite traveler who asks one thing at a time.
-    goal: "Find out what the capital of Germany is, then say goodbye."
     judge: !include judge_text.yaml
-    success: "the bot told the caller that the capital of Germany is Berlin"
-    metrics:
-      - name: politeness
-        criterion: "the bot stayed courteous throughout"
-        min_score: 1
-    max_turns: 10
+    scenarios:
+      - name: capital_curious
+        persona: |
+          A curious, polite traveler who asks one thing at a time.
+        goal: "Find out what the capital of Germany is, then say goodbye."
+        success: "the bot told the caller that the capital of Germany is Berlin"
+        metrics:
+          - name: politeness
+            criterion: "the bot stayed courteous throughout"
+            min_score: 1
+        max_turns: 10
 
 Fields:
 

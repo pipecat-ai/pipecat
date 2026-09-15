@@ -14,13 +14,15 @@ user: !include ../user_audio.yaml
 
 judge: !include ../judge_audio.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: capital_question
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "What is the capital of Germany?"
-    expect:
-      - event: response
-        eval: "the response says the capital of Germany is Berlin"
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: response
+            eval: "the response says the capital of Germany is Berlin"

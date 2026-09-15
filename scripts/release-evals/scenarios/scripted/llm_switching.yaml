@@ -4,49 +4,51 @@ name: llm_switching
 
 judge: !include ../judge_text.yaml
 
-turns:
-  - expect:
-      - event: response
-        eval: "the bot greets the user"
+scenarios:
+  - name: llm_switching
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot greets the user"
 
-  - user: "Please switch to the Anthropic model."
-    expect:
-      - event: function_call
-        calls:
-          - name: switch_llm
-            args: { llm: Anthropic }
-      - event: response
-        eval: "the bot confirms it switched the language model"
+      - user: "Please switch to the Anthropic model."
+        expect:
+          - event: function_call
+            calls:
+              - name: switch_llm
+                args: { llm: Anthropic }
+          - event: response
+            eval: "the bot confirms it switched the language model"
 
-  - user: "What's the weather in San Francisco?"
-    expect:
-      - event: function_call
-        calls:
-          - name: get_current_weather
-      - event: response
-        eval: "the bot reports the current weather conditions and temperature"
+      - user: "What's the weather in San Francisco?"
+        expect:
+          - event: function_call
+            calls:
+              - name: get_current_weather
+          - event: response
+            eval: "the bot reports the current weather conditions and temperature"
 
-  - user: "Now switch to Google."
-    expect:
-      - event: function_call
-        calls:
-          - name: switch_llm
-            args: { llm: Google }
-      - event: response
-        eval: "the bot confirms it switched the language model"
+      - user: "Now switch to Google."
+        expect:
+          - event: function_call
+            calls:
+              - name: switch_llm
+                args: { llm: Google }
+          - event: response
+            eval: "the bot confirms it switched the language model"
 
-  - user: "And what's the weather in Paris?"
-    expect:
-      - event: function_call
-        calls:
-          - name: get_current_weather
-      - event: response
-        eval: "the bot reports the current weather conditions and temperature"
+      - user: "And what's the weather in Paris?"
+        expect:
+          - event: function_call
+            calls:
+              - name: get_current_weather
+          - event: response
+            eval: "the bot reports the current weather conditions and temperature"
 
-  - user: "Can you summarize our conversation so far?"
-    expect:
-      - event: function_call
-        calls:
-          - name: summarize_conversation
-      - event: response
-        eval: "the bot gives a summary of the conversation that mentions the weather"
+      - user: "Can you summarize our conversation so far?"
+        expect:
+          - event: function_call
+            calls:
+              - name: summarize_conversation
+          - event: response
+            eval: "the bot gives a summary of the conversation that mentions the weather"

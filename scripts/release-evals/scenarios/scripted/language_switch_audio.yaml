@@ -29,13 +29,15 @@ judge:
     model: tiny
     language: es
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: tts_response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: language_switch_audio
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: tts_response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "From now on, reply only in Spanish. Where is La Sagrada Familia?"
-    expect:
-      - event: response
-        eval: "the response is written in Spanish and says that La Sagrada Familia is in Barcelona"
+      - user: "From now on, reply only in Spanish. Where is La Sagrada Familia?"
+        expect:
+          - event: response
+            eval: "the response is written in Spanish and says that La Sagrada Familia is in Barcelona"

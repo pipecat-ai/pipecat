@@ -831,7 +831,7 @@ def test_eval_transport_opt_in(temp_output_dir):
 
 def test_eval_starter_scenarios(temp_output_dir):
     """``enable_eval`` scaffolds runnable starter scenarios plus the deps to run them."""
-    from pipecat.evals.scenario import EvalScriptScenario
+    from pipecat.evals.scenario import load_scenario
 
     def gen(name, *, enable_eval, mode="cascade", **kwargs):
         path = temp_output_dir / name
@@ -862,13 +862,13 @@ def test_eval_starter_scenarios(temp_output_dir):
     assert "kokoro" not in pyproject and "moonshine" not in pyproject
 
     # Cascade: both starters are generated and parse against the real scenario
-    # schema (EvalScriptScenario.load is the validator the harness itself uses).
+    # schema (load_scenario is the loader the harness itself uses).
     server = gen("starters-cascade", enable_eval=True, **cascade_services)
     text_path = server / "evals" / "starter_text.yaml"
     audio_path = server / "evals" / "starter_audio.yaml"
-    assert EvalScriptScenario.load(text_path).name == "starter_text"
-    audio = EvalScriptScenario.load(audio_path)
-    assert audio.name == "starter_audio"
+    assert load_scenario(text_path).name == "starter_text/starter_text"
+    audio = load_scenario(audio_path)
+    assert audio.name == "starter_audio/starter_audio"
     assert audio.user_audio is not None  # audio starter drives real speech in
 
     # The project env carries what the harness needs via the `evals` extra: the
@@ -888,7 +888,9 @@ def test_eval_starter_scenarios(temp_output_dir):
         realtime_service="openai_realtime",
     )
     assert not (server / "evals" / "starter_text.yaml").exists()
-    assert EvalScriptScenario.load(server / "evals" / "starter_audio.yaml").name == "starter_audio"
+    assert (
+        load_scenario(server / "evals" / "starter_audio.yaml").name == "starter_audio/starter_audio"
+    )
 
 
 def _gen_bot(temp_output_dir, name, *, mode="cascade", **kwargs):

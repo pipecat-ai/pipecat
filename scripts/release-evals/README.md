@@ -12,9 +12,10 @@ client, plays the user's side of a conversation (synthesizing audio when a
 scenario is in audio mode), transcribes the bot's speech, and judges what the
 bot did with an LLM.
 
-A **scenario** is one such check: a YAML file describing a conversation to hold
-with the bot and how to decide whether it behaved properly. There are two
-kinds:
+A **scenario** is one such check: a conversation to hold with the bot and how
+to decide whether it behaved properly. A YAML file holds one or more under
+`scenarios:`, each run on its own against its own bot, and each named
+`<file>/<scenario>`. There are two kinds:
 
 - A **scripted** scenario (`scenarios/scripted/<name>.yaml`) writes the user's
   turns out, each with the results expected of the bot. `capital_question` asks
@@ -26,8 +27,8 @@ kinds:
   [Simulations](#simulations).
 
 Scenarios are reusable, so one shared scenario covers many bots.
-[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs, both
-kinds listed the same way; the file says which it is.
+[`manifest.yaml`](manifest.yaml) maps each bot to the scenario files it runs,
+both kinds listed the same way; each scenario says which it is.
 
 ## Prerequisites
 
@@ -194,8 +195,15 @@ like an opening greeting. The full file
 format (events, expectations, `send_after:`, `image:`, ...) is documented in the
 [`pipecat.evals.script`](../../src/pipecat/evals/script.py) module docstring.
 
-Two things worth knowing when authoring:
+Three things worth knowing when authoring:
 
+- **Several scenarios per file.** A file's `scenarios:` list can hold many,
+  which suits testing one behavior through short conversations, such as the
+  turn-completion cases. The file's other keys (`user:`, `judge:`, `context:`,
+  `stop_on_failure:`) are defaults for all of them, and a scenario that sets
+  one replaces it whole: a `context:` is restated in full, never appended to.
+  Each runs as its own run, against its own bot; `-s <file>` selects them all
+  and `-s <file>/<scenario>` one.
 - **Modality.** `judge:` and `user:` blocks select audio vs text. In audio mode
   the user's turns are synthesized (exercising the bot's STT for real) and the
   judge evaluates a local transcription of the bot's actual audio; text mode
@@ -350,6 +358,7 @@ which prints the conversation as it happens.
 
 - New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
 - New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
-  manifest as `scripted/<name>`.
-- New goal to reach: add a `scenarios/simulated/<name>.yaml` with a `persona:` and reference
-  it from the manifest as `simulated/<name>` under the bot that serves it.
+  manifest as `scripted/<name>`. Several short cases of one behavior go in one
+  file's `scenarios:` list.
+- New goal to reach: add a `scenarios/simulated/<name>.yaml` whose scenario has a `persona:`
+  and reference it from the manifest as `simulated/<name>` under the bot that serves it.

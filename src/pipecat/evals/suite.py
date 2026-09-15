@@ -34,14 +34,13 @@ Manifest format (YAML)::
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
 
-A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
-simulation, and the file says which (see
-:func:`~pipecat.evals.scenario.load_scenarios`). A name resolves under
-``scenarios_dir`` with ``.yaml`` added and may carry a folder, as
-``scripted/greeting``; a name ending in ``.yaml`` is a path relative to the
-manifest instead. A file holding a group of scenarios contributes one run per
-entry, named ``<group>/<entry>``. A simulation runs as many
-times as its ``runs:`` says, and every run must pass.
+A ``scenarios:`` entry names a scenario file, and the file contributes one run
+per scenario it holds, scripted or a simulation as each says (see
+:func:`~pipecat.evals.scenario.load_scenarios`), named
+``<file name>/<scenario name>``. A name resolves under ``scenarios_dir`` with
+``.yaml`` added and may carry a folder, as ``scripted/greeting``; a name ending
+in ``.yaml`` is a path relative to the manifest instead. A simulation runs as
+many times as its ``runs:`` says, and every run must pass.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
 passed to the bot as ``--runner-body``, supplying runner-args data it would
@@ -579,16 +578,12 @@ class EvalManifest:
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
-                # A file holding one scenario runs under the manifest's name for
-                # it; a group's entries run under their own ``<group>/<entry>``.
+                # A file that fails to load still gets a run, under the
+                # manifest's name for it, so the failure is reported.
                 try:
-                    loaded = load_scenarios(scenario_path)
+                    named = [(one.name, one) for one in load_scenarios(scenario_path)]
                 except (ValueError, FileNotFoundError):
-                    loaded = []
-                if len(loaded) > 1:
-                    named = [(one.name, one) for one in loaded]
-                else:
-                    named = [(name, loaded[0] if loaded else None)]
+                    named = [(name, None)]
                 for run_name, one in named:
                     kind, attempts = EvalKind.SCRIPT, settings.repeat
                     if isinstance(one, EvalSimulationScenario):
@@ -717,7 +712,9 @@ class EvalSuite(BaseObject):
 
         Args:
             pattern: Keep only runs whose bot name contains this substring.
-            scenario: Keep only runs for this exact scenario name.
+            scenario: Keep only runs of this scenario: its full
+                ``<file>/<scenario>`` name, or either half of it, so a file's
+                name selects every scenario it holds.
             kind: Keep only runs of this kind.
 
         Returns:
@@ -727,7 +724,7 @@ class EvalSuite(BaseObject):
         if pattern:
             runs = [r for r in runs if pattern in r.bot]
         if scenario:
-            runs = [r for r in runs if r.scenario == scenario]
+            runs = [r for r in runs if scenario in (r.scenario, *r.scenario.split("/"))]
         if kind:
             runs = [r for r in runs if r.kind == kind]
         self.runs = runs

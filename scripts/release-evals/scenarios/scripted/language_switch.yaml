@@ -5,18 +5,20 @@ name: language_switch
 
 judge: !include ../judge_text.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: language_switch
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "Where is La Sagrada Familia?"
-    expect:
-      - event: response
-        eval: "answers that La Sagrada Familia is in Barcelona, Spain"
+      - user: "Where is La Sagrada Familia?"
+        expect:
+          - event: response
+            eval: "answers that La Sagrada Familia is in Barcelona, Spain"
 
-  - user: "From now on, reply only in Spanish. What's a good dish to try there?"
-    expect:
-      - event: response
-        eval: "the response is written in Spanish (Catalan place or dish names such as 'pa amb tomàquet' are acceptable)"
+      - user: "From now on, reply only in Spanish. What's a good dish to try there?"
+        expect:
+          - event: response
+            eval: "the response is written in Spanish (Catalan place or dish names such as 'pa amb tomàquet' are acceptable)"

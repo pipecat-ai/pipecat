@@ -99,7 +99,9 @@ class TestScenarioPathExpansion(unittest.TestCase):
         """The judge, user, and simulator blocks a directory's scenarios include have no name."""
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            (directory / "alpha.yaml").write_text("name: alpha\nturns: []\n")
+            (directory / "alpha.yaml").write_text(
+                "name: alpha\nscenarios: [{name: alpha, turns: []}]\n"
+            )
             (directory / "judge_text.yaml").write_text("modality: text\n")
             (directory / "simulator.yaml").write_text("service: openai\n")
             # Not valid YAML: still taken, so the run reports it instead of hiding it.
@@ -127,11 +129,11 @@ class TestScenarioRuns(unittest.TestCase):
                 "name: g\nscenarios:\n  - name: a\n    turns: []\n  - name: b\n    turns: []\n"
             )
             single = Path(tmp) / "single.yaml"
-            single.write_text("name: single\nturns: []\n")
+            single.write_text("name: single\nscenarios: [{name: single, turns: []}]\n")
 
             runs = _build_scenario_runs([group, single], "ws://bot")
 
-        self.assertEqual([r.scenario for r in runs], ["g/a", "g/b", "single"])
+        self.assertEqual([r.scenario for r in runs], ["g/a", "g/b", "single/single"])
         self.assertEqual([r.scenario_path for r in runs], [group, group, single])
         self.assertTrue(all(r.bot_url == "ws://bot" for r in runs))
 

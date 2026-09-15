@@ -224,12 +224,16 @@ from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # 
 
 SIMULATION = """
 name: {name}
-persona: "A caller."
-goal: "Get it done."
 simulator: {{service: openai}}
-success: "it got done"
-runs: {runs}
+scenarios:
+  - name: {name}
+    persona: "A caller."
+    goal: "Get it done."
+    success: "it got done"
+    runs: {runs}
 """
+
+SCRIPT = "name: {name}\nscenarios:\n  - name: {name}\n    turns: []\n"
 
 
 class TestManifestSimulations(unittest.TestCase):
@@ -239,7 +243,7 @@ class TestManifestSimulations(unittest.TestCase):
         (self.base / "scenarios").mkdir()
         (self.base / "scenarios" / "book.yaml").write_text(SIMULATION.format(name="book", runs=3))
         (self.base / "scenarios" / "once.yaml").write_text(SIMULATION.format(name="once", runs=1))
-        (self.base / "scenarios" / "greet.yaml").write_text("name: greet\nturns: []\n")
+        (self.base / "scenarios" / "greet.yaml").write_text(SCRIPT.format(name="greet"))
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -254,15 +258,15 @@ class TestManifestSimulations(unittest.TestCase):
         by_name = {}
         for run in manifest.runs:
             by_name.setdefault(run.scenario, []).append(run)
-        self.assertEqual([r.attempt for r in by_name["book"]], [1, 2, 3])
-        self.assertEqual([r.attempt for r in by_name["once"]], [1])
-        self.assertEqual([r.attempt for r in by_name["greet"]], [1])
-        book = by_name["book"][0]
+        self.assertEqual([r.attempt for r in by_name["book/book"]], [1, 2, 3])
+        self.assertEqual([r.attempt for r in by_name["once/once"]], [1])
+        self.assertEqual([r.attempt for r in by_name["greet/greet"]], [1])
+        book = by_name["book/book"][0]
         self.assertEqual(book.kind, "simulation")
         self.assertEqual(book.attempts, 3)
         self.assertFalse(book.sweep)  # its runs are a requirement
         self.assertEqual(book.scenario_path, self.base / "scenarios" / "book.yaml")
-        greet = by_name["greet"][0]
+        greet = by_name["greet/greet"][0]
         self.assertEqual(greet.kind, "script")
         self.assertEqual(greet.attempts, 1)
         self.assertFalse(greet.sweep)
@@ -285,10 +289,12 @@ class TestManifestSimulations(unittest.TestCase):
 
     def test_a_folder_in_a_name_stays_under_the_scenarios_dir(self):
         (self.base / "scenarios" / "scripted").mkdir()
-        (self.base / "scenarios" / "scripted" / "greet.yaml").write_text("name: greet\nturns: []\n")
+        (self.base / "scenarios" / "scripted" / "greet.yaml").write_text(
+            SCRIPT.format(name="greet")
+        )
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [scripted/greet]\n")
         run = manifest.runs[0]
-        self.assertEqual(run.scenario, "greet")
+        self.assertEqual(run.scenario, "greet/greet")
         self.assertEqual(run.scenario_path, self.base / "scenarios" / "scripted" / "greet.yaml")
 
     def test_the_suite_filters_by_kind(self):
@@ -296,18 +302,19 @@ class TestManifestSimulations(unittest.TestCase):
 
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, book]\n")
         runs = EvalSuite(manifest).filter(kind=EvalKind.SIMULATION)
-        self.assertEqual({r.scenario for r in runs}, {"book"})
+        self.assertEqual({r.scenario for r in runs}, {"book/book"})
         self.assertEqual(len(runs), 3)
 
     def test_a_missing_scenario_still_gets_a_run(self):
         """Its kind can't be read, so it runs once as a scenario and reports the error."""
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [nope]\n")
         self.assertEqual(len(manifest.runs), 1)
+        self.assertEqual(manifest.runs[0].scenario, "nope")
         self.assertEqual(manifest.runs[0].kind, "script")
         self.assertEqual(manifest.runs[0].attempts, 1)
 
-    def test_a_group_contributes_a_run_per_entry(self):
-        """Entries run under their own names, each of its own kind; a plain file keeps the manifest's."""
+    def test_a_file_contributes_a_run_per_scenario(self):
+        """Each scenario runs under its own name and as its own kind."""
         (self.base / "scenarios" / "mixed.yaml").write_text(
             "name: mixed\n"
             "scenarios:\n"
@@ -316,12 +323,33 @@ class TestManifestSimulations(unittest.TestCase):
         )
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, mixed]\n")
         first = [r for r in manifest.runs if r.attempt == 1]
-        self.assertEqual([r.scenario for r in first], ["greet", "mixed/hi", "mixed/call"])
+        self.assertEqual([r.scenario for r in first], ["greet/greet", "mixed/hi", "mixed/call"])
         self.assertEqual([r.kind for r in first], ["script", "script", "simulation"])
         self.assertEqual([r.attempts for r in first], [1, 1, 2])
         self.assertTrue(all(r.scenario_path.name == "mixed.yaml" for r in first[1:]))
-        # A group entry's name is a file stem without the slash.
+        # A scenario's name is a file stem without the slash.
         self.assertEqual(first[1].stem, "mixed__hi")
+
+    def test_the_suite_filters_by_scenario_name_or_either_half(self):
+        from pipecat.evals.suite import EvalSuite
+
+        (self.base / "scenarios" / "mixed.yaml").write_text(
+            "name: mixed\nscenarios:\n  - name: hi\n    turns: []\n  - name: bye\n    turns: []\n"
+        )
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [greet, mixed]\n")
+        names = lambda runs: [r.scenario for r in runs]
+        self.assertEqual(names(EvalSuite(manifest).filter(scenario="mixed/hi")), ["mixed/hi"])
+        self.assertEqual(names(EvalSuite(manifest).filter(scenario="hi")), ["mixed/hi"])
+        self.assertEqual(
+            names(EvalSuite(manifest).filter(scenario="mixed")), ["mixed/hi", "mixed/bye"]
+        )
+        self.assertEqual(names(EvalSuite(manifest).filter(scenario="greet")), ["greet/greet"])
+
+    def test_a_flat_file_still_loads_and_warns(self):
+        (self.base / "scenarios" / "old.yaml").write_text("name: old\nturns: []\n")
+        with self.assertWarns(DeprecationWarning):
+            manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [old]\n")
+        self.assertEqual([r.scenario for r in manifest.runs], ["old"])
 
 
 class TestSimulationRecords(unittest.TestCase):

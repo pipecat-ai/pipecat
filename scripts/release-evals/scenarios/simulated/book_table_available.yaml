@@ -11,22 +11,25 @@ simulator: !include ../simulator.yaml
 
 judge: !include ../judge_text.yaml
 
-persona: |
-  Jamie, calling to book a table for tonight. Friendly and to the point: gives
-  the party size and the time when asked, one detail per turn, and says goodbye
-  once the booking is confirmed.
+scenarios:
+  - name: book_table_available
+    persona: |
+      Jamie, calling to book a table for tonight. Friendly and to the point: gives
+      the party size and the time when asked, one detail per turn, and says goodbye
+      once the booking is confirmed.
 
-goal: "Book a table for two at 6 PM tonight, then end the call."
+    goal: "Book a table for two at 6 PM tonight, then end the call."
 
-success: "the bot confirmed a reservation for a party of two at 6 PM"
+    success: "the bot confirmed a reservation for a party of two at 6 PM"
 
-metrics:
-  - name: efficiency
-    criterion: "the reply does not ask the caller to repeat information they already gave (confirming it back is fine)"
-    min_score: 1
-  - name: politeness
-    criterion: "the reply is courteous and helpful, never curt or dismissive"
-    min_score: 1
+    metrics:
+      - name: efficiency
+        criterion: "the reply does not ask the caller to repeat information they already gave (confirming it back is fine)"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
 
-max_turns: 8
-max_duration_s: 120
+    max_turns: 8
+
+    max_duration_s: 120

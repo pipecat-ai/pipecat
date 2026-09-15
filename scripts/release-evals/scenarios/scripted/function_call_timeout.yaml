@@ -9,22 +9,24 @@ name: function_call_timeout
 
 judge: !include ../judge_text.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: function_call_timeout
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "What's the current share price of NVDA?"
-    expect:
-      - event: function_call
-        calls:
-          - name: get_stock_price
+      - user: "What's the current share price of NVDA?"
+        expect:
+          - event: function_call
+            calls:
+              - name: get_stock_price
 
-  # No user turn: the lookup's deadline passes with nothing to report, and
-  # cancelling runs inference, so the bot volunteers the failure without being
-  # asked. A "let me look that up" filler ahead of it is fine — the judge holds
-  # out for the rest of the reply.
-  - expect:
-      - event: response
-        eval: "says the price lookup did not succeed — it failed, timed out, was cancelled, or produced nothing — and does not quote a share price"
+      # No user turn: the lookup's deadline passes with nothing to report, and
+      # cancelling runs inference, so the bot volunteers the failure without being
+      # asked. A "let me look that up" filler ahead of it is fine — the judge holds
+      # out for the rest of the reply.
+      - expect:
+          - event: response
+            eval: "says the price lookup did not succeed — it failed, timed out, was cancelled, or produced nothing — and does not quote a share price"

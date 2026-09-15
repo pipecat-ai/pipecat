@@ -9,22 +9,25 @@ simulator: !include ../simulator.yaml
 
 judge: !include ../judge_text.yaml
 
-persona: |
-  A friendly, curious traveler planning a trip to Europe. Polite and concise:
-  asks one question at a time, and thanks the assistant once satisfied.
+scenarios:
+  - name: capital_curious
+    persona: |
+      A friendly, curious traveler planning a trip to Europe. Polite and concise:
+      asks one question at a time, and thanks the assistant once satisfied.
 
-goal: "Find out what the capital of Germany is, then end the call."
+    goal: "Find out what the capital of Germany is, then end the call."
 
-success: "the bot told the caller that the capital of Germany is Berlin"
+    success: "the bot told the caller that the capital of Germany is Berlin"
 
-metrics:
-  - name: politeness
-    criterion: "the reply is courteous and helpful, never curt or dismissive"
-    min_score: 1
-  - name: brevity
-    criterion: "the reply is at most three sentences, with no monologue"
-  - measure: words
-    max_value: 60
+    metrics:
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
+      - name: brevity
+        criterion: "the reply is at most three sentences, with no monologue"
+      - measure: words
+        max_value: 60
 
-max_turns: 6
-max_duration_s: 120
+    max_turns: 6
+
+    max_duration_s: 120

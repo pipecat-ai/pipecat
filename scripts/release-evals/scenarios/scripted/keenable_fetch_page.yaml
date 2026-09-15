@@ -6,16 +6,18 @@ name: keenable_fetch_page
 
 judge: !include ../judge_text.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: keenable_fetch_page
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "Please read the page at https://example.com and tell me what it says."
-    expect:
-      - event: function_call
-        calls:
-          - name: fetch_page_content
-      - event: response
-        eval: "the response describes example.com as a domain used for illustrative examples or documentation"
+      - user: "Please read the page at https://example.com and tell me what it says."
+        expect:
+          - event: function_call
+            calls:
+              - name: fetch_page_content
+          - event: response
+            eval: "the response describes example.com as a domain used for illustrative examples or documentation"

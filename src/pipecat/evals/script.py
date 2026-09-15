@@ -6,20 +6,26 @@
 
 """Scripted scenario file format for Pipecat behavioral evaluations.
 
-A scenario is a YAML file describing a scripted conversation and the semantic
-events expected to flow back from the bot. Simple example::
+A scripted scenario describes a conversation and the semantic events expected
+to flow back from the bot. It lives in a scenario file's ``scenarios:`` list
+(:mod:`pipecat.evals.scenario`). Simple example::
 
     name: simple_user_input
-    turns:
-      - user: "hello world"
-        expect:
-          - event: user_started_speaking
-          - event: user_transcription
-            text_contains: "hello world"
+    scenarios:
+      - name: simple_user_input
+        turns:
+          - user: "hello world"
+            expect:
+              - event: user_started_speaking
+              - event: user_transcription
+                text_contains: "hello world"
 
 The harness plays each turn and checks the events the bot emits back, in
-order. A file with a ``persona:`` instead of ``turns:`` is the other kind, a
-simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
+order. A scenario with a ``persona:`` instead of ``turns:`` is the other kind,
+a simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
+The keys below are a scenario's; the file-level ones (``user:``, ``judge:``,
+``context:``, ``stop_on_failure:``) may also sit at the top of the file as
+defaults for every scenario in it.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,

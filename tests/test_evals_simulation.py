@@ -16,16 +16,28 @@ from pipecat.evals.scenario import (
     EvalScriptScenario,
     EvalSimulationScenario,
     describe_simulation,
-    load_scenario_file,
+    load_scenarios,
 )
 from pipecat.evals.script import EvalFunctionCall
 
+# A simulation's own mapping, as EvalSimulationScenario parses it.
 MINIMAL = """
 name: capital_curious
 persona: "A curious traveler."
 goal: "Learn the capital of Germany."
 simulator: {service: openai, model: gpt-4o-mini}
 success: "the bot said the capital of Germany is Berlin"
+"""
+
+# The same simulation as a scenario file holds it.
+MINIMAL_FILE = """
+name: capital_curious
+simulator: {service: openai, model: gpt-4o-mini}
+scenarios:
+  - name: capital_curious
+    persona: "A curious traveler."
+    goal: "Learn the capital of Germany."
+    success: "the bot said the capital of Germany is Berlin"
 """
 
 
@@ -214,22 +226,22 @@ metrics:
         self.assertEqual(len(text.splitlines()), 3)
 
 
-class TestLoadScenarioFile(unittest.TestCase):
+class TestLoadScenarios(unittest.TestCase):
     def test_a_persona_makes_a_simulation(self):
-        self.assertIsInstance(load_scenario_file(_write(MINIMAL)), EvalSimulationScenario)
+        (loaded,) = load_scenarios(_write(MINIMAL_FILE))
+        self.assertIsInstance(loaded, EvalSimulationScenario)
 
     def test_turns_make_a_scripted_scenario(self):
-        self.assertIsInstance(
-            load_scenario_file(_write("name: greet\nturns: []\n")), EvalScriptScenario
-        )
+        (loaded,) = load_scenarios(_write("name: greet\nscenarios: [{name: greet, turns: []}]\n"))
+        self.assertIsInstance(loaded, EvalScriptScenario)
 
-    def test_a_file_is_one_kind_or_the_other(self):
+    def test_a_scenario_is_one_kind_or_the_other(self):
         with self.assertRaises(ValueError) as cm:
-            load_scenario_file(_write("name: nothing\n"))
+            load_scenarios(_write("name: nothing\nscenarios: [{name: nothing}]\n"))
         self.assertIn("'turns:'", str(cm.exception))
         self.assertIn("'persona:'", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
-            load_scenario_file(_write(MINIMAL + "turns: []\n"))
+            load_scenarios(_write(MINIMAL_FILE + "    turns: []\n"))
         self.assertIn("not both", str(cm.exception))
 
 

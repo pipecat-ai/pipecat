@@ -10,25 +10,28 @@ simulator: !include ../simulator.yaml
 
 judge: !include ../judge_text.yaml
 
-persona: |
-  Alex, ordering dinner. Casual and quick: wants a large pepperoni pizza, asks
-  how long delivery will take once the order is read back, and then confirms
-  the order.
+scenarios:
+  - name: order_pizza
+    persona: |
+      Alex, ordering dinner. Casual and quick: wants a large pepperoni pizza, asks
+      how long delivery will take once the order is read back, and then confirms
+      the order.
 
-goal: "Order a large pepperoni pizza, find out the delivery time, and confirm the order."
+    goal: "Order a large pepperoni pizza, find out the delivery time, and confirm the order."
 
-success: "the bot took an order for a large pepperoni pizza, gave a delivery estimate, and completed the order"
+    success: "the bot took an order for a large pepperoni pizza, gave a delivery estimate, and completed the order"
 
-metrics:
-  - name: accuracy
-    criterion: "when the reply states the order, it is a large pepperoni pizza; a reply that does not state the order passes"
-    min_score: 1
-  - name: politeness
-    criterion: "the reply is courteous and helpful, never curt or dismissive"
-    min_score: 1
-  - name: order_recorded
-    measure: function_calls
-    calls: [choose_pizza, select_pizza_order, get_delivery_estimate, complete_order]
+    metrics:
+      - name: accuracy
+        criterion: "when the reply states the order, it is a large pepperoni pizza; a reply that does not state the order passes"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
+      - name: order_recorded
+        measure: function_calls
+        calls: [choose_pizza, select_pizza_order, get_delivery_estimate, complete_order]
 
-max_turns: 8
-max_duration_s: 120
+    max_turns: 8
+
+    max_duration_s: 120

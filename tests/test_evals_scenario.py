@@ -56,12 +56,17 @@ scenarios:
 
 
 class TestScenarioGroups(unittest.TestCase):
-    def test_a_plain_file_is_a_group_of_one(self):
-        scenarios = load_scenarios(_write("name: greet\nturns: [{user: hi}]\n"))
-        self.assertEqual([s.name for s in scenarios], ["greet"])
-        self.assertEqual(
-            load_scenario_file(_write("name: greet\nturns: [{user: hi}]\n")).name, "greet"
+    def test_a_file_of_one_scenario_names_it_under_the_file(self):
+        scenarios = load_scenarios(
+            _write("name: greet\nscenarios:\n  - name: greet\n    turns: [{user: hi}]\n")
         )
+        self.assertEqual([s.name for s in scenarios], ["greet/greet"])
+
+    def test_a_flat_file_is_deprecated_and_keeps_its_name(self):
+        with self.assertWarns(DeprecationWarning) as cm:
+            scenarios = load_scenarios(_write("name: greet\nturns: [{user: hi}]\n"))
+        self.assertEqual([s.name for s in scenarios], ["greet"])
+        self.assertIn("'scenarios:' list", str(cm.warning))
 
     def test_entries_are_named_under_the_group(self):
         scenarios = load_scenarios(_write(GROUP))
@@ -117,20 +122,24 @@ class TestScenarioGroups(unittest.TestCase):
             load_scenario(path, "turn_completion/nope")
         self.assertIn("no scenario called", str(cm.exception))
 
-    def test_load_scenario_returns_a_lone_scenario_whatever_the_name(self):
-        path = _write("name: greet\nturns: [{user: hi}]\n")
-        self.assertEqual(load_scenario(path).name, "greet")
-        self.assertEqual(load_scenario(path, "something-else").name, "greet")
+    def test_load_scenario_without_a_name_wants_a_lone_scenario(self):
+        path = _write("name: greet\nscenarios:\n  - name: greet\n    turns: [{user: hi}]\n")
+        self.assertEqual(load_scenario(path).name, "greet/greet")
+        self.assertEqual(load_scenario(path, "greet/greet").name, "greet/greet")
+        with self.assertRaises(ValueError):
+            load_scenario(path, "greet")
 
     def test_load_scenario_file_is_deprecated(self):
         with self.assertWarns(DeprecationWarning):
-            scenario = load_scenario_file(_write("name: greet\nturns: [{user: hi}]\n"))
-        self.assertEqual(scenario.name, "greet")
+            scenario = load_scenario_file(
+                _write("name: greet\nscenarios:\n  - name: greet\n    turns: [{user: hi}]\n")
+            )
+        self.assertEqual(scenario.name, "greet/greet")
 
     def test_group_needs_a_name(self):
         with self.assertRaises(ValueError) as cm:
             load_scenarios(_write("scenarios: [{name: a, turns: []}]\n"))
-        self.assertIn("needs a 'name:'", str(cm.exception))
+        self.assertIn("missing or invalid 'name:'", str(cm.exception))
 
     def test_group_needs_entries(self):
         with self.assertRaises(ValueError) as cm:
