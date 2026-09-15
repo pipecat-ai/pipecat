@@ -476,6 +476,93 @@ async def test_a_backend_can_say_something_as_soon_as_a_delegation_arrives():
 
 
 @pytest.mark.asyncio
+async def test_an_apps_own_output_is_sent_as_given_past_the_transform():
+    """A transform that silences the model's progress leaves the app's outputs alone."""
+    llm = _ScriptedLLM(
+        [
+            [("text", "Checking."), ("call", "report", "call_1", {"text": "Seattle is up."})],
+            [("text", "Done.")],
+        ]
+    )
+
+    async def report(params: FunctionCallParams, text: str):
+        """Tell the user something.
+
+        Args:
+            text: What to tell them.
+        """
+        await backend.send_output(BackendOutput(text=text, prefers_spoken=False))
+        await params.result_callback("told")
+
+    async def silence_progress(output: BackendOutput) -> BackendOutput:
+        return output if output.is_final else replace(output, text="")
+
+    backend = BackendLLMWorker(
+        llm=llm,
+        name="backend",
+        context=LLMContext(tools=[report]),
+        transform_output=silence_progress,
+    )
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        await worker.say("Let me look into that.")
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert updates == [
+        BackendOutput(text="Let me look into that.", prefers_spoken=True),
+        BackendOutput(text="Seattle is up.", prefers_spoken=False),
+        BackendOutput(text="Done.", is_final=True, prefers_spoken=True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_apps_own_output_can_ask_for_the_transform():
+    llm = _ScriptedLLM([[("text", "Done.")]])
+
+    async def shout(output: BackendOutput) -> BackendOutput:
+        return replace(output, text=output.text.upper())
+
+    backend = BackendLLMWorker(
+        llm=llm, name="backend", context=LLMContext(), transform_output=shout
+    )
+
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(worker, request: str):
+        await worker.say("as given")
+        await worker.say("shaped", apply_transform_output=True)
+
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    updates: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async for event in _delegate_to_backend(requester, "backend", request="Do it"):
+                if isinstance(event, BackendOutput):
+                    updates.append(event)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert [u.text for u in updates] == ["as given", "SHAPED", "DONE."]
+
+
+@pytest.mark.asyncio
 async def test_an_output_sent_outside_a_delegation_is_dropped():
     backend = BackendLLMWorker(llm=_ScriptedLLM([]), name="backend", context=LLMContext())
     backend.send_job_update = AsyncMock()  # type: ignore[method-assign]
