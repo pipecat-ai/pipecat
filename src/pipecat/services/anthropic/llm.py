@@ -531,6 +531,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            await self.resolve_context_files(context)
+
             params_from_context = self._get_llm_invocation_params(context)
 
             self._log_llm_response(context)
