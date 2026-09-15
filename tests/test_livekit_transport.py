@@ -765,6 +765,35 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
         self.assertIn(rtc.TrackSource.SOURCE_CAMERA, published_sources)
         self.assertIn(rtc.TrackSource.SOURCE_MICROPHONE, published_sources)
 
+    def _video_publish_options(self, **params) -> "rtc.TrackPublishOptions":
+        client = self._create_client(video_out_enabled=True)
+        client._params = LiveKitParams(video_out_enabled=True, **params)
+        return client._video_publish_options()
+
+    async def test_video_publish_options_default_leaves_encoding_to_livekit(self):
+        """Without a bitrate or codec, LiveKit chooses the encoding and codec."""
+        options = self._video_publish_options()
+
+        self.assertEqual(options.source, rtc.TrackSource.SOURCE_CAMERA)
+        self.assertFalse(options.HasField("video_encoding"))
+        self.assertFalse(options.HasField("video_codec"))
+
+    async def test_video_publish_options_apply_bitrate_framerate_and_codec(self):
+        """The max bitrate, framerate and codec params reach the publish options."""
+        options = self._video_publish_options(
+            video_out_max_bitrate=2_000_000, video_out_framerate=24, video_out_codec="h264"
+        )
+
+        self.assertEqual(options.video_encoding.max_bitrate, 2_000_000)
+        self.assertEqual(options.video_encoding.max_framerate, 24)
+        self.assertEqual(options.video_codec, rtc.VideoCodec.H264)
+
+    async def test_video_publish_options_ignore_unknown_codec(self):
+        """An unknown codec is ignored so LiveKit falls back to its default."""
+        options = self._video_publish_options(video_out_codec="MPEG2")
+
+        self.assertFalse(options.HasField("video_codec"))
+
     async def test_publish_video_writes_to_video_source(self):
         """``publish_video`` captures the frame on the connected VideoSource."""
         client = self._create_client(video_out_enabled=True)

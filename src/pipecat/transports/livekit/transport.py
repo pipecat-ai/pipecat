@@ -131,12 +131,19 @@ class LiveKitParams(TransportParams):
     ``camera_out_enabled``/``register_video_destination``) is not yet
     implemented for LiveKit.
 
+    ``video_out_codec`` selects the published video codec (``"VP8"``, ``"H264"``,
+    ``"VP9"``, ``"AV1"`` or ``"H265"``); LiveKit picks one when it is unset.
+
     Parameters:
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
+        video_out_max_bitrate: Maximum bitrate of the published video track, in bits
+            per second, capped at ``video_out_framerate``. LiveKit chooses the encoding
+            from the track resolution when unset.
     """
 
     audio_out_queue_size_ms: int = 1000
+    video_out_max_bitrate: int | None = None
 
 
 class LiveKitCallbacks(BaseModel):
@@ -316,8 +323,7 @@ class LiveKitTransportClient:
                     self._video_track = rtc.LocalVideoTrack.create_video_track(
                         "pipecat-video", self._video_source
                     )
-                    video_options = rtc.TrackPublishOptions()
-                    video_options.source = rtc.TrackSource.SOURCE_CAMERA
+                    video_options = self._video_publish_options()
                     await self.room.local_participant.publish_track(
                         self._video_track, video_options
                     )
@@ -341,6 +347,29 @@ class LiveKitTransportClient:
                 if not self._connected:
                     await self._rollback_partial_connect()
                 raise
+
+    def _video_publish_options(self) -> rtc.TrackPublishOptions:
+        """Build the publish options for the video track from the params."""
+        options = rtc.TrackPublishOptions()
+        options.source = rtc.TrackSource.SOURCE_CAMERA
+
+        # LiveKit requires both fields of a video encoding, so the framerate
+        # is only sent along with a bitrate.
+        if self._params.video_out_max_bitrate is not None:
+            options.video_encoding.max_bitrate = self._params.video_out_max_bitrate
+            options.video_encoding.max_framerate = self._params.video_out_framerate
+
+        codec = self._params.video_out_codec
+        if codec:
+            try:
+                options.video_codec = rtc.VideoCodec.Value(codec.upper())
+            except ValueError:
+                logger.warning(
+                    f"{self} unsupported video codec for LiveKit output: {codec!r}, "
+                    f"expected one of {list(rtc.VideoCodec.keys())}"
+                )
+
+        return options
 
     async def _rollback_partial_connect(self):
         """Undo a connection attempt that failed before it completed."""
