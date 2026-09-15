@@ -223,8 +223,7 @@ class BackendReplyStrategy:
     """Turns each :class:`BackendOutput` into what the frontend hears about it.
 
     The final output settles the ``delegate`` call; what the frontend hears
-    of the outputs before it, and when, is what strategies differ on. The
-    base delivers the final output's text alone.
+    of the outputs before it, and when, is what strategies differ on.
     """
 
     #: Whether the strategy reports outputs before the final one as
@@ -241,8 +240,7 @@ class BackendReplyStrategy:
             params: The ``delegate`` call the output belongs to.
             output: The output.
         """
-        if output.is_final:
-            await params.result_callback(output.text)
+        raise NotImplementedError
 
 
 class OneShotBackendReplyStrategy(BackendReplyStrategy):
