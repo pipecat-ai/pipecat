@@ -37,6 +37,31 @@ except ModuleNotFoundError as e:
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
 
+_MAX_ERROR_DETAIL = 200
+
+
+def _sole_cause(error: BaseException) -> BaseException:
+    """Read the one exception a group of one wraps, at whatever depth.
+
+    A group carries neither the type nor the message of what went wrong, so a
+    group of one reports as the cause it holds.
+    """
+    while isinstance(error, BaseExceptionGroup) and len(error.exceptions) == 1:
+        error = error.exceptions[0]
+    return error
+
+
+def _error_detail(error: BaseException) -> str:
+    """Name the cause of a failed tool call, in the one line the model reads."""
+    cause = _sole_cause(error)
+    detail = str(cause)
+    if not detail:
+        # An anyio stream error carries no message, so name its class instead.
+        return type(cause).__name__
+    if len(detail) > _MAX_ERROR_DETAIL:
+        return detail[:_MAX_ERROR_DETAIL] + "..."
+    return detail
+
 
 @asynccontextmanager
 async def _streamable_http_transport(params: StreamableHttpParameters):
@@ -92,10 +117,11 @@ def _connect_failure_cause(*candidates: BaseException | None) -> Exception | Non
         candidate is a cancellation.
     """
     for candidate in candidates:
-        while isinstance(candidate, BaseExceptionGroup) and len(candidate.exceptions) == 1:
-            candidate = candidate.exceptions[0]
-        if isinstance(candidate, Exception):
-            return candidate
+        if candidate is None:
+            continue
+        cause = _sole_cause(candidate)
+        if isinstance(cause, Exception):
+            return cause
     return None
 
 
@@ -481,10 +507,11 @@ class MCPClient(BaseObject):
 
         logger.debug(f"Calling mcp tool '{function_name}'")
         results = None
+        error_msg = None
         try:
             results = await session.call_tool(function_name, arguments=arguments)
         except Exception as e:
-            error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
+            error_msg = f"Error calling mcp tool {function_name}: {_error_detail(e)}"
             logger.error(error_msg)
 
         response = ""
@@ -510,11 +537,11 @@ class MCPClient(BaseObject):
                 logger.error(f"Error applying output filter for {function_name}")
                 response = ""
 
-        if response and len(response) and isinstance(response, str):
+        if isinstance(response, str) and response:
             logger.info(f"Tool '{function_name}' completed successfully")
             logger.debug(f"Final response: {response}")
         else:
-            response = "Sorry, could not call the mcp tool"
+            response = error_msg or "Sorry, could not call the mcp tool"
 
         return response
 
