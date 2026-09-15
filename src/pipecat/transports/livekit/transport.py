@@ -14,7 +14,6 @@ event handling for conversational AI applications.
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -223,9 +222,6 @@ class LiveKitTransportClient:
         self._audio_streams: dict[str, tuple[rtc.AudioStream, asyncio.Task]] = {}
         self._video_source: rtc.VideoSource | None = None
         self._video_track: rtc.LocalVideoTrack | None = None
-        # LiveKit converts each captured frame to I420 synchronously, so
-        # capture runs on a single worker thread that also keeps frame order.
-        self._video_executor = ThreadPoolExecutor(max_workers=1)
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
         # Symmetric registry for video streams.
@@ -495,14 +491,13 @@ class LiveKitTransportClient:
         Returns:
             True if the video frame was published successfully, False otherwise.
         """
-        video_source = self._video_source
-        if not self._connected or not video_source:
+        if not self._connected or not self._video_source:
             return False
 
         try:
-            await asyncio.get_running_loop().run_in_executor(
-                self._video_executor, video_source.capture_frame, video_frame
-            )
+            # Unlike ``AudioSource.capture_frame``, ``VideoSource.capture_frame``
+            # is synchronous in livekit-rtc.
+            self._video_source.capture_frame(video_frame)
             return True
         except Exception as e:
             logger.error(f"Error publishing video: {e}")
