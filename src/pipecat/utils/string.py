@@ -21,6 +21,8 @@ from functools import cache
 # The native extension does not publish Python type stubs.
 from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
+_QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
+
 
 @cache
 def _sent_tokenizer() -> Callable[[str], list[str]]:
@@ -147,8 +149,21 @@ def match_endofsentence(text: str) -> int:
 
     first_sentence = sentences[0]
 
+    tokenizer_text = text
+    # With an unfinished quote such as 'She said, "Dr. S', sentencex can split
+    # after '"Dr.'. Recheck a proposed split after a quoted word ending in a
+    # period, letting sentencex decide whether that word is an abbreviation.
+    if len(sentences) > 1 and (quote := _QUOTED_WORD_END.search(first_sentence)):
+        # Group 1 contains only the opening quote characters. Replace them with
+        # equal-width spaces so sentencex sees the abbreviation without the quote.
+        # Boundary offsets still refer to the original text, which keeps its quotes.
+        start, end = quote.span(1)
+        tokenizer_text = text[:start] + " " * (end - start) + text[end:]
+        sentences = _sent_tokenizer()(tokenizer_text)
+        first_sentence = sentences[0]
+
     # A single span can be an incomplete fragment; require terminal punctuation.
-    if len(sentences) == 1 and first_sentence == text:
+    if len(sentences) == 1 and first_sentence == tokenizer_text:
         if text and text[-1] in SENTENCE_ENDING_PUNCTUATION:
             return len(text)
         # Additional punctuation can delimit sentences outside the selected rules.
