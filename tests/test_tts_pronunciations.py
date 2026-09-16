@@ -43,7 +43,9 @@ class TestNormalizeIpa(unittest.TestCase):
 
     def test_unifies_notation(self):
         self.assertEqual(normalize_ipa("ˈʧɪkən"), "ˈtʃɪkən")
-        self.assertEqual(normalize_ipa("t͡ʃ"), "tʃ")
+        self.assertEqual(normalize_ipa("ˈt\u0361ʃɪkən"), "ˈtʃɪkən")
+        self.assertEqual(normalize_ipa("ˈpiʦa"), "ˈpit\u0361sa")
+        self.assertEqual(normalize_ipa("t\u035cs"), "t\u0361s")
         self.assertEqual(normalize_ipa("'ælɛgrə"), "ˈælɛɡrə")
         self.assertEqual(normalize_ipa("bi:"), "biː")
 
@@ -58,6 +60,11 @@ class TestNormalizeIpa(unittest.TestCase):
 class TestIpaPhones(unittest.TestCase):
     def test_groups_multi_character_phones(self):
         self.assertEqual(ipa_phones("ˈtʃaɪnə"), ["ˈ", "tʃ", "aɪ", "n", "ə"])
+        self.assertEqual(ipa_phones("ˈʧaɪnə"), ["ˈ", "tʃ", "aɪ", "n", "ə"])
+
+    def test_groups_only_tied_clusters(self):
+        self.assertEqual(ipa_phones("kæts"), ["k", "æ", "t", "s"])
+        self.assertEqual(ipa_phones("ˈpit\u0361sa"), ["ˈ", "p", "i", "ts", "a"])
 
     def test_keeps_length_and_diacritics_with_their_phone(self):
         self.assertEqual(ipa_phones("biːn̩"), ["b", "iː", "n̩"])
@@ -92,6 +99,10 @@ class TestArpabet(unittest.TestCase):
     def test_from_ipa_r_coloured_vowel(self):
         self.assertEqual(ipa_to_arpabet("ˈnɜrs"), "N ER1 S")
         self.assertEqual(ipa_to_arpabet("ˈbɚd"), "B ER1 D")
+        self.assertEqual(ipa_to_arpabet("ˈæspərɪn"), "AE1 S P ER0 IH0 N")
+        self.assertEqual(ipa_to_arpabet("zəˈɹɛltoʊ"), "Z AH0 R EH1 L T OW0")
+        self.assertEqual(ipa_to_arpabet("ˈkʌɹənt"), "K ER1 AH0 N T")
+        self.assertEqual(ipa_to_arpabet("ˈkɑɹ"), "K AA1 R")
 
     def test_from_ipa_unknown_sound(self):
         self.assertIsNone(ipa_to_arpabet("ˈbax"))

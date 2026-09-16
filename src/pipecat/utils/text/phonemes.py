@@ -14,7 +14,8 @@ formatter only has to render the result.
 
 Normalization is notation-only. It unifies ways of writing the same symbol
 (``ʧ`` and ``tʃ``, ``g`` and ``ɡ``, ``'`` and ``ˈ``) and never changes which sound
-is written, so it is safe for any language.
+is written, so it is safe for any language. Arpabet conversion is the exception:
+Arpabet only exists for English, so it follows English conventions.
 """
 
 import re
@@ -39,23 +40,29 @@ PRIMARY_STRESS = "ˈ"
 SECONDARY_STRESS = "ˌ"
 STRESS_MARKS = (PRIMARY_STRESS, SECONDARY_STRESS)
 
-# Single code points that stand for a sequence of symbols, and ASCII look-alikes
-# of IPA symbols.
+TIE_BAR = "\u0361"
+
+# Ligatures and ASCII look-alikes of IPA symbols. "tʃ" and "dʒ" are always read
+# as one phone, so they are written untied; other affricates keep the tie bar
+# that tells them apart from a cluster.
 _IPA_NOTATION = [
+    ("\u035c", TIE_BAR),  # tie bar below
     ("ʧ", "tʃ"),
     ("ʤ", "dʒ"),
-    ("ʦ", "ts"),
-    ("ʣ", "dz"),
+    (f"t{TIE_BAR}ʃ", "tʃ"),
+    (f"d{TIE_BAR}ʒ", "dʒ"),
+    ("ʦ", f"t{TIE_BAR}s"),
+    ("ʣ", f"d{TIE_BAR}z"),
     ("g", "ɡ"),
     ("'", PRIMARY_STRESS),
     (":", "ː"),
-    ("\u0361", ""),  # tie bar above: t͡ʃ -> tʃ
-    ("\u035c", ""),  # tie bar below
     (".", ""),  # syllable break
 ]
 
-# Sequences read as a single phone. Longest first.
-_IPA_MULTI = ["tʃ", "dʒ", "ts", "dz", "aɪ", "aʊ", "ɔɪ", "oʊ", "eɪ"]
+# Sequences read as a single phone even without a tie bar: affricates written
+# this way in nearly every dictionary, and the English diphthongs. Anything else
+# ("ts" in "cats" against Italian "pizza") is one phone only when tied.
+_IPA_MULTI = ["tʃ", "dʒ", "aɪ", "aʊ", "ɔɪ", "oʊ", "eɪ"]
 
 _IPA_VOWELS = set("aeiouyæɑɒɔəɚɛɜɝɪʊʌɐᵻɨʉɯɤøœɶɵɘɞ")
 
@@ -67,8 +74,9 @@ def normalize_ipa(ipa: str) -> str:
     """Unify the notation of an IPA string without changing what it says.
 
     Strips surrounding ``/…/`` or ``[…]``, composes Unicode, replaces ligatures and
-    ASCII look-alikes with their IPA symbols, drops tie bars and syllable breaks,
-    and collapses whitespace.
+    ASCII look-alikes with their IPA symbols, writes ``tʃ`` and ``dʒ`` untied and
+    other affricates tied (``ʦ`` becomes ``t͡s``), drops syllable breaks, and
+    collapses whitespace.
 
     Args:
         ipa: An IPA transcription.
@@ -92,7 +100,8 @@ def ipa_phones(ipa: str) -> list[str]:
     """Split one IPA word into phones, in written order.
 
     Stress marks are returned as tokens of their own, where they were written.
-    Affricates and diphthongs are one phone each; length marks and combining
+    Tied sequences (``t͡s``), ``tʃ``, ``dʒ`` and the English diphthongs are one
+    phone each, returned without the tie bar; length marks and combining
     diacritics stay with the phone they modify.
 
     Args:
@@ -114,8 +123,12 @@ def ipa_phones(ipa: str) -> list[str]:
             phones.append(char)
             i += 1
             continue
-        phone = next((m for m in _IPA_MULTI if ipa.startswith(m, i)), char)
-        i += len(phone)
+        if ipa.startswith(TIE_BAR, i + 1) and i + 2 < len(ipa):
+            phone = char + ipa[i + 2]
+            i += 3
+        else:
+            phone = next((m for m in _IPA_MULTI if ipa.startswith(m, i)), char)
+            i += len(phone)
         while i < len(ipa) and (ipa[i] in _IPA_MODIFIERS or unicodedata.category(ipa[i]) == "Mn"):
             phone += ipa[i]
             i += 1
@@ -187,6 +200,10 @@ _IPA_TO_ARPABET = {
 }  # fmt: skip
 
 
+# Vowels that, followed by R, are written as the single vowel ER.
+_R_COLOURING = ("AH", "ER")
+
+
 def normalize_arpabet(arpabet: str) -> str | None:
     """Canonical form of an Arpabet transcription, or None if it is not valid.
 
@@ -223,6 +240,11 @@ def normalize_arpabet(arpabet: str) -> str | None:
 def ipa_to_arpabet(ipa: str) -> str | None:
     """Convert a General American IPA word to Arpabet with stress digits.
 
+    A central vowel followed by ``ɹ`` is written ``ER``, as the CMU dictionary
+    does ("aspirin" is ``AE1 S P ER0 IH0 N``), unless a stress mark between them
+    makes the ``ɹ`` the start of the next syllable (``zəˈɹɛltoʊ`` keeps
+    ``Z AH0 R EH1 L T OW0``).
+
     Args:
         ipa: An IPA transcription of a single English word.
 
@@ -236,9 +258,11 @@ def ipa_to_arpabet(ipa: str) -> str | None:
     """
     codes: list[str] = []
     stress = "0"
-    for phone in stress_before_vowels(ipa_phones(ipa)):
+    syllable_break = False
+    for phone in ipa_phones(ipa):
         if phone in STRESS_MARKS:
             stress = "1" if phone == PRIMARY_STRESS else "2"
+            syllable_break = True
             continue
         base = "".join(
             c for c in phone if c not in _IPA_MODIFIERS and unicodedata.category(c) != "Mn"
@@ -251,9 +275,9 @@ def ipa_to_arpabet(ipa: str) -> str | None:
         if code in ARPABET_VOWELS:
             codes.append(code + stress)
             stress = "0"
-        elif code == "R" and codes and codes[-1].startswith("ER"):
-            # "ɜɹ" and "ɝɹ" write one r-coloured vowel, not a vowel followed by R.
-            continue
+            syllable_break = False
+        elif code == "R" and codes and codes[-1][:2] in _R_COLOURING and not syllable_break:
+            codes[-1] = "ER" + codes[-1][2]
         else:
             codes.append(code)
     return normalize_arpabet(" ".join(codes))
