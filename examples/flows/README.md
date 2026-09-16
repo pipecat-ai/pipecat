@@ -40,7 +40,7 @@ The Python examples support multiple LLM providers (OpenAI, Anthropic, Google Ge
 ## Flows as YAML
 
 - [`yaml/hello_world/`](./yaml/hello_world) — the smallest possible flow: two nodes and one tool. Read this first.
-- [`yaml/food_ordering/`](./yaml/food_ordering) — the full-featured flow: branching between pizza and sushi, a pre-action, a global function, and transition-only entries
+- [`yaml/food_ordering/`](./yaml/food_ordering) — the full-featured flow: branching between pizza and sushi, a pre-action, global functions, and transition-only entries. It runs with no text LLM: `TypeSafeFlowsLLMService` picks each tool and its arguments with a TypeSafe judgment and speaks written lines (needs `TYPESAFE_API_KEY` and the `typesafe` extra)
 - [`yaml/restaurant_reservation/`](./yaml/restaurant_reservation) — a branch table keyed on a tool's result, and the shim pattern for transitions that depend on logic: flow-agnostic business logic under a thin tool that reports its outcome as a `status` field
 - [`yaml/patient_intake/`](./yaml/patient_intake) — data-capture tools, a branch on a boolean result, and session facts such as the practice and patient names read from state
 - [`yaml/insurance_quote/`](./yaml/insurance_quote) — prompts built from computed values: the handlers store each quote in state, the results node reads it with `{{ quote.monthly_premium }}`, and adjusting the coverage re-enters the node with the new figures
@@ -54,7 +54,6 @@ The Python examples support multiple LLM providers (OpenAI, Anthropic, Google Ge
 - [`python/warm_transfer.py`](./python/warm_transfer.py) — a flow driven by transport events: the bot transfers the caller to a human agent, briefs the agent while the caller hears hold music from a parallel pipeline, then drops out (DailyTransport only)
 - [`python/multi_worker_handoff.py`](./python/multi_worker_handoff.py) — a flow living inside a worker: a structured reservation worker hands off to and from a free-form `LLMWorker` router over the bus, sharing one conversation context
 - [`python/llm_switching.py`](./python/llm_switching.py) — switching between LLM providers during a conversation; the flow is incidental to the `LLMSwitcher`
-
 Python flows define their functions as direct functions, async functions whose schema is derived from the signature and docstring, except where the point is the schema.
 
 ## Evals

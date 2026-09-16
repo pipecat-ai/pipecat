@@ -1,0 +1,37 @@
+name: order_pizza_piecemeal
+
+# Text modality, against flows/yaml/food_ordering: a caller who gives the
+# order one detail at a time. Only the size first, the type only when asked,
+# then a confirmation. A bot that needs both details in one breath either
+# stalls or tells the caller it did not hear them.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  - name: order_pizza_piecemeal
+    persona: |
+      Sam, ordering dinner over the phone. Answers with a few words at a time and
+      never volunteers more than was asked. Wants a large pizza; when asked what
+      kind, says pepperoni. Confirms the order once it is read back correctly,
+      and stays on the line until the bot says goodbye.
+
+    goal: "Order a large pepperoni pizza, giving the size first and the type only when asked, then confirm the order."
+
+    success: "the bot took an order for a large pepperoni pizza and completed the order"
+
+    metrics:
+      - name: accuracy
+        criterion: "when the reply states the order, it is a large pepperoni pizza; a reply that does not state the order passes"
+        min_score: 1
+      - name: heard_the_caller
+        criterion: "the reply never says it did not catch, hear, or understand the caller"
+        min_score: 1
+      - name: order_recorded
+        measure: function_calls
+        calls: [choose_pizza, select_pizza_order, complete_order]
+
+    max_turns: 8
+
+    max_duration_s: 180

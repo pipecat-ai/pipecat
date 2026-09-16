@@ -1,0 +1,37 @@
+name: order_sushi_change_mind
+
+# Text modality, against flows/yaml/food_ordering: a caller who orders sushi,
+# hears it read back, changes their mind, and orders a pizza instead. Checks
+# the revise_order loop back to the start and that the second order, not the
+# first, is what gets confirmed.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  - name: order_sushi_change_mind
+    persona: |
+      Casey, ordering dinner over the phone. First asks for two California rolls.
+      When the order is read back, says they changed their mind and want pizza
+      instead: a small cheese pizza. Confirms the pizza order once it is read
+      back correctly, and stays on the line until the bot says goodbye.
+
+    goal: "Order two California rolls, then change the order to a small cheese pizza and confirm it."
+
+    success: "the bot ended with a confirmed order for a small cheese pizza, not the sushi"
+
+    metrics:
+      - name: accuracy
+        criterion: "when the reply states an order, it matches what the caller most recently asked for; a reply that does not state the order passes"
+        min_score: 1
+      - name: heard_the_caller
+        criterion: "the reply never says it did not catch, hear, or understand the caller"
+        min_score: 1
+      - name: order_recorded
+        measure: function_calls
+        calls: [choose_sushi, select_sushi_order, revise_order, choose_pizza, select_pizza_order, complete_order]
+
+    max_turns: 12
+
+    max_duration_s: 240

@@ -1,0 +1,41 @@
+name: order_pizza_price_question
+
+# Text modality, against flows/yaml/food_ordering: a caller who asks what a
+# large pizza costs before giving the order. The bot has to take the question
+# in stride: answer it, or ask for the order details, but never tell the caller
+# it did not hear them.
+
+simulator: !include ../simulator.yaml
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  - name: order_pizza_price_question
+    persona: |
+      Jordan, ordering dinner over the phone. Wants pizza. Before choosing, asks
+      how much a large pizza costs. Whatever the answer, then orders a large
+      cheese pizza and confirms the order once it is read back correctly. Does
+      not repeat the price question more than once. Stays on the line until the
+      bot says goodbye.
+
+    goal: "Ask what a large pizza costs, then order a large cheese pizza and confirm the order."
+
+    success: "the bot took an order for a large cheese pizza and completed the order"
+
+    metrics:
+      - name: accuracy
+        criterion: "when the reply reads an order back, it is a large cheese pizza; a reply that asks a question or gives prices passes"
+        min_score: 1
+      - name: heard_the_caller
+        criterion: "the reply never says it did not catch, hear, or understand the caller"
+        min_score: 1
+      - name: handles_price_question
+        criterion: "when the caller has just asked a price, the reply either gives a price or asks for the order details; a reply to anything else passes"
+        min_score: 1
+      - name: order_recorded
+        measure: function_calls
+        calls: [get_prices, choose_pizza, select_pizza_order, complete_order]
+
+    max_turns: 8
+
+    max_duration_s: 180

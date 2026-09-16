@@ -382,6 +382,8 @@ suite:
     scenarios: [scripted/hello_world]
   - bot: flows/python/food_ordering.py
     scenarios: [scripted/food_ordering_pizza]
+  # No text LLM: TypeSafe's Jev picks the tools and the bot speaks written
+  # lines as LLM text, so the same text-mode script applies.
   - bot: flows/yaml/food_ordering/bot.py
     scenarios: [scripted/food_ordering_pizza]
   - bot: flows/python/food_ordering_advanced_functionschema.py
@@ -436,9 +438,20 @@ suite:
     scenarios: [simulated/complete_patient_intake]
   - bot: flows/python/food_ordering.py
     scenarios: [simulated/order_pizza]
+  # The TypeSafe-driven food ordering bot: the shared order_pizza simulation
+  # plus three callers that test its judgments (a piecemeal order, a price
+  # question, and a change of mind).
   - bot: flows/yaml/food_ordering/bot.py
-    scenarios: [simulated/order_pizza]
+    scenarios:
+      - simulated/order_pizza
+      - simulated/order_pizza_piecemeal
+      - simulated/order_pizza_price_question
+      - simulated/order_sushi_change_mind
   - bot: flows/python/food_ordering_advanced_functionschema.py
     scenarios: [simulated/order_sushi]
   - bot: flows/yaml/insurance_quote/bot.py
     scenarios: [simulated/get_insurance_quote]
+  # No LLM at all: TypeSafe picks between canned lines. Audio only, since the
+  # bot's whole job is which line it speaks.
+  - bot: features/features-typesafe-canned-routing.py
+    scenarios: [simulated/age_verification]

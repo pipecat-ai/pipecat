@@ -1,0 +1,22 @@
+# Pipecat Cloud deployment for the TypeSafe-driven food ordering bot.
+#
+# From this directory:
+#   pipecat cloud secrets set food-ordering-typesafe-secrets --file .env
+#   pipecat cloud deploy
+#
+# The secret set needs CARTESIA_API_KEY, DEEPGRAM_API_KEY and TYPESAFE_API_KEY.
+agent_name = "food-ordering-typesafe"
+secret_set = "food-ordering-typesafe-secrets"
+agent_profile = "agent-1x"
+
+[scaling]
+min_agents = 1
+
+# The image installs pipecat from this checkout, so the build context is the
+# repository root, not this directory.
+[build]
+context_dir = "../../../.."
+dockerfile = "examples/flows/yaml/food_ordering/Dockerfile"
+
+[build.exclude]
+patterns = ["examples/assets/", "test-runs/"]

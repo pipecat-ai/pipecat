@@ -4,26 +4,31 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The food ordering flow, configured from YAML at runtime.
+"""The food ordering flow, configured from YAML and driven by TypeSafe.
 
 The same conversation as python/food_ordering.py, split along the seam Pipecat
 Flows offers for runtime configuration:
 
-- flow.yaml holds the graph: the nodes, what each one says, which
-  tools each offers, and where each tool leads.
-- handlers.py holds the tools: direct functions whose schema comes
-  from their signature and docstring.
+- flow.yaml holds the graph: the nodes, which tools each offers, and where
+  each tool leads.
+- handlers.py holds the tools: direct functions whose schema comes from
+  their signature and docstring.
+- This file holds every line the bot can say.
 
-This bot reads the YAML from disk when it starts a session. A production bot
-would fetch it from a database or CMS instead, so one deployment can run
-whichever flow the session calls for. Prompts refer to session facts and
-to what handlers have stored as {{ key }}, filled in from the manager's state.
+There is no text-generating LLM. TypeSafeFlowsLLMService stands in its place:
+when the flow enters a node it speaks that node's written line, and at the end
+of each caller turn it asks TypeSafe's Jev which of the node's tools the turn
+calls for and what each tool argument is, then runs that tool so the flow
+moves on exactly as it would with an LLM. A caller who gives the order one
+detail at a time is asked for the missing detail; a turn that matches no tool
+gets the node's reprompt line. Lines refer to session facts and to what
+handlers have stored as {{ key }}, filled in from the manager's state.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)
 - DEEPGRAM_API_KEY (for STT)
-- DAILY_API_KEY (for transport)
-- OPENAI_API_KEY (for the LLM)
+- TYPESAFE_API_KEY (for the judgments)
+- DAILY_API_KEY (for the Daily transport)
 """
 
 import os
@@ -36,6 +41,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.flows import Flow, FlowConfig, FlowManager
+from pipecat.flows.typesafe_llm import NodeLines, ToolLines, TypeSafeFlowsLLMService
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -47,7 +53,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.typesafe import TypeSafeJudge
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -56,6 +62,86 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 FLOW_CONFIG_PATH = Path(__file__).with_name("flow.yaml")
+
+# What the bot says in each node of flow.yaml: on entry, and again when the
+# caller's turn matched none of the node's tools. A reprompt never says the
+# bot did not hear the caller; it repeats the question.
+NODE_LINES = {
+    "initial": NodeLines(
+        say="Hi, welcome to {{ restaurant_name }}! Would you like pizza or sushi today?",
+        reprompt="We have pizza and sushi tonight. Which would you like?",
+    ),
+    "choose_pizza": NodeLines(
+        say=(
+            "Great, pizza it is! What size would you like, and what kind? "
+            "We have cheese, pepperoni, supreme, and vegetarian."
+        ),
+        reprompt="What size and what kind of pizza would you like?",
+    ),
+    "choose_sushi": NodeLines(
+        say=(
+            "Sushi, nice choice! How many rolls would you like, and which kind? "
+            "We have California, spicy tuna, rainbow, and dragon."
+        ),
+        reprompt="How many rolls would you like, and which kind?",
+    ),
+    "confirm": NodeLines(
+        say="So that's {{ order.summary }}, {{ order.total }} total. Does that sound right?",
+        reprompt=(
+            "Just to check: {{ order.summary }} for {{ order.total }}. "
+            "Say yes to place the order, or tell me what to change."
+        ),
+    ),
+    "restart": NodeLines(
+        say="No problem, let's start over. Would you like pizza or sushi?",
+        reprompt="We have pizza and sushi tonight. Which would you like?",
+    ),
+    "end": NodeLines(say="Thanks for your order! It'll be on its way soon. Goodbye!"),
+}
+
+# How each tool is judged, the values its arguments can take, and what the bot
+# says around it. Tools not listed here (choose_pizza, choose_sushi,
+# complete_order, revise_order) are judged by the descriptions in flow.yaml.
+TOOL_LINES = {
+    "select_pizza_order": ToolLines(
+        description="The caller gives pizza order details: a size, a kind of pizza, or both",
+        options={
+            "size": ["small", "medium", "large"],
+            "pizza_type": ["cheese", "pepperoni", "supreme", "vegetarian"],
+        },
+        ask={
+            "size": "Sure. What size would you like: small, medium, or large?",
+            "pizza_type": (
+                "Got it. What kind of pizza would you like: "
+                "cheese, pepperoni, supreme, or vegetarian?"
+            ),
+        },
+    ),
+    "select_sushi_order": ToolLines(
+        description="The caller gives sushi order details: how many rolls, which roll, or both",
+        options={
+            "count": list(range(1, 11)),
+            "roll_type": ["california", "spicy tuna", "rainbow", "dragon"],
+        },
+        ask={
+            "count": "Sure. How many rolls would you like?",
+            "roll_type": (
+                "Got it. Which roll would you like: California, spicy tuna, rainbow, or dragon?"
+            ),
+        },
+    ),
+    "get_delivery_estimate": ToolLines(
+        description="The caller asks how long delivery takes or when the food will arrive",
+        result="Delivery takes about {{ result.minutes }} minutes.",
+    ),
+    "get_prices": ToolLines(
+        description="The caller asks what something costs, or about prices",
+        result=(
+            "Pizzas are ten dollars for a small, fifteen for a medium, and twenty for a "
+            "large. Sushi rolls are eight dollars each."
+        ),
+    ),
+}
 
 transport_params = {
     "daily": lambda: DailyParams(
@@ -87,18 +173,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="820a3788-2b37-4d21-847a-b65d8a68c99a",  # Salesman
         ),
     )
-    llm = OpenAIResponsesLLMService(
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1"),
+    # Reads TYPESAFE_API_KEY. The timeout is longer than the judge's default
+    # because nothing here falls back to an LLM: a judgment that arrives late
+    # still moves the order along, while a timeout only gets the caller a
+    # repeat of the question.
+    judge = TypeSafeJudge(timeout=3.0)
+    llm = TypeSafeFlowsLLMService(
+        judge=judge,
+        nodes=NODE_LINES,
+        tools=TOOL_LINES,
     )
 
     context = LLMContext()
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
-            filter_incomplete_user_turns=True,
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -143,9 +232,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         transport=transport,
         global_functions=flow.global_functions,
     )
+    # The service reads the current node and the state its lines refer to.
+    llm.flow_manager = flow_manager
 
-    # Session facts the prompts refer to as {{ key }}. The manager fills them
-    # in from its state when it enters each node.
+    # Session facts the lines refer to as {{ key }}. The service fills them in
+    # from the manager's state when it speaks.
     flow_manager.state.update(
         {"restaurant_name": os.getenv("RESTAURANT_NAME", "Pipecat Pizza and Sushi")}
     )

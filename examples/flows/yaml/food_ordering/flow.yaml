@@ -1,6 +1,12 @@
 # The food-ordering flow as data. Loaded by bot.py and bound to
 # the tools in handlers.py. Every function named here is a direct
 # function in that module; its description and parameters come from the code.
+#
+# bot.py drives this graph with TypeSafeFlowsLLMService, which speaks written
+# lines instead of prompting an LLM. The prompts below still describe each
+# node's job (and each transition-only function's description is what TypeSafe
+# judges a caller's turn against), and they let the same graph run on a text
+# LLM by swapping the service in bot.py.
 
 initial_node: initial
 
@@ -92,7 +98,23 @@ nodes:
       - name: revise_order
         transition_only: true
         description: The caller wants to make changes to their order.
-        transition_to: initial
+        transition_to: restart
+
+  restart:
+    task_messages:
+      - role: developer
+        content: >
+          The caller is changing their order. Ask whether they'd like pizza or
+          sushi, then wait for them to use a function to choose.
+    functions:
+      - name: choose_pizza
+        transition_only: true
+        description: The caller wants to order pizza.
+        transition_to: choose_pizza
+      - name: choose_sushi
+        transition_only: true
+        description: The caller wants to order sushi.
+        transition_to: choose_sushi
 
   end:
     task_messages:
@@ -103,3 +125,4 @@ nodes:
 
 global_functions:
   - name: get_delivery_estimate
+  - name: get_prices
