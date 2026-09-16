@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from loguru import logger
 
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSService
+from pipecat.services.deepgram.flux.tts_base import DeepgramFluxTTSBase
+from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSService
 from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsTTSService
 from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSService
@@ -211,6 +213,44 @@ class TestInworldPronunciation(unittest.TestCase):
             InworldHttpTTSService.format_pronunciation("Crete", "kriːt", IPA),
             InworldTTSService.format_pronunciation("Crete", "kriːt", IPA),
         )
+
+
+class TestDeepgramPronunciation(unittest.TestCase):
+    def test_ipa(self):
+        self.assertEqual(
+            DeepgramTTSService.format_pronunciation("dupilumab", "duːˈpɪljuːmæb", IPA),
+            '\\{"word": "dupilumab", "pronounce": "duːˈpɪljuːmæb"\\}',
+        )
+
+    def test_notation_variants_format_the_same(self):
+        a = DeepgramTTSService.format_pronunciation("Achoo", "/əˈʧu/", IPA)
+        b = DeepgramTTSService.format_pronunciation("Achoo", "ə'tʃu", IPA)
+        self.assertEqual(a, b)
+
+    def test_quotes_in_word_are_escaped(self):
+        self.assertEqual(
+            DeepgramTTSService.format_pronunciation('say "hi"', "haɪ", IPA),
+            '\\{"word": "say \\"hi\\"", "pronounce": "haɪ"\\}',
+        )
+
+    def test_unusable(self):
+        fmt = DeepgramTTSService.format_pronunciation
+        self.assertIsNone(fmt("Cat", "K AE1 T", ARPABET))
+        self.assertIsNone(fmt("Crete", "", IPA))
+        self.assertIsNone(fmt("ab", "ˈkʌɹənt" * 3, IPA))  # far longer than the word
+        self.assertIsNone(fmt("dupilumab", "duːˈpɪljuːmæb" * 12, IPA))  # over 128 characters
+
+    def test_short_word_gets_a_length_floor(self):
+        self.assertIsNotNone(DeepgramTTSService.format_pronunciation("a", "əˈbaʊtðæt", IPA))
+
+    def test_http_service_matches(self):
+        self.assertEqual(
+            DeepgramHttpTTSService.format_pronunciation("Crete", "kriːt", IPA),
+            DeepgramTTSService.format_pronunciation("Crete", "kriːt", IPA),
+        )
+
+    def test_flux_unsupported(self):
+        self.assertIsNone(DeepgramFluxTTSBase.format_pronunciation("Crete", "kriːt", IPA))
 
 
 class TestPronunciationTransforms(unittest.IsolatedAsyncioTestCase):
