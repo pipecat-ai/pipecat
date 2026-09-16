@@ -562,6 +562,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
+    async def test_text_excludes_fails_the_reply_as_soon_as_it_appears(self):
+        import time
+
+        s = _matcher(bot_audio=False)
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "Berlin.●"})
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_excludes="●")
+        failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+        self.assertEqual(failure.kind, "text_present")
+        self.assertIn("'Berlin.●'", failure.reason)
+
     async def test_eval_yes_passes(self):
         s = _matcher()
         s._judge = _FakeJudge(["yes"])
@@ -757,6 +768,16 @@ class TestTextContainsResolution(unittest.TestCase):
         failure = self._check({"type": "user_transcription", "transcript": "bye"}, exp)
         self.assertIsNotNone(failure)
         self.assertIn("does not contain", failure.reason)
+
+    def test_text_excludes(self):
+        exp = EvalExpectation(event="llm_response", text_excludes="●")
+        self.assertIsNone(self._check({"type": "llm_response", "text": "Berlin."}, exp))
+        failure = self._check({"type": "llm_response", "text": "Berlin.● The capital."}, exp)
+        self.assertEqual(failure.kind, "text_present")
+        self.assertIn("contains '●'", failure.reason)
+        # Spacing is ignored, as for text_contains.
+        exp = EvalExpectation(event="llm_response", text_excludes="not sure")
+        self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
 
 
 class TestMarkerCheck(unittest.TestCase):

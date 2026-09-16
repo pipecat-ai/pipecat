@@ -72,6 +72,16 @@ not)::
           markers: 1
           text_after: false
 
+A marker the LLM lets slip into its reply reaches the user, so the reply's
+own text is worth checking too: ``text_excludes`` fails when the text holds
+the given string, the mirror of ``text_contains``::
+
+    - user: "What is the capital of Germany?"
+      expect:
+        - event: llm_response
+          text_contains: Berlin
+          text_excludes: "●"
+
 The bot's reply can be asserted three ways:
 
 ``response``
@@ -97,6 +107,9 @@ Supported expectation fields (per event):
 
 ``text_contains: <str>``
     substring check on the event's text content, ignoring whitespace differences
+
+``text_excludes: <str>``
+    the reverse: the event's text content must not hold this substring
 
 ``marker: <str>``
     for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
@@ -318,6 +331,9 @@ class EvalExpectation:
             asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
+        text_excludes: Optional substring the event's text content must not
+            hold. Checked on the text the expectation matched; with
+            ``text_contains``, on the reply accumulated up to the match.
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
@@ -338,13 +354,14 @@ class EvalExpectation:
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``eval``, ``calls`` and the marker checks are not
-            allowed alongside it.
+            ``text_contains``, ``text_excludes``, ``eval``, ``calls`` and the
+            marker checks are not allowed alongside it.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
+    text_excludes: str | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     marker: str | None = None
@@ -842,6 +859,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             key
             for key in (
                 "text_contains",
+                "text_excludes",
                 "eval",
                 "calls",
                 "name",
@@ -884,6 +902,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
+        text_excludes=e.get("text_excludes"),
         calls=calls,
         eval=criterion,
         marker=marker,

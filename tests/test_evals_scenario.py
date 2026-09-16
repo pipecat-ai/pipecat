@@ -310,6 +310,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
                       - event: llm_response
                         within_ms: 500
                         text_contains: "bar"
+                        text_excludes: "baz"
                         eval: "is friendly"
                 """
             )
@@ -317,6 +318,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         exp = s.turns[0].expect[0]
         self.assertEqual(exp.within_ms, 500)
         self.assertEqual(exp.text_contains, "bar")
+        self.assertEqual(exp.text_excludes, "baz")
         self.assertEqual(exp.eval, "is friendly")
         self.assertIsNone(exp.calls)
         self.assertFalse(exp.absent)
@@ -342,7 +344,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.within_ms, 5000)
 
     def test_absent_rejects_content_checks(self):
-        for extra in ('eval: "repeats itself"', 'text_contains: "again"'):
+        for extra in ('eval: "repeats itself"', 'text_contains: "again"', 'text_excludes: "x"'):
             with self.assertRaises(ValueError):
                 _script(
                     _write(

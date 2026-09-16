@@ -164,6 +164,9 @@ class ExpectationMatcher:
             seen_any = True
             delta = self._event_text(event)
             aggregate += delta
+            excluded = self._text_excluded(aggregate, expectation, turn_idx, exp_idx)
+            if excluded is not None:
+                return excluded
             # Feed each segment to the judge as its own assistant message, so it
             # judges the bot's reply in the conversation's context (the cumulative
             # `aggregate` is kept only for text_contains and the match summary).
@@ -380,6 +383,9 @@ class ExpectationMatcher:
                     f"text {content!r} does not contain {expectation.text_contains!r}",
                     "text_mismatch",
                 )
+        excluded = self._text_excluded(self._event_text(event), expectation, turn_idx, exp_idx)
+        if excluded is not None:
+            return excluded
         if expectation.marker is not None:
             kind = event.get("kind")
             wanted = (
@@ -498,6 +504,22 @@ class ExpectationMatcher:
     def _event_text(self, event: dict) -> str:
         """The text an event carries: reply events use ``text``, ``user_transcription`` ``transcript``."""
         return event.get("text") or event.get("transcript") or ""
+
+    def _text_excluded(
+        self, content: str, expectation: EvalExpectation, turn_idx: int, exp_idx: int
+    ) -> EvalAssertionFailure | None:
+        """The failure for ``text_excludes`` when ``content`` holds it, else ``None``."""
+        if expectation.text_excludes is None or not self._text_contains(
+            content, expectation.text_excludes
+        ):
+            return None
+        return self._failure(
+            expectation,
+            turn_idx,
+            exp_idx,
+            f"text {content.strip()!r} contains {expectation.text_excludes!r}",
+            "text_present",
+        )
 
     def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring spacing."""
