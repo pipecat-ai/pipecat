@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
@@ -317,6 +318,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         """
         super().__init__(*args, **kwargs)
         self._turn_text_buffer = ""
+        # The current response as the LLM produced it, and the marker read
+        # from it, reported together when the response ends.
+        self._response_raw = ""
+        self._response_marker: tuple[str, str] | None = None
         # Completion verdict for the current LLM response, set when a marker is
         # detected in the text stream. ``None`` means no marker yet, so keep
         # buffering text until one appears. ``INCOMPLETE`` also doubles as a
@@ -535,10 +540,43 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # between the timeout firing and a ● arriving: whichever inference
             # starts first cancels the timeout before its text is parsed.
             await self._cancel_incomplete_timeout()
+            self._response_raw = ""
+            self._response_marker = None
         elif isinstance(frame, LLMFullResponseEndFrame):
+            await self._report_response()
             await self._turn_reset()
 
         await super().push_frame(frame, direction)
+
+    async def _push_marker(
+        self, marker: str, kind: str, append_to_context_immediately: bool = True
+    ):
+        """Push the marker read from the response, and remember it for the response's report."""
+        self._response_marker = (marker, kind)
+        await self.push_frame(
+            LLMMarkerFrame(marker, append_to_context_immediately=append_to_context_immediately)
+        )
+
+    async def _report_response(self):
+        """Push the response's raw text and marker, once there was a response to read."""
+        if not self._response_raw and self._response_marker is None:
+            return
+        config = self._user_turn_completion_config
+        marker, kind = self._response_marker or (None, None)
+        await self.push_frame(
+            LLMMarkerResponseFrame(
+                raw=self._response_raw,
+                marker=marker,
+                kind=kind,
+                markers=[
+                    config.complete_marker,
+                    config.incomplete_short_marker,
+                    config.incomplete_long_marker,
+                ],
+            )
+        )
+        self._response_raw = ""
+        self._response_marker = None
 
     async def _push_turn_text(self, text: str):
         """Push LLM text with turn completion detection.
@@ -554,6 +592,8 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         Args:
             text: The text content from the LLM to push.
         """
+        self._response_raw += text
+
         # One spoken completion per user turn: once a ● has been voiced this
         # user turn, drop text from any later inference (the acoustic detector
         # can trigger several within one turn). ``_turn_marker is None`` scopes
@@ -606,7 +646,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # message via LLMMarkerFrame: the bot produces no spoken
             # output for incomplete turns, so the marker is the entire
             # context entry.
-            await self.push_frame(LLMMarkerFrame(marker, kind=incomplete_type.value))
+            await self._push_marker(marker, incomplete_type.value)
 
             self._turn_text_buffer = ""
             await self._start_incomplete_timeout(incomplete_type)
@@ -624,9 +664,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
                     f"treating as stale: suppressing text"
                 )
                 self._turn_marker = TurnMarker.INCOMPLETE
-                await self.push_frame(
-                    LLMMarkerFrame(config.incomplete_short_marker, kind=IncompleteType.SHORT.value)
-                )
+                await self._push_marker(config.incomplete_short_marker, IncompleteType.SHORT.value)
                 self._turn_text_buffer = ""
                 await self._start_incomplete_timeout(IncompleteType.SHORT)
                 return
@@ -653,12 +691,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             # Push the marker as a sideband signal that the assistant
             # aggregator will prepend to the upcoming aggregated text,
             # so the context message ends up as "● <response>".
-            await self.push_frame(
-                LLMMarkerFrame(
-                    config.complete_marker,
-                    append_to_context_immediately=False,
-                    kind=TurnMarker.COMPLETE.value,
-                )
+            await self._push_marker(
+                config.complete_marker,
+                TurnMarker.COMPLETE.value,
+                append_to_context_immediately=False,
             )
 
             # Split buffer at the marker to handle cases where marker and text

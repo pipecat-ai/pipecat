@@ -309,29 +309,36 @@ suite:
 
   #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
-  # describes it. `runner_body:` is resolved relative to this manifest; relative
+  # describes it. The body file resolves relative to this manifest; relative
   # paths inside it (the image) resolve next to the body file.
   #
   - bot: vision/vision-openai.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-openai-responses.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-openai-responses-http.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-anthropic.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-aws.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-gemini-flash.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-moondream.py
-    runner_body: scenarios/vision-cat.json
+    runner_body:
+      path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
 
   #

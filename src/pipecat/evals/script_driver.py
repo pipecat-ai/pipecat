@@ -17,6 +17,7 @@ from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalExpectationResult,
     EvalProgress,
     EvalScriptResult,
     EvalScriptTurnProgress,
@@ -265,6 +266,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         one budget per expectation.
         """
         failures: list[EvalAssertionFailure] = []
+        resolved = self.turns[turn_idx].expectations
         anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or self._default_timeout_ms
@@ -283,6 +285,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                         kind="timeout",
                     )
                 )
+                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
                 self._trace.log(f"FAIL: {expectation.event}: {reason}")
                 await self._progress(
                     EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
@@ -291,6 +294,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
             if failure:
                 failures.append(failure)
+                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
                 self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
                     EvalScriptTurnProgress(
@@ -298,13 +302,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     )
                 )
             else:
+                matched = self._matcher.last_match_text
+                resolved.append(
+                    EvalExpectationResult(exp_idx, expectation.event, passed=True, matched=matched)
+                )
                 await self._progress(
-                    EvalScriptTurnProgress(
-                        turn_idx,
-                        exp_idx,
-                        expectation.event,
-                        "matched",
-                        self._matcher.last_match_text,
-                    )
+                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "matched", matched)
                 )
         return failures

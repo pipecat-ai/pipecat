@@ -114,6 +114,8 @@ Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
 Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
 timeout in seconds, for expectations without their own `within_ms`), and
 `--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
+A bot whose provider rate-limits concurrent connections can set its own
+`concurrency:` on its manifest entry, under the suite's.
 Everything in the manifest header except the `suite:` list can also be overridden
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
@@ -151,13 +153,16 @@ in `pipecat.evals.results`) — rather than listed one line per failing run:
 A repeated sweep always exits 0: it reports a rate, and what rate is acceptable is
 your policy, not the harness's.
 
-Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
-its `kind` (`script` or `simulation`), its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
-status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
-and paths to its artifacts — appended as each run finishes, so an interrupted sweep
-keeps everything already done. It's the machine-readable counterpart to the printed
-tally; group and count it however your question needs. Runs that didn't pass also carry `events_seen`, the
-record of what the bot actually did, which is usually where a root cause is found.
+Every run (repeated or not) also writes `results.jsonl`, one JSON line per run
+with its `kind` (`script` or `simulation`), its outcome, its failures (each with
+a `kind`), a `turns` array giving each turn's status (`passed`, `failed`, or
+`not_run` for the turns a stopped run never reached) and what each of its
+expectations matched (the marker an `llm_marker` saw, a function call's
+signature, a reply's text), and paths to its artifacts — appended as each run
+finishes, so an interrupted sweep keeps everything already done. It's the
+machine-readable counterpart to the printed tally; group and count it however
+your question needs. Runs that didn't pass also carry `events_seen`, the record
+of what the bot actually did, which is usually where a root cause is found.
 
 ### Concurrency and GPU
 
@@ -233,20 +238,30 @@ judge: !include ../judge_audio.yaml
 
 Some bots need session data they'd normally get from a `/start` request body,
 such as a vision bot's image. The eval transport has no such endpoint, so a
-bot entry can point to a JSON `runner_body:` file (resolved relative to the
-manifest) that is passed to the bot as `--runner-body`:
+bot entry gives a `runner_body:` that is passed to the bot as `--runner-body`,
+either a YAML or JSON file (resolved relative to the manifest) or the body
+written inline:
 
 ```yaml
 - bot: vision/vision-openai.py
-  runner_body: scenarios/vision-cat.json   # {"image_path": "../assets/cat.jpg", "question": "..."}
+  runner_body:
+    path: scenarios/vision-cat.yaml   # image_path: ../assets/cat.jpg, question: ...
   scenarios: [vision_describe]
+- bot: turns/filter-incomplete-turns.py
+  runner_body:
+    data: {model: gpt-4o-mini}
+  scenarios: [turn_completion]
 ```
 
-The bot is spawned with the body file's directory as its working directory, so
-a relative `image_path` in the body resolves next to the file and the two travel
-together. The `vision_describe` scenario is a bot-first turn (no user input): the
-bot describes the image (a cat) on connect and the judge checks that it described
-a cat.
+A bot given a file is spawned with the file's directory as its working
+directory, so a relative `image_path` in the body resolves next to the file and
+the two travel together; a body that holds such paths belongs in a file for that
+reason. Several entries can share one bot and differ only in their body, as when
+sweeping models; give each a `name:` (`name: groq/llama-3.3-70b`) so the
+display, `-p`, `results.jsonl` and the log file names tell them apart. The
+`vision_describe` scenario is a bot-first turn (no user input): the bot
+describes the image (a cat) on connect and the judge checks that it described a
+cat.
 
 For function-calling-video bots, a turn can instead register an `image:` that the
 eval transport serves when the bot requests a user image mid-conversation (see
@@ -299,15 +314,15 @@ intake, place an order, quote a policy.
 
 A simulation runs once unless its file says otherwise (`runs`) or `-r` repeats
 it, and every run must pass; a persona does not say the same thing twice, so
-repeat a doubtful result rather than read one run as a verdict. A run passes when the judge
-says the bot did its job (`success`), no judged metric with a `min_score`
-scored below it, and no measured one failed its range or its call list; a run
-that fails says which of those gave way. The judge sees the bot's tool calls
-(name and arguments), not their results. Whether the bot made a call at all is
-a `function_calls` measure, no judge needed; if a reply must match backend
-data, write the expected value into `success` or the criterion ("the reply
-says the appointment is on Tuesday September fifteenth") and keep the mocks
-deterministic so it stays true across runs.
+repeat a doubtful result rather than read one run as a verdict. A run passes
+when the judge says the bot did its job (`success`), no judged metric with a
+`min_score` scored below it, and no measured one failed its range or its call
+list; a run that fails says which of those gave way. The judge sees the bot's
+tool calls (name and arguments), not their results. Whether the bot made a call
+at all is a `function_calls` measure, no judge needed; if a reply must match
+backend data, write the expected value into `success` or the criterion ("the
+reply says the appointment is on Tuesday September fifteenth") and keep the
+mocks deterministic so it stays true across runs.
 
 A judged metric's `criterion` says what every reply of the bot should be, and
 the judge decides it for each bot turn in one call over the whole transcript,
@@ -347,21 +362,24 @@ neither side does anything for `max_silence_s` (30 s by default) ends as
 | `get_insurance_quote`     | `flows/insurance_quote.py`                       | Gets a quote, then a second one with more coverage.              |
 
 The persona LLM is the `simulator:` block, by default the same local Ollama
-model as the judge, so a simulation needs no API key; `simulator.yaml` is
-where to point every simulation at another model. In audio mode the persona's turns are synthesized and
-the bot's speech transcribed by the same services as a scripted audio scenario,
-Kokoro and Moonshine by default, so `capital_curious/audio` exercises the bot's
-STT, TTS, and turn taking against an autonomous caller. The file format is documented in the
+model as the judge, so a simulation needs no API key; `simulator.yaml` is where
+to point every simulation at another model. In audio mode the persona's turns
+are synthesized and the bot's speech transcribed by the same services as a
+scripted audio scenario, Kokoro and Moonshine by default, so
+`capital_curious/audio` exercises the bot's STT, TTS, and turn taking against an
+autonomous caller. The file format is documented in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
-docstring; run one by hand with `pipecat eval run scenarios/simulated/<name>.yaml
---bot-url ws://localhost:7860 -v`, the same command as a scripted scenario,
-which prints the conversation as it happens.
+docstring; run one by hand with `pipecat eval run
+scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860 -v`, the same
+command as a scripted scenario, which prints the conversation as it happens.
 
 ## Adding coverage
 
-- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
-- New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
-  manifest as `scripted/<name>`. Several short cases of one behavior go in one
-  file's `scenarios:` list.
-- New goal to reach: add a `scenarios/simulated/<name>.yaml` whose scenario has a `persona:`
-  and reference it from the manifest as `simulated/<name>` under the bot that serves it.
+- New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should
+  run).
+- New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it
+  from the manifest as `scripted/<name>`. Several short cases of one behavior go
+  in one file's `scenarios:` list.
+- New goal to reach: add a `scenarios/simulated/<name>.yaml` whose scenario has
+  a `persona:` and reference it from the manifest as `simulated/<name>` under
+  the bot that serves it.

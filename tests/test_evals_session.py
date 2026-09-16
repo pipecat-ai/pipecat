@@ -58,7 +58,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
@@ -136,12 +136,22 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_marker_is_its_own_event(self):
         s = _stream(bot_audio=False)
         s.frame_to_event(LLMFullResponseStartFrame())
+        s.frame_to_event(LLMTextFrame(text="Hello"))
         self.assertEqual(
-            s.frame_to_event(LLMMarkerFrame(marker="●", kind="complete")),
-            {"type": "llm_marker", "text": "●", "kind": "complete"},
+            s.frame_to_event(
+                LLMMarkerResponseFrame(
+                    raw="● Hello", marker="●", kind="complete", markers=["●", "◐", "○"]
+                )
+            ),
+            {
+                "type": "llm_marker",
+                "text": "●",
+                "kind": "complete",
+                "raw": "● Hello",
+                "markers": ["●", "◐", "○"],
+            },
         )
         # The marker is not part of the reply's text.
-        s.frame_to_event(LLMTextFrame(text="Hello"))
         self.assertEqual(
             self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
             {"type": "llm_response", "text": "Hello"},
@@ -150,11 +160,11 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_marker_before_the_reply_starts_is_dropped(self):
         s = _stream(bot_audio=False)
         s.input_sent()
-        self.assertIsNone(s.frame_to_event(LLMMarkerFrame(marker="◐")))
+        self.assertIsNone(s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐")))
         s.frame_to_event(LLMFullResponseStartFrame())
         self.assertEqual(
-            s.frame_to_event(LLMMarkerFrame(marker="◐", kind="short")),
-            {"type": "llm_marker", "text": "◐", "kind": "short"},
+            s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐", kind="short")),
+            {"type": "llm_marker", "text": "◐", "kind": "short", "raw": "◐", "markers": []},
         )
 
     def test_llm_lifecycle_aggregates_text(self):
@@ -552,6 +562,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
         self.assertEqual(status, "continue")
 
+    async def test_text_excludes_fails_the_reply_as_soon_as_it_appears(self):
+        import time
+
+        s = _matcher(bot_audio=False)
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "Berlin.●"})
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_excludes="●")
+        failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+        self.assertEqual(failure.kind, "text_present")
+        self.assertIn("'Berlin.●'", failure.reason)
+
     async def test_eval_yes_passes(self):
         s = _matcher()
         s._judge = _FakeJudge(["yes"])
@@ -748,6 +769,16 @@ class TestTextContainsResolution(unittest.TestCase):
         self.assertIsNotNone(failure)
         self.assertIn("does not contain", failure.reason)
 
+    def test_text_excludes(self):
+        exp = EvalExpectation(event="llm_response", text_excludes="●")
+        self.assertIsNone(self._check({"type": "llm_response", "text": "Berlin."}, exp))
+        failure = self._check({"type": "llm_response", "text": "Berlin.● The capital."}, exp)
+        self.assertEqual(failure.kind, "text_present")
+        self.assertIn("contains '●'", failure.reason)
+        # Spacing is ignored, as for text_contains.
+        exp = EvalExpectation(event="llm_response", text_excludes="not sure")
+        self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
+
 
 class TestMarkerCheck(unittest.TestCase):
     """``marker:`` matches the kind the bot stamped on the marker, not its text."""
@@ -774,6 +805,51 @@ class TestMarkerCheck(unittest.TestCase):
         failure = self._check(None, exp)
         self.assertIsNotNone(failure)
         self.assertIn("no known kind", failure.reason)
+
+
+class TestMarkerFormatChecks(unittest.TestCase):
+    """Checks on how the raw LLM text was laid out around its markers."""
+
+    def _check(self, raw: str, **fields):
+        event = {
+            "type": "llm_marker",
+            "text": "●",
+            "kind": "complete",
+            "raw": raw,
+            "markers": ["●", "◐", "○"],
+        }
+        return _matcher()._check_payload(event, EvalExpectation(event="llm_marker", **fields), 0, 0)
+
+    def test_no_format_fields_means_no_check(self):
+        self.assertIsNone(self._check("Hi ● there ○"))
+
+    def test_marker_first(self):
+        self.assertIsNone(self._check("● Hi", marker_first=True))
+        self.assertIsNone(self._check("  ● Hi", marker_first=True))
+        failure = self._check("Hi ●", marker_first=True)
+        self.assertEqual(failure.kind, "marker_format")
+        self.assertIn("does not start", failure.reason)
+        self.assertIsNone(self._check("Hi ●", marker_first=False))
+        self.assertIsNotNone(self._check("● Hi", marker_first=False))
+        # No marker at all cannot be marker-first.
+        self.assertIsNotNone(self._check("Hi", marker_first=True))
+
+    def test_marker_count(self):
+        self.assertIsNone(self._check("● Hi", markers=1))
+        self.assertIsNone(self._check("Hi", markers=0))
+        self.assertIsNone(self._check("● Hi ◐ ○", markers=3))
+        failure = self._check("● Hi ●", markers=1)
+        self.assertEqual(failure.kind, "marker_format")
+        self.assertIn("holds 2 marker(s)", failure.reason)
+
+    def test_text_after(self):
+        self.assertIsNone(self._check("● Hi", text_after=True))
+        self.assertIsNone(self._check("●", text_after=False))
+        self.assertIsNone(self._check("● ", text_after=False))
+        self.assertIsNotNone(self._check("● Hi", text_after=False))
+        self.assertIsNotNone(self._check("●", text_after=True))
+        # No marker means nothing follows one.
+        self.assertIsNotNone(self._check("Hi", text_after=True))
 
 
 class _Collector(FrameProcessor):
@@ -1569,6 +1645,71 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(passed.failures, [])
         # Every turn's failures, in order, are the flat list on the result.
         self.assertEqual([f for t in result.turns for f in t.failures], result.failures)
+
+    async def test_turn_results_record_what_each_expectation_matched(self):
+        self.server.on_text(
+            "hello",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hi there"}),
+            _rtvi("bot-llm-marker", {"text": "◐", "kind": "short", "raw": "◐ Hi there"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScriptScenario(
+            name="matched",
+            bot_audio=False,
+            turns=[
+                EvalScriptTurn(
+                    user="hello",
+                    expect=[
+                        EvalExpectation(event="llm_marker", marker="incomplete", within_ms=300),
+                        EvalExpectation(event="llm_response", within_ms=300),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, result.failures)
+        # The marker the LLM produced is kept, so `incomplete` can be told apart.
+        self.assertEqual(
+            [
+                (e.expectation_index, e.event_name, e.passed, e.matched)
+                for e in result.turns[0].expectations
+            ],
+            [(0, "llm_marker", True, "◐"), (1, "llm_response", True, "Hi there")],
+        )
+
+    async def test_turn_results_record_failed_expectations_too(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        failed, passed = result.turns
+        self.assertEqual(
+            [(e.event_name, e.passed, e.matched) for e in failed.expectations],
+            [("llm_response", False, "")],
+        )
+        self.assertEqual(
+            [(e.event_name, e.passed, e.matched) for e in passed.expectations],
+            [("llm_response", True, "Berlin")],
+        )
+
+    async def test_turn_results_stop_recording_at_a_timeout(self):
+        scenario = EvalScriptScenario(
+            name="never",
+            bot_audio=False,
+            turns=[
+                EvalScriptTurn(
+                    user="hi",
+                    expect=[
+                        EvalExpectation(event="llm_response", within_ms=200),
+                        EvalExpectation(event="tts_response", within_ms=200),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertEqual(
+            [(e.event_name, e.passed) for e in result.turns[0].expectations],
+            [("llm_response", False)],
+        )
 
     async def test_turn_results_are_timed(self):
         scenario = self._two_turn_first_fails(stop_on_failure=False)

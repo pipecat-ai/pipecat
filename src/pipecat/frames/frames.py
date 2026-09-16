@@ -377,15 +377,37 @@ class LLMMarkerFrame(DataFrame):
             context together with the following text as a single
             message (e.g. for the ● case the context message ends up
             as "● <response>").
-        kind: What the marker means, in the emitter's own vocabulary, for
-            consumers that should not depend on the marker text (which is
-            configurable). The turn-completion mixin uses ``"complete"``,
-            ``"short"`` and ``"long"``.
     """
 
     marker: str
     append_to_context_immediately: bool = True
+
+
+@dataclass
+class LLMMarkerResponseFrame(DataFrame):
+    """What a marker-reading LLM service made of one whole response.
+
+    Pushed when the response ends, after the :class:`LLMMarkerFrame` and the
+    spoken text: the marker it found, what it meant, and the raw text the LLM
+    produced before anything was held back. A diagnostic, for consumers that
+    check how well the LLM follows the marker protocol; it plays no part in the
+    conversation.
+
+    Parameters:
+        raw: The response text as the LLM produced it, markers included.
+        marker: The marker found, or ``None`` when the response carried none.
+        kind: What the marker meant, in the emitter's own vocabulary, for
+            consumers that should not depend on the marker text (which is
+            configurable). The turn-completion mixin uses ``"complete"``,
+            ``"short"`` and ``"long"``.
+        markers: Every marker the emitter recognizes, so a consumer can find
+            them in ``raw`` without knowing the emitter's configuration.
+    """
+
+    raw: str
+    marker: str | None = None
     kind: str | None = None
+    markers: list[str] = field(default_factory=list)
 
 
 @dataclass

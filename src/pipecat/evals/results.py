@@ -26,6 +26,7 @@ FAILURE_KINDS = (
     "no_judge",  # the scenario uses `eval:` but no judge could be built
     "no_content",  # the matched event carried no text to judge
     "text_mismatch",  # `text_contains` not present in the event's text
+    "text_present",  # `text_excludes` found in the event's text
     "missing_function_call",  # an expected function call never arrived
     "function_args_mismatch",  # the call arrived with unexpected arguments
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
@@ -73,6 +74,26 @@ class EvalAssertionFailure:
 
 
 @dataclass
+class EvalExpectationResult:
+    """What one expectation of a turn resolved to, pass or fail.
+
+    Parameters:
+        expectation_index: Index of the expectation within the turn.
+        event_name: The expectation's event name.
+        passed: Whether the expectation was satisfied.
+        matched: What it matched, in short, when it passed: the marker of an
+            ``llm_marker``, a function call's signature, the text of a reply or
+            a transcript. Empty for an event that carries no text, and on a
+            failure, whose reason is in the turn's failures.
+    """
+
+    expectation_index: int
+    event_name: str
+    passed: bool
+    matched: str = ""
+
+
+@dataclass
 class EvalScriptTurnResult:
     """Outcome of one turn within a scenario run.
 
@@ -86,6 +107,8 @@ class EvalScriptTurnResult:
             :attr:`~pipecat.evals.script.EvalScriptScenario.stop_on_failure`.
         failures: The turn's failed assertions, in order; empty unless ``status``
             is ``failed``.
+        expectations: What each expectation resolved to, in order, up to the
+            one that timed out; what a passed run matched is only recorded here.
         duration_ms: Wall-clock time the turn took, in milliseconds; 0 when the
             turn was not run.
     """
@@ -93,6 +116,7 @@ class EvalScriptTurnResult:
     turn_index: int
     status: str = "not_run"
     failures: list[EvalAssertionFailure] = field(default_factory=list)
+    expectations: list[EvalExpectationResult] = field(default_factory=list)
     duration_ms: int = 0
 
 

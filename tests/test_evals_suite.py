@@ -6,6 +6,9 @@
 
 """Tests for the eval suite's manifest parsing, per-run log capture, and run updates."""
 
+import asyncio
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -33,7 +36,8 @@ suite:
   - bot: voice/voice-a.py
     scenarios: [simple_math, multi_turn]
   - bot: vision/vision-b.py
-    runner_body: bodies/cat.json
+    runner_body:
+      path: bodies/cat.yaml
     scenarios: [other/special.yaml]
 """
 
@@ -68,7 +72,46 @@ class TestEvalManifestLoad(unittest.TestCase):
         # A path-like scenario bypasses scenarios_dir and resolves to the manifest.
         self.assertEqual(special.scenario, "special")
         self.assertEqual(special.scenario_path, self.base / "other" / "special.yaml")
-        self.assertEqual(special.runner_body_path, self.base / "bodies" / "cat.json")
+        self.assertEqual(special.runner_body_path, self.base / "bodies" / "cat.yaml")
+        self.assertIsNone(special.runner_body)
+
+    def test_runner_body_given_inline(self):
+        self.manifest_path.write_text(
+            "suite:\n"
+            "  - bot: a.py\n"
+            "    runner_body:\n"
+            "      data: {model: gpt-4o-mini, question: hi}\n"
+            "    scenarios: [x]\n"
+        )
+        run = EvalManifest.load(self.manifest_path).runs[0]
+        self.assertEqual(run.runner_body, {"model": "gpt-4o-mini", "question": "hi"})
+        self.assertIsNone(run.runner_body_path)
+
+    def test_bare_runner_body_path_is_deprecated(self):
+        self.manifest_path.write_text(
+            "suite:\n  - bot: a.py\n    runner_body: bodies/cat.yaml\n    scenarios: [x]\n"
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            run = EvalManifest.load(self.manifest_path).runs[0]
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIn("runner_body: {path: <file>}", str(caught[0].message))
+        self.assertEqual(run.runner_body_path, self.base / "bodies" / "cat.yaml")
+
+    def test_runner_body_must_be_a_path_or_data(self):
+        for bad in (
+            "{path: a.yaml, data: {}}",
+            "{}",
+            "{file: a.yaml}",
+            "[a.yaml]",
+            "{data: a.yaml}",
+        ):
+            self.manifest_path.write_text(
+                f"suite:\n  - bot: a.py\n    runner_body: {bad}\n    scenarios: [x]\n"
+            )
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalManifest.load(self.manifest_path)
+            self.assertIn("'runner_body:'", str(ctx.exception))
 
     def test_defaults(self):
         (self.base / "minimal.yaml").write_text("suite: []\n")
@@ -84,6 +127,26 @@ class TestEvalManifestLoad(unittest.TestCase):
         self.assertEqual(m.concurrency, 8)
         self.assertFalse(m.record)
         self.assertEqual(m.spawn, "x {bot}")
+
+    def test_an_entry_caps_its_own_concurrency(self):
+        self.manifest_path.write_text(
+            "suite:\n"
+            "  - bot: a.py\n    concurrency: 2\n    scenarios: [x, y]\n"
+            "  - bot: b.py\n    scenarios: [x]\n"
+        )
+        m = EvalManifest.load(self.manifest_path, concurrency=8)
+        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None])
+        # The command line's cap is the suite's, not the entry's.
+        self.assertEqual(m.concurrency, 8)
+
+    def test_entry_concurrency_must_be_a_positive_integer(self):
+        for bad in ("0", "-1", "two", "true", "1.5"):
+            self.manifest_path.write_text(
+                f"suite:\n  - bot: a.py\n    concurrency: {bad}\n    scenarios: [x]\n"
+            )
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalManifest.load(self.manifest_path)
+            self.assertIn("'concurrency:'", str(ctx.exception))
 
 
 class TestCapturePipelineLogs(unittest.TestCase):
@@ -204,6 +267,169 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["running", "done"] * 2)
 
 
+class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
+    """A bot's own cap limits its runs; the suite's cap limits the rest."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logs_dir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        logger.remove()
+        logger.add(sys.stderr)
+
+    async def test_capped_bot_runs_one_at_a_time_while_others_overlap(self):
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario=f"s{i}",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                concurrency=1 if bot == "capped.py" else None,
+            )
+            for bot in ("capped.py", "free.py")
+            for i in range(3)
+        ]
+        suite = EvalSuite(
+            EvalManifest(
+                runs=runs,
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=4,
+                repeat=1,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        # Stand in for the bot and the harness: each run holds its slot for a
+        # moment, and the test records how many of each bot were held at once.
+        active: dict[str, int] = {}
+        peak: dict[str, int] = {}
+
+        async def spawn(run, port, files):
+            active[run.bot] = active.get(run.bot, 0) + 1
+            peak[run.bot] = max(peak.get(run.bot, 0), active[run.bot])
+            await asyncio.sleep(0.05)
+            active[run.bot] -= 1
+            return None
+
+        async def harness(run, port, files, *, debug, params):
+            return None
+
+        async def finish(run, files, bot, worker, results_path, logs_dir, record_dir):
+            run.status = "done"
+
+        suite._missing_file = lambda run: None
+        suite._spawn_bot = spawn
+        suite._run_harness = harness
+        suite._finish = finish
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["capped.py"], 1)
+        self.assertEqual(peak["free.py"], 3)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
+
+class TestRunFiles(unittest.TestCase):
+    def test_prefix_carries_the_bot_and_the_name_when_the_entry_has_one(self):
+        from pipecat.evals.suite import _RunFiles
+
+        logs = Path("/logs")
+        run = EvalRun(bot="turns/bot.py", scenario="scripted/turn", scenario_path=Path("x"))
+        self.assertEqual(_RunFiles.for_run(run, logs, None).prefix, "turns_bot.py__scripted__turn")
+        named = EvalRun(
+            bot="turns/bot.py", name="groq/llama", scenario="scripted/turn", scenario_path=Path("x")
+        )
+        self.assertEqual(
+            _RunFiles.for_run(named, logs, None).prefix, "turns_bot.py__groq_llama__scripted__turn"
+        )
+        repeated = EvalRun(
+            bot="turns/bot.py",
+            name="groq/llama",
+            scenario="turn",
+            scenario_path=Path("x"),
+            attempts=2,
+            attempt=2,
+        )
+        self.assertEqual(
+            _RunFiles.for_run(repeated, logs, None).prefix, "turns_bot.py__groq_llama__turn__002"
+        )
+
+
+class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
+    """An inline body reaches the bot as a file; a body file sets the bot's directory."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        (self.base / "bodies").mkdir()
+        # The "bot" records its argv and working directory, then exits.
+        self.bot = self.base / "bot.py"
+        self.bot.write_text(
+            "import json, os, sys\nprint(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}))\n"
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def _spawn(self, run: EvalRun) -> dict:
+        from pipecat.evals.suite import _RunFiles
+
+        suite = EvalSuite(
+            EvalManifest(
+                runs=[run],
+                spawn="{python} {bot} --port {port}",
+                python=sys.executable,
+                concurrency=1,
+                repeat=1,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        files = _RunFiles.for_run(run, self.base / "logs", None)
+        files.log.parent.mkdir(parents=True, exist_ok=True)
+        proc = await suite._spawn_bot(run, 7900, files)
+        await proc.wait()
+        return json.loads(files.log.read_text())
+
+    async def test_inline_body_is_written_for_the_bot(self):
+        run = EvalRun(
+            bot="bot.py",
+            scenario="x",
+            scenario_path=self.base / "x.yaml",
+            bot_path=self.bot,
+            runner_body={"model": "gpt-4o-mini"},
+        )
+        seen = await self._spawn(run)
+        self.assertEqual(seen["argv"][:2], ["--port", "7900"])
+        self.assertEqual(seen["argv"][2], "--runner-body")
+        body_path = Path(seen["argv"][3])
+        self.assertEqual(body_path.parent, self.base / "logs")
+        self.assertEqual(json.loads(body_path.read_text()), {"model": "gpt-4o-mini"})
+        # No body file to anchor it, so the bot runs where the suite does.
+        self.assertEqual(seen["cwd"], os.getcwd())
+
+    async def test_body_file_is_the_bots_directory(self):
+        body = self.base / "bodies" / "cat.yaml"
+        body.write_text("image_path: cat.jpg\n")
+        run = EvalRun(
+            bot="bot.py",
+            scenario="x",
+            scenario_path=self.base / "x.yaml",
+            bot_path=self.bot,
+            runner_body_path=body,
+        )
+        seen = await self._spawn(run)
+        self.assertEqual(seen["argv"][2:], ["--runner-body", str(body)])
+        self.assertEqual(Path(seen["cwd"]).resolve(), body.parent)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -212,15 +438,22 @@ if __name__ == "__main__":
 # Simulations in a manifest's scenarios: list, and their results.jsonl records.
 # ---------------------------------------------------------------------------
 
-import json  # noqa: E402
+import dataclasses  # noqa: E402
 
 from pipecat.evals.results import (  # noqa: E402
+    EvalExpectationResult,
+    EvalScriptResult,
+    EvalScriptTurnResult,
     EvalSimulationMetricScore,
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
 from pipecat.evals.scenario import EvalKind  # noqa: E402
-from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
+from pipecat.evals.suite import (  # noqa: E402
+    _append_result,
+    _result_from_dict,
+    _simulation_result_from_dict,
+)
 
 SIMULATION = """
 name: {name}
@@ -362,11 +595,116 @@ class TestManifestSimulations(unittest.TestCase):
             EvalRun(bot="b", scenario="mixed/nope", scenario_path=path).load()
         self.assertIn("no scenario called 'mixed/nope'", str(cm.exception))
 
+    def test_an_entry_name_labels_its_runs(self):
+        manifest = self._manifest(
+            "suite:\n"
+            "  - bot: bot.py\n    name: openai/gpt-4o-mini\n    scenarios: [greet]\n"
+            "  - bot: bot.py\n    name: groq/llama\n    scenarios: [greet]\n"
+            "  - bot: other.py\n    scenarios: [greet]\n"
+        )
+        self.assertEqual(
+            [r.label for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", "other.py"]
+        )
+        self.assertEqual(
+            [r.name for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", None]
+        )
+        self.assertEqual([r.bot for r in manifest.runs], ["bot.py", "bot.py", "other.py"])
+        # The pattern filter sees the name and the bot path alike.
+        from pipecat.evals.suite import EvalSuite
+
+        self.assertEqual(
+            [r.label for r in EvalSuite(manifest).filter(pattern="groq")], ["groq/llama"]
+        )
+        self.assertEqual(len(EvalSuite(manifest).filter(pattern="bot.py")), 2)
+
+    def test_two_entries_may_not_run_a_scenario_under_one_label(self):
+        with self.assertRaises(ValueError) as cm:
+            self._manifest(
+                "suite:\n  - bot: bot.py\n    scenarios: [greet]\n  - bot: bot.py\n    scenarios: [greet]\n"
+            )
+        self.assertIn("'bot.py' runs 'greet/greet' twice", str(cm.exception))
+        # The same bot on different scenarios is fine, as is a named second entry.
+        self._manifest(
+            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n  - bot: bot.py\n    scenarios: [book]\n"
+        )
+        self._manifest(
+            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n"
+            "  - bot: bot.py\n    name: again\n    scenarios: [greet]\n"
+        )
+
+    def test_an_entry_name_must_be_a_non_empty_string(self):
+        for bad in ('""', "3", "[a]"):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                self._manifest(
+                    f"suite:\n  - bot: bot.py\n    name: {bad}\n    scenarios: [greet]\n"
+                )
+            self.assertIn("'name:'", str(cm.exception))
+
     def test_a_flat_file_still_loads_and_warns(self):
         (self.base / "scenarios" / "old.yaml").write_text("name: old\nturns: []\n")
         with self.assertWarns(DeprecationWarning):
             manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [old]\n")
         self.assertEqual([r.scenario for r in manifest.runs], ["old"])
+
+
+class TestScenarioRecords(unittest.TestCase):
+    def _result(self) -> EvalScriptResult:
+        return EvalScriptResult(
+            scenario_name="greet",
+            passed=True,
+            failures=[],
+            turns=[
+                EvalScriptTurnResult(
+                    turn_index=0,
+                    status="passed",
+                    expectations=[
+                        EvalExpectationResult(0, "llm_marker", True, "◐"),
+                        EvalExpectationResult(1, "llm_response", True, "Hi"),
+                    ],
+                    duration_ms=50,
+                )
+            ],
+            duration_ms=60,
+        )
+
+    def test_result_roundtrips_through_the_worker_json(self):
+        result = self._result()
+        rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+
+    def test_results_jsonl_record_keeps_what_each_expectation_matched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="voice/x.py",
+                name="openai/gpt-4o-mini",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                result=self._result(),
+            )
+            _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertTrue(record["passed"])
+            self.assertEqual((record["bot"], record["name"]), ("voice/x.py", "openai/gpt-4o-mini"))
+            self.assertEqual(
+                record["turns"][0]["expectations"],
+                [
+                    {
+                        "expectation_index": 0,
+                        "event_name": "llm_marker",
+                        "passed": True,
+                        "matched": "◐",
+                    },
+                    {
+                        "expectation_index": 1,
+                        "event_name": "llm_response",
+                        "passed": True,
+                        "matched": "Hi",
+                    },
+                ],
+            )
+            self.assertNotIn("events_seen", record)
 
 
 class TestSimulationRecords(unittest.TestCase):
@@ -394,8 +732,6 @@ class TestSimulationRecords(unittest.TestCase):
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
         )
-        import dataclasses
-
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
 
@@ -423,6 +759,7 @@ class TestSimulationRecords(unittest.TestCase):
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
             record = json.loads((base / "results.jsonl").read_text())
             self.assertEqual(record["scenario"], "book")
+            self.assertEqual(record["name"], "flows/x.py")
             self.assertEqual(record["kind"], "simulation")
             self.assertEqual(record["attempt"], 2)
             self.assertFalse(record["passed"])

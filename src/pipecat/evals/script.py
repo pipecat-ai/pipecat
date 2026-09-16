@@ -36,13 +36,14 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
 
-``llm_marker`` is a sideband marker the bot's LLM emitted, such as the
-turn-completion markers of ``filter_incomplete_user_turns``. ``marker:`` says
-which one: ``complete`` (the turn was finished and the bot answers), ``short``
-(the user was cut off and the bot waits), ``long`` (the user asked for time),
-or ``incomplete`` (either of the last two). A bare ``llm_marker`` asserts only
-that a marker arrived. Markers never reach clients by default; a scenario that
-asserts on one asks the bot to report them::
+``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
+as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
+when the response ends. ``marker:`` says which one: ``complete`` (the turn was
+finished and the bot answers), ``short`` (the user was cut off and the bot
+waits), ``long`` (the user asked for time), or ``incomplete`` (either of the
+last two). A bare ``llm_marker`` asserts only that the bot read a response.
+Markers never reach clients by default; a scenario that asserts on one asks the
+bot to report them::
 
     turns:
       - user: "Let me think about it, hmmm"
@@ -55,6 +56,31 @@ asserts on one asks the bot to report them::
             marker: complete          # ... and answered this one
           - event: response
             eval: "engages with the user's answer about Japan"
+
+The event also carries the response's raw text, as the LLM produced it before
+the bot held anything back, so a scenario can check how well the LLM follows
+the protocol: ``marker_first`` (nothing before the marker), ``markers`` (how
+many markers the text holds), and ``text_after`` (whether text follows the
+first marker, which a complete turn should have and an incomplete one should
+not)::
+
+    - user: "I'd go to Japan because"
+      expect:
+        - event: llm_marker
+          marker: short
+          marker_first: true
+          markers: 1
+          text_after: false
+
+A marker the LLM lets slip into its reply reaches the user, so the reply's
+own text is worth checking too: ``text_excludes`` fails when the text holds
+the given string, the mirror of ``text_contains``::
+
+    - user: "What is the capital of Germany?"
+      expect:
+        - event: llm_response
+          text_contains: Berlin
+          text_excludes: "●"
 
 The bot's reply can be asserted three ways:
 
@@ -82,9 +108,17 @@ Supported expectation fields (per event):
 ``text_contains: <str>``
     substring check on the event's text content, ignoring whitespace differences
 
+``text_excludes: <str>``
+    the reverse: the event's text content must not hold this substring
+
 ``marker: <str>``
     for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
     or ``incomplete`` for either of the last two
+
+``marker_first: <bool>``, ``markers: <int>``, ``text_after: <bool>``
+    for ``llm_marker`` — checks on the response's raw text: whether the first
+    marker comes before any text, how many markers the text holds, and whether
+    text follows the first marker
 
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by
@@ -297,6 +331,9 @@ class EvalExpectation:
             asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
+        text_excludes: Optional substring the event's text content must not
+            hold. Checked on the text the expectation matched; with
+            ``text_contains``, on the reply accumulated up to the match.
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
@@ -308,19 +345,29 @@ class EvalExpectation:
         marker: For an ``llm_marker`` event, the meaning the marker must have:
             one of :data:`MARKER_KINDS`, where ``incomplete`` accepts ``short``
             or ``long``.
+        marker_first: For an ``llm_marker`` event, whether the first marker in
+            the response's raw text must come before any text.
+        markers: For an ``llm_marker`` event, how many markers the response's
+            raw text must hold.
+        text_after: For an ``llm_marker`` event, whether text must (True) or
+            must not (False) follow the first marker in the raw text.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``eval``, ``calls`` and ``marker`` are not allowed
-            alongside it.
+            ``text_contains``, ``text_excludes``, ``eval``, ``calls`` and the
+            marker checks are not allowed alongside it.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
+    text_excludes: str | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     marker: str | None = None
+    marker_first: bool | None = None
+    markers: int | None = None
+    text_after: bool | None = None
     absent: bool = False
 
     @property
@@ -809,7 +856,20 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
         conflicting = [
-            key for key in ("text_contains", "eval", "calls", "name", "args", "marker") if key in e
+            key
+            for key in (
+                "text_contains",
+                "text_excludes",
+                "eval",
+                "calls",
+                "name",
+                "args",
+                "marker",
+                "marker_first",
+                "markers",
+                "text_after",
+            )
+            if key in e
         ]
         if conflicting:
             raise ValueError(
@@ -819,26 +879,36 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
 
     calls = _parse_function_calls(e, event, path, turn_idx, exp_idx) if not absent else None
 
+    where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"
+    marker_keys = [key for key in ("marker", "marker_first", "markers", "text_after") if key in e]
+    if marker_keys and event != "llm_marker":
+        raise ValueError(
+            f"{where} {', '.join(repr(k) + ':' for k in marker_keys)} only applies to "
+            f"the 'llm_marker' event, not {event!r}"
+        )
     marker = e.get("marker")
-    if marker is not None:
-        if event != "llm_marker":
-            raise ValueError(
-                f"{path}: turn #{turn_idx} expectation #{exp_idx} 'marker:' only applies to "
-                f"the 'llm_marker' event, not {event!r}"
-            )
-        if marker not in MARKER_KINDS:
-            raise ValueError(
-                f"{path}: turn #{turn_idx} expectation #{exp_idx} 'marker:' must be one of "
-                f"{', '.join(MARKER_KINDS)}, not {marker!r}"
-            )
+    if marker is not None and marker not in MARKER_KINDS:
+        raise ValueError(
+            f"{where} 'marker:' must be one of {', '.join(MARKER_KINDS)}, not {marker!r}"
+        )
+    for key, kind in (("marker_first", bool), ("text_after", bool), ("markers", int)):
+        value = e.get(key)
+        if value is not None and (
+            not isinstance(value, kind) or isinstance(value, bool) != (kind is bool)
+        ):
+            raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
 
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
+        text_excludes=e.get("text_excludes"),
         calls=calls,
         eval=criterion,
         marker=marker,
+        marker_first=e.get("marker_first"),
+        markers=e.get("markers"),
+        text_after=e.get("text_after"),
         absent=absent,
     )
 
