@@ -68,10 +68,7 @@ load_dotenv(override=True)
 
 FRONTEND_INSTRUCTIONS = """You are a friendly, concise voice assistant. Your responses are spoken
 aloud, so keep them to one or two natural sentences without any formatting.
-
-Backend tools:
-- Weather: the current weather for a place.
-- Restaurants: a recommendation for a place."""
+The backend answers questions about the weather and restaurants."""
 
 BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Use the available tools to
 answer questions about the weather and restaurants."""
