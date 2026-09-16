@@ -57,6 +57,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
@@ -90,6 +91,7 @@ BOT_READY_TIMEOUT_S = 10.0
 _BOT_FRAMES = (
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMMarkerResponseFrame,
     LLMFullResponseEndFrame,
     TTSTextFrame,
     BotStartedSpeakingFrame,

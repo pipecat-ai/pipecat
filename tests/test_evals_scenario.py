@@ -444,6 +444,37 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(s.turns[1].expect[0].marker, "complete")
         self.assertTrue(s.needs_marker_events())
 
+    def test_llm_marker_format_fields(self):
+        s = EvalScriptScenario.load(
+            _write(
+                """
+                name: markers
+                turns:
+                  - user: "I'd go to Japan because"
+                    expect:
+                      - event: llm_marker
+                        marker: short
+                        marker_first: true
+                        markers: 1
+                        text_after: false
+                """
+            )
+        )
+        exp = s.turns[0].expect[0]
+        self.assertEqual((exp.marker_first, exp.markers, exp.text_after), (True, 1, False))
+        for bad, message in (
+            ("expect: [{event: response, markers: 1}]", "only applies to the 'llm_marker' event"),
+            ("expect: [{event: llm_marker, markers: yes}]", "'markers:' must be a int"),
+            ("expect: [{event: llm_marker, marker_first: 1}]", "'marker_first:' must be a bool"),
+            (
+                "expect: [{event: llm_marker, absent: true, text_after: false}]",
+                "cannot be combined",
+            ),
+        ):
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
+            self.assertIn(message, str(ctx.exception))
+
     def test_llm_marker_unknown_kind_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             EvalScriptScenario.load(

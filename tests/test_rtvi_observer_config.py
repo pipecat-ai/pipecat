@@ -9,7 +9,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMMarkerFrame
+from pipecat.frames.frames import LLMMarkerFrame, LLMMarkerResponseFrame
 from pipecat.observers.base_observer import FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
@@ -88,16 +88,33 @@ class TestRTVIObserverLLMMarkers(unittest.IsolatedAsyncioTestCase):
 
     async def test_markers_are_not_sent_by_default(self):
         observer = RTVIObserver(params=RTVIObserverParams())
-        sent = await self._push(observer, LLMMarkerFrame(marker="●"))
+        sent = await self._push(observer, LLMMarkerResponseFrame(raw="● Hi", marker="●"))
         self.assertEqual(sent, [])
 
     async def test_marker_is_sent_when_enabled(self):
         observer = RTVIObserver(params=RTVIObserverParams(bot_llm_marker_enabled=True))
-        sent = await self._push(observer, LLMMarkerFrame(marker="●", kind="complete"))
+        frame = LLMMarkerResponseFrame(
+            raw="● Hi there", marker="●", kind="complete", markers=["●", "◐", "○"]
+        )
+        sent = await self._push(observer, frame)
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0].type, "bot-llm-marker")
         self.assertEqual(sent[0].data.text, "●")
         self.assertEqual(sent[0].data.kind, "complete")
+        self.assertEqual(sent[0].data.raw, "● Hi there")
+        self.assertEqual(sent[0].data.markers, ["●", "◐", "○"])
+
+    async def test_a_response_without_a_marker_is_reported_too(self):
+        observer = RTVIObserver(params=RTVIObserverParams(bot_llm_marker_enabled=True))
+        sent = await self._push(observer, LLMMarkerResponseFrame(raw="Hi there"))
+        self.assertEqual((sent[0].data.text, sent[0].data.kind), ("", None))
+
+    async def test_the_marker_frame_itself_is_not_sent(self):
+        # The context aggregator's marker frame is not the report; the report
+        # comes once per response, when it ends.
+        observer = RTVIObserver(params=RTVIObserverParams(bot_llm_marker_enabled=True))
+        sent = await self._push(observer, LLMMarkerFrame(marker="●", kind="complete"))
+        self.assertEqual(sent, [])
 
 
 if __name__ == "__main__":

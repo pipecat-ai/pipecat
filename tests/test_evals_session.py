@@ -58,7 +58,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
@@ -136,12 +136,22 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_marker_is_its_own_event(self):
         s = _stream(bot_audio=False)
         s.frame_to_event(LLMFullResponseStartFrame())
+        s.frame_to_event(LLMTextFrame(text="Hello"))
         self.assertEqual(
-            s.frame_to_event(LLMMarkerFrame(marker="●", kind="complete")),
-            {"type": "llm_marker", "text": "●", "kind": "complete"},
+            s.frame_to_event(
+                LLMMarkerResponseFrame(
+                    raw="● Hello", marker="●", kind="complete", markers=["●", "◐", "○"]
+                )
+            ),
+            {
+                "type": "llm_marker",
+                "text": "●",
+                "kind": "complete",
+                "raw": "● Hello",
+                "markers": ["●", "◐", "○"],
+            },
         )
         # The marker is not part of the reply's text.
-        s.frame_to_event(LLMTextFrame(text="Hello"))
         self.assertEqual(
             self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
             {"type": "llm_response", "text": "Hello"},
@@ -150,11 +160,11 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_marker_before_the_reply_starts_is_dropped(self):
         s = _stream(bot_audio=False)
         s.input_sent()
-        self.assertIsNone(s.frame_to_event(LLMMarkerFrame(marker="◐")))
+        self.assertIsNone(s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐")))
         s.frame_to_event(LLMFullResponseStartFrame())
         self.assertEqual(
-            s.frame_to_event(LLMMarkerFrame(marker="◐", kind="short")),
-            {"type": "llm_marker", "text": "◐", "kind": "short"},
+            s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐", kind="short")),
+            {"type": "llm_marker", "text": "◐", "kind": "short", "raw": "◐", "markers": []},
         )
 
     def test_llm_lifecycle_aggregates_text(self):
@@ -774,6 +784,51 @@ class TestMarkerCheck(unittest.TestCase):
         failure = self._check(None, exp)
         self.assertIsNotNone(failure)
         self.assertIn("no known kind", failure.reason)
+
+
+class TestMarkerFormatChecks(unittest.TestCase):
+    """Checks on how the raw LLM text was laid out around its markers."""
+
+    def _check(self, raw: str, **fields):
+        event = {
+            "type": "llm_marker",
+            "text": "●",
+            "kind": "complete",
+            "raw": raw,
+            "markers": ["●", "◐", "○"],
+        }
+        return _matcher()._check_payload(event, EvalExpectation(event="llm_marker", **fields), 0, 0)
+
+    def test_no_format_fields_means_no_check(self):
+        self.assertIsNone(self._check("Hi ● there ○"))
+
+    def test_marker_first(self):
+        self.assertIsNone(self._check("● Hi", marker_first=True))
+        self.assertIsNone(self._check("  ● Hi", marker_first=True))
+        failure = self._check("Hi ●", marker_first=True)
+        self.assertEqual(failure.kind, "marker_format")
+        self.assertIn("does not start", failure.reason)
+        self.assertIsNone(self._check("Hi ●", marker_first=False))
+        self.assertIsNotNone(self._check("● Hi", marker_first=False))
+        # No marker at all cannot be marker-first.
+        self.assertIsNotNone(self._check("Hi", marker_first=True))
+
+    def test_marker_count(self):
+        self.assertIsNone(self._check("● Hi", markers=1))
+        self.assertIsNone(self._check("Hi", markers=0))
+        self.assertIsNone(self._check("● Hi ◐ ○", markers=3))
+        failure = self._check("● Hi ●", markers=1)
+        self.assertEqual(failure.kind, "marker_format")
+        self.assertIn("holds 2 marker(s)", failure.reason)
+
+    def test_text_after(self):
+        self.assertIsNone(self._check("● Hi", text_after=True))
+        self.assertIsNone(self._check("●", text_after=False))
+        self.assertIsNone(self._check("● ", text_after=False))
+        self.assertIsNotNone(self._check("● Hi", text_after=False))
+        self.assertIsNotNone(self._check("●", text_after=True))
+        # No marker means nothing follows one.
+        self.assertIsNotNone(self._check("Hi", text_after=True))
 
 
 class _Collector(FrameProcessor):

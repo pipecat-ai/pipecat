@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -49,10 +49,18 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_llm_marker(self):
-        frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "◐", "kind": "short"}))
-        self.assertIsInstance(frame, LLMMarkerFrame)
-        self.assertEqual(frame.marker, "◐")
-        self.assertEqual(frame.kind, "short")
+        frame = await self.s.deserialize(
+            _server(
+                "bot-llm-marker",
+                {"text": "◐", "kind": "short", "raw": "◐ wait", "markers": ["●", "◐", "○"]},
+            )
+        )
+        self.assertIsInstance(frame, LLMMarkerResponseFrame)
+        self.assertEqual((frame.marker, frame.kind, frame.raw), ("◐", "short", "◐ wait"))
+        self.assertEqual(frame.markers, ["●", "◐", "○"])
+        # A response that carried no marker reports an empty text.
+        frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "", "raw": "Hi"}))
+        self.assertEqual((frame.marker, frame.kind, frame.raw), (None, None, "Hi"))
 
     async def test_tts_text(self):
         frame = await self.s.deserialize(_server("bot-tts-text", {"text": "Hello there!"}))
