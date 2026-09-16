@@ -81,6 +81,16 @@ JUDGE_ASK_TEMPLATE = (
     "Answer yes, no, or continue."
 )
 
+# The ask for an ``eval:`` on a function call. It names the call and gives its
+# arguments as JSON, so the verdict is about that call rather than about what
+# the bot said around it.
+JUDGE_CALL_ASK_TEMPLATE = (
+    "The bot called the function `{name}` with arguments `{args}`. "
+    "Does this call satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
+)
+
 
 RUN_JUDGE_SYSTEM_INSTRUCTION = (
     "You are a strict but fair judge evaluating a complete conversation between a user "
@@ -255,6 +265,28 @@ class EvalJudge:
             assertion over the same conversation hits the judge only once.
         """
         ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+
+    async def evaluate_call(self, name: str, args: dict | None, criterion: str) -> JudgeVerdict:
+        """Judge whether a function call the bot made satisfies ``criterion``, in the conversation so far.
+
+        The ask names the call and its arguments, so the verdict is about that
+        call, in the light of the spoken conversation so far. A ``continue``
+        makes no sense for a call — it is not a partial reply — and callers
+        treat it as a ``no``.
+
+        Args:
+            name: The function's name.
+            args: The call's arguments, shown to the judge as JSON.
+            criterion: Natural-language description of what the call should be.
+
+        Returns:
+            A :class:`JudgeVerdict`, cached by ``(call, criterion, conversation)``
+            like :meth:`evaluate`.
+        """
+        ask = JUDGE_CALL_ASK_TEMPLATE.format(
+            name=name, args=json.dumps(args or {}, ensure_ascii=False), criterion=criterion
+        )
         return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
 
     async def evaluate_run(

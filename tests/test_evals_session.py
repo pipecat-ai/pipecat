@@ -325,6 +325,8 @@ class _FakeJudge:
         self._verdicts = list(verdicts)
         self.calls: list[str] = []
         self.segments: list[str] = []
+        # The calls judged.
+        self.call_asks: list[tuple[str, dict | None, str]] = []
 
     def add_user_message(self, text):
         pass
@@ -333,9 +335,16 @@ class _FakeJudge:
         self.segments.append(text)
 
     async def evaluate(self, criterion: str):
+        self.calls.append(criterion)
+        return self._next_verdict()
+
+    async def evaluate_call(self, name, args, criterion):
+        self.call_asks.append((name, args, criterion))
+        return self._next_verdict()
+
+    def _next_verdict(self):
         from pipecat.evals.judge import JudgeVerdict
 
-        self.calls.append(criterion)
         v = self._verdicts.pop(0)
         return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
 
@@ -548,6 +557,96 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(failure)
 
 
+def _call(name: str, args: dict | None = None, stopped: bool = False) -> dict:
+    return {
+        "type": "function_call_stopped" if stopped else "function_call",
+        "name": name,
+        "args": args,
+    }
+
+
+class TestFunctionCallEval(unittest.IsolatedAsyncioTestCase):
+    """``eval:`` on a function call puts each matched call to the judge."""
+
+    CRITERION = "the suggestion is about tracing, for Jennifer Smith"
+    ARGS = {"title": "OpenTelemetry tracing", "speaker": "Jennifer Smith"}
+
+    def _exp(self, *names: str, event: str = "function_call") -> EvalExpectation:
+        calls = [EvalFunctionCall(name=n) for n in names] or None
+        return EvalExpectation(event=event, calls=calls, eval=self.CRITERION)
+
+    async def _match(self, s: ExpectationMatcher, exp: EvalExpectation, budget_ms: int = 1000):
+        return await s.match(exp, time.monotonic(), budget_ms, 0, 0)
+
+    async def test_yes_passes_and_the_ask_carries_the_args(self):
+        judge = _FakeJudge(["yes"])
+        s = _matcher(judge)
+        await s._stream.append(_call("submit_session_suggestion", self.ARGS))
+        self.assertIsNone(await self._match(s, self._exp("submit_session_suggestion")))
+        self.assertEqual(
+            judge.call_asks, [("submit_session_suggestion", self.ARGS, self.CRITERION)]
+        )
+        self.assertEqual(s.last_match_text, "submit_session_suggestion")
+
+    async def test_no_fails_with_the_judges_reason(self):
+        judge = _FakeJudge(["no"])
+        s = _matcher(judge)
+        await s._stream.append(_call("submit_session_suggestion", self.ARGS))
+        failure = await self._match(s, self._exp("submit_session_suggestion"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no")
+        self.assertIn("judge said no — (no)", failure.reason)
+        self.assertIn("submit_session_suggestion(", failure.reason)
+
+    async def test_continue_counts_as_no(self):
+        judge = _FakeJudge(["continue"])
+        s = _matcher(judge)
+        await s._stream.append(_call("submit_session_suggestion", self.ARGS))
+        failure = await self._match(s, self._exp("submit_session_suggestion"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no")
+        self.assertIn("judge said continue", failure.reason)
+
+    async def test_every_listed_call_is_judged(self):
+        judge = _FakeJudge(["yes", "no"])
+        s = _matcher(judge)
+        await s._stream.append(_call("lookup", {"q": "a"}))
+        await s._stream.append(_call("submit", {"q": "b"}))
+        failure = await self._match(s, self._exp("lookup", "submit"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no")
+        self.assertEqual([ask[0] for ask in judge.call_asks], ["lookup", "submit"])
+
+    async def test_verbatim_args_are_checked_before_the_judge(self):
+        judge = _FakeJudge([])  # would IndexError if the judge were asked
+        s = _matcher(judge)
+        await s._stream.append(_call("submit", {"speaker": "someone else"}))
+        exp = EvalExpectation(
+            event="function_call",
+            calls=[EvalFunctionCall(name="submit", args={"speaker": "Jennifer Smith"})],
+            eval=self.CRITERION,
+        )
+        failure = await self._match(s, exp, budget_ms=200)
+        assert failure is not None
+        self.assertEqual(failure.kind, "function_args_mismatch")
+        self.assertEqual(judge.call_asks, [])
+
+    async def test_stopped_calls_are_judged_too(self):
+        judge = _FakeJudge(["yes"])
+        s = _matcher(judge)
+        await s._stream.append(_call("write_report", {"cancelled": True}, stopped=True))
+        exp = self._exp("write_report", event="function_call_stopped")
+        self.assertIsNone(await self._match(s, exp))
+        self.assertEqual(judge.call_asks, [("write_report", {"cancelled": True}, self.CRITERION)])
+
+    async def test_no_judge_fails_before_matching(self):
+        s = _matcher(judge=None)
+        await s._stream.append(_call("submit", self.ARGS))
+        failure = await self._match(s, self._exp("submit"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "no_judge")
+
+
 class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
     """The pass/fail/continue decision over accumulated response text."""
 
@@ -639,6 +738,30 @@ class TestRequiredReportLevel(unittest.TestCase):
                 )
             ),
             "full",
+        )
+
+    def test_full_when_a_call_is_judged(self):
+        # The judge reads the call's arguments, so names alone are not enough.
+        self.assertEqual(
+            self._level(
+                EvalExpectation(
+                    event="function_call",
+                    calls=[EvalFunctionCall(name="submit")],
+                    eval="submitted for the right person",
+                )
+            ),
+            "full",
+        )
+
+    def test_a_judged_reply_after_a_call_does_not_need_args(self):
+        # A reply is judged on the spoken conversation only, so the call
+        # needs no more than a name to be matched.
+        self.assertEqual(
+            self._level(
+                EvalExpectation(event="function_call", calls=[EvalFunctionCall(name="submit")]),
+                EvalExpectation(event="llm_response", eval="confirms what it submitted"),
+            ),
+            "name",
         )
 
 

@@ -6,7 +6,12 @@
 
 import unittest
 
-from pipecat.evals.judge import EvalJudge, JudgeVerdict, _parse_run_verdicts, _parse_verdict
+from pipecat.evals.judge import (
+    EvalJudge,
+    JudgeVerdict,
+    _parse_run_verdicts,
+    _parse_verdict,
+)
 
 
 class TestParseRunVerdicts(unittest.TestCase):
@@ -275,6 +280,34 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
             ask = svc.calls[-1]["messages"][-1]["content"]
             self.assertIn("Bot turn 1: given", ask)
             self.assertNotIn("kept", ask)
+
+
+class TestJudgeToolCalls(unittest.IsolatedAsyncioTestCase):
+    """A verdict on one function call."""
+
+    async def test_evaluate_call_asks_about_the_named_call(self):
+        svc = _FakeLLMService(['{"verdict": "no", "reason": "wrong speaker"}'])
+        judge = EvalJudge(svc)
+        v = await judge.evaluate_call("submit", {"speaker": "Ann"}, "submitted for Bob")
+        self.assertFalse(v.passed)
+        self.assertEqual(v.reason, "wrong speaker")
+        ask = svc.calls[0]["messages"][-1]["content"]
+        self.assertIn('called the function `submit` with arguments `{"speaker": "Ann"}`', ask)
+        self.assertIn("Criterion: submitted for Bob", ask)
+
+    async def test_evaluate_call_caches_per_call(self):
+        """The same criterion on two different calls is two questions."""
+        svc = _FakeLLMService(
+            ['{"verdict": "yes", "reason": "a"}', '{"verdict": "no", "reason": "b"}']
+        )
+        judge = EvalJudge(svc)
+        first = await judge.evaluate_call("submit", {"n": 1}, "n is one")
+        again = await judge.evaluate_call("submit", {"n": 1}, "n is one")
+        second = await judge.evaluate_call("submit", {"n": 2}, "n is one")
+        self.assertTrue(first.passed)
+        self.assertTrue(again.passed)
+        self.assertFalse(second.passed)
+        self.assertEqual(len(svc.calls), 2)
 
 
 class TestJudgeVerdictDataclass(unittest.TestCase):

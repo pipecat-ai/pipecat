@@ -21,7 +21,7 @@ from pipecat.utils.deprecation import deprecated
 # report "10x timeout on turn 3" without parsing free-text reasons.
 FAILURE_KINDS = (
     "timeout",  # no event of the expected type arrived within the budget
-    "judge_no",  # the judge rejected the reply
+    "judge_no",  # the judge rejected the reply, or a function call's `eval:`
     "judge_continue",  # the judge never accepted the reply before the budget ran out
     "no_judge",  # the scenario uses `eval:` but no judge could be built
     "no_content",  # the matched event carried no text to judge
