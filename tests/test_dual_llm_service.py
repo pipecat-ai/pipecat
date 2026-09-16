@@ -153,8 +153,8 @@ def _bound(connector: BackendConnector, realtime: bool = False) -> BackendConnec
 
 def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
     connector = _bound(BackendConnector())
-    assert isinstance(connector.request, TranscriptBackendRequestStrategy)
-    assert isinstance(connector.reply, SpeakOnPrefersSpokenBackendReplyStrategy)
+    assert isinstance(connector.request_strategy, TranscriptBackendRequestStrategy)
+    assert isinstance(connector.reply_strategy, SpeakOnPrefersSpokenBackendReplyStrategy)
     assert connector.tool.name == "delegate"
     assert connector.tool.properties == {}
     assert connector.tool.handler is not None
@@ -162,14 +162,17 @@ def test_a_text_frontend_hands_over_the_transcript_and_follows_the_flag():
 
 def test_a_realtime_frontend_words_the_request_and_takes_every_output_at_once():
     connector = _bound(BackendConnector(), realtime=True)
-    assert isinstance(connector.request, ExplicitBackendRequestStrategy)
-    assert isinstance(connector.reply, OneShotBackendReplyStrategy)
+    assert isinstance(connector.request_strategy, ExplicitBackendRequestStrategy)
+    assert isinstance(connector.reply_strategy, OneShotBackendReplyStrategy)
     assert connector.tool.required == ["request"]
 
 
 def test_a_realtime_frontend_refuses_a_reply_strategy_that_streams():
     with pytest.raises(ValueError, match="one result"):
-        _bound(BackendConnector(reply=SpeakOnPrefersSpokenBackendReplyStrategy()), realtime=True)
+        _bound(
+            BackendConnector(reply_strategy=SpeakOnPrefersSpokenBackendReplyStrategy()),
+            realtime=True,
+        )
 
 
 def test_the_tool_description_frames_a_handoff():
@@ -212,7 +215,7 @@ async def test_the_transcript_request_sends_only_what_the_backend_has_not_seen(m
 @pytest.mark.asyncio
 async def test_the_explicit_request_sends_the_model_words(monkeypatch):
     requests = _stream(monkeypatch, _BackendFinalOutput(BackendOutput(text="ok")))
-    connector = _bound(BackendConnector(request=ExplicitBackendRequestStrategy()))
+    connector = _bound(BackendConnector(request_strategy=ExplicitBackendRequestStrategy()))
 
     await connector.delegate(_params(arguments={"request": "Weather in Seattle, Fahrenheit."}))
 

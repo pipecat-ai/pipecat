@@ -337,43 +337,43 @@ class BackendConnector:
 
     Example::
 
-        connector = BackendConnector(reply=OneShotBackendReplyStrategy())
+        connector = BackendConnector(reply_strategy=OneShotBackendReplyStrategy())
     """
 
     def __init__(
         self,
         *,
-        request: BackendRequestStrategy | None = None,
-        reply: BackendReplyStrategy | None = None,
+        request_strategy: BackendRequestStrategy | None = None,
+        reply_strategy: BackendReplyStrategy | None = None,
         timeout_secs: float | None = 120,
     ):
         """Initialize the connector.
 
         Args:
-            request: How a ``delegate`` call becomes the backend's request.
+            request_strategy: How a ``delegate`` call becomes the backend's
+                request. Picked by frontend kind when omitted.
+            reply_strategy: How the backend's outputs reach the frontend.
                 Picked by frontend kind when omitted.
-            reply: How the backend's outputs reach the frontend. Picked by
-                frontend kind when omitted.
             timeout_secs: How long a delegation may take, including the wait
                 for the backend to become ready.
         """
-        self._request = request
-        self._reply = reply
+        self._request_strategy = request_strategy
+        self._reply_strategy = reply_strategy
         self._timeout_secs = timeout_secs
         self._context: ConnectorContext | None = None
         self._tool: FunctionSchema | None = None
 
     @property
-    def request(self) -> BackendRequestStrategy:
+    def request_strategy(self) -> BackendRequestStrategy:
         """The request strategy in use. Available once bound."""
-        assert self._request is not None, "connector not bound"
-        return self._request
+        assert self._request_strategy is not None, "connector not bound"
+        return self._request_strategy
 
     @property
-    def reply(self) -> BackendReplyStrategy:
+    def reply_strategy(self) -> BackendReplyStrategy:
         """The reply strategy in use. Available once bound."""
-        assert self._reply is not None, "connector not bound"
-        return self._reply
+        assert self._reply_strategy is not None, "connector not bound"
+        return self._reply_strategy
 
     @property
     def tool(self) -> FunctionSchema:
@@ -384,7 +384,10 @@ class BackendConnector:
     @property
     def frontend_instruction(self) -> str | None:
         """Guidance for the frontend model, from both strategies. Available once bound."""
-        parts = [self.request.frontend_instruction, self.reply.frontend_instruction]
+        parts = [
+            self.request_strategy.frontend_instruction,
+            self.reply_strategy.frontend_instruction,
+        ]
         return "\n\n".join(p for p in parts if p) or None
 
     def bind(self, context: ConnectorContext) -> None:
@@ -398,21 +401,21 @@ class BackendConnector:
                 frontend is a speech-to-speech service, which cannot take them.
         """
         self._context = context
-        if self._request is None:
-            self._request = (
+        if self._request_strategy is None:
+            self._request_strategy = (
                 ExplicitBackendRequestStrategy()
                 if context.frontend_is_realtime
                 else TranscriptBackendRequestStrategy()
             )
-        if self._reply is None:
-            self._reply = (
+        if self._reply_strategy is None:
+            self._reply_strategy = (
                 OneShotBackendReplyStrategy()
                 if context.frontend_is_realtime
                 else SpeakOnPrefersSpokenBackendReplyStrategy()
             )
-        if context.frontend_is_realtime and self._reply.needs_intermediate_results:
+        if context.frontend_is_realtime and self._reply_strategy.needs_intermediate_results:
             raise ValueError(
-                f"{type(self._reply).__name__} reports intermediate results, which a "
+                f"{type(self._reply_strategy).__name__} reports intermediate results, which a "
                 "speech-to-speech frontend cannot take: its function calls accept one result"
             )
         self._tool = self.build_tool()
@@ -433,9 +436,9 @@ class BackendConnector:
 
         return FunctionSchema(
             name=DELEGATE_TOOL_NAME,
-            description=self.request.tool_description(),
-            properties=self.request.tool_parameters,
-            required=self.request.tool_required,
+            description=self.request_strategy.tool_description(),
+            properties=self.request_strategy.tool_parameters,
+            required=self.request_strategy.tool_required,
             handler=delegate,
         )
 
@@ -446,7 +449,7 @@ class BackendConnector:
             params: The ``delegate`` call.
         """
         assert self._context is not None, "connector not bound"
-        request = await self.request.compose_request(params)
+        request = await self.request_strategy.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         finished = False
         async for event in _delegate_to_backend(
@@ -460,9 +463,9 @@ class BackendConnector:
                 continue
             if isinstance(event, _BackendFinalOutput):
                 finished = True
-                await self.reply.deliver(params, event.output, is_final=True)
+                await self.reply_strategy.deliver(params, event.output, is_final=True)
             else:
-                await self.reply.deliver(params, event, is_final=False)
+                await self.reply_strategy.deliver(params, event, is_final=False)
         if not finished:
             logger.warning(f"Delegation to '{self._context.backend_name}' produced no final output")
             await params.result_callback({"error": "The backend finished without saying anything."})
