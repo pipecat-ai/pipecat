@@ -451,7 +451,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """Major/minor version parsed from the model id, or None if absent.
 
         Handles ids that carry the version with or without a minor part
-        (``gemini-3-pro-preview``, ``gemini-3.8-live``, ``gemini-2.0-flash-live-001``).
+        (``gemini-3.8-live``, ``gemini-2.0-flash-live-001``).
         """
         model = assert_given(self._settings.model) or ""
         match = re.search(r"gemini(?:-[a-z]+)*-(\d+)(?:\.(\d+))?", model)
@@ -463,11 +463,15 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     def _expects_interaction_status(self) -> bool:
         """Whether the current model reports ``interaction_status``.
 
-        Live thinking models reason in the background between output chunks;
-        for those, ``turn_complete`` alone doesn't mean the turn is over.
+        Thinking models from 3.8 on reason in the background between output
+        chunks; for those, ``turn_complete`` alone doesn't mean the turn is
+        over. The version gate excludes earlier thinking-named models (e.g.
+        ``gemini-2.5-flash-exp-native-audio-thinking-dialog``), which don't
+        report the status.
         """
         model = assert_given(self._settings.model) or ""
-        return "live" in model and "thinking" in model
+        version = self._gemini_version
+        return "thinking" in model and version is not None and version >= (3, 8)
 
     def _warn_if_interaction_status_unsupported(self):
         """Warn (once) when the installed SDK can't surface ``interaction_status``.
@@ -508,9 +512,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         The 3.8 Live family flipped the default: function calls execute
         NON_BLOCKING unless the declaration explicitly asks for BLOCKING.
         """
-        model = assert_given(self._settings.model) or ""
         version = self._gemini_version
-        return "live" in model and version is not None and version >= (3, 8)
+        return version is not None and version >= (3, 8)
 
     @property
     def _supports_blocking_tools(self) -> bool:
