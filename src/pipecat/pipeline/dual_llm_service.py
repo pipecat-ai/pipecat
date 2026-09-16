@@ -521,9 +521,9 @@ class PipecatDualLLMService(Pipeline):
     backend worker to the pipeline worker so the app never wires it up.
 
     The guidance says when to delegate in general terms. The frontend's own
-    system instruction is the place to say what the backend is for, in a
-    sentence of plain words, as the backend's own instruction does: no tool
-    names, nothing to update when a tool changes.
+    system instruction is the place to say what the backend is for, in plain
+    words, as the backend's own instruction does: no tool names, nothing to
+    update when a tool changes.
 
     Example::
 
