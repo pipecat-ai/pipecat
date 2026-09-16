@@ -1016,7 +1016,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _peer_leaves_after(client: MOQTransportClient, sessions_seen: int):
-        """A stand-in ``_consume_peer`` whose peer leaves during session N."""
+        """A stand-in ``_consume_peer`` whose peer says goodbye and leaves during session N."""
         seen = 0
 
         async def consume(_origin):
@@ -1024,8 +1024,29 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
             seen += 1
             await client._on_peer_available()
             if seen >= sessions_seen:
+                client._peer_goodbye = True
                 return
             await asyncio.Event().wait()
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+
+    @staticmethod
+    def _peer_tracks_end_without_goodbye(client: MOQTransportClient, comes_back: bool):
+        """A stand-in ``_consume_peer``: in the first session the peer is seen and
+        its tracks end without the marker. On the next session the peer either
+        comes back and then says goodbye, or never appears."""
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            if seen == 1:
+                await client._on_peer_available()
+                return
+            if comes_back:
+                await client._on_peer_available()
+                client._peer_goodbye = True
+            return
 
         client._consume_peer = consume  # type: ignore[method-assign]
 
@@ -1206,6 +1227,39 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_disconnected.assert_awaited_once()
 
+    async def test_peer_tracks_ending_without_goodbye_redial_and_the_peer_comes_back(self):
+        """A relay between the peers failing ends the peer's tracks the way a
+        hangup does; without the marker the transport redials and the peer
+        reappears on the new session."""
+        self.script[:] = [_FakeSession(), _FakeSession()]
+        client = self._make_client()
+        self._peer_tracks_end_without_goodbye(client, comes_back=True)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_awaited_once()
+        cb.on_client_connected.assert_awaited_once()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+
+    async def test_peer_tracks_ending_without_goodbye_and_no_return_report_the_peer_gone(self):
+        """A hard hangup also ends the tracks without the marker; the peer
+        then fails to appear on the redialed session and is reported gone."""
+        self.script[:] = [_FakeSession(), _FakeSession()]
+        client = self._make_client()
+        self._peer_tracks_end_without_goodbye(client, comes_back=False)
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_reconnecting.assert_awaited_once_with(1)
+        cb.on_reconnected.assert_not_awaited()
+        cb.on_client_disconnected.assert_awaited_once()
+        cb.on_error.assert_not_awaited()
+        cb.on_disconnected.assert_awaited_once()
+
     async def test_a_peer_that_leaves_ends_the_loop_without_redialing(self):
         self.script[:] = [_FakeSession()]
         client = self._make_client()
@@ -1217,6 +1271,59 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_reconnecting.assert_not_awaited()
         cb.on_client_disconnected.assert_awaited_once()
         cb.on_error.assert_not_awaited()
+
+
+class _FakeJsonStream:
+    """Stands in for a ``JsonStreamConsumer``: yields scripted records, then ends."""
+
+    def __init__(self, records):
+        self._records = list(records)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._records:
+            raise StopAsyncIteration
+        return self._records.pop(0)
+
+    def cancel(self):
+        pass
+
+
+class TestPeerGoodbye(unittest.IsolatedAsyncioTestCase):
+    """The peer's session-ending marker is read off its transcript stream and
+    never reaches the pipeline."""
+
+    async def test_marker_sets_goodbye_and_is_not_forwarded(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream(
+                [
+                    {"label": "rtvi-ai", "type": "client-ready", "seq": 0, "epoch": "e"},
+                    {"label": "moq-transport", "type": "session-ending", "seq": 1, "epoch": "e"},
+                ]
+            )
+        )
+
+        await client._forward_peer_transcript(peer_broadcast)
+
+        client._callbacks.on_message_received.assert_awaited_once_with(
+            {"label": "rtvi-ai", "type": "client-ready"}
+        )
+        self.assertTrue(client._peer_goodbye)
+
+    async def test_tracks_ending_without_the_marker_leave_goodbye_unset(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream([{"label": "rtvi-ai", "type": "client-ready"}])
+        )
+
+        await client._forward_peer_transcript(peer_broadcast)
+
+        self.assertFalse(client._peer_goodbye)
 
 
 class TestIsUnauthorized(unittest.TestCase):

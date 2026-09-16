@@ -64,6 +64,12 @@ A token the relay refuses is not retried; the relay accepts the connection
 first and then closes the session as unauthorized, so the refusal is read
 off the session close rather than the dial.
 
+Each side appends a ``session-ending`` marker to its transcript stream
+before it leaves. A peer whose tracks end after the marker has hung up. A
+peer whose tracks end without it may be behind a failed relay, which on
+the wire looks the same as a hangup, so the transport redials and gives
+the peer ``connection_timeout`` to reappear before reporting it gone.
+
 Every transcript record carries ``seq`` and ``epoch``. The JSON stream is
 a single group that a subscriber always reads from its first record, so a
 reconnect on either side replays the whole log. The subscriber drops
@@ -371,7 +377,8 @@ class MOQParams(TransportParams):
             :attr:`MOQTransport.cert_fingerprints` for exactly this. Again,
             an alternative to disabling ``verify_ssl``, not a companion.
         connection_timeout: Seconds to wait for the peer broadcast to be
-            announced before giving up.
+            announced before giving up, on the first session and again on
+            every redialed one.
         reconnect_timeout: Client mode only. How long, in seconds, the
             transport keeps redialing the relay after the session drops
             before it gives up, counted from the start of the outage.
@@ -640,6 +647,11 @@ class MOQTransportClient:
         self._outage_started: float | None = None
         # Why the current session closed, when the close carried an error.
         self._session_close_error: Exception | None = None
+        # Whether the peer's broadcast was seen on the current session.
+        self._session_saw_peer = False
+        # Set by the peer's session-ending marker: its tracks are ending
+        # because it is leaving, not because a relay between us failed.
+        self._peer_goodbye = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Capture the task manager from the input/output processors.
@@ -980,9 +992,14 @@ class MOQTransportClient:
         """Run one dialed session to its end.
 
         Returns:
-            ``True`` when the peer left a session that stayed up, ``False``
-            when the session itself closed. Raises what the dial raised,
-            so the caller can tell a refused dial from a dropped session.
+            ``True`` when the peer is gone: it never appeared on this
+            session, or its tracks ended after its session-ending marker.
+            ``False`` when the session itself closed, or when the peer's
+            tracks ended without the marker, which is what a failed relay
+            between the peers looks like: the caller redials and the peer
+            has ``connection_timeout`` to appear on the new session.
+            Raises what the dial raised, so the caller can tell a refused
+            dial from a dropped session.
         """
         assert self._task_manager is not None, (
             "MOQTransportClient.setup() must run before _run(); "
@@ -1006,6 +1023,7 @@ class MOQTransportClient:
                 await self._callbacks.on_connected()
 
             self._session_close_error = None
+            self._session_saw_peer = False
             closed = self._task_manager.create_task(
                 self._session_closed(session), f"{self}::moq_session_closed"
             )
@@ -1018,10 +1036,13 @@ class MOQTransportClient:
                     await asyncio.wait({closed}, timeout=_SESSION_CLOSE_GRACE_S)
                 if closed.done():
                     return False
-                # The session is up and the peer's tracks ended: the peer
-                # left, unless a consumer failed, which propagates.
+                # The session is up and the peer's tracks ended (a consumer
+                # failure propagates instead).
                 consume.result()
-                return True
+                if not self._session_saw_peer or self._peer_goodbye:
+                    return True
+                logger.warning("MOQ: peer tracks ended without a session-ending marker; redialing")
+                return False
             finally:
                 for task in (closed, consume):
                     if not task.done():
@@ -1046,6 +1067,8 @@ class MOQTransportClient:
         accepts a dial and closes the session at once keeps the window
         running instead of restarting it.
         """
+        self._session_saw_peer = True
+        self._peer_goodbye = False
         if self._peer_connected:
             self._outage_started = None
             await self._callbacks.on_reconnected()
@@ -1317,6 +1340,13 @@ class MOQTransportClient:
                 message = self._accept_peer_record(record)
                 if message is None:
                     dropped += 1
+                    continue
+                if message.get("label") == "moq-transport":
+                    # Intra-transport signals never reach the pipeline. The
+                    # peer's session-ending marker says its tracks are about
+                    # to end because it is leaving.
+                    if message.get("type") == "session-ending":
+                        self._peer_goodbye = True
                     continue
                 await self._callbacks.on_message_received(message)
         except asyncio.CancelledError:
