@@ -112,7 +112,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Each word is matched whole and case-insensitively, wherever the LLM says it.
         text_transforms=[
             ("*", CartesiaTTSService.pronounce_ipa(dictionary["ipa"])),
-            ("*", CartesiaTTSService.pronounce_arpabet(dictionary["arpabet"])),
         ],
     )
 
