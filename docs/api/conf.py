@@ -108,6 +108,11 @@ autodoc_mock_imports = [
     "mlx_whisper",  # Note: might need underscore format too
     # pocket-tts dependencies (torch is mocked above)
     "pocket_tts",
+    # vui-tts dependencies (torch is mocked above)
+    "vui",
+    "vui.engine",
+    "vui.prompt_files",
+    "vui.qwen_codec",
     # Pydantic v2 compatibility issues in third-party SDKs
     "hume",
     "hume.tts",
