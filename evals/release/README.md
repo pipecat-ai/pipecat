@@ -155,8 +155,9 @@ your policy, not the harness's.
 
 Every run (repeated or not) also writes `results.jsonl`, one JSON line per run with
 its `kind` (`script` or `simulation`), its outcome, its failures (each with a `kind`), a `turns` array giving each turn's
-status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached),
-and paths to its artifacts — appended as each run finishes, so an interrupted sweep
+status (`passed`, `failed`, or `not_run` for the turns a stopped run never reached)
+and what each of its expectations matched (the marker an `llm_marker` saw, a
+function call's signature, a reply's text), and paths to its artifacts — appended as each run finishes, so an interrupted sweep
 keeps everything already done. It's the machine-readable counterpart to the printed
 tally; group and count it however your question needs. Runs that didn't pass also carry `events_seen`, the
 record of what the bot actually did, which is usually where a root cause is found.

@@ -1625,6 +1625,71 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # Every turn's failures, in order, are the flat list on the result.
         self.assertEqual([f for t in result.turns for f in t.failures], result.failures)
 
+    async def test_turn_results_record_what_each_expectation_matched(self):
+        self.server.on_text(
+            "hello",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hi there"}),
+            _rtvi("bot-llm-marker", {"text": "◐", "kind": "short", "raw": "◐ Hi there"}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = EvalScriptScenario(
+            name="matched",
+            bot_audio=False,
+            turns=[
+                EvalScriptTurn(
+                    user="hello",
+                    expect=[
+                        EvalExpectation(event="llm_marker", marker="incomplete", within_ms=300),
+                        EvalExpectation(event="llm_response", within_ms=300),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, result.failures)
+        # The marker the LLM produced is kept, so `incomplete` can be told apart.
+        self.assertEqual(
+            [
+                (e.expectation_index, e.event_name, e.passed, e.matched)
+                for e in result.turns[0].expectations
+            ],
+            [(0, "llm_marker", True, "◐"), (1, "llm_response", True, "Hi there")],
+        )
+
+    async def test_turn_results_record_failed_expectations_too(self):
+        scenario = self._two_turn_first_fails(stop_on_failure=False)
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        failed, passed = result.turns
+        self.assertEqual(
+            [(e.event_name, e.passed, e.matched) for e in failed.expectations],
+            [("llm_response", False, "")],
+        )
+        self.assertEqual(
+            [(e.event_name, e.passed, e.matched) for e in passed.expectations],
+            [("llm_response", True, "Berlin")],
+        )
+
+    async def test_turn_results_stop_recording_at_a_timeout(self):
+        scenario = EvalScriptScenario(
+            name="never",
+            bot_audio=False,
+            turns=[
+                EvalScriptTurn(
+                    user="hi",
+                    expect=[
+                        EvalExpectation(event="llm_response", within_ms=200),
+                        EvalExpectation(event="tts_response", within_ms=200),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertEqual(
+            [(e.event_name, e.passed) for e in result.turns[0].expectations],
+            [("llm_response", False)],
+        )
+
     async def test_turn_results_are_timed(self):
         scenario = self._two_turn_first_fails(stop_on_failure=False)
         result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()

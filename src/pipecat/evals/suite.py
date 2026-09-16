@@ -97,6 +97,7 @@ from loguru import logger
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalExpectationResult,
     EvalScriptResult,
     EvalScriptTurnResult,
     EvalSimulationMetricScore,
@@ -238,7 +239,20 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
             for f in (result.failures if result else [])
         ],
         "turns": [
-            {"turn_index": t.turn_index, "status": t.status, "duration_ms": t.duration_ms}
+            {
+                "turn_index": t.turn_index,
+                "status": t.status,
+                "duration_ms": t.duration_ms,
+                "expectations": [
+                    {
+                        "expectation_index": e.expectation_index,
+                        "event_name": e.event_name,
+                        "passed": e.passed,
+                        "matched": e.matched,
+                    }
+                    for e in t.expectations
+                ],
+            }
             for t in (result.turns if result else [])
         ],
         "artifacts": artifacts,
@@ -323,6 +337,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
                 turn_index=t["turn_index"],
                 status=t.get("status", "not_run"),
                 failures=[EvalAssertionFailure(**f) for f in t.get("failures", [])],
+                expectations=[EvalExpectationResult(**e) for e in t.get("expectations", [])],
                 duration_ms=t.get("duration_ms", 0),
             )
             for t in data.get("turns", [])

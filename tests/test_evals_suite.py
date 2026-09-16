@@ -412,13 +412,22 @@ if __name__ == "__main__":
 # Simulations in a manifest's scenarios: list, and their results.jsonl records.
 # ---------------------------------------------------------------------------
 
+import dataclasses  # noqa: E402
+
 from pipecat.evals.results import (  # noqa: E402
+    EvalExpectationResult,
+    EvalScriptResult,
+    EvalScriptTurnResult,
     EvalSimulationMetricScore,
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
 from pipecat.evals.scenario import EvalKind  # noqa: E402
-from pipecat.evals.suite import _append_result, _simulation_result_from_dict  # noqa: E402
+from pipecat.evals.suite import (  # noqa: E402
+    _append_result,
+    _result_from_dict,
+    _simulation_result_from_dict,
+)
 
 SIMULATION = """
 name: {name}
@@ -567,6 +576,64 @@ class TestManifestSimulations(unittest.TestCase):
         self.assertEqual([r.scenario for r in manifest.runs], ["old"])
 
 
+class TestScenarioRecords(unittest.TestCase):
+    def _result(self) -> EvalScriptResult:
+        return EvalScriptResult(
+            scenario_name="greet",
+            passed=True,
+            failures=[],
+            turns=[
+                EvalScriptTurnResult(
+                    turn_index=0,
+                    status="passed",
+                    expectations=[
+                        EvalExpectationResult(0, "llm_marker", True, "◐"),
+                        EvalExpectationResult(1, "llm_response", True, "Hi"),
+                    ],
+                    duration_ms=50,
+                )
+            ],
+            duration_ms=60,
+        )
+
+    def test_result_roundtrips_through_the_worker_json(self):
+        result = self._result()
+        rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+
+    def test_results_jsonl_record_keeps_what_each_expectation_matched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="voice/x.py",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                result=self._result(),
+            )
+            _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertTrue(record["passed"])
+            self.assertEqual(
+                record["turns"][0]["expectations"],
+                [
+                    {
+                        "expectation_index": 0,
+                        "event_name": "llm_marker",
+                        "passed": True,
+                        "matched": "◐",
+                    },
+                    {
+                        "expectation_index": 1,
+                        "event_name": "llm_response",
+                        "passed": True,
+                        "matched": "Hi",
+                    },
+                ],
+            )
+            self.assertNotIn("events_seen", record)
+
+
 class TestSimulationRecords(unittest.TestCase):
     def test_result_roundtrips_through_the_worker_json(self):
         result = EvalSimulationResult(
@@ -592,8 +659,6 @@ class TestSimulationRecords(unittest.TestCase):
             end_call={"success": True, "reason": "done"},
             duration_ms=1234,
         )
-        import dataclasses
-
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
 
