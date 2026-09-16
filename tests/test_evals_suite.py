@@ -334,6 +334,32 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r.status for r in runs], ["done"] * 6)
 
 
+class TestRunFiles(unittest.TestCase):
+    def test_prefix_carries_the_bot_and_the_name_when_the_entry_has_one(self):
+        from pipecat.evals.suite import _RunFiles
+
+        logs = Path("/logs")
+        run = EvalRun(bot="turns/bot.py", scenario="scripted/turn", scenario_path=Path("x"))
+        self.assertEqual(_RunFiles.for_run(run, logs, None).prefix, "turns_bot.py__scripted__turn")
+        named = EvalRun(
+            bot="turns/bot.py", name="groq/llama", scenario="scripted/turn", scenario_path=Path("x")
+        )
+        self.assertEqual(
+            _RunFiles.for_run(named, logs, None).prefix, "turns_bot.py__groq_llama__scripted__turn"
+        )
+        repeated = EvalRun(
+            bot="turns/bot.py",
+            name="groq/llama",
+            scenario="turn",
+            scenario_path=Path("x"),
+            attempts=2,
+            attempt=2,
+        )
+        self.assertEqual(
+            _RunFiles.for_run(repeated, logs, None).prefix, "turns_bot.py__groq_llama__turn__002"
+        )
+
+
 class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
     """An inline body reaches the bot as a file; a body file sets the bot's directory."""
 
@@ -569,6 +595,48 @@ class TestManifestSimulations(unittest.TestCase):
             EvalRun(bot="b", scenario="mixed/nope", scenario_path=path).load()
         self.assertIn("no scenario called 'mixed/nope'", str(cm.exception))
 
+    def test_an_entry_name_labels_its_runs(self):
+        manifest = self._manifest(
+            "suite:\n"
+            "  - bot: bot.py\n    name: openai/gpt-4o-mini\n    scenarios: [greet]\n"
+            "  - bot: bot.py\n    name: groq/llama\n    scenarios: [greet]\n"
+            "  - bot: other.py\n    scenarios: [greet]\n"
+        )
+        self.assertEqual(
+            [r.name for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", "other.py"]
+        )
+        self.assertEqual([r.bot for r in manifest.runs], ["bot.py", "bot.py", "other.py"])
+        # The pattern filter sees the name and the bot path alike.
+        from pipecat.evals.suite import EvalSuite
+
+        self.assertEqual(
+            [r.name for r in EvalSuite(manifest).filter(pattern="groq")], ["groq/llama"]
+        )
+        self.assertEqual(len(EvalSuite(manifest).filter(pattern="bot.py")), 2)
+
+    def test_two_entries_may_not_run_a_scenario_under_one_label(self):
+        with self.assertRaises(ValueError) as cm:
+            self._manifest(
+                "suite:\n  - bot: bot.py\n    scenarios: [greet]\n  - bot: bot.py\n    scenarios: [greet]\n"
+            )
+        self.assertIn("'bot.py' runs 'greet/greet' twice", str(cm.exception))
+        # The same bot on different scenarios is fine, as is a named second entry.
+        self._manifest(
+            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n  - bot: bot.py\n    scenarios: [book]\n"
+        )
+        self._manifest(
+            "suite:\n  - bot: bot.py\n    scenarios: [greet]\n"
+            "  - bot: bot.py\n    name: again\n    scenarios: [greet]\n"
+        )
+
+    def test_an_entry_name_must_be_a_non_empty_string(self):
+        for bad in ('""', "3", "[a]"):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                self._manifest(
+                    f"suite:\n  - bot: bot.py\n    name: {bad}\n    scenarios: [greet]\n"
+                )
+            self.assertIn("'name:'", str(cm.exception))
+
     def test_a_flat_file_still_loads_and_warns(self):
         (self.base / "scenarios" / "old.yaml").write_text("name: old\nturns: []\n")
         with self.assertWarns(DeprecationWarning):
@@ -606,6 +674,7 @@ class TestScenarioRecords(unittest.TestCase):
             base = Path(tmp)
             run = EvalRun(
                 bot="voice/x.py",
+                name="openai/gpt-4o-mini",
                 scenario="greet",
                 scenario_path=base / "greet.yaml",
                 status="done",
@@ -614,6 +683,7 @@ class TestScenarioRecords(unittest.TestCase):
             _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
             record = json.loads((base / "results.jsonl").read_text())
             self.assertTrue(record["passed"])
+            self.assertEqual((record["bot"], record["name"]), ("voice/x.py", "openai/gpt-4o-mini"))
             self.assertEqual(
                 record["turns"][0]["expectations"],
                 [
@@ -686,6 +756,7 @@ class TestSimulationRecords(unittest.TestCase):
             _append_result(base / "results.jsonl", run, "flows_x.py__book__002", base, None)
             record = json.loads((base / "results.jsonl").read_text())
             self.assertEqual(record["scenario"], "book")
+            self.assertEqual(record["name"], "flows/x.py")
             self.assertEqual(record["kind"], "simulation")
             self.assertEqual(record["attempt"], 2)
             self.assertFalse(record["passed"])

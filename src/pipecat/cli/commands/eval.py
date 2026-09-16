@@ -621,7 +621,7 @@ def _row_seconds(group: list[EvalRun]) -> float | None:
 
 
 def _group_key(r: EvalRun) -> tuple[str, str]:
-    return (r.bot, r.scenario)
+    return (r.name, r.scenario)
 
 
 def _grouped_runs(runs: list[EvalRun]) -> dict[tuple[str, str], list[EvalRun]]:
@@ -670,7 +670,7 @@ class _EvalDashboard:
             cells.append(
                 (
                     _eval_status_cell(r, self._spinner),
-                    Text(r.bot),
+                    Text(r.name),
                     Text(r.scenario, style="cyan"),
                     Text(detail, style="dim"),
                 )
@@ -859,7 +859,7 @@ def _print_eval_line(r: EvalRun, *, show_attempt: bool = False) -> None:
     if tally:
         extra = f"{tally} {extra}"
     scenario = f"{r.scenario} #{r.attempt}" if show_attempt else r.scenario
-    print(f"  {_color(glyph, code)} {r.bot} {_color(scenario, '36')} {_dim(extra)}", flush=True)
+    print(f"  {_color(glyph, code)} {r.name} {_color(scenario, '36')} {_dim(extra)}", flush=True)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -989,7 +989,7 @@ def _print_failures(failed: list[EvalRun], total: int, *, show_attempt: bool) ->
     for r in failed:
         attempt = f" {_dim('#' + str(r.attempt))}" if show_attempt else ""
         tally = _turn_tally(r)
-        header = f"  {_red('✗')} {r.bot} {_color(r.scenario, '36')}{attempt}"
+        header = f"  {_red('✗')} {r.name} {_color(r.scenario, '36')}{attempt}"
         if tally and isinstance(r.result, EvalScriptResult):
             header = f"{header} {_dim(tally + ' passed')}"
         if r.error:
@@ -1144,7 +1144,7 @@ def suite(
         ..., help="Manifest YAML listing bots + their scenarios (scripted, or simulations)."
     ),
     pattern: str = typer.Option(
-        None, "-p", "--pattern", help="Only bots whose path contains this."
+        None, "-p", "--pattern", help="Only entries whose name or bot path contains this."
     ),
     scenario: str = typer.Option(None, "-s", "--scenario", help="Only this scenario name."),
     kind: EvalKind = typer.Option(None, "-k", "--kind", help="Only scenarios of this kind."),

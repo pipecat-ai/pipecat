@@ -36,8 +36,14 @@ Manifest format (YAML)::
           path: scenarios/vision-cat.yaml        # passed to the bot as --runner-body
         scenarios: [vision_describe]
       - bot: examples/turns/filter-incomplete-turns.py
+        name: openai/gpt-4o-mini                 # this entry's label, the bot path by default
         runner_body:
           data: {model: gpt-4o-mini}             # written to a file for the bot
+        scenarios: [turn_completion]
+      - bot: examples/turns/filter-incomplete-turns.py
+        name: groq/llama-3.3-70b
+        runner_body:
+          data: {model: llama-3.3-70b}
         scenarios: [turn_completion]
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
@@ -62,6 +68,13 @@ paths belongs in a file for that reason.
 .. deprecated:: 1.11.0
     Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``.
     Will be removed in 2.0.0.
+
+An entry's ``name:`` is its label: what the display, the ``-p`` filter, the
+results records and the artifact file names use, and what an entry's own
+``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
+needed when several entries share a bot, as when sweeping a model with
+``runner_body:``; two entries may not run the same scenario under the same
+label.
 
 ``concurrency`` is how many runs execute at once. An entry may set its own
 ``concurrency:`` to cap the runs of that bot below it, for a provider that
@@ -221,6 +234,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalScriptResult) else None
     record = {
         "bot": run.bot,
+        "name": run.name,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -267,6 +281,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
+        "name": run.name,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -366,7 +381,9 @@ class EvalRun:
     """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
 
     Parameters:
-        bot: Display name — the manifest's ``bot:`` (suite) or the bot URL (run).
+        bot: The manifest's ``bot:`` path (suite) or the bot URL (run).
+        name: The run's label: the manifest entry's ``name:``, or ``bot`` when
+            it has none. What the display, the filters and the results key on.
         scenario: Display name (the scenario or simulation, without ``.yaml``).
         scenario_path: Path to the scenario or simulation file.
         kind: ``script`` (played by :class:`~pipecat.evals.script_session.EvalScriptSession`)
@@ -401,6 +418,7 @@ class EvalRun:
     bot: str
     scenario: str
     scenario_path: Path
+    name: str = ""
     loaded: EvalScriptScenario | EvalSimulationScenario | None = None
     bot_path: Path | None = None
     bot_url: str | None = None
@@ -417,6 +435,10 @@ class EvalRun:
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
+
+    def __post_init__(self):
+        if not self.name:
+            self.name = self.bot
 
     @property
     def stem(self) -> str:
@@ -641,6 +663,9 @@ class EvalManifest:
         for item in data.get("suite", []):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
+            name = item.get("name", bot)
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"{path}: bot {bot!r} 'name:' must be a non-empty string")
             body = cls._runner_body(item.get("runner_body"), base, f"{path}: bot {bot!r}")
             concurrency = item.get("concurrency")
             if concurrency is not None and (
@@ -648,13 +673,15 @@ class EvalManifest:
             ):
                 raise ValueError(f"{path}: bot {bot!r} 'concurrency:' must be a positive integer")
             for scenario in item.get("scenarios", []):
-                name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
+                file_name, scenario_path = _resolve_scenario(
+                    str(scenario), base, settings.scenarios_dir
+                )
                 # A file that fails to load still gets a run, under the
                 # manifest's name for it, so the failure is reported.
                 try:
                     named = [(one.name, one) for one in EvalScenarioFile.load(scenario_path)]
                 except (ValueError, FileNotFoundError):
-                    named = [(name, None)]
+                    named = [(file_name, None)]
                 for run_name, one in named:
                     kind, attempts = EvalKind.SCRIPT, settings.repeat
                     if isinstance(one, EvalSimulationScenario):
@@ -663,6 +690,7 @@ class EvalManifest:
                     runs.append(
                         EvalRun(
                             bot=bot,
+                            name=name,
                             scenario=run_name,
                             loaded=one,
                             bot_path=bot_path,
@@ -675,6 +703,14 @@ class EvalManifest:
                             sweep=settings.repeat_given,
                         )
                     )
+        seen: set[tuple[str, str]] = set()
+        for run in runs:
+            if (run.name, run.scenario) in seen:
+                raise ValueError(
+                    f"{path}: {run.name!r} runs {run.scenario!r} twice; give one of the "
+                    f"entries a 'name:'"
+                )
+            seen.add((run.name, run.scenario))
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -736,10 +772,15 @@ class _RunFiles:
         """The files of ``run`` under ``logs_dir`` and ``record_dir``.
 
         The bot is part of the prefix because one bot can run several scenarios
-        at once; the attempt number joins it when the suite repeats, so no
-        attempt writes over another's artifacts.
+        at once, and the run's name joins it when the entry has one of its own,
+        so a bot's files list together and each entry's stay apart; the attempt
+        number joins it when the suite repeats, so no attempt writes over
+        another's artifacts.
         """
-        prefix = f"{run.bot.replace('/', '_')}__{run.stem}"
+        prefix = run.bot.replace("/", "_")
+        if run.name != run.bot:
+            prefix += f"__{run.name.replace('/', '_')}"
+        prefix += f"__{run.stem}"
         if run.attempts > 1:
             prefix += f"__{run.attempt:03d}"
         return cls(
@@ -806,10 +847,10 @@ class EvalSuite(BaseObject):
         scenario: str | None = None,
         kind: EvalKind | None = None,
     ) -> list[EvalRun]:
-        """Keep only the runs matching a bot-name substring, a scenario name, and/or a kind.
+        """Keep only the runs matching a bot substring, a scenario name, and/or a kind.
 
         Args:
-            pattern: Keep only runs whose bot name contains this substring.
+            pattern: Keep only runs whose name or bot path contains this substring.
             scenario: Keep only runs of this scenario: its full
                 ``<file>/<scenario>`` name, or either half of it, so a file's
                 name selects every scenario it holds.
@@ -820,7 +861,7 @@ class EvalSuite(BaseObject):
         """
         runs = self.runs
         if pattern:
-            runs = [r for r in runs if pattern in r.bot]
+            runs = [r for r in runs if pattern in r.name or pattern in r.bot]
         if scenario:
             runs = [r for r in runs if scenario in (r.scenario, *r.scenario.split("/"))]
         if kind:
@@ -897,7 +938,7 @@ class EvalSuite(BaseObject):
                         record_dir,
                         results_path,
                         sem,
-                        bot_sems.get(run.bot),
+                        bot_sems.get(run.name),
                         debug,
                         params,
                     )
@@ -945,12 +986,12 @@ class EvalSuite(BaseObject):
                 await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
 
     def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
-        """One semaphore per bot whose entry caps its concurrency; the lowest cap wins for a bot listed twice."""
+        """One semaphore per run name whose entry caps its concurrency; the lowest cap wins for a name listed twice."""
         caps: dict[str, int] = {}
         for run in self.runs:
             if run.concurrency is not None:
-                caps[run.bot] = min(caps.get(run.bot, run.concurrency), run.concurrency)
-        return {bot: asyncio.Semaphore(cap) for bot, cap in caps.items()}
+                caps[run.name] = min(caps.get(run.name, run.concurrency), run.concurrency)
+        return {name: asyncio.Semaphore(cap) for name, cap in caps.items()}
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""
