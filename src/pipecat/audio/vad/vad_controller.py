@@ -181,7 +181,7 @@ class VADController(BaseObject):
         self._vad_state = await self._handle_vad(frame.audio, self._vad_state)
 
         if self._vad_state == VADState.SPEAKING:
-            await self._call_event_handler("on_speech_activity")
+            await self._maybe_speech_activity()
 
     async def _handle_vad(self, audio: bytes, vad_state: VADState) -> VADState:
         """Handle Voice Activity Detection results and trigger appropriate events."""
