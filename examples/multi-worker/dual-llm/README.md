@@ -14,17 +14,17 @@ llm = PipecatDualLLMService(
 
 How a delegation crosses is the `BackendConnector`'s business, built from two strategies the service picks by frontend kind unless told otherwise:
 
-|                    | request (frontend → backend)                                        | reply (backend → frontend)                                   |
-| ------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------ |
-| text frontend      | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says |
-| realtime frontend  | `ExplicitBackendRequestStrategy`: a request the model words itself   | `OneShotBackendReplyStrategy`: every output at once, when done             |
+|                   | request (frontend → backend)                                                       | reply (backend → frontend)                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| text frontend     | `TranscriptBackendRequestStrategy`: the conversation since the previous delegation | `SpeakOnPrefersSpokenBackendReplyStrategy`: progress relayed as it comes, spoken as the backend's flag says |
+| realtime frontend | `ExplicitBackendRequestStrategy`: a request the model words itself                 | `OneShotBackendReplyStrategy`: every output at once, when done                                              |
 
 ## Examples
 
-| Example                                            | What it shows                                                                                          |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| [`cascade-frontend.py`](cascade-frontend.py)       | A cascade pipeline (STT + GPT + TTS) as the frontend, all defaults.                                    |
-| [`realtime-frontend.py`](realtime-frontend.py)     | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example.       |
+| Example                                        | What it shows                                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`cascade-frontend.py`](cascade-frontend.py)   | A cascade pipeline (STT + GPT + TTS) as the frontend, all defaults.                               |
+| [`realtime-frontend.py`](realtime-frontend.py) | OpenAI Realtime as the frontend, all defaults. Same backend, same prompts as the cascade example. |
 
 Run any of them the usual way, then connect a client:
 
