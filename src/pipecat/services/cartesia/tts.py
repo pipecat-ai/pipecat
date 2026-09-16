@@ -30,6 +30,12 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.text.phonemes import (
+    PhonemeAlphabet,
+    ipa_phones,
+    normalize_ipa,
+    stress_before_vowels,
+)
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -135,6 +141,33 @@ def language_to_cartesia_language(language: Language) -> str:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+def format_cartesia_pronunciation(
+    word: str, phonemes: str, alphabet: PhonemeAlphabet
+) -> str | None:
+    """Render a pronunciation as Cartesia inline phonemes.
+
+    Cartesia reads ``<<…>>`` blocks of ``|``-separated IPA phones, with stress
+    marks directly before the vowel they stress. Each word of the IPA becomes its
+    own block.
+
+    Args:
+        word: The word being pronounced (unused: the block replaces it).
+        phonemes: The pronunciation, written in ``alphabet``.
+        alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+    Returns:
+        The inline phoneme blocks, e.g. ``<<m|ɛ|t|f|ˈ|ɔ|ɹ|m|ɪ|n>>``, or None for an
+        alphabet other than IPA or an empty pronunciation.
+    """
+    if alphabet != PhonemeAlphabet.IPA:
+        return None
+    blocks = [
+        "<<" + "|".join(stress_before_vowels(ipa_phones(w))) + ">>"
+        for w in normalize_ipa(phonemes).split()
+    ]
+    return " ".join(blocks) or None
 
 
 class CartesiaEmotion(StrEnum):
@@ -398,6 +431,24 @@ class CartesiaTTSService(WebsocketTTSService):
         self._max_buffer_delay_ms = max_buffer_delay_ms
 
         self._receive_task = None
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, phonemes, alphabet)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -899,6 +950,24 @@ class CartesiaHttpTTSService(TTSService):
 
         self._session: aiohttp.ClientSession | None = aiohttp_session
         self._owns_session = aiohttp_session is None
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``. Only IPA is supported.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, phonemes, alphabet)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

@@ -10,7 +10,7 @@ import asyncio
 import uuid
 import warnings
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
@@ -57,7 +57,9 @@ from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
+from pipecat.utils.text.phonemes import PhonemeAlphabet
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.transforms.pronunciations import pronunciation_transform
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.types import is_given
@@ -673,6 +675,76 @@ class TTSService(AIService):
             for agg_type, func in self._text_transforms
             if not (agg_type == aggregation_type and func == transform_function)
         ]
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a word's pronunciation in this service's markup.
+
+        Services that support pronunciation hints override this. The base
+        implementation supports none.
+
+        Args:
+            word: The word as it appears in the text.
+            phonemes: How to pronounce it, written in ``alphabet``.
+            alphabet: The alphabet ``phonemes`` is written in.
+
+        Returns:
+            The text to send in place of ``word``, or None when this service cannot
+            use a pronunciation in that alphabet.
+        """
+        return None
+
+    @classmethod
+    def pronounce_ipa(
+        cls, pronunciations: Mapping[str, str]
+    ) -> Callable[[str, str | AggregationType], Awaitable[str]]:
+        """Create a text transform that makes this service say words as IPA describes.
+
+        Each word is replaced with :meth:`format_pronunciation` output, so the
+        same IPA works with any service that supports it. Words the service
+        cannot use are reported once and spoken as written.
+
+        Args:
+            pronunciations: Word to IPA, e.g. ``{"Metformin": "mɛtˈfɔɹmɪn"}``.
+
+        Returns:
+            A transform to register with ``text_transforms``.
+
+        Example::
+
+            tts = CartesiaTTSService(
+                text_transforms=[
+                    ("*", CartesiaTTSService.pronounce_ipa({"Metformin": "mɛtˈfɔɹmɪn"})),
+                ],
+            )
+        """
+        return pronunciation_transform(
+            pronunciations, PhonemeAlphabet.IPA, cls.format_pronunciation, service_name=cls.__name__
+        )
+
+    @classmethod
+    def pronounce_arpabet(
+        cls, pronunciations: Mapping[str, str]
+    ) -> Callable[[str, str | AggregationType], Awaitable[str]]:
+        """Create a text transform that makes this service say words as Arpabet describes.
+
+        Like :meth:`pronounce_ipa`, with CMU Arpabet pronunciations.
+
+        Args:
+            pronunciations: Word to Arpabet with stress digits, e.g.
+                ``{"Metformin": "M EH0 T F AO1 R M IH0 N"}``.
+
+        Returns:
+            A transform to register with ``text_transforms``.
+        """
+        return pronunciation_transform(
+            pronunciations,
+            PhonemeAlphabet.ARPABET,
+            cls.format_pronunciation,
+            service_name=cls.__name__,
+        )
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings delta.

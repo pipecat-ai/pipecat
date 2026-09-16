@@ -11,6 +11,7 @@ with support for streaming audio, word timestamps, and voice customization.
 """
 
 import base64
+import html
 import json
 import warnings
 from collections.abc import AsyncGenerator, Mapping
@@ -55,6 +56,7 @@ from pipecat.services.tts_service import (
 )
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.phonemes import PhonemeAlphabet, normalize_arpabet, normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -107,6 +109,45 @@ def build_elevenlabs_voice_settings(
             voice_settings[key] = val
 
     return voice_settings or None
+
+
+def format_elevenlabs_pronunciation(
+    word: str, phonemes: str, alphabet: PhonemeAlphabet
+) -> str | None:
+    """Render a pronunciation as ElevenLabs SSML ``<phoneme>`` tags.
+
+    A phoneme tag holds a single word, so a phrase gets one tag per word and its
+    IPA must have as many words. Arpabet cannot mark where one word ends, so it is
+    only accepted for a single word. Phoneme tags are honored by the
+    ``eleven_flash_v2`` model.
+
+    Args:
+        word: The word being pronounced, kept inside the tag.
+        phonemes: The pronunciation, written in ``alphabet``.
+        alphabet: The alphabet of ``phonemes``: IPA or CMU Arpabet.
+
+    Returns:
+        The phoneme tags, e.g.
+        ``<phoneme alphabet="ipa" ph="mɛtˈfɔɹmɪn">Metformin</phoneme>``, or None
+        when the words and phonemes do not line up or the Arpabet is invalid.
+    """
+    words = word.split()
+    if alphabet == PhonemeAlphabet.IPA:
+        tag_alphabet = "ipa"
+        spoken = normalize_ipa(phonemes).split()
+    elif alphabet == PhonemeAlphabet.ARPABET and len(words) == 1:
+        tag_alphabet = "cmu-arpabet"
+        normalized = normalize_arpabet(phonemes)
+        spoken = [normalized] if normalized else []
+    else:
+        return None
+    if not words or len(spoken) != len(words):
+        return None
+    return " ".join(
+        f'<phoneme alphabet="{tag_alphabet}" ph="{html.escape(ph)}">'
+        f"{html.escape(w, quote=False)}</phoneme>"
+        for w, ph in zip(words, spoken)
+    )
 
 
 @deprecated(
@@ -438,6 +479,25 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         # Context IDs whose context-init has been sent, so the keepalive knows
         # which contexts are safe to target.
         self._context_init_sent: set[str] = set()
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as SSML ``<phoneme>`` tags.
+
+        See :func:`format_elevenlabs_pronunciation`. Phoneme tags are honored by the
+        ``eleven_flash_v2`` model.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``: IPA or CMU Arpabet.
+
+        Returns:
+            The phoneme tags, or None when the pronunciation cannot be used.
+        """
+        return format_elevenlabs_pronunciation(word, phonemes, alphabet)
 
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
@@ -856,6 +916,25 @@ class ElevenLabsHttpTTSService(TTSService):
             True, as ElevenLabs HTTP service supports metrics generation.
         """
         return True
+
+    @classmethod
+    def format_pronunciation(
+        cls, word: str, phonemes: str, alphabet: PhonemeAlphabet
+    ) -> str | None:
+        """Render a pronunciation as SSML ``<phoneme>`` tags.
+
+        See :func:`format_elevenlabs_pronunciation`. Phoneme tags are honored by the
+        ``eleven_flash_v2`` model.
+
+        Args:
+            word: The word being pronounced.
+            phonemes: The pronunciation, written in ``alphabet``.
+            alphabet: The alphabet of ``phonemes``: IPA or CMU Arpabet.
+
+        Returns:
+            The phoneme tags, or None when the pronunciation cannot be used.
+        """
+        return format_elevenlabs_pronunciation(word, phonemes, alphabet)
 
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
