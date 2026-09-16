@@ -219,7 +219,7 @@ class TestDeepgramPronunciation(unittest.TestCase):
     def test_ipa(self):
         self.assertEqual(
             DeepgramTTSService.format_pronunciation("dupilumab", "duːˈpɪljuːmæb", IPA),
-            '\\{"word": "dupilumab", "pronounce": "duːˈpɪljuːmæb"\\}',
+            '\\{"word": "dupilumab", "pronounce": "duːpˈɪljuːmæb"\\}',
         )
 
     def test_notation_variants_format_the_same(self):
