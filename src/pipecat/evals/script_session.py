@@ -8,13 +8,13 @@
 
 Example::
 
-    scenario = EvalScriptScenario.load("scenarios/greeting.yaml")
-    result = await EvalScriptSession.from_scenario(scenario, "ws://localhost:7860").run()
-    if result.passed:
-        print("PASS")
-    else:
-        for f in result.failures:
-            print(f"  {f}")
+    for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
+        result = await EvalScriptSession.from_scenario(scenario, "ws://localhost:7860").run()
+        if result.passed:
+            print(scenario.name, "PASS")
+        else:
+            for f in result.failures:
+                print(f"  {f}")
 
     # Per-turn outcomes, for a scenario scored a turn at a time.
     scored = [t for t in result.turns if t.status != "not_run"]

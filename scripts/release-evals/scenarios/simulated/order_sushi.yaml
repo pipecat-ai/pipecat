@@ -8,21 +8,24 @@ simulator: !include ../simulator.yaml
 
 judge: !include ../judge_text.yaml
 
-persona: |
-  Riley, ordering dinner. Casual and quick: wants three California rolls and
-  confirms the order once it is read back correctly.
+scenarios:
+  - name: order_sushi
+    persona: |
+      Riley, ordering dinner. Casual and quick: wants three California rolls and
+      confirms the order once it is read back correctly.
 
-goal: "Order three California rolls and confirm the order."
+    goal: "Order three California rolls and confirm the order."
 
-success: "the bot took an order for three California rolls and completed the order"
+    success: "the bot took an order for three California rolls and completed the order"
 
-metrics:
-  - name: accuracy
-    criterion: "when the reply states the order, it is three California rolls; a reply that does not state the order passes"
-    min_score: 1
-  - name: politeness
-    criterion: "the reply is courteous and helpful, never curt or dismissive"
-    min_score: 1
+    metrics:
+      - name: accuracy
+        criterion: "when the reply states the order, it is three California rolls; a reply that does not state the order passes"
+        min_score: 1
+      - name: politeness
+        criterion: "the reply is courteous and helpful, never curt or dismissive"
+        min_score: 1
 
-max_turns: 8
-max_duration_s: 120
+    max_turns: 8
+
+    max_duration_s: 120

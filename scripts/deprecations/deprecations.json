@@ -135,6 +135,28 @@
       "location": "pipecat/evals/results.py"
     },
     {
+      "subject": "load_scenario_file",
+      "module": "pipecat.evals.scenario",
+      "kind": "function",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`load_scenario_file` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/scenario.py"
+    },
+    {
+      "subject": "pipecat.evals.scenario",
+      "module": "pipecat.evals.scenario",
+      "kind": "module",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "scenarios:",
+      "message": "Use a ``scenarios:`` list instead of a scenario's own keys (``turns:`` or ``persona:``) at a file's top level. Such a file still loads, as that one scenario under the file's ``name:``, with a ``DeprecationWarning``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/scenario.py"
+    },
+    {
       "subject": "EvalScenario",
       "module": "pipecat.evals.script",
       "kind": "class",
@@ -143,6 +165,17 @@
       "relation": "use_existing",
       "replacement": "EvalScriptScenario",
       "message": "`EvalScenario` is deprecated since 1.9.0 and will be removed in 2.0.0. Use `EvalScriptScenario` instead.",
+      "location": "pipecat/evals/script.py"
+    },
+    {
+      "subject": "EvalScriptScenario.load",
+      "module": "pipecat.evals.script",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`EvalScriptScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
       "location": "pipecat/evals/script.py"
     },
     {
@@ -397,6 +430,17 @@
       "replacement": "params",
       "message": "Use ``params`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/evals/session.py"
+    },
+    {
+      "subject": "EvalSimulationScenario.load",
+      "module": "pipecat.evals.simulation",
+      "kind": "method",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EvalScenarioFile.load",
+      "message": "`EvalSimulationScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. Use `EvalScenarioFile.load` instead.",
+      "location": "pipecat/evals/simulation.py"
     },
     {
       "subject": "EvalSimulationDriver.transcript",

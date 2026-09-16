@@ -1,11 +1,10 @@
-name: interruption_text
+name: interruption
 
-# Text modality: the user barges in mid-response. The bot must drop the
-# in-progress answer and respond to the new question (exercises interruption
-# handling and context ordering). send_after fires 2s after the bot starts its
-# long answer, so there's a real response to interrupt.
-
-judge: !include ../judge_text.yaml
+# The user barges in mid-response. The bot must drop the in-progress answer
+# and respond to the new question (exercises interruption handling and
+# context ordering). send_after fires 2s after the bot starts its long
+# answer, so there's a real response to interrupt. The same turns run in text
+# and in audio.
 
 turns:
   # Wait for the bot's on-connect greeting before speaking (avoids barging into
@@ -28,3 +27,11 @@ turns:
       - event: bot_interrupted
       - event: response
         eval: "the response says the capital of Japan is Tokyo, instead of continuing the Paris story"
+
+scenarios:
+  - name: text
+    judge: !include ../judge_text.yaml
+
+  - name: audio
+    user: !include ../user_audio.yaml
+    judge: !include ../judge_audio.yaml

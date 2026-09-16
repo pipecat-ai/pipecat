@@ -34,13 +34,13 @@ Manifest format (YAML)::
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
 
-A ``scenarios:`` entry names a scenario file of either kind, a scripted one or a
-simulation, and the file says which (see
-:func:`~pipecat.evals.scenario.load_scenario_file`). A name resolves under
-``scenarios_dir`` with ``.yaml`` added and may carry a folder, as
-``scripted/greeting``; a name ending in ``.yaml`` is a path relative to the
-manifest instead. A simulation runs as many
-times as its ``runs:`` says, and every run must pass.
+A ``scenarios:`` entry names a scenario file, and the file contributes one run
+per scenario it holds, scripted or a simulation as each says (see
+:class:`~pipecat.evals.scenario.EvalScenarioFile`), named
+``<file name>/<scenario name>``. A name resolves under ``scenarios_dir`` with
+``.yaml`` added and may carry a folder, as ``scripted/greeting``; a name ending
+in ``.yaml`` is a path relative to the manifest instead. A simulation runs as
+many times as its ``runs:`` says, and every run must pass.
 
 An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
 passed to the bot as ``--runner-body``, supplying runner-args data it would
@@ -83,7 +83,8 @@ from pipecat.evals.results import (
     EvalSimulationResult,
     EvalSimulationTurnVerdict,
 )
-from pipecat.evals.scenario import EvalKind, load_scenario_file
+from pipecat.evals.scenario import EvalKind, EvalScenarioFile
+from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
@@ -353,11 +354,14 @@ class EvalRun:
         error: Spawn/connection error message, if the run failed before producing a result.
         started_at: Monotonic start time, for the live elapsed counter.
         duration_ms: Wall-clock time the run took, in milliseconds.
+        loaded: The scenario, when the run was built from a loaded file;
+            :meth:`load` returns it, or reads the file when it is ``None``.
     """
 
     bot: str
     scenario: str
     scenario_path: Path
+    loaded: EvalScriptScenario | EvalSimulationScenario | None = None
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
@@ -371,6 +375,24 @@ class EvalRun:
     error: str | None = None
     started_at: float | None = None
     duration_ms: int | None = None
+
+    @property
+    def stem(self) -> str:
+        """The scenario name as a file name stem: a group entry's ``/`` becomes ``__``."""
+        return self.scenario.replace("/", "__")
+
+    def load(self) -> EvalScriptScenario | EvalSimulationScenario:
+        """The run's scenario: as loaded when the run was built, else read from its file.
+
+        Raises:
+            ValueError: If the file is invalid.
+            KeyError: If the file holds no scenario of this name.
+            FileNotFoundError: If the file doesn't exist.
+        """
+        loaded = self.loaded
+        if loaded is None:
+            loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+        return loaded
 
 
 @dataclass(frozen=True)
@@ -573,26 +595,30 @@ class EvalManifest:
             runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
-                kind, attempts = EvalKind.SCRIPT, settings.repeat
+                # A file that fails to load still gets a run, under the
+                # manifest's name for it, so the failure is reported.
                 try:
-                    loaded = load_scenario_file(scenario_path)
+                    named = [(one.name, one) for one in EvalScenarioFile.load(scenario_path)]
                 except (ValueError, FileNotFoundError):
-                    loaded = None
-                if isinstance(loaded, EvalSimulationScenario):
-                    kind = EvalKind.SIMULATION
-                    attempts = settings.repeat if settings.repeat_given else loaded.runs
-                runs.append(
-                    EvalRun(
-                        bot=bot,
-                        scenario=name,
-                        bot_path=bot_path,
-                        scenario_path=scenario_path,
-                        runner_body_path=runner_body_path,
-                        kind=kind,
-                        attempts=attempts,
-                        sweep=settings.repeat_given,
+                    named = [(name, None)]
+                for run_name, one in named:
+                    kind, attempts = EvalKind.SCRIPT, settings.repeat
+                    if isinstance(one, EvalSimulationScenario):
+                        kind = EvalKind.SIMULATION
+                        attempts = settings.repeat if settings.repeat_given else one.runs
+                    runs.append(
+                        EvalRun(
+                            bot=bot,
+                            scenario=run_name,
+                            loaded=one,
+                            bot_path=bot_path,
+                            scenario_path=scenario_path,
+                            runner_body_path=runner_body_path,
+                            kind=kind,
+                            attempts=attempts,
+                            sweep=settings.repeat_given,
+                        )
                     )
-                )
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -634,7 +660,7 @@ class _RunFiles:
         at once; the attempt number joins it when the suite repeats, so no
         attempt writes over another's artifacts.
         """
-        prefix = f"{run.bot.replace('/', '_')}__{run.scenario}"
+        prefix = f"{run.bot.replace('/', '_')}__{run.stem}"
         if run.attempts > 1:
             prefix += f"__{run.attempt:03d}"
         return cls(
@@ -704,7 +730,9 @@ class EvalSuite(BaseObject):
 
         Args:
             pattern: Keep only runs whose bot name contains this substring.
-            scenario: Keep only runs for this exact scenario name.
+            scenario: Keep only runs of this scenario: its full
+                ``<file>/<scenario>`` name, or either half of it, so a file's
+                name selects every scenario it holds.
             kind: Keep only runs of this kind.
 
         Returns:
@@ -714,7 +742,7 @@ class EvalSuite(BaseObject):
         if pattern:
             runs = [r for r in runs if pattern in r.bot]
         if scenario:
-            runs = [r for r in runs if r.scenario == scenario]
+            runs = [r for r in runs if scenario in (r.scenario, *r.scenario.split("/"))]
         if kind:
             runs = [r for r in runs if r.kind == kind]
         self.runs = runs

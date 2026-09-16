@@ -5,13 +5,15 @@ name: weather
 
 judge: !include ../judge_text.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+scenarios:
+  - name: weather
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
 
-  - user: "What's the weather in San Francisco, California? Use Fahrenheit."
-    expect:
-      - event: response
-        eval: "the response describes the weather in San Francisco, including a temperature in degrees"
+      - user: "What's the weather in San Francisco, California? Use Fahrenheit."
+        expect:
+          - event: response
+            eval: "the response describes the weather in San Francisco, including a temperature in degrees"
