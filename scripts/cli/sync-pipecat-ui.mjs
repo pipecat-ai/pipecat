@@ -18,12 +18,12 @@
 //
 // Usage (from the repository root, Node 22+, npm and git required):
 //
-//   node scripts/sync-pipecat-ui.mjs                    # latest pipecat-ui release
-//   node scripts/sync-pipecat-ui.mjs --tag v1.0.0       # a specific release
-//   node scripts/sync-pipecat-ui.mjs --ref my-branch    # an unreleased branch or tag
-//   node scripts/sync-pipecat-ui.mjs --repo ../pipecat-ui --ref my-branch
+//   node scripts/cli/sync-pipecat-ui.mjs                    # latest pipecat-ui release
+//   node scripts/cli/sync-pipecat-ui.mjs --tag v1.0.0       # a specific release
+//   node scripts/cli/sync-pipecat-ui.mjs --ref my-branch    # an unreleased branch or tag
+//   node scripts/cli/sync-pipecat-ui.mjs --repo ../pipecat-ui --ref my-branch
 //                                                       # ... from a local clone
-//   node scripts/sync-pipecat-ui.mjs --keep             # leave the scratch project behind
+//   node scripts/cli/sync-pipecat-ui.mjs --keep             # leave the scratch project behind
 //
 // Review the resulting diff, then run the client generation tests and build a
 // generated project before committing.
@@ -69,7 +69,7 @@ if (options.tag && options.ref) {
   throw new Error("--tag and --ref are mutually exclusive");
 }
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const output = path.join(repoRoot, "src/pipecat/cli/templates/client/_pipecat_ui");
 
 async function run(command, args, cwd, { capture = false } = {}) {

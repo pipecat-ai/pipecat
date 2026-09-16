@@ -41,7 +41,7 @@ uv run ruff format --check
 uv lock && uv sync
 
 # Refresh the Pipecat UI component snapshot vendored into the CLI's React client templates
-node scripts/sync-pipecat-ui.mjs
+node scripts/cli/sync-pipecat-ui.mjs
 ```
 
 ## Architecture

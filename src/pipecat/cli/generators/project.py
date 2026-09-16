@@ -738,7 +738,7 @@ class ProjectGenerator:
         """Return the vendored Pipecat UI snapshot directory.
 
         The snapshot is what ``npx shadcn add @pipecat/...`` installs into a
-        project; ``scripts/sync-pipecat-ui.mjs`` refreshes it from the registry.
+        project; ``scripts/cli/sync-pipecat-ui.mjs`` refreshes it from the registry.
         """
         import pipecat.cli
 
@@ -756,12 +756,12 @@ class ProjectGenerator:
         except (OSError, ValueError, KeyError, TypeError) as e:
             raise RuntimeError(
                 f"Pipecat UI snapshot manifest missing or malformed at {manifest}; "
-                "regenerate it with `node scripts/sync-pipecat-ui.mjs`"
+                "regenerate it with `node scripts/cli/sync-pipecat-ui.mjs`"
             ) from e
         if not isinstance(dependencies, dict):
             raise RuntimeError(
                 f"Pipecat UI snapshot manifest at {manifest} has no dependency map; "
-                "regenerate it with `node scripts/sync-pipecat-ui.mjs`"
+                "regenerate it with `node scripts/cli/sync-pipecat-ui.mjs`"
             )
         return dependencies
 
