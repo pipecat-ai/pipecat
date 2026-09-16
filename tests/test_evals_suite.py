@@ -603,14 +603,17 @@ class TestManifestSimulations(unittest.TestCase):
             "  - bot: other.py\n    scenarios: [greet]\n"
         )
         self.assertEqual(
-            [r.name for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", "other.py"]
+            [r.label for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", "other.py"]
+        )
+        self.assertEqual(
+            [r.name for r in manifest.runs], ["openai/gpt-4o-mini", "groq/llama", None]
         )
         self.assertEqual([r.bot for r in manifest.runs], ["bot.py", "bot.py", "other.py"])
         # The pattern filter sees the name and the bot path alike.
         from pipecat.evals.suite import EvalSuite
 
         self.assertEqual(
-            [r.name for r in EvalSuite(manifest).filter(pattern="groq")], ["groq/llama"]
+            [r.label for r in EvalSuite(manifest).filter(pattern="groq")], ["groq/llama"]
         )
         self.assertEqual(len(EvalSuite(manifest).filter(pattern="bot.py")), 2)
 

@@ -234,7 +234,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalScriptResult) else None
     record = {
         "bot": run.bot,
-        "name": run.name,
+        "name": run.label,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -281,7 +281,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
     result = run.result if isinstance(run.result, EvalSimulationResult) else None
     record = {
         "bot": run.bot,
-        "name": run.name,
+        "name": run.label,
         "scenario": run.scenario,
         "kind": run.kind,
         "attempt": run.attempt,
@@ -382,8 +382,8 @@ class EvalRun:
 
     Parameters:
         bot: The manifest's ``bot:`` path (suite) or the bot URL (run).
-        name: The run's label: the manifest entry's ``name:``, or ``bot`` when
-            it has none. What the display, the filters and the results key on.
+        name: The manifest entry's ``name:``, or ``None`` when it has none;
+            :attr:`label` is what the display, the filters and the results use.
         scenario: Display name (the scenario or simulation, without ``.yaml``).
         scenario_path: Path to the scenario or simulation file.
         kind: ``script`` (played by :class:`~pipecat.evals.script_session.EvalScriptSession`)
@@ -418,7 +418,7 @@ class EvalRun:
     bot: str
     scenario: str
     scenario_path: Path
-    name: str = ""
+    name: str | None = None
     loaded: EvalScriptScenario | EvalSimulationScenario | None = None
     bot_path: Path | None = None
     bot_url: str | None = None
@@ -436,9 +436,10 @@ class EvalRun:
     started_at: float | None = None
     duration_ms: int | None = None
 
-    def __post_init__(self):
-        if not self.name:
-            self.name = self.bot
+    @property
+    def label(self) -> str:
+        """The run's label: the entry's ``name``, or its ``bot`` when it has none."""
+        return self.name or self.bot
 
     @property
     def stem(self) -> str:
@@ -663,8 +664,8 @@ class EvalManifest:
         for item in data.get("suite", []):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
-            name = item.get("name", bot)
-            if not isinstance(name, str) or not name.strip():
+            name = item.get("name")
+            if name is not None and (not isinstance(name, str) or not name.strip()):
                 raise ValueError(f"{path}: bot {bot!r} 'name:' must be a non-empty string")
             body = cls._runner_body(item.get("runner_body"), base, f"{path}: bot {bot!r}")
             concurrency = item.get("concurrency")
@@ -705,12 +706,12 @@ class EvalManifest:
                     )
         seen: set[tuple[str, str]] = set()
         for run in runs:
-            if (run.name, run.scenario) in seen:
+            if (run.label, run.scenario) in seen:
                 raise ValueError(
-                    f"{path}: {run.name!r} runs {run.scenario!r} twice; give one of the "
+                    f"{path}: {run.label!r} runs {run.scenario!r} twice; give one of the "
                     f"entries a 'name:'"
                 )
-            seen.add((run.name, run.scenario))
+            seen.add((run.label, run.scenario))
         most = max((run.attempts for run in runs), default=1)
         if most > 1:
             runs = [
@@ -778,7 +779,7 @@ class _RunFiles:
         another's artifacts.
         """
         prefix = run.bot.replace("/", "_")
-        if run.name != run.bot:
+        if run.name is not None:
             prefix += f"__{run.name.replace('/', '_')}"
         prefix += f"__{run.stem}"
         if run.attempts > 1:
@@ -861,7 +862,7 @@ class EvalSuite(BaseObject):
         """
         runs = self.runs
         if pattern:
-            runs = [r for r in runs if pattern in r.name or pattern in r.bot]
+            runs = [r for r in runs if pattern in r.label or pattern in r.bot]
         if scenario:
             runs = [r for r in runs if scenario in (r.scenario, *r.scenario.split("/"))]
         if kind:
@@ -938,7 +939,7 @@ class EvalSuite(BaseObject):
                         record_dir,
                         results_path,
                         sem,
-                        bot_sems.get(run.name),
+                        bot_sems.get(run.label),
                         debug,
                         params,
                     )
@@ -986,12 +987,12 @@ class EvalSuite(BaseObject):
                 await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
 
     def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
-        """One semaphore per run name whose entry caps its concurrency; the lowest cap wins for a name listed twice."""
+        """One semaphore per label whose entry caps its concurrency; the lowest cap wins for a label listed twice."""
         caps: dict[str, int] = {}
         for run in self.runs:
             if run.concurrency is not None:
-                caps[run.name] = min(caps.get(run.name, run.concurrency), run.concurrency)
-        return {name: asyncio.Semaphore(cap) for name, cap in caps.items()}
+                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
+        return {label: asyncio.Semaphore(cap) for label, cap in caps.items()}
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""
