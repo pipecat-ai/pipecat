@@ -132,24 +132,38 @@ def language_to_assemblyai_language(language: Language) -> str:
         The AssemblyAI language code.
     """
     LANGUAGE_MAP = {
-        Language.AR: "ar",
-        Language.DA: "da",
-        Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
-        Language.FI: "fi",
         Language.FR: "fr",
-        Language.HE: "he",
-        Language.HI: "hi",
+        Language.DE: "de",
         Language.IT: "it",
-        Language.JA: "ja",
-        Language.NL: "nl",
-        Language.NO: "no",
         Language.PT: "pt",
-        Language.SV: "sv",
         Language.TR: "tr",
+        Language.NL: "nl",
+        Language.SV: "sv",
+        Language.NO: "no",
+        Language.DA: "da",
+        Language.FI: "fi",
+        Language.HI: "hi",
         Language.VI: "vi",
+        Language.AR: "ar",
+        Language.HE: "he",
+        Language.JA: "ja",
+        Language.UR: "ur",
         Language.ZH: "zh",
+        Language.RU: "ru",
+        Language.KO: "ko",
+        Language.CA: "ca",
+        Language.GL: "gl",
+        Language.RO: "ro",
+        Language.ET: "et",
+        Language.FA: "fa",
+        Language.YUE: "yue",
+        Language.AF: "af",
+        Language.MR: "mr",
+        Language.ZU: "zu",
+        Language.XH: "xh",
+        Language.NN: "nn",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
@@ -206,11 +220,13 @@ class AssemblyAISTTSettings(STTSettings):
             "en", "es", "fr"). On U3 Pro models, a tier-1 code
             ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
             language; other supported codes are "tr", "nl", "sv", "no", "da",
-            "fi", "hi", "vi", "ar", "he", "ja", "zh". This is one of the names
-            AssemblyAI accepts for its declared-language parameter, alongside
-            ``language_codes``, which covers the same languages as ``Language``
-            enums and is bound in preference to this one when both are set. Prefer
-            ``language_codes``. Defaults to None (not sent; no steering).
+            "fi", "hi", "vi", "ar", "he", "ja", "ur", "zh", "ru", "ko", "ca",
+            "gl", "ro", "et", "fa", "yue", "af", "mr", "zu", "xh", "nn". This
+            is one of the names AssemblyAI accepts for its declared-language
+            parameter, alongside ``language_codes``, which covers the same
+            languages as ``Language`` enums and is bound in preference to this
+            one when both are set. Prefer ``language_codes``. Defaults to None
+            (not sent; no steering).
         language_codes: Customer-declared audio languages. A single language (e.g.
             ``[Language.ES]``) pins transcription to that language; several (e.g.
             ``[Language.EN, Language.ES]``) steer toward that subset while keeping
@@ -450,28 +466,12 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"or use model='universal-3-5-pro'."
             )
 
-        if (
-            not is_u3_pro
-            and default_settings.prompt is not None
-            and default_settings.keyterms_prompt is not None
-        ):
+        if not is_u3_pro and default_settings.prompt is not None:
             raise ValueError(
-                f"The prompt and keyterms_prompt parameters cannot be used in the same request "
-                f"with model {default_settings.model}; only U3 Pro models support combining them. "
-                "Please choose either one or the other based on your use case. When you use "
-                "keyterms_prompt, your boosted words are appended to the default prompt automatically. "
-                "Or to boost within prompt: <prompt> + Make sure to boost the words <keyterms> "
-                "in the audio. "
+                f"prompt is only supported by U3 Pro models and will be rejected by the server "
+                f"for model {default_settings.model}. Use keyterms_prompt instead, or switch to "
+                "a U3 Pro model to use prompt (optionally combined with keyterms_prompt). "
                 "For more info go to: https://www.assemblyai.com/docs/streaming/universal-3-pro"
-            )
-
-        if default_settings.prompt is not None:
-            logger.warning(
-                "Custom prompt detected. Prompting is a beta feature. We recommend testing "
-                "with no prompt first, as this will use our optimized default prompt for "
-                "voice agents. Bad prompts may lead to bad results. If you'd like to create "
-                "your own prompt, check out our prompting guide at: "
-                "https://www.assemblyai.com/docs/streaming/prompting"
             )
 
         # continuous_partials and interruption_delay are U3 Pro-only.
