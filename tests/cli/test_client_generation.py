@@ -28,6 +28,15 @@ def assert_pipecat_ui_source(client_path, src):
             assert "voice-ui-kit" not in file.read_text(), f"{file} references voice-ui-kit"
 
 
+def test_every_web_transport_declares_a_client_package():
+    """Client package.json rendering depends on each web transport naming its npm package."""
+    from pipecat.cli.registry import ServiceRegistry
+
+    for transport in ServiceRegistry.WEBRTC_TRANSPORTS:
+        assert transport.client_package, f"{transport.value} has no client_package"
+        assert transport.client_package_version, f"{transport.value} has no version"
+
+
 class TestClientGeneration:
     """Test client generation with different configurations."""
 

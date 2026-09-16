@@ -60,6 +60,10 @@ class ServiceDefinition:
             produces os.getenv("ENV_VAR", "default") instead of os.getenv("ENV_VAR").
             Use this for params where the quickstart should work without the user
             setting the env var (e.g., model or voice defaults).
+        client_package: npm package a generated web client installs to connect over
+            this transport (e.g., "@pipecat-ai/daily-transport"), with its version
+            range in ``client_package_version``. Only web transports have one.
+        client_package_version: Version range for ``client_package`` (e.g., "^1.6.9").
     """
 
     value: str
@@ -73,6 +77,8 @@ class ServiceDefinition:
     recommended: bool = False
     additional_imports: list[str] | None = None
     param_defaults: dict[str, str] | None = None
+    client_package: str | None = None
+    client_package_version: str | None = None
 
     def __post_init__(self):
         """Validate service definition after initialization."""
@@ -82,6 +88,8 @@ class ServiceDefinition:
             raise ValueError("Service must have a label")
         if not self.package:
             raise ValueError("Service must have a package")
+        if bool(self.client_package) != bool(self.client_package_version):
+            raise ValueError("client_package and client_package_version go together")
 
 
 # Feature definitions with metadata for auto-generation
@@ -148,18 +156,24 @@ class ServiceRegistry:
             package="pipecat-ai[daily]",
             # Bots build transports via create_transport(); only the params are needed.
             class_name=["DailyParams"],
+            client_package="@pipecat-ai/daily-transport",
+            client_package_version="^1.6.9",
         ),
         ServiceDefinition(
             value="smallwebrtc",
             label="SmallWebRTC",
             package="pipecat-ai[webrtc]",
             class_name=["TransportParams"],
+            client_package="@pipecat-ai/small-webrtc-transport",
+            client_package_version="^1.10.8",
         ),
         ServiceDefinition(
             value="websocket",
             label="WebSocket",
             package="pipecat-ai[websocket]",
             class_name=["FastAPIWebsocketParams", "ProtobufFrameSerializer"],
+            client_package="@pipecat-ai/websocket-transport",
+            client_package_version="^1.7.2",
         ),
     ]
 

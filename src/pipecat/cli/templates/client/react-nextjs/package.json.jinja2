@@ -13,14 +13,8 @@
     "{{ name }}": "{{ version }}",
 {%- endfor %}
     "@fontsource-variable/geist": "^5.3.0",
-{%- for transport in transports %}
-{%- if transport.value == 'daily' %}
-    "@pipecat-ai/daily-transport": "^1.6.8",
-{%- elif transport.value == 'smallwebrtc' %}
-    "@pipecat-ai/small-webrtc-transport": "^1.10.7",
-{%- elif transport.value == 'websocket' %}
-    "@pipecat-ai/websocket-transport": "^1.7.1",
-{%- endif %}
+{%- for name, version in transport_packages.items() %}
+    "{{ name }}": "{{ version }}",
 {%- endfor %}
     "next": "^16",
     "react": "^19",

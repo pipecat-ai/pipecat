@@ -707,20 +707,31 @@ class ProjectGenerator:
             console.print(f"[red]{e}[/red]")
             raise
 
-        # Prepare context - transport values, project name and the npm
-        # dependencies the vendored Pipecat UI snapshot needs
+        # Prepare context - transport values, the npm packages those transports
+        # need in the client, project name and the npm dependencies the vendored
+        # Pipecat UI snapshot needs
         # Transform transport strings to objects for template iteration
         transport_objects = [{"value": t} for t in self.config.transports]
 
         context = {
             "project_name": self.config.project_name,
             "transports": transport_objects,
+            "transport_packages": self._client_transport_packages(),
             "ui_dependencies": self._pipecat_ui_dependencies(),
         }
 
         # Render and write
         rendered = template.render(**context)
         dest_file.write_text(rendered, encoding="utf-8")
+
+    def _client_transport_packages(self) -> dict[str, str]:
+        """Return the npm packages the selected web transports need in the client."""
+        packages: dict[str, str] = {}
+        for value in self.config.transports:
+            service = ServiceLoader.get_service_by_value(ServiceRegistry.WEBRTC_TRANSPORTS, value)
+            if service and service.client_package and service.client_package_version:
+                packages[service.client_package] = service.client_package_version
+        return packages
 
     @staticmethod
     def _pipecat_ui_dir() -> Path:
