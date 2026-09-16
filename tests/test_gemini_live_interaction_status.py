@@ -155,6 +155,63 @@ def test_gemini_3_protocol_detection(model):
     assert service._is_gemini_3 is True
 
 
+@pytest.mark.parametrize(
+    "model, expected_level",
+    [
+        # Live thinking models require a thinking_level; an unset one defaults.
+        ("models/gemini-3.8-live-extended-thinking", "LOW"),
+        ("models/gemini-3.8-live", None),
+        ("models/gemini-2.0-flash-live-001", None),
+        ("models/gemini-2.5-flash-exp-native-audio-thinking-dialog", None),
+    ],
+)
+def test_thinking_level_defaults_only_on_live_thinking_models(model, expected_level):
+    """Models that require a thinking_level get one; other models get no config."""
+    service = _make_service(model=model)
+
+    thinking = service._resolved_thinking_config()
+
+    if expected_level is None:
+        assert thinking is None
+    else:
+        assert thinking is not None
+        assert thinking.thinking_level == expected_level
+
+
+def test_explicit_thinking_level_is_kept():
+    """A configured thinking_level is never overridden by the default."""
+    service = GeminiLiveLLMService(
+        api_key="test-key",
+        settings=GeminiLiveLLMService.Settings(
+            model="models/gemini-3.8-live-extended-thinking",
+            thinking={"thinking_level": "HIGH"},
+        ),
+    )
+
+    thinking = service._resolved_thinking_config()
+
+    assert thinking is not None
+    assert thinking.thinking_level == "HIGH"
+
+
+def test_thinking_level_default_merges_with_other_thinking_settings():
+    """Defaulting the level keeps the rest of the config and leaves settings untouched."""
+    service = GeminiLiveLLMService(
+        api_key="test-key",
+        settings=GeminiLiveLLMService.Settings(
+            model="models/gemini-3.8-live-extended-thinking",
+            thinking={"include_thoughts": True},
+        ),
+    )
+
+    thinking = service._resolved_thinking_config()
+
+    assert thinking is not None
+    assert thinking.include_thoughts is True
+    assert thinking.thinking_level == "LOW"
+    assert service._settings.thinking == {"include_thoughts": True}
+
+
 # ---------------------------------------------------------------------------
 # interaction_status gating
 # ---------------------------------------------------------------------------

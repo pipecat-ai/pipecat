@@ -338,6 +338,8 @@ class InputParams(BaseModel):
         thinking: Thinking settings. Defaults to None.
             Note that these settings may require specifying a model that
             supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
+            Live thinking models require a ``thinking_level``; when none is
+            set, the service applies the lowest level the model accepts.
         enable_affective_dialog: Enable affective dialog, which allows Gemini
             to adapt to expression and tone. Defaults to None.
             Note that these settings may require specifying a model that
@@ -386,7 +388,9 @@ class GeminiLiveLLMSettings(LLMSettings):
         turn_coverage: Which realtime input a user turn covers. Unset uses the
             model's own default.
         context_window_compression: Context window compression configuration.
-        thinking: Thinking configuration.
+        thinking: Thinking configuration. Live thinking models require a
+            ``thinking_level``; when none is set, the service applies the
+            lowest level the model accepts.
         enable_affective_dialog: Whether to enable affective dialog.
         proactivity: Proactivity configuration.
     """
@@ -439,6 +443,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     # Version of google-genai that added LiveServerContent.interaction_status.
     _INTERACTION_STATUS_MIN_SDK = "2.18.0"
+
+    # Lowest thinking_level the Live thinking models accept (they reject
+    # MINIMAL), applied when no level is configured. Lowest keeps reply
+    # latency down, matching the thinking defaults of GoogleLLMService.
+    _DEFAULT_THINKING_LEVEL = "LOW"
 
     @property
     def _is_gemini_3(self) -> bool:
@@ -493,6 +502,32 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             f"single reply may be split across multiple assistant turns. "
             f"Upgrade to google-genai>={self._INTERACTION_STATUS_MIN_SDK}."
         )
+
+    def _resolved_thinking_config(self) -> ThinkingConfig | None:
+        """The thinking config to connect with.
+
+        Live thinking models require a ``thinking_level`` — the API has no
+        default and rejects a setup without one — so an unset level defaults
+        to the lowest the model accepts. An explicitly configured level is
+        never overridden. On an SDK without the field the default is skipped
+        and the server reports the missing level itself.
+        """
+        thinking = assert_given(self._settings.thinking)
+        if isinstance(thinking, dict):
+            thinking = ThinkingConfig(**thinking) if thinking else None
+        if (
+            self._expects_interaction_status
+            and "thinking_level" in ThinkingConfig.model_fields
+            and not (thinking and thinking.thinking_level)
+        ):
+            thinking = (thinking or ThinkingConfig()).model_copy(
+                update={"thinking_level": self._DEFAULT_THINKING_LEVEL}
+            )
+            logger.debug(
+                f"{self}: defaulting thinking_level to {self._DEFAULT_THINKING_LEVEL} "
+                f"({self._settings.model} requires one)"
+            )
+        return thinking
 
     @property
     def _supports_non_blocking_tools(self) -> bool:
@@ -1330,9 +1365,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 config.context_window_compression = compression_config
 
             # Add thinking configuration to configuration, if provided
-            thinking = assert_given(self._settings.thinking)
-            if isinstance(thinking, dict):
-                thinking = ThinkingConfig(**thinking) if thinking else None
+            thinking = self._resolved_thinking_config()
             if thinking:
                 config.thinking_config = thinking
 
