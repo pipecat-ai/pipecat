@@ -12,6 +12,7 @@ from loguru import logger
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSService
 from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsTTSService
+from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSService
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.text.phonemes import (
     PhonemeAlphabet,
@@ -187,6 +188,28 @@ class TestElevenLabsPronunciation(unittest.TestCase):
     def test_dialogue_arpabet_unsupported(self):
         self.assertIsNone(
             ElevenLabsDialogueTTSService.format_pronunciation("Cat", "K AE1 T", ARPABET)
+        )
+
+
+class TestInworldPronunciation(unittest.TestCase):
+    def test_ipa(self):
+        self.assertEqual(InworldTTSService.format_pronunciation("Crete", "[kriːt]", IPA), "/kriːt/")
+
+    def test_notation_variants_format_the_same(self):
+        a = InworldTTSService.format_pronunciation("Achoo", "/əˈʧu/", IPA)
+        b = InworldTTSService.format_pronunciation("Achoo", "ə'tʃu", IPA)
+        self.assertEqual(a, b)
+
+    def test_unusable(self):
+        fmt = InworldTTSService.format_pronunciation
+        self.assertIsNone(fmt("Cat", "K AE1 T", ARPABET))
+        self.assertIsNone(fmt("Glyburide metformin", "ˈɡlaɪ mɛt", IPA))  # one word per pair
+        self.assertIsNone(fmt("Crete", "", IPA))
+
+    def test_http_service_matches(self):
+        self.assertEqual(
+            InworldHttpTTSService.format_pronunciation("Crete", "kriːt", IPA),
+            InworldTTSService.format_pronunciation("Crete", "kriːt", IPA),
         )
 
 
