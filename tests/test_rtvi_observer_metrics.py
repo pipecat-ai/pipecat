@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
+    AICAudioQualityMetricsData,
     LLMTokenUsage,
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -24,6 +25,27 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserv
 
 
 class TestRTVIObserverMetrics(unittest.IsolatedAsyncioTestCase):
+    async def test_audio_quality_scores_forwarded_to_clients(self):
+        observer = RTVIObserver(params=RTVIObserverParams(metrics_enabled=True))
+        observer.send_rtvi_message = AsyncMock()
+        scores = AICAudioQualityMetricsData(
+            processor="tyto",
+            model="tyto-1.1-l-16khz",
+            risk_score=0.7,
+            speaker_reverb=0.2,
+            speaker_loudness=0.5,
+            interfering_speech=0.1,
+            codec_degradation=0.3,
+            noise=0.8,
+            packet_loss=0.0,
+            sequence=1,
+            timestamp=123.0,
+            inference_duration=0.01,
+        )
+        await observer._handle_metrics(MetricsFrame(data=[scores]))
+        message = observer.send_rtvi_message.await_args.args[0]
+        self.assertEqual(message.data["audio_quality"], [scores.model_dump(exclude_none=True)])
+
     async def test_ttfb_and_ttfa_forwarded_to_clients(self):
         # TTFB and TTFA are emitted in separate frames during a real TTS turn;
         # both must reach RTVI clients.
