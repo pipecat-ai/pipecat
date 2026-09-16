@@ -112,14 +112,19 @@ Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
   pass `-a/--audio` to force recording on if a manifest has it off.
 
 Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
-timeout in seconds, for expectations without their own `within_ms`), and
-`--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
-A bot whose provider rate-limits concurrent connections can set its own
-`concurrency:` on its manifest entry, under the suite's.
+timeout in seconds, for expectations without their own `within_ms`),
+`-w/--worker-timeout` (seconds a run's harness worker may take before the suite
+kills it and reports an error; by default derived from the scenario: a scripted
+scenario's turn budgets summed or a simulation's `max_duration_s`, with a 600 s
+floor, plus 60 s for the judge and teardown), and `--no-cache` (re-synthesize
+user audio every turn instead of reusing the cache). A bot whose provider
+rate-limits concurrent connections can set its own `concurrency:` on its
+manifest entry, under the suite's.
 Everything in the manifest header except the `suite:` list can also be overridden
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
-`--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
-can be just a `suite:` list with the rest supplied as flags.
+`--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python`,
+`--worker-timeout` — so a manifest can be just a `suite:` list with the rest
+supplied as flags.
 
 ### Measuring flakiness
 
@@ -258,8 +263,10 @@ directory, so a relative `image_path` in the body resolves next to the file and
 the two travel together; a body that holds such paths belongs in a file for that
 reason. Several entries can share one bot and differ only in their body, as when
 sweeping models; give each a `name:` (`name: groq/llama-3.3-70b`) so the
-display, `-p`, `results.jsonl` and the log file names tell them apart. The
-`vision_describe` scenario is a bot-first turn (no user input): the bot
+display, `-p`, `results.jsonl` and the log file names tell them apart. A bot
+that reads its configuration from the environment instead (a model, a reasoning
+effort) takes it from the entry's `env:` mapping, added to the spawned bot's
+environment over the suite's own. The `vision_describe` scenario is a bot-first turn (no user input): the bot
 describes the image (a cat) on connect and the judge checks that it described a
 cat.
 
@@ -376,7 +383,8 @@ command as a scripted scenario, which prints the conversation as it happens.
 ## Adding coverage
 
 - New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should
-  run).
+  run; a `name:` and an `env:` or `runner_body:` when the same file runs under
+  more than one configuration).
 - New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it
   from the manifest as `scripted/<name>`. Several short cases of one behavior go
   in one file's `scenarios:` list.

@@ -19,6 +19,7 @@ Manifest format (YAML)::
     runs_dir: test-runs           # logs + recordings go to <runs_dir>/<timestamp>/
     record: false                 # record conversation audio
     cache_dir: null               # optional
+    worker_timeout: null          # seconds before a harness worker is killed (default derived)
     scenarios_dir: scenarios      # resolved relative to this manifest file
     # {python}=interpreter (default sys.executable), {bot}=bot path,
     # {port}=assigned per run by the suite runner
@@ -45,6 +46,10 @@ Manifest format (YAML)::
         runner_body:
           data: {model: llama-3.3-70b}
         scenarios: [turn_completion]
+      - bot: examples/voice/voice-anthropic.py
+        name: claude (low effort)
+        env: {ANTHROPIC_EFFORT: low}             # added to the spawned bot's environment
+        scenarios: [simple_math]
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
 
@@ -74,7 +79,9 @@ results records and the artifact file names use, and what an entry's own
 ``concurrency:`` is keyed on. It defaults to the ``bot:`` path, so it is only
 needed when several entries share a bot, as when sweeping a model with
 ``runner_body:``; two entries may not run the same scenario under the same
-label.
+label. An entry's ``env:`` mapping is added to the spawned bot's environment
+over the suite's own, for a bot that reads its configuration (a model, a
+reasoning effort) from the environment rather than a runner body.
 
 ``concurrency`` is how many runs execute at once. An entry may set its own
 ``concurrency:`` to cap the runs of that bot below it, for a provider that
@@ -84,6 +91,14 @@ still bounds the whole.
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
 the same values passed as CLI overrides resolve against the working directory.
+
+``worker_timeout`` (or ``--worker-timeout``) caps how long a run's harness
+worker may take, in seconds, before the suite kills it and reports the run as
+an error. Left unset, the cap is derived from the scenario: a scripted
+scenario's turn budgets summed (each turn's largest ``within_ms``, or the
+default timeout), or a simulation's ``max_duration_s``, with a floor of
+:data:`WORKER_SAFETY_TIMEOUT_S` and :data:`WORKER_TIMEOUT_MARGIN_S` on top for
+the judge and teardown.
 
 ``repeat`` (or ``--repeat``) runs every (bot, scenario) pair N times, which is how
 a flaky behavior gets measured rather than sampled: a bot that passes a scenario
@@ -102,7 +117,7 @@ import time
 import traceback
 import warnings
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -131,10 +146,14 @@ BOT_CONNECT_TIMEOUT_S = 60.0
 # How long to wait for a bot subprocess to exit after the harness asks it to
 # stop (via eval-cancel) before escalating to terminate/kill.
 BOT_STOP_TIMEOUT_S = 10.0
-# Safety net for a hung harness worker. The harness's own per-expectation timeouts
-# bound a healthy run far below this; the cap only catches a worker that wedges, so
-# it can't hold a concurrency slot forever.
+# Safety net for a hung harness worker, and the floor of the derived cap (see
+# :func:`worker_timeout_s`). The harness's own per-expectation timeouts bound a
+# healthy run; the cap only catches a worker that wedges, so it can't hold a
+# concurrency slot forever. A manifest's ``worker_timeout`` replaces it outright.
 WORKER_SAFETY_TIMEOUT_S = 600.0
+# Added on top of a scenario's own budget when the cap is derived: the judge's
+# last verdict, the result handoff, and teardown all happen after the budget.
+WORKER_TIMEOUT_MARGIN_S = 60.0
 # Default spawn template; {python}/{bot}/{port} are substituted per run.
 DEFAULT_SPAWN = "{python} {bot} -t eval --port {port}"
 # What a scenario file may be named, wherever one is looked for.
@@ -376,6 +395,47 @@ def _resolve_scenario(name: str, base: Path, default_dir: Path) -> tuple[str, Pa
     return Path(name).name, (default_dir / f"{name}.yaml").resolve()
 
 
+def worker_timeout_s(run: "EvalRun", default_timeout_ms: int, override: float | None) -> float:
+    """How long ``run``'s harness worker may take before the suite kills it, in seconds.
+
+    An ``override`` (the manifest's ``worker_timeout`` or ``--worker-timeout``)
+    is taken as is. Otherwise the cap follows the scenario, so a long one is
+    not cut short and a short one still has the safety net: a scripted
+    scenario's turn budgets summed, each turn's largest ``within_ms`` or
+    ``default_timeout_ms`` when none is set, or a simulation's
+    ``max_duration_s``; whichever, at least :data:`WORKER_SAFETY_TIMEOUT_S`,
+    plus :data:`WORKER_TIMEOUT_MARGIN_S` for the judge and teardown. A run
+    whose scenario did not load gets the floor.
+
+    Args:
+        run: The run, carrying its scenario when its file loaded.
+        default_timeout_ms: The run's budget for a turn without a ``within_ms``.
+        override: An explicit cap, or ``None`` to derive one.
+
+    Returns:
+        The cap in seconds.
+    """
+    if override is not None:
+        return override
+    loaded = run.loaded
+    if isinstance(loaded, EvalSimulationScenario):
+        budget_s = loaded.max_duration_s
+    elif isinstance(loaded, EvalScriptScenario):
+        budget_s = (
+            sum(
+                max(
+                    (e.within_ms for e in turn.expect if e.within_ms is not None),
+                    default=default_timeout_ms,
+                )
+                for turn in loaded.turns
+            )
+            / 1000
+        )
+    else:
+        budget_s = 0.0
+    return max(WORKER_SAFETY_TIMEOUT_S, budget_s) + WORKER_TIMEOUT_MARGIN_S
+
+
 @dataclass
 class EvalRun:
     """Mutable per-(bot, scenario) state, updated in place so a live display can read it.
@@ -402,6 +462,9 @@ class EvalRun:
             it comes from ``runner_body_path``.
         concurrency: How many of this bot's runs may execute at once, when its
             manifest entry caps that; ``None`` leaves only the suite's cap.
+        env: Environment variables added to the spawned bot's, over the suite's
+            own (the manifest entry's ``env:``). Empty for a bot the suite does
+            not spawn.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -425,6 +488,7 @@ class EvalRun:
     runner_body_path: Path | None = None
     runner_body: dict | None = None
     concurrency: int | None = None
+    env: dict[str, str] = field(default_factory=dict)
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -483,6 +547,7 @@ class _ManifestSettings:
     base_port: int
     record: bool
     cache_dir: str | None
+    worker_timeout: float | None
 
 
 @dataclass
@@ -505,6 +570,9 @@ class EvalManifest:
         runs_dir: Base for run output (a ``<name>/`` subdir is added), or ``None``.
         record: Whether to record conversation audio.
         cache_dir: Directory for cached synthesized user audio, or ``None``.
+        worker_timeout: Seconds a run's harness worker may take before it is
+            killed, or ``None`` to derive a cap from each scenario (see
+            :func:`worker_timeout_s`).
     """
 
     runs: list[EvalRun]
@@ -516,6 +584,7 @@ class EvalManifest:
     runs_dir: Path | None
     record: bool
     cache_dir: str | None
+    worker_timeout: float | None = None
 
     @classmethod
     def load(
@@ -532,6 +601,7 @@ class EvalManifest:
         base_port: int | None = None,
         record: bool | None = None,
         cache_dir: str | None = None,
+        worker_timeout: float | None = None,
     ) -> "EvalManifest":
         """Parse a manifest YAML into an :class:`EvalManifest`.
 
@@ -553,6 +623,7 @@ class EvalManifest:
             base_port: Override for the first port assigned.
             record: Override for whether to record conversation audio.
             cache_dir: Override for the synthesized-audio cache directory.
+            worker_timeout: Override for the manifest's ``worker_timeout`` (seconds).
 
         Returns:
             The parsed :class:`EvalManifest`.
@@ -574,6 +645,7 @@ class EvalManifest:
             base_port=base_port,
             record=record,
             cache_dir=cache_dir,
+            worker_timeout=worker_timeout,
         )
         return cls(
             runs=cls._runs(data, base, path, settings),
@@ -585,6 +657,7 @@ class EvalManifest:
             runs_dir=settings.runs_dir,
             record=settings.record,
             cache_dir=settings.cache_dir,
+            worker_timeout=settings.worker_timeout,
         )
 
     @classmethod
@@ -604,6 +677,7 @@ class EvalManifest:
         base_port: int | None,
         record: bool | None,
         cache_dir: str | None,
+        worker_timeout: float | None,
     ) -> "_ManifestSettings":
         """The manifest's settings with the overrides applied: an override wins, and its paths resolve against the working directory rather than the manifest's."""
 
@@ -625,6 +699,10 @@ class EvalManifest:
         repeat = repeat if repeat is not None else int(data.get("repeat", 1))
         if repeat < 1:
             raise ValueError(f"{path}: 'repeat' must be at least 1")
+        if worker_timeout is None and data.get("worker_timeout") is not None:
+            worker_timeout = float(data["worker_timeout"])
+        if worker_timeout is not None and worker_timeout <= 0:
+            raise ValueError(f"{path}: 'worker_timeout' must be positive")
         return _ManifestSettings(
             bots_dir=dir_value(bots_dir, "bots_dir", "."),
             scenarios_dir=dir_value(scenarios_dir, "scenarios_dir", "scenarios"),
@@ -645,6 +723,7 @@ class EvalManifest:
             ),
             record=record if record is not None else bool(data.get("record", False)),
             cache_dir=cache_dir if cache_dir is not None else data.get("cache_dir"),
+            worker_timeout=worker_timeout,
         )
 
     @classmethod
@@ -673,6 +752,11 @@ class EvalManifest:
                 isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1
             ):
                 raise ValueError(f"{path}: bot {bot!r} 'concurrency:' must be a positive integer")
+            env = item.get("env") or {}
+            if not isinstance(env, dict):
+                raise ValueError(f"{path}: bot {bot!r} 'env:' must be a mapping")
+            # Values are strings, since that is what an environment holds.
+            env = {str(k): str(v) for k, v in env.items()}
             for scenario in item.get("scenarios", []):
                 file_name, scenario_path = _resolve_scenario(
                     str(scenario), base, settings.scenarios_dir
@@ -699,6 +783,7 @@ class EvalManifest:
                             runner_body_path=body.path,
                             runner_body=body.data,
                             concurrency=concurrency,
+                            env=env,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -1011,7 +1096,9 @@ class EvalSuite(BaseObject):
 
         A body file's directory is the bot's working directory, so relative
         paths inside the body (an image) resolve next to the file. A body given
-        inline is written to the run's body file first.
+        inline is written to the run's body file first. The run's ``env`` is
+        laid over the suite's own environment, so an entry can set (or
+        override) what its bot reads at startup.
         """
         assert run.bot_path is not None
         cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
@@ -1025,6 +1112,7 @@ class EvalSuite(BaseObject):
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
+                env={**os.environ, **run.env},
             )
 
     async def _run_harness(
@@ -1039,7 +1127,8 @@ class EvalSuite(BaseObject):
         """Run the harness worker for this run and read its result back onto ``run``.
 
         The worker gets its config as a file and writes its result as one; a
-        worker that times out or exits without a result leaves ``run.error``.
+        worker that times out (see :func:`worker_timeout_s`) or exits without a
+        result leaves ``run.error``.
         """
         run_params = params.model_copy(
             update={
@@ -1073,12 +1162,15 @@ class EvalSuite(BaseObject):
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
             )
+        timeout_s = worker_timeout_s(
+            run, run_params.default_timeout_ms, self.manifest.worker_timeout
+        )
         try:
-            await asyncio.wait_for(worker.wait(), timeout=WORKER_SAFETY_TIMEOUT_S)
+            await asyncio.wait_for(worker.wait(), timeout=timeout_s)
         except TimeoutError:
             worker.kill()
             await worker.wait()
-            run.error = f"error: harness worker timed out after {WORKER_SAFETY_TIMEOUT_S:.0f}s"
+            run.error = f"error: harness worker timed out after {timeout_s:.0f}s"
             return worker
         if worker.returncode != 0 or not files.result.exists():
             # The worker crashed before writing a result; its traceback is in the harness log.
