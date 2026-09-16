@@ -24,14 +24,14 @@ from pathlib import Path
 from loguru import logger
 
 from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
-from pipecat.evals.scenario import load_scenario_file
+from pipecat.evals.scenario import EvalScenarioFile
 from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.suite import capture_pipeline_logs
 
 
 async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
-    """Build and run the session for the scenario file in ``config``, whichever kind it is."""
-    loaded = load_scenario_file(Path(config["scenario_path"]))
+    """Build and run the session for the scenario named in ``config``, whichever kind it is."""
+    loaded = EvalScenarioFile.load(Path(config["scenario_path"]))[config["scenario_name"]]
     params = EvalSessionParams.model_validate(config["params"])
     session = EvalSession.from_scenario(loaded, config["bot_url"], params=params)
     return await session.run()

@@ -14,29 +14,31 @@ user: !include ../user_audio.yaml
 
 judge: !include ../judge_audio.yaml
 
-turns:
-  # Wait for the bot's on-connect greeting before speaking.
-  - expect:
-      - event: response
-        eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
+scenarios:
+  - name: filter_incomplete_turns_function_calling
+    turns:
+      # Wait for the bot's on-connect greeting before speaking.
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, or an offer to help)"
 
-  # The user trails off mid-question. VAD detects the pause, but the bot should
-  # mark the turn incomplete and not call the tool yet (the location is missing).
-  - user: "What's the weather in... hmmm"
-    expect:
-      - event: vad_user_stopped_speaking
+      # The user trails off mid-question. VAD detects the pause, but the bot should
+      # mark the turn incomplete and not call the tool yet (the location is missing).
+      - user: "What's the weather in... hmmm"
+        expect:
+          - event: vad_user_stopped_speaking
 
-  # ~3s later (under the 5s incomplete-short timeout), the user supplies the
-  # location. Now the turn completes and the bot calls the weather tool.
-  - user: "in Los Angeles, California?"
-    send_after:
-      event: vad_user_stopped_speaking
-      delay_ms: 3000
-    expect:
-      # Name only: the stub ignores location and the LLM phrases it
-      # unpredictably, so asserting args would be flaky.
-      - event: function_call
-        calls:
-          - name: get_current_weather
-      - event: response
-        eval: "the response reports the current weather for Los Angeles, mentioning the city and its conditions or temperature"
+      # ~3s later (under the 5s incomplete-short timeout), the user supplies the
+      # location. Now the turn completes and the bot calls the weather tool.
+      - user: "in Los Angeles, California?"
+        send_after:
+          event: vad_user_stopped_speaking
+          delay_ms: 3000
+        expect:
+          # Name only: the stub ignores location and the LLM phrases it
+          # unpredictably, so asserting args would be flaky.
+          - event: function_call
+            calls:
+              - name: get_current_weather
+          - event: response
+            eval: "the response reports the current weather for Los Angeles, mentioning the city and its conditions or temperature"

@@ -12,9 +12,10 @@ client, plays the user's side of a conversation (synthesizing audio when a
 scenario is in audio mode), transcribes the bot's speech, and judges what the
 bot did with an LLM.
 
-A **scenario** is one such check: a YAML file describing a conversation to hold
-with the bot and how to decide whether it behaved properly. There are two
-kinds:
+A **scenario** is one such check: a conversation to hold with the bot and how
+to decide whether it behaved properly. A YAML file holds one or more under
+`scenarios:`, each run on its own against its own bot, and each named
+`<file>/<scenario>`. There are two kinds:
 
 - A **scripted** scenario (`scenarios/scripted/<name>.yaml`) writes the user's
   turns out, each with the results expected of the bot. `capital_question` asks
@@ -26,8 +27,8 @@ kinds:
   [Simulations](#simulations).
 
 Scenarios are reusable, so one shared scenario covers many bots.
-[`manifest.yaml`](manifest.yaml) maps each bot to the scenarios it runs, both
-kinds listed the same way; the file says which it is.
+[`manifest.yaml`](manifest.yaml) maps each bot to the scenario files it runs,
+both kinds listed the same way; each scenario says which it is.
 
 ## Prerequisites
 
@@ -65,7 +66,7 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   are cached under `~/.cache/pipecat/evals/tts` so a repeated scenario does not
   synthesize them again. No keys, no per-run cost. Non-English transcription
   needs a multilingual model, which the English-only defaults aren't —
-  `language_switch_audio` pulls Whisper's `tiny` (75MB).
+  `language_switch/audio` pulls Whisper's `tiny` (75MB).
 - **Node.js** (MCP bot only). `mcp/mcp-stdio.py` spawns its memory MCP server
   with `npx`; the server package downloads on first use.
 - **Each bot's own credentials.** A bot is a real example, so it needs the same
@@ -126,7 +127,7 @@ async function results, turn detection), where a bot can pass a scenario half th
 time and look reliable in any one run.
 
 ```sh
-./run.sh -p function-calling -s async_tool_delivery --repeat 50 -c 3
+./run.sh -p function-calling -s async_tool/delivery --repeat 50 -c 3
 ```
 
 Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue
@@ -194,8 +195,18 @@ like an opening greeting. The full file
 format (events, expectations, `send_after:`, `image:`, ...) is documented in the
 [`pipecat.evals.script`](../../src/pipecat/evals/script.py) module docstring.
 
-Two things worth knowing when authoring:
+Three things worth knowing when authoring:
 
+- **Several scenarios per file.** A file's `scenarios:` list can hold many,
+  which suits testing one behavior through short conversations, such as the
+  turn-completion cases. Any key a scenario can have may also sit at the top
+  of the file as the default for all of them; a scenario that sets the same
+  key replaces it whole, so a `context:` is written out in full, never added
+  to. `turns:` at the top with one entry per judge or modality runs the same
+  conversation under each (`interruption`, `capital_curious`); `persona:` at
+  the top with a `goal:` per entry sends the same caller on different errands.
+  Each runs as its own run, against its own bot; `-s <file>` selects them all
+  and `-s <file>/<scenario>` one.
 - **Modality.** `judge:` and `user:` blocks select audio vs text. In audio mode
   the user's turns are synthesized (exercising the bot's STT for real) and the
   judge evaluates a local transcription of the bot's actual audio; text mode
@@ -282,7 +293,7 @@ intake, place an order, quote a policy.
 ```sh
 ./run.sh -k simulation             # every simulation, nothing scripted
 ./run.sh -p flows                  # the Flows bots: their scripted scenarios and simulations
-./run.sh -s book_table_available   # one simulation, as many runs as its file says
+./run.sh -s book_table/available   # one simulation, as many runs as its file says
 ./run.sh -s order_pizza -r 5       # one simulation, five runs
 ```
 
@@ -325,11 +336,11 @@ neither side does anything for `max_silence_s` (30 s by default) ends as
 
 | Simulation                | Bot                                              | The caller                                                       |
 | ------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
-| `capital_curious`         | `voice/voice-cartesia.py`                        | Asks the capital of Germany and hangs up, in text.               |
-| `capital_curious_audio`   | `voice/voice-cartesia.py`                        | The same caller, speaking and listening.                         |
-| `book_table_available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
-| `book_table_flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
-| `book_table_impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
+| `capital_curious/text`    | `voice/voice-cartesia.py`                        | Asks the capital of Germany and hangs up, in text.               |
+| `capital_curious/audio`   | `voice/voice-cartesia.py`                        | The same caller, speaking and listening.                         |
+| `book_table/available`    | `flows/restaurant_reservation.py`                | Books a table for two at 6 PM, which is free.                    |
+| `book_table/flexible`     | `flows/restaurant_reservation.py`                | Wants 7 PM (taken) for four but accepts anything from 6 to 9 PM. |
+| `book_table/impossible`   | `flows/restaurant_reservation.py`                | Can only do 7 or 8 PM, both taken; success is a graceful no.     |
 | `complete_patient_intake` | `flows/patient_intake.py`                        | Gives a birthday, a prescription, an allergy, and a condition.   |
 | `order_pizza`             | `flows/food_ordering.py`                         | Orders a large pepperoni pizza and asks about delivery time.     |
 | `order_sushi`             | `flows/food_ordering_advanced_functionschema.py` | Orders three California rolls.                                   |
@@ -339,7 +350,7 @@ The persona LLM is the `simulator:` block, by default the same local Ollama
 model as the judge, so a simulation needs no API key; `simulator.yaml` is
 where to point every simulation at another model. In audio mode the persona's turns are synthesized and
 the bot's speech transcribed by the same services as a scripted audio scenario,
-Kokoro and Moonshine by default, so `capital_curious_audio` exercises the bot's
+Kokoro and Moonshine by default, so `capital_curious/audio` exercises the bot's
 STT, TTS, and turn taking against an autonomous caller. The file format is documented in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
 docstring; run one by hand with `pipecat eval run scenarios/simulated/<name>.yaml
@@ -350,6 +361,7 @@ which prints the conversation as it happens.
 
 - New bot: add an entry to `manifest.yaml` (`bot:` + the `scenarios:` it should run).
 - New behavior to test: add a `scenarios/scripted/<name>.yaml` and reference it from the
-  manifest as `scripted/<name>`.
-- New goal to reach: add a `scenarios/simulated/<name>.yaml` with a `persona:` and reference
-  it from the manifest as `simulated/<name>` under the bot that serves it.
+  manifest as `scripted/<name>`. Several short cases of one behavior go in one
+  file's `scenarios:` list.
+- New goal to reach: add a `scenarios/simulated/<name>.yaml` whose scenario has a `persona:`
+  and reference it from the manifest as `simulated/<name>` under the bot that serves it.

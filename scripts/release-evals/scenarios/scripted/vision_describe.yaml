@@ -9,7 +9,9 @@ name: vision_describe
 
 judge: !include ../judge_text.yaml
 
-turns:
-  - expect:
-      - event: response
-        eval: "describes a cat or kitten"
+scenarios:
+  - name: vision_describe
+    turns:
+      - expect:
+          - event: response
+            eval: "describes a cat or kitten"

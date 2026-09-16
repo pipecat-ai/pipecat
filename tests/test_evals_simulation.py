@@ -13,19 +13,33 @@ from pathlib import Path
 from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import EvalSimulationResult
 from pipecat.evals.scenario import (
+    EvalScenarioFile,
     EvalScriptScenario,
     EvalSimulationScenario,
+    _load_mapping,
     describe_simulation,
-    load_scenario_file,
 )
 from pipecat.evals.script import EvalFunctionCall
+from pipecat.evals.simulation import _parse_simulation
 
+# A simulation's own mapping, as EvalSimulationScenario parses it.
 MINIMAL = """
 name: capital_curious
 persona: "A curious traveler."
 goal: "Learn the capital of Germany."
 simulator: {service: openai, model: gpt-4o-mini}
 success: "the bot said the capital of Germany is Berlin"
+"""
+
+# The same simulation as a scenario file holds it.
+MINIMAL_FILE = """
+name: capital_curious
+simulator: {service: openai, model: gpt-4o-mini}
+scenarios:
+  - name: capital_curious
+    persona: "A curious traveler."
+    goal: "Learn the capital of Germany."
+    success: "the bot said the capital of Germany is Berlin"
 """
 
 
@@ -36,9 +50,14 @@ def _write(yaml_text: str) -> Path:
     return Path(f.name)
 
 
+def _load_simulation(path: Path) -> EvalSimulationScenario:
+    """Parse a file holding one simulation's own keys at its top level."""
+    return _parse_simulation(_load_mapping(path), path)
+
+
 class TestSimulationLoader(unittest.TestCase):
     def test_minimal_has_defaults(self):
-        s = EvalSimulationScenario.load(_write(MINIMAL))
+        s = _load_simulation(_write(MINIMAL))
         self.assertEqual(s.name, "capital_curious")
         self.assertEqual(s.persona, "A curious traveler.")
         self.assertEqual(s.goal, "Learn the capital of Germany.")
@@ -53,7 +72,7 @@ class TestSimulationLoader(unittest.TestCase):
         self.assertEqual(s.judge["service"], "ollama")
 
     def test_metrics_and_caps(self):
-        s = EvalSimulationScenario.load(
+        s = _load_simulation(
             _write(
                 MINIMAL
                 + """
@@ -74,7 +93,7 @@ runs: 3
         self.assertEqual(s.runs, 3)
 
     def test_a_measured_metric_takes_a_measure_and_a_range(self):
-        s = EvalSimulationScenario.load(
+        s = _load_simulation(
             _write(
                 MINIMAL
                 + """
@@ -104,17 +123,17 @@ metrics:
             ),
         ):
             with self.assertRaises(ValueError, msg=bad) as cm:
-                EvalSimulationScenario.load(_write(MINIMAL + "metrics:\n" + bad))
+                _load_simulation(_write(MINIMAL + "metrics:\n" + bad))
             self.assertIn(message, str(cm.exception))
 
     def test_min_score_is_a_share_and_names_are_unique(self):
         with self.assertRaises(ValueError) as cm:
-            EvalSimulationScenario.load(
+            _load_simulation(
                 _write(MINIMAL + "metrics:\n  - {name: a, criterion: x, min_score: 2}\n")
             )
         self.assertIn("0..1", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
-            EvalSimulationScenario.load(
+            _load_simulation(
                 _write(
                     MINIMAL + "metrics:\n  - {name: a, criterion: x}\n  - {name: a, criterion: y}\n"
                 )
@@ -122,7 +141,7 @@ metrics:
         self.assertIn("twice", str(cm.exception))
 
     def test_audio_modalities(self):
-        s = EvalSimulationScenario.load(
+        s = _load_simulation(
             _write(
                 MINIMAL
                 + """
@@ -142,18 +161,18 @@ judge:
 
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
-            EvalSimulationScenario.load(_write(MINIMAL + "user: {modality: audio}\n"))
+            _load_simulation(_write(MINIMAL + "user: {modality: audio}\n"))
         self.assertIn("user.speech", str(cm.exception))
 
     def test_required_fields(self):
         for missing in ("persona", "goal", "success"):
             text = "\n".join(line for line in MINIMAL.splitlines() if not line.startswith(missing))
             with self.assertRaises(ValueError, msg=missing) as cm:
-                EvalSimulationScenario.load(_write(text))
+                _load_simulation(_write(text))
             self.assertIn(missing, str(cm.exception))
 
     def test_a_function_calls_measure_takes_the_calls_the_bot_should_make(self):
-        s = EvalSimulationScenario.load(
+        s = _load_simulation(
             _write(
                 MINIMAL
                 + """
@@ -189,21 +208,21 @@ metrics:
             ("  - measure: turns\n    max_value: 3\n    calls: []\n", "'calls:' belongs to"),
         ):
             with self.assertRaisesRegex(ValueError, message):
-                EvalSimulationScenario.load(_write(MINIMAL + "metrics:\n" + bad))
+                _load_simulation(_write(MINIMAL + "metrics:\n" + bad))
 
     def test_metric_needs_a_criterion(self):
         with self.assertRaises(ValueError) as cm:
-            EvalSimulationScenario.load(_write(MINIMAL + "metrics: [{name: politeness}]\n"))
+            _load_simulation(_write(MINIMAL + "metrics: [{name: politeness}]\n"))
         self.assertIn("criterion", str(cm.exception))
 
     def test_caps_must_be_positive(self):
         with self.assertRaises(ValueError):
-            EvalSimulationScenario.load(_write(MINIMAL + "max_turns: 0\n"))
+            _load_simulation(_write(MINIMAL + "max_turns: 0\n"))
         with self.assertRaises(ValueError):
-            EvalSimulationScenario.load(_write(MINIMAL + "max_duration_s: -1\n"))
+            _load_simulation(_write(MINIMAL + "max_duration_s: -1\n"))
 
     def test_describe(self):
-        text = describe_simulation(EvalSimulationScenario.load(_write(MINIMAL)))
+        text = describe_simulation(_load_simulation(_write(MINIMAL)))
         self.assertIn(
             "user  -> modality: text | persona: openai/gpt-4o-mini | max_turns: 20 | "
             "max_duration_s: 300",
@@ -214,22 +233,24 @@ metrics:
         self.assertEqual(len(text.splitlines()), 3)
 
 
-class TestLoadScenarioFile(unittest.TestCase):
+class TestLoadScenarios(unittest.TestCase):
     def test_a_persona_makes_a_simulation(self):
-        self.assertIsInstance(load_scenario_file(_write(MINIMAL)), EvalSimulationScenario)
+        (loaded,) = EvalScenarioFile.load(_write(MINIMAL_FILE))
+        self.assertIsInstance(loaded, EvalSimulationScenario)
 
     def test_turns_make_a_scripted_scenario(self):
-        self.assertIsInstance(
-            load_scenario_file(_write("name: greet\nturns: []\n")), EvalScriptScenario
+        (loaded,) = EvalScenarioFile.load(
+            _write("name: greet\nscenarios: [{name: greet, turns: []}]\n")
         )
+        self.assertIsInstance(loaded, EvalScriptScenario)
 
-    def test_a_file_is_one_kind_or_the_other(self):
+    def test_a_scenario_is_one_kind_or_the_other(self):
         with self.assertRaises(ValueError) as cm:
-            load_scenario_file(_write("name: nothing\n"))
+            EvalScenarioFile.load(_write("name: nothing\nscenarios: [{name: nothing}]\n"))
         self.assertIn("'turns:'", str(cm.exception))
         self.assertIn("'persona:'", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
-            load_scenario_file(_write(MINIMAL + "turns: []\n"))
+            EvalScenarioFile.load(_write(MINIMAL_FILE + "    turns: []\n"))
         self.assertIn("not both", str(cm.exception))
 
 
@@ -980,7 +1001,7 @@ class TestSimulationMetricKinds(unittest.IsolatedAsyncioTestCase):
 class TestSimulatorDefault(unittest.TestCase):
     def test_simulator_is_optional_and_describes_as_the_default_judge_model(self):
         text = "\n".join(line for line in MINIMAL.splitlines() if not line.startswith("simulator"))
-        s = EvalSimulationScenario.load(_write(text))
+        s = _load_simulation(_write(text))
         self.assertEqual(s.simulator, {})
         self.assertEqual(s.max_silence_s, 30.0)
         described = describe_simulation(s)
@@ -988,7 +1009,7 @@ class TestSimulatorDefault(unittest.TestCase):
         self.assertIn("max_silence_s: 30", described)
 
     def test_a_partial_simulator_keeps_its_own_values(self):
-        s = EvalSimulationScenario.load(_write(MINIMAL + "max_silence_s: 7\n"))
+        s = _load_simulation(_write(MINIMAL + "max_silence_s: 7\n"))
         self.assertEqual(s.max_silence_s, 7.0)
         self.assertIn("persona: openai/gpt-4o-mini", describe_simulation(s))
 
@@ -996,13 +1017,9 @@ class TestSimulatorDefault(unittest.TestCase):
         # A service without a model shows the model the builder defaults to; a
         # factory is named as such, since the summary cannot know what it builds.
         without = "\n".join(l for l in MINIMAL.splitlines() if not l.startswith("simulator"))
-        openai = EvalSimulationScenario.load(_write(without + "\nsimulator: {service: openai}\n"))
+        openai = _load_simulation(_write(without + "\nsimulator: {service: openai}\n"))
         self.assertIn("persona: openai/gpt-4o", describe_simulation(openai))
-        factory = EvalSimulationScenario.load(
-            _write(without + "\nsimulator: {factory: my_evals.persona}\n")
-        )
+        factory = _load_simulation(_write(without + "\nsimulator: {factory: my_evals.persona}\n"))
         self.assertIn("persona: factory:my_evals.persona", describe_simulation(factory))
-        judged = EvalSimulationScenario.load(
-            _write(MINIMAL + "judge: {eval: {factory: my_evals.judge}}\n")
-        )
+        judged = _load_simulation(_write(MINIMAL + "judge: {eval: {factory: my_evals.judge}}\n"))
         self.assertIn("eval: factory:my_evals.judge", describe_simulation(judged))
