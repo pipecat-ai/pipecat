@@ -127,6 +127,61 @@ async def test_dialogue_close_context_is_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_dialogue_context_init_is_idempotent():
+    """Re-registering a context the server already has closes the socket."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._send_context_init("ctx-1")
+    await service._send_context_init("ctx-1")
+
+    assert ws.sent == [{"context_id": "ctx-1", "voices": ["test-voice"]}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_quiet_context_is_not_registered_again():
+    """The reported 1008: run_tts reopens the audio context, the server's stays."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+    await service._send_text("First sentence.", "ctx-1")
+
+    # What the base class does when an audio context reaches its idle timeout.
+    del service._audio_contexts["ctx-1"]
+    await service.on_audio_context_completed("ctx-1")
+    ws.sent.clear()
+
+    async for _ in service.run_tts("The rest of the turn.", "ctx-1"):
+        pass
+
+    assert ws.sent == [
+        {
+            "context_id": "ctx-1",
+            "inputs": [
+                {"text": "The rest of the turn.", "voice_id": "test-voice", "new_turn": False}
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_new_connection_forgets_old_contexts():
+    """A context belongs to the connection that registered it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    fresh = _FakeWebSocket()
+    service._websocket = fresh
+    await service._on_websocket_connected()
+
+    assert "ctx-1" not in service._contexts
+    assert fresh.sent == [{"context_id": _KEEPALIVE_CONTEXT_ID, "voices": ["test-voice"]}]
+
+
+@pytest.mark.asyncio
 async def test_dialogue_keepalive_context_is_registered_on_connect():
     """The connection idles out in 20s without a context to keep alive."""
     service = _make_dialogue_service()
@@ -209,6 +264,23 @@ async def test_dialogue_turn_end_closes_the_context():
     await service.on_turn_context_completed()
 
     assert ws.sent[-1] == {"context_id": "ctx-1", "close_context": True}
+
+
+@pytest.mark.asyncio
+async def test_dialogue_turn_end_closes_a_context_that_went_quiet():
+    """A context still generating outlives the audio context that waits on it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+
+    # What the base class does when an audio context reaches its idle timeout.
+    del service._audio_contexts["ctx-1"]
+    await service.on_audio_context_completed("ctx-1")
+
+    await service.on_turn_context_completed()
+
+    assert ws.sent == [{"context_id": "ctx-1", "close_context": True}]
 
 
 @pytest.mark.asyncio
