@@ -304,7 +304,7 @@ class MCPClient(BaseObject):
                 self._session_requested = True
             if self._session_requested:
                 await self._start_locked()
-            return self._ensure_connected()
+            return self._get_active_session()
 
     async def _start_locked(self) -> None:
         """Open the session, with the lifecycle lock held."""
@@ -459,13 +459,13 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing all successfully registered tools.
         """
-        session = self._ensure_connected()
+        session = self._get_active_session()
         tools_schema = await self._list_tools_helper(session)
         for function_schema in tools_schema.standard_tools:
             llm.register_function(function_schema.name, self._tool_wrapper_with_cleanup)
         return tools_schema
 
-    def _ensure_connected(self) -> ClientSession:
+    def _get_active_session(self) -> ClientSession:
         """Return the active session or raise if not connected."""
         if not self._active_session:
             raise _NotConnectedError(
@@ -489,7 +489,7 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing all available tools.
         """
-        session = self._ensure_connected()
+        session = self._get_active_session()
         return await self._list_tools_helper(session)
 
     @deprecated(
