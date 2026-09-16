@@ -72,6 +72,14 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
+# The token a Gemma model emits to switch into a channel (a thought, a tool
+# call) and out again. A server parses the channels into the reply, the
+# reasoning and the tool calls, but where spoken text is followed by a tool
+# call it can let the switch through as content. Nothing after a switch is
+# spoken text, so it is dropped up to the switch that closes the section.
+GEMMA_CHANNEL_SWITCH = "<channel|>"
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -239,6 +247,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self._full_model_name: str = ""
+        # Whether the text being streamed is inside a Gemma channel section.
+        self._in_channel = False
         self._client = self.create_client(
             api_key=api_key,
             base_url=base_url,
@@ -433,7 +443,32 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         return response.choices[0].message.content
 
     @traced_llm
+    async def _push_llm_text(self, text: str):
+        """Push the spoken part of a text chunk, leaving out a Gemma model's channel sections."""
+        if not str(self._settings.model or "").lower().startswith("gemma"):
+            await super()._push_llm_text(text)
+            return
+        while text:
+            at = text.find(GEMMA_CHANNEL_SWITCH)
+            if self._in_channel:
+                if at < 0:
+                    return
+                text = text[at + len(GEMMA_CHANNEL_SWITCH) :]
+                self._in_channel = False
+            else:
+                if at < 0:
+                    await super()._push_llm_text(text)
+                    return
+                if at:
+                    await super()._push_llm_text(text[:at])
+                text = text[at + len(GEMMA_CHANNEL_SWITCH) :]
+                self._in_channel = True
+
+    def _reset_channel_state(self):
+        self._in_channel = False
+
     async def _process_context(self, context: LLMContext):
+        self._reset_channel_state()
         functions_list = []
         arguments_list = []
         tool_id_list = []
