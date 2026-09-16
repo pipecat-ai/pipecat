@@ -253,11 +253,14 @@ class MCPClient(BaseObject):
         # down on signal.
         self._session_task: asyncio.Task | None = None
         self._closing: asyncio.Event | None = None
-        # One lock owns a start, a close, a drop and the connect a tool call
-        # needs. The owner task clears the session fields as it exits.
+        # One lock serializes the session lifecycle transitions:
+        # start, close, drop, and a tool call's reconnect.
+        # Owner task clears the session fields as it exits.
         self._lifecycle_lock = asyncio.Lock()
-        # True between start() and close(). A tool call reconnects only a
-        # client that lost its session, because only that client has an owner.
+        # Whether an owner (start() or tools()) currently holds client open.
+        # With _active_session distinguishes the no-session states:
+        # no session requested + True = dropped; a tool call may reconnect.
+        # no session requested + False = never started or closed; a tool call raises.
         self._session_requested = False
 
         if not isinstance(
@@ -281,23 +284,23 @@ class MCPClient(BaseObject):
             async with MCPClient(server_params=...) as mcp:
                 ...
         """
-        await self._open_session(request=True)
+        await self._open_session(as_owner=True)
 
-    async def _open_session(self, *, request: bool) -> ClientSession:
+    async def _open_session(self, *, as_owner: bool) -> ClientSession:
         """Return the session the caller runs on, opening one if the client holds none.
 
         Holds the lifecycle lock across the start and the read, so a close
         cannot take the session away in between.
 
         Args:
-            request: True when the caller owns the connection. A tool call
+            as_owner: True when the caller owns the connection. A tool call
                 passes False and uses the session an owner asked for.
 
         Raises:
             _NotConnectedError: If no owner has asked the client for a session.
         """
         async with self._lifecycle_lock:
-            if request:
+            if as_owner:
                 self._session_requested = True
             if self._session_requested:
                 await self._start_locked()
@@ -433,7 +436,7 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing the available tools with handlers attached.
         """
-        session = await self._open_session(request=True)
+        session = await self._open_session(as_owner=True)
         return await self._list_tools_helper(session, attach_handlers=True)
 
     @deprecated(
@@ -570,7 +573,7 @@ class MCPClient(BaseObject):
         results = None
         error_msg = None
         try:
-            session = await self._open_session(request=False)
+            session = await self._open_session(as_owner=False)
             results = await session.call_tool(function_name, arguments=arguments)
         except _NotConnectedError:
             # The call reached no session. That is a wiring mistake, so it
