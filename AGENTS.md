@@ -31,7 +31,7 @@ uv run towncrier build --draft --version Unreleased
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
-pipecat eval suite scripts/release-evals/manifest.yaml -p <bot-pattern> -s <scenario>
+pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
 
 # Lint and format check
 uv run ruff check
@@ -135,6 +135,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
 | `src/pipecat/metrics/`     | Metrics data models                                |
+| `evals/`                   | Eval suites; `evals/release/` is the release suite |
 
 ## Code Style
 
@@ -215,11 +216,11 @@ When adding a new service:
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
 
-**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) drives a *real bot* end-to-end and checks its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. A **scenario** is one such check: a YAML file describing a conversation to hold with the bot and how to decide whether the bot behaved properly. The harness connects to the bot's **eval transport** as an RTVI client, plays the user's side (synthesizing audio in audio mode), and judges the bot's side.
+**Behavioral evals.** `pipecat.evals` (`src/pipecat/evals/`) drives a *real bot* end-to-end and checks its behavior — use it to confirm a feature works (interruptions, function calls, vision, multi-turn, transcription, DTMF) rather than only checking frame plumbing. A **scenario** is one such check: a conversation to hold with the bot and how to decide whether the bot behaved properly. A YAML file lists one or more under `scenarios:`, each with a `name:`, and any scenario key at the file's top level is the default for all of them (a scenario that sets the same key replaces it whole). Each runs on its own, against its own bot, named `<file>/<scenario>`. The harness connects to the bot's **eval transport** as an RTVI client, plays the user's side (synthesizing audio in audio mode), and judges the bot's side.
 
-There are two kinds of scenario, told apart by the file's keys:
+There are two kinds of scenario, told apart by the scenario's keys:
 
-- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains`, an expected `function_call`, or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots.
+- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains`, an expected `function_call`, the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots.
 - A **simulated** scenario, a simulation for short (`persona:` and `goal:`), lets an LLM play a caller who pursues the goal and hangs up with an `end_call` tool. A judge then reads the whole conversation, the bot's tool calls in place, and decides whether the bot did its job (`success:`, prose) and how each reply scored on the `metrics:`. A judged metric (`criterion`, optionally `min_score`) says what every reply should be and scores the share of turns that satisfied it; a measured one (`measure: turns | duration | words | latency` with `min_value` / `max_value`, or `measure: function_calls` with the `calls` the bot should make, `[]` for none) is computed from the run. A run passes when the goal is met and no metric falls short, and a simulation's `runs` must all pass.
 
 To confirm a behavior while developing:
@@ -227,6 +228,6 @@ To confirm a behavior while developing:
 1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
 2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
 
-For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 
-From Python, `load_scenario_file(path)` (`src/pipecat/evals/scenario.py`) parses a file of either kind and `EvalSession.from_scenario(scenario, bot_url, params=EvalSessionParams(...)).run()` (`src/pipecat/evals/session.py`) runs it, building the scripted or simulation session the scenario needs; `EvalSessionParams` is how the run behaves (timeouts, recording, caching, teardown), the services it uses are keyword arguments, and the result is an `EvalScriptResult` or an `EvalSimulationResult` (`src/pipecat/evals/results.py`).
+From Python, `EvalScenarioFile.load(path)` (`src/pipecat/evals/scenario.py`) reads a file and holds its scenarios, each of whichever kind it is, and `EvalSession.from_scenario(scenario, bot_url, params=EvalSessionParams(...)).run()` (`src/pipecat/evals/session.py`) runs one, building the scripted or simulation session the scenario needs; `EvalSessionParams` is how the run behaves (timeouts, recording, caching, teardown), the services it uses are keyword arguments, and the result is an `EvalScriptResult` or an `EvalSimulationResult` (`src/pipecat/evals/results.py`).

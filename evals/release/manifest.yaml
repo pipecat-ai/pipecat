@@ -1,5 +1,5 @@
 # Release evals manifest: which scenarios each bot runs.
-# Run with: pipecat eval suite scripts/release-evals/manifest.yaml
+# Run with: pipecat eval suite evals/release/manifest.yaml
 #
 # Scenarios are reusable, so one shared scenario covers many bots. A scenario is
 # scripted (a `turns:` list, in scenarios/scripted/) or a simulation (a
