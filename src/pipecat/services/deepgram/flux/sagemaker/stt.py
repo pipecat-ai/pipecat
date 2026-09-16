@@ -216,8 +216,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         )
 
         try:
-            # A connection setting the endpoint rejects leaves start_session
-            # blocked indefinitely rather than raising, so it is bounded too.
+            # A rejected connection setting raises a generic 424 from
+            # start_session; the timeout guards against a session that never opens.
             await self._start_session_within_timeout()
 
             # Start response processor first so we can receive the Connected message
@@ -252,7 +252,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         except TimeoutError:
             raise FluxConnectionNotConfirmedError(
                 f"SageMaker session did not open within {self._CONNECTION_TIMEOUT}s; "
-                "the endpoint may not accept the current connection settings"
+                "the endpoint may not accept the current connection settings (see "
+                f"CloudWatch log group /aws/sagemaker/Endpoints/{self._endpoint_name})"
             ) from None
 
     async def _disconnect(self):
