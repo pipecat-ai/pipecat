@@ -145,3 +145,51 @@ async def test_every_frame_is_paced_when_payloads_are_coalesced():
     assert written == [True] * 9
     assert output._write_audio_sleep.await_count == 9
     assert connection.send.await_count == 3
+
+
+class _AlwaysEmitsSerializer(FrameSerializer):
+    """Emits a payload for every frame, so every write reaches the socket."""
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit a fixed payload."""
+        return "payload"
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+@pytest.mark.asyncio
+async def test_wedged_send_gives_up_and_writes_the_peer_off():
+    """Tests for issue #5789.
+
+    A peer that stops reading leaves the send waiting on socket buffers that
+    never drain, so a write that never returns parks the task handling the
+    frame along with the `EndFrame` queued behind it.
+    """
+    never_returns = asyncio.Event()
+
+    async def wedged(*args, **kwargs):
+        await never_returns.wait()
+
+    params = WebsocketClientParams(
+        serializer=_AlwaysEmitsSerializer(),
+        audio_out_enabled=True,
+        audio_out_write_timeout_secs=0.1,
+    )
+    output = WebsocketClientTransport(uri="ws://localhost:1", params=params).output()
+
+    connection = AsyncMock()
+    connection.state = websockets.State.OPEN
+    connection.send = AsyncMock(side_effect=wedged)
+    output._session._websocket = connection
+
+    written = await asyncio.wait_for(
+        output._write_frame(
+            OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+        ),
+        timeout=5.0,
+    )
+
+    assert written is False
+    assert output.is_usable is False

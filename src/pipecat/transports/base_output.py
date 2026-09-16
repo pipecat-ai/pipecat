@@ -14,7 +14,7 @@ import asyncio
 import itertools
 import time
 from collections import deque
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Coroutine, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -285,6 +285,44 @@ class BaseOutputTransport(FrameProcessor):
             frame: The frame to handle.
         """
         pass
+
+    async def _write_within_timeout(self, write: Coroutine[Any, Any, Any]) -> bool:
+        """Await a write to the transport, giving up if it never returns.
+
+        A peer that stops reading leaves the write waiting on socket buffers
+        that never drain, with nothing to fail and no state to check, so how
+        long it takes is the only signal available.
+
+        An audio write from the media sender arrives already bounded and loses
+        this race. The writes that need this bound are the ones that reach the
+        transport on the task handling the frame: the message a serializer
+        emits on an interruption, and a DTMF tone, which reaches
+        ``write_audio_frame`` without going through the media sender.
+
+        Args:
+            write: The pending write to await.
+
+        Returns:
+            Whether the write completed in time.
+        """
+        # Reporting the timeout below costs the transport its usability, so a
+        # peer is only written off once however much is still queued for it.
+        if not self.is_usable:
+            write.close()
+            return False
+
+        timeout = self._params.audio_out_write_timeout_secs
+        try:
+            await asyncio.wait_for(write, timeout=timeout)
+            return True
+        except TimeoutError as e:
+            await self.push_error(
+                f"{self} timed out after {timeout}s writing to the transport; "
+                "the peer has stopped reading",
+                exception=e,
+                force_treat_as_permanent=True,
+            )
+            return False
 
     def _supports_native_dtmf(self) -> bool:
         """Override in transport implementations that support native DTMF.
