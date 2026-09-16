@@ -6,6 +6,8 @@
 
 """Tests for the eval suite's manifest parsing, per-run log capture, and run updates."""
 
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -33,7 +35,8 @@ suite:
   - bot: voice/voice-a.py
     scenarios: [simple_math, multi_turn]
   - bot: vision/vision-b.py
-    runner_body: bodies/cat.json
+    runner_body:
+      path: bodies/cat.yaml
     scenarios: [other/special.yaml]
 """
 
@@ -68,7 +71,46 @@ class TestEvalManifestLoad(unittest.TestCase):
         # A path-like scenario bypasses scenarios_dir and resolves to the manifest.
         self.assertEqual(special.scenario, "special")
         self.assertEqual(special.scenario_path, self.base / "other" / "special.yaml")
-        self.assertEqual(special.runner_body_path, self.base / "bodies" / "cat.json")
+        self.assertEqual(special.runner_body_path, self.base / "bodies" / "cat.yaml")
+        self.assertIsNone(special.runner_body)
+
+    def test_runner_body_given_inline(self):
+        self.manifest_path.write_text(
+            "suite:\n"
+            "  - bot: a.py\n"
+            "    runner_body:\n"
+            "      data: {model: gpt-4o-mini, question: hi}\n"
+            "    scenarios: [x]\n"
+        )
+        run = EvalManifest.load(self.manifest_path).runs[0]
+        self.assertEqual(run.runner_body, {"model": "gpt-4o-mini", "question": "hi"})
+        self.assertIsNone(run.runner_body_path)
+
+    def test_bare_runner_body_path_is_deprecated(self):
+        self.manifest_path.write_text(
+            "suite:\n  - bot: a.py\n    runner_body: bodies/cat.yaml\n    scenarios: [x]\n"
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            run = EvalManifest.load(self.manifest_path).runs[0]
+        self.assertEqual([w.category for w in caught], [DeprecationWarning])
+        self.assertIn("runner_body: {path: <file>}", str(caught[0].message))
+        self.assertEqual(run.runner_body_path, self.base / "bodies" / "cat.yaml")
+
+    def test_runner_body_must_be_a_path_or_data(self):
+        for bad in (
+            "{path: a.yaml, data: {}}",
+            "{}",
+            "{file: a.yaml}",
+            "[a.yaml]",
+            "{data: a.yaml}",
+        ):
+            self.manifest_path.write_text(
+                f"suite:\n  - bot: a.py\n    runner_body: {bad}\n    scenarios: [x]\n"
+            )
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalManifest.load(self.manifest_path)
+            self.assertIn("'runner_body:'", str(ctx.exception))
 
     def test_defaults(self):
         (self.base / "minimal.yaml").write_text("suite: []\n")
@@ -204,6 +246,76 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["running", "done"] * 2)
 
 
+class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
+    """An inline body reaches the bot as a file; a body file sets the bot's directory."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        (self.base / "bodies").mkdir()
+        # The "bot" records its argv and working directory, then exits.
+        self.bot = self.base / "bot.py"
+        self.bot.write_text(
+            "import json, os, sys\nprint(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}))\n"
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def _spawn(self, run: EvalRun) -> dict:
+        from pipecat.evals.suite import _RunFiles
+
+        suite = EvalSuite(
+            EvalManifest(
+                runs=[run],
+                spawn="{python} {bot} --port {port}",
+                python=sys.executable,
+                concurrency=1,
+                repeat=1,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        files = _RunFiles.for_run(run, self.base / "logs", None)
+        files.log.parent.mkdir(parents=True, exist_ok=True)
+        proc = await suite._spawn_bot(run, 7900, files)
+        await proc.wait()
+        return json.loads(files.log.read_text())
+
+    async def test_inline_body_is_written_for_the_bot(self):
+        run = EvalRun(
+            bot="bot.py",
+            scenario="x",
+            scenario_path=self.base / "x.yaml",
+            bot_path=self.bot,
+            runner_body={"model": "gpt-4o-mini"},
+        )
+        seen = await self._spawn(run)
+        self.assertEqual(seen["argv"][:2], ["--port", "7900"])
+        self.assertEqual(seen["argv"][2], "--runner-body")
+        body_path = Path(seen["argv"][3])
+        self.assertEqual(body_path.parent, self.base / "logs")
+        self.assertEqual(json.loads(body_path.read_text()), {"model": "gpt-4o-mini"})
+        # No body file to anchor it, so the bot runs where the suite does.
+        self.assertEqual(seen["cwd"], os.getcwd())
+
+    async def test_body_file_is_the_bots_directory(self):
+        body = self.base / "bodies" / "cat.yaml"
+        body.write_text("image_path: cat.jpg\n")
+        run = EvalRun(
+            bot="bot.py",
+            scenario="x",
+            scenario_path=self.base / "x.yaml",
+            bot_path=self.bot,
+            runner_body_path=body,
+        )
+        seen = await self._spawn(run)
+        self.assertEqual(seen["argv"][2:], ["--runner-body", str(body)])
+        self.assertEqual(Path(seen["cwd"]).resolve(), body.parent)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -211,8 +323,6 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # Simulations in a manifest's scenarios: list, and their results.jsonl records.
 # ---------------------------------------------------------------------------
-
-import json  # noqa: E402
 
 from pipecat.evals.results import (  # noqa: E402
     EvalSimulationMetricScore,

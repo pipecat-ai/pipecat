@@ -233,18 +233,25 @@ judge: !include ../judge_audio.yaml
 
 Some bots need session data they'd normally get from a `/start` request body,
 such as a vision bot's image. The eval transport has no such endpoint, so a
-bot entry can point to a JSON `runner_body:` file (resolved relative to the
-manifest) that is passed to the bot as `--runner-body`:
+bot entry gives a `runner_body:` that is passed to the bot as `--runner-body`,
+either a YAML or JSON file (resolved relative to the manifest) or the body
+written inline:
 
 ```yaml
 - bot: vision/vision-openai.py
-  runner_body: scenarios/vision-cat.json   # {"image_path": "../assets/cat.jpg", "question": "..."}
+  runner_body:
+    path: scenarios/vision-cat.yaml   # image_path: ../assets/cat.jpg, question: ...
   scenarios: [vision_describe]
+- bot: turns/filter-incomplete-turns.py
+  runner_body:
+    data: {model: gpt-4o-mini}
+  scenarios: [turn_completion]
 ```
 
-The bot is spawned with the body file's directory as its working directory, so
-a relative `image_path` in the body resolves next to the file and the two travel
-together. The `vision_describe` scenario is a bot-first turn (no user input): the
+A bot given a file is spawned with the file's directory as its working
+directory, so a relative `image_path` in the body resolves next to the file and
+the two travel together; a body that holds such paths belongs in a file for
+that reason. The `vision_describe` scenario is a bot-first turn (no user input): the
 bot describes the image (a cat) on connect and the judge checks that it described
 a cat.
 

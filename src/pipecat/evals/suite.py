@@ -29,8 +29,13 @@ Manifest format (YAML)::
       - bot: examples/voice/voice-openai.py
         scenarios: [simple_math, interruption]
       - bot: examples/vision/vision-openai.py
-        runner_body: scenarios/vision-cat.json   # passed to the bot as --runner-body
+        runner_body:
+          path: scenarios/vision-cat.yaml        # passed to the bot as --runner-body
         scenarios: [vision_describe]
+      - bot: examples/turns/filter-incomplete-turns.py
+        runner_body:
+          data: {model: gpt-4o-mini}             # written to a file for the bot
+        scenarios: [turn_completion]
       - bot: examples/flows/restaurant_reservation.py
         scenarios: [book_table]                  # a simulation: its file has a persona
 
@@ -42,11 +47,18 @@ per scenario it holds, scripted or a simulation as each says (see
 in ``.yaml`` is a path relative to the manifest instead. A simulation runs as
 many times as its ``runs:`` says, and every run must pass.
 
-An optional ``runner_body:`` (a JSON file, resolved relative to the manifest) is
-passed to the bot as ``--runner-body``, supplying runner-args data it would
-normally receive in a ``/start`` request body (e.g. a vision bot's image path).
-The bot is spawned with the body file's directory as its working directory, so
-relative paths inside the body (like an image) resolve next to the file.
+An optional ``runner_body:`` supplies runner-args data the bot would normally
+receive in a ``/start`` request body (e.g. a vision bot's image path), passed
+to it as ``--runner-body``. It holds either ``path:``, a YAML or JSON file
+resolved relative to the manifest, or ``data:``, the body itself as a mapping,
+which the suite writes to a file among the run's logs. A bot given a file runs
+with the file's directory as its working directory, so relative paths inside
+the body (like an image) resolve next to the file; a body that holds such
+paths belongs in a file for that reason.
+
+.. deprecated:: 1.11.0
+    Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``.
+    Will be removed in 2.0.0.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -344,7 +356,10 @@ class EvalRun:
             simulation's ``runs`` (a requirement: every attempt must pass).
         bot_path: The bot to spawn (suite); ``None`` when connecting to ``bot_url``.
         bot_url: Connect here instead of spawning (used by ``pipecat eval run``).
-        runner_body_path: Optional ``--runner-body`` JSON for the bot's runner args.
+        runner_body_path: Optional ``--runner-body`` file for the bot's runner args.
+        runner_body: The bot's runner-args body given inline, written to a
+            file for the bot when it is spawned; ``None`` when there is none or
+            it comes from ``runner_body_path``.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -365,6 +380,7 @@ class EvalRun:
     bot_path: Path | None = None
     bot_url: str | None = None
     runner_body_path: Path | None = None
+    runner_body: dict | None = None
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -393,6 +409,14 @@ class EvalRun:
         if loaded is None:
             loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
         return loaded
+
+
+@dataclass(frozen=True)
+class _RunnerBody:
+    """A manifest entry's ``runner_body:``: a file to pass to the bot, or data to write to one."""
+
+    path: Path | None = None
+    data: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -503,7 +527,7 @@ class EvalManifest:
             cache_dir=cache_dir,
         )
         return cls(
-            runs=cls._runs(data, base, settings),
+            runs=cls._runs(data, base, path, settings),
             spawn=settings.spawn,
             python=settings.python,
             concurrency=settings.concurrency,
@@ -575,7 +599,9 @@ class EvalManifest:
         )
 
     @classmethod
-    def _runs(cls, data: dict, base: Path, settings: "_ManifestSettings") -> list[EvalRun]:
+    def _runs(
+        cls, data: dict, base: Path, path: Path, settings: "_ManifestSettings"
+    ) -> list[EvalRun]:
         """The runs the ``suite:`` list describes, one per bot, scenario, and attempt.
 
         The scenario file says which kind it is. A simulation runs as many
@@ -589,10 +615,7 @@ class EvalManifest:
         for item in data.get("suite", []):
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
-            # A body file is passed to the bot as --runner-body: runner-args data
-            # it would normally get from a /start request (a vision bot's image).
-            runner_body = item.get("runner_body")
-            runner_body_path = (base / str(runner_body)).resolve() if runner_body else None
+            body = cls._runner_body(item.get("runner_body"), base, f"{path}: bot {bot!r}")
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
                 # A file that fails to load still gets a run, under the
@@ -613,7 +636,8 @@ class EvalManifest:
                             loaded=one,
                             bot_path=bot_path,
                             scenario_path=scenario_path,
-                            runner_body_path=runner_body_path,
+                            runner_body_path=body.path,
+                            runner_body=body.data,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -629,6 +653,27 @@ class EvalManifest:
             ]
         return runs
 
+    @classmethod
+    def _runner_body(cls, spec, base: Path, where: str) -> _RunnerBody:
+        """An entry's ``runner_body:`` as the bot gets it: a file to pass, or data the suite writes to one."""
+        if spec is None:
+            return _RunnerBody()
+        if isinstance(spec, str):
+            warnings.warn(
+                f"{where} a bare 'runner_body: <file>' is deprecated since 1.11.0 and will be "
+                "removed in 2.0.0. Use 'runner_body: {path: <file>}' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            spec = {"path": spec}
+        if not isinstance(spec, dict) or sorted(spec) not in (["data"], ["path"]):
+            raise ValueError(f"{where} 'runner_body:' must hold one of 'path:' or 'data:'")
+        if "path" in spec:
+            return _RunnerBody(path=(base / str(spec["path"])).resolve())
+        if not isinstance(spec["data"], dict):
+            raise ValueError(f"{where} 'runner_body:' 'data:' must be a mapping")
+        return _RunnerBody(data=spec["data"])
+
 
 @dataclass(frozen=True)
 class _RunFiles:
@@ -641,6 +686,7 @@ class _RunFiles:
         trace: The harness's decision trace, ``<prefix>.eval.log``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
+        body: The bot's runner-args body, written when the manifest gives it inline.
         record: The conversation recording, or ``None`` when not recording.
     """
 
@@ -650,6 +696,7 @@ class _RunFiles:
     trace: Path
     config: Path
     result: Path
+    body: Path
     record: Path | None
 
     @classmethod
@@ -670,6 +717,7 @@ class _RunFiles:
             trace=logs_dir / f"{prefix}.eval.log",
             config=logs_dir / f"{prefix}.config.json",
             result=logs_dir / f"{prefix}.result.json",
+            body=logs_dir / f"{prefix}.body.json",
             record=(record_dir / f"{prefix}.wav") if record_dir else None,
         )
 
@@ -875,13 +923,18 @@ class EvalSuite(BaseObject):
         """Start the bot with its eval transport on ``port``, its output going to the bot log.
 
         A body file's directory is the bot's working directory, so relative
-        paths inside the body (an image) resolve next to the file.
+        paths inside the body (an image) resolve next to the file. A body given
+        inline is written to the run's body file first.
         """
         assert run.bot_path is not None
         cwd = str(run.runner_body_path.parent) if run.runner_body_path else None
+        body_path = run.runner_body_path
+        if run.runner_body is not None:
+            body_path = files.body
+            body_path.write_text(json.dumps(run.runner_body))
         with files.log.open("wb") as logf:
             return await asyncio.create_subprocess_exec(
-                *self._spawn_argv(run.bot_path, port, run.runner_body_path),
+                *self._spawn_argv(run.bot_path, port, body_path),
                 stdout=logf,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,

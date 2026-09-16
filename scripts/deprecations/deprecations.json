@@ -487,6 +487,17 @@
       "location": "pipecat/evals/suite.py"
     },
     {
+      "subject": "pipecat.evals.suite",
+      "module": "pipecat.evals.suite",
+      "kind": "module",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "runner_body: {path: <file>}",
+      "message": "Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``. Will be removed in 2.0.0.",
+      "location": "pipecat/evals/suite.py"
+    },
+    {
       "subject": "FlowManager.task",
       "module": "pipecat.flows.manager",
       "kind": "parameter",

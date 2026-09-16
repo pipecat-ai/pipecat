@@ -118,6 +118,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import aiohttp
+import yaml
 from fastapi.responses import FileResponse, Response
 from loguru import logger
 
@@ -1529,9 +1530,10 @@ async def _run_eval(args: argparse.Namespace):
 
     # A bot may need session data it would normally receive in the /start request
     # body (e.g. a vision bot's image path). The eval transport has no such
-    # endpoint, so the body is read from a JSON file passed with --runner-body.
+    # endpoint, so the body is read from a YAML or JSON file passed with
+    # --runner-body.
     if args.runner_body:
-        runner_args.body = json.loads(Path(args.runner_body).read_text())
+        runner_args.body = yaml.safe_load(Path(args.runner_body).read_text())
 
     bot_module = _get_bot_module()
     await bot_module.bot(runner_args)
@@ -1744,7 +1746,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--runner-body",
         type=str,
         default=None,
-        help="Path to a JSON file with the runner args body (e.g. a vision bot's image path under -t eval)",
+        help="Path to a YAML or JSON file with the runner args body (e.g. a vision bot's image path under -t eval)",
     )
     parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase logging verbosity"
