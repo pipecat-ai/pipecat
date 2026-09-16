@@ -31,7 +31,7 @@ uv run towncrier build --draft --version Unreleased
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
-pipecat eval suite scripts/release-evals/manifest.yaml -p <bot-pattern> -s <scenario>
+pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
 
 # Lint and format check
 uv run ruff check
@@ -227,6 +227,6 @@ To confirm a behavior while developing:
 1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
 2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
 
-For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. Reusable scenarios and the pre-release validation manifest live in `scripts/release-evals/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
+For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: a local Ollama judge `gemma4:12b`, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 
 From Python, `load_scenario_file(path)` (`src/pipecat/evals/scenario.py`) parses a file of either kind and `EvalSession.from_scenario(scenario, bot_url, params=EvalSessionParams(...)).run()` (`src/pipecat/evals/session.py`) runs it, building the scripted or simulation session the scenario needs; `EvalSessionParams` is how the run behaves (timeouts, recording, caching, teardown), the services it uses are keyword arguments, and the result is an `EvalScriptResult` or an `EvalSimulationResult` (`src/pipecat/evals/results.py`).
