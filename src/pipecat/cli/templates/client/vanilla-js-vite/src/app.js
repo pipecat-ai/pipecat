@@ -2,6 +2,7 @@ import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import {
   AVAILABLE_TRANSPORTS,
   DEFAULT_TRANSPORT,
+  PROJECT_NAME,
   TRANSPORT_CONFIG,
   createTransport,
 } from './config';
@@ -18,6 +19,8 @@ class VoiceChatClient {
   }
 
   setupDOM() {
+    document.title = PROJECT_NAME;
+    document.getElementById('title').textContent = PROJECT_NAME;
     this.transportSelect = document.getElementById('transport-select');
     this.connectBtn = document.getElementById('connect-btn');
     this.micBtn = document.getElementById('mic-btn');
@@ -44,7 +47,7 @@ class VoiceChatClient {
 
     // Hide transport selector if only one transport
     if (AVAILABLE_TRANSPORTS.length === 1) {
-      this.transportSelect.parentElement.style.display = 'none';
+      this.transportSelect.hidden = true;
     }
 
     // Add placeholder message
@@ -181,8 +184,8 @@ class VoiceChatClient {
   }
 
   updateMicButton(enabled) {
-    this.micStatus.textContent = enabled ? 'Mic is On' : 'Mic is Off';
-    this.micBtn.style.backgroundColor = enabled ? '#10b981' : '#1f2937';
+    this.micStatus.textContent = enabled ? 'Mic on' : 'Mic off';
+    this.micBtn.classList.toggle('on', enabled);
   }
 
   addConversationMessage(text, role) {
@@ -211,7 +214,13 @@ class VoiceChatClient {
     const eventDiv = document.createElement('div');
     eventDiv.className = 'event-entry';
 
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = new Date().toLocaleTimeString(undefined, {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+    });
     const timestampSpan = document.createElement('span');
     timestampSpan.className = 'timestamp';
     timestampSpan.textContent = timestamp;

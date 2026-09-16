@@ -1,228 +1,319 @@
-* {
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+/*
+ * The shadcn neutral theme the Pipecat UI console renders with, so this client
+ * matches the React ones. The dark set follows the system preference.
+ */
+:root {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --border: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --active-background: oklch(0.696 0.17 162.48);
+  --active-foreground: oklch(0.979 0.021 166.113);
+  --inactive-background: oklch(0.702 0.189 22.23);
+  --agent-foreground: oklch(0.585 0.233 277.117);
+  --client-foreground: oklch(0.623 0.214 259.815);
+  --radius: 0.625rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 10%);
+    --ring: oklch(0.556 0 0);
+    --active-background: oklch(0.702 0.158 160.44);
+    --active-foreground: oklch(0.979 0.021 166.11);
+    --inactive-background: oklch(0.702 0.189 22.23);
+    --agent-foreground: oklch(0.585 0.233 277.117);
+    --client-foreground: oklch(0.623 0.214 259.815);
+  }
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+  border-color: var(--border);
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
   margin: 0;
-  padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  background-color: #000;
-  color: #e5e7eb;
   height: 100vh;
   overflow: hidden;
-}
-
-.container {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100vh;
-}
-
-/* Header */
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  border-bottom: 1px solid #333;
-}
-
-.transport-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.transport-selector label {
-  font-weight: 500;
-}
-
-#transport-select {
-  padding: 0.5rem 1rem;
-  background-color: #1f2937;
-  color: #e5e7eb;
-  border: 1px solid #374151;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-#transport-select:focus {
-  outline: none;
-  border-color: #10b981;
-}
-
-.controls {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.control-btn,
-.connect-btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.control-btn {
-  background-color: #1f2937;
-  color: #e5e7eb;
-  border: 1px solid #374151;
-}
-
-.control-btn:hover:not(:disabled) {
-  background-color: #374151;
-}
-
-.control-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.connect-btn {
-  background-color: #10b981;
-  color: #000;
-}
-
-.connect-btn:hover {
-  background-color: #059669;
-}
-
-.connect-btn.disconnect {
-  background-color: #ef4444;
-  color: #fff;
-}
-
-.connect-btn.disconnect:hover {
-  background-color: #dc2626;
-}
-
-/* Conversation Panel */
-.conversation-panel {
-  flex: 1;
-  padding: 1rem;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.conversation-panel h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-#conversation-log {
-  flex: 1;
-  overflow-y: auto;
-  background-color: #111;
-  border: 1px solid #333;
-  border-radius: 0.5rem;
-  padding: 1rem;
+  background: var(--background);
+  color: var(--foreground);
   font-size: 0.875rem;
   line-height: 1.5;
 }
 
-.conversation-message {
-  margin-bottom: 0.75rem;
-  padding: 0.5rem;
-  border-radius: 0.25rem;
+button,
+select {
+  font: inherit;
+  color: inherit;
 }
 
-.conversation-message.user {
-  background-color: #1e40af;
-  color: #e0e7ff;
-}
-
-.conversation-message.bot {
-  background-color: #065f46;
-  color: #d1fae5;
-}
-
-.conversation-message .role {
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-
-.conversation-message.placeholder {
-  color: #6b7280;
-  font-style: italic;
-  background-color: transparent;
-}
-
-/* Events Panel */
-.events-panel {
-  height: 256px;
-  padding: 0 1rem 1rem 1rem;
-  border-top: 1px solid #333;
-}
-
-.events-panel h3 {
-  margin: 1rem 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-#events-log {
-  height: calc(100% - 3rem);
-  overflow-y: auto;
-  background-color: #111;
-  border: 1px solid #333;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  font-family: 'Courier New', monospace;
-  font-size: 0.75rem;
-  line-height: 1.4;
-}
-
-.event-entry {
-  margin-bottom: 0.5rem;
+.app {
   display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header: transport picker at the left, logo and name centered, controls at
+   the right, over a hairline. */
+.header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.header-start,
+.header-end {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.event-entry .timestamp {
-  color: #6b7280;
+.header-end {
+  margin-left: auto;
+  gap: 0.25rem;
+}
+
+.header-label {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.header-brand {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  color: var(--foreground);
+}
+
+.header-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Small controls, the console's header size. */
+.control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.75rem;
+  padding: 0 0.625rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) * 0.8);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    color 150ms;
+}
+
+.control:focus-visible {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A single transport hides the whole picker, label included. */
+.header-start:has(.control[hidden]) {
+  display: none;
+}
+
+select.control {
+  border-color: var(--border);
+  padding-right: 0.5rem;
+}
+
+/* Mic toggle: ghost while off, green while live, red when muted mid-session. */
+.mic-btn {
+  color: var(--muted-foreground);
+}
+
+.mic-btn:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.mic-btn.on {
+  background: var(--active-background);
+  color: var(--active-foreground);
+}
+
+.mic-btn.on:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--active-background) 85%, transparent);
+}
+
+.mic-btn:not(:disabled):not(.on) {
+  color: var(--inactive-background);
+}
+
+/* Connect: solid green while idle, tinted red while connected. */
+.connect-btn {
+  background: var(--active-background);
+  color: var(--active-foreground);
+}
+
+.connect-btn:hover {
+  background: color-mix(in oklab, var(--active-background) 85%, transparent);
+}
+
+.connect-btn.disconnect {
+  border-color: color-mix(in oklab, var(--inactive-background) 30%, transparent);
+  background: color-mix(in oklab, var(--inactive-background) 10%, transparent);
+  color: var(--inactive-background);
+}
+
+.connect-btn.disconnect:hover {
+  background: color-mix(in oklab, var(--inactive-background) 20%, transparent);
+}
+
+/* Panels: the console's cards, with a titled header over the content. */
+.main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--card);
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.conversation-panel {
+  flex: 1;
+}
+
+.events-panel {
+  height: 30%;
   flex-shrink: 0;
+}
+
+.panel-title {
+  margin: 0;
+  padding: 0.75rem;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Conversation */
+#conversation-log {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.75rem;
+}
+
+.conversation-message .role {
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.conversation-message.user .role {
+  color: var(--client-foreground);
+}
+
+.conversation-message.bot .role {
+  color: var(--agent-foreground);
+}
+
+.conversation-message.placeholder {
+  margin: auto;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+/* Events */
+#events-log {
+  padding: 0.25rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.event-entry {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  padding: 0.125rem 0.75rem;
+}
+
+.event-entry .timestamp {
+  color: var(--muted-foreground);
+  white-space: nowrap;
 }
 
 .event-entry .event-name {
-  color: #10b981;
   font-weight: 600;
-  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .event-entry .event-data {
-  color: #9ca3af;
-}
-
-/* Scrollbar styling */
-#conversation-log::-webkit-scrollbar,
-#events-log::-webkit-scrollbar {
-  width: 8px;
-}
-
-#conversation-log::-webkit-scrollbar-track,
-#events-log::-webkit-scrollbar-track {
-  background: #1f2937;
-  border-radius: 4px;
-}
-
-#conversation-log::-webkit-scrollbar-thumb,
-#events-log::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 4px;
-}
-
-#conversation-log::-webkit-scrollbar-thumb:hover,
-#events-log::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
