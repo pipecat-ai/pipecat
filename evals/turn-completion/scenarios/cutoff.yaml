@@ -1,0 +1,332 @@
+# The user stopped mid-sentence. The model must answer with ◐ and nothing else.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: cutoff
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: cutoff_preposition
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I'd go to Japan because I love
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_preposition_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i'd go to japan because i love
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_article
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: I need help with the
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_article_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: i need help with the
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_mid_request
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: I need help with
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_mid_request_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: i need help with
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_conjunction
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● When would you like to fly?
+  turns:
+  - user: I'd like to fly out on Tuesday and
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_conjunction_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● When would you like to fly?
+  turns:
+  - user: i'd like to fly out on tuesday and
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_list_comma
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What can I get for you?
+  turns:
+  - user: I'd like a large pepperoni pizza, a garden salad,
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_phone_number
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's the best phone number to reach you?
+  turns:
+  - user: It's five five five,
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_phone_number_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's the best phone number to reach you?
+  turns:
+  - user: it's five five five
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_question_no_object
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Can you tell me the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_question_no_object_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: can you tell me the weather in
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_subject_only
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: So the thing I wanted to ask about was
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_subject_only_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: so the thing i wanted to ask about was
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_disfluent
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I was thinking maybe, uh,
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_disfluent_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i was thinking maybe uh
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_the_reason
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Why do you want to cancel the subscription?
+  turns:
+  - user: The main reason is that
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_the_reason_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Why do you want to cancel the subscription?
+  turns:
+  - user: the main reason is that
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_infinitive
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What would you like to do next?
+  turns:
+  - user: I want to
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_infinitive_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What would you like to do next?
+  turns:
+  - user: i want to
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_so
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I'd go to Japan, so
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: cutoff_so_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i'd go to japan so
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false

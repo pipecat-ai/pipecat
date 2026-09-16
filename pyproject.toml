@@ -304,6 +304,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 "examples/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "tests/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "scripts/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"evals/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]

@@ -1,0 +1,346 @@
+# Turn-completion evals manifest: one entry per model, all running the same
+# scenario files. An entry's runner_body describes the LLM service bot.py
+# builds; see the bot's module docstring for the fields. Providers that
+# rate-limit concurrent connections cap their own concurrency.
+#
+# Run with ./run.sh (pipecat eval suite over this file); see README.md.
+
+bots_dir: .
+scenarios_dir: scenarios
+concurrency: 8
+runs_dir: test-runs
+record: false
+spawn: "{python} {bot} -t eval --port {port}"
+
+# The tool scenarios need a model whose endpoint accepts tools; an entry whose
+# body sets tools: false runs the other files instead.
+scenario_files: &all
+  - complete
+  - continuation
+  - cutoff
+  - drift
+  - greeting
+  - hard
+  - language
+  - long
+  - preamble
+  - reprompt
+  - short_complete
+  - time_request
+  - tools
+
+
+scenario_files_no_tools: &no_tools
+  - complete
+  - continuation
+  - cutoff
+  - drift
+  - greeting
+  - hard
+  - language
+  - long
+  - preamble
+  - reprompt
+  - short_complete
+  - time_request
+
+suite:
+  - bot: bot.py
+    name: openai/gpt-4.1
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-4.1, service: pipecat.services.openai.llm.OpenAILLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openai/gpt-4.1-mini
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-4.1-mini, service: pipecat.services.openai.llm.OpenAILLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openai/gpt-4o
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-4o, service: pipecat.services.openai.llm.OpenAILLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openai/gpt-4o-mini
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-4o-mini, service: pipecat.services.openai.llm.OpenAILLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openai/gpt-5-mini
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-5-mini, service: pipecat.services.openai.llm.OpenAILLMService, settings: {extra: {reasoning_effort: minimal}}}
+    scenarios: *all
+  - bot: bot.py
+    name: openai/gpt-5.4
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-5.4, service: pipecat.services.openai.llm.OpenAILLMService, settings: {extra: {reasoning_effort: none}}}
+    scenarios: *all
+  - bot: bot.py
+    name: openai-responses/gpt-4.1
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-4.1, service: pipecat.services.openai.responses.llm.OpenAIResponsesLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openai-responses/gpt-5.4
+    runner_body:
+      data: {kwargs: {api_key: $OPENAI_API_KEY}, model: gpt-5.4, service: pipecat.services.openai.responses.llm.OpenAIResponsesLLMService, settings: {reasoning: {effort: none}}}
+    scenarios: *all
+  - bot: bot.py
+    name: anthropic/claude-sonnet-4-6
+    runner_body:
+      data: {kwargs: {api_key: $ANTHROPIC_API_KEY}, model: claude-sonnet-4-6, service: pipecat.services.anthropic.llm.AnthropicLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: anthropic/claude-haiku-4-5
+    runner_body:
+      data: {kwargs: {api_key: $ANTHROPIC_API_KEY}, model: claude-haiku-4-5-20251001, service: pipecat.services.anthropic.llm.AnthropicLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: anthropic/claude-sonnet-5
+    runner_body:
+      data: {kwargs: {api_key: $ANTHROPIC_API_KEY}, model: claude-sonnet-5, service: pipecat.services.anthropic.llm.AnthropicLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: google/gemini-3.6-flash
+    runner_body:
+      data: {kwargs: {api_key: $GOOGLE_API_KEY}, model: gemini-3.6-flash, service: pipecat.services.google.llm.GoogleLLMService, settings: {thinking: {thinking_level: minimal}}}
+    scenarios: *all
+  - bot: bot.py
+    name: google/gemini-3.5-flash-lite
+    runner_body:
+      data: {kwargs: {api_key: $GOOGLE_API_KEY}, model: gemini-3.5-flash-lite, service: pipecat.services.google.llm.GoogleLLMService, settings: {thinking: {thinking_level: minimal}}}
+    scenarios: *all
+  - bot: bot.py
+    name: google/gemini-2.5-flash
+    runner_body:
+      data: {kwargs: {api_key: $GOOGLE_API_KEY}, model: gemini-2.5-flash, service: pipecat.services.google.llm.GoogleLLMService, settings: {thinking: {thinking_budget: 0}}}
+    scenarios: *all
+  - bot: bot.py
+    name: vertex/gemini-3.6-flash
+    runner_body:
+      data: {kwargs: {credentials: $GOOGLE_VERTEX_TEST_CREDENTIALS, project_id: $GOOGLE_CLOUD_PROJECT_ID}, model: gemini-3.6-flash, service: pipecat.services.google.vertex.llm.GoogleVertexLLMService, settings: {thinking: {thinking_level: minimal}}}
+    scenarios: *all
+  - bot: bot.py
+    name: aws/us.amazon.nova-lite-v1:0
+    runner_body:
+      data: {kwargs: {aws_region: $AWS_REGION}, model: 'us.amazon.nova-lite-v1:0', service: pipecat.services.aws.llm.AWSBedrockLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: aws/us.amazon.nova-pro-v1:0
+    runner_body:
+      data: {kwargs: {aws_region: $AWS_REGION}, model: 'us.amazon.nova-pro-v1:0', service: pipecat.services.aws.llm.AWSBedrockLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: aws/us.meta.llama3-3-70b-instruct-v1:0
+    runner_body:
+      data: {kwargs: {aws_region: $AWS_REGION}, model: 'us.meta.llama3-3-70b-instruct-v1:0', service: pipecat.services.aws.llm.AWSBedrockLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: azure/gpt-4.1
+    runner_body:
+      data: {kwargs: {api_key: $AZURE_CHATGPT_API_KEY, endpoint: $AZURE_CHATGPT_ENDPOINT}, model: $AZURE_CHATGPT_MODEL, service: pipecat.services.azure.llm.AzureLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: groq/openai/gpt-oss-120b
+    concurrency: 2
+    runner_body:
+      data: {kwargs: {api_key: $GROQ_API_KEY}, model: openai/gpt-oss-120b, service: pipecat.services.groq.llm.GroqLLMService, settings: {reasoning_effort: low}}
+    scenarios: *all
+  - bot: bot.py
+    name: groq/openai/gpt-oss-20b
+    concurrency: 2
+    runner_body:
+      data: {kwargs: {api_key: $GROQ_API_KEY}, model: openai/gpt-oss-20b, service: pipecat.services.groq.llm.GroqLLMService, settings: {reasoning_effort: low}}
+    scenarios: *all
+  - bot: bot.py
+    name: groq/qwen/qwen3.6-27b
+    concurrency: 2
+    runner_body:
+      data: {developer_role: false, kwargs: {api_key: $GROQ_API_KEY}, model: qwen/qwen3.6-27b, service: pipecat.services.groq.llm.GroqLLMService, settings: {reasoning_effort: none}}
+    scenarios: *all
+  - bot: bot.py
+    name: cerebras/gpt-oss-120b
+    runner_body:
+      data: {kwargs: {api_key: $CEREBRAS_API_KEY}, model: gpt-oss-120b, service: pipecat.services.cerebras.llm.CerebrasLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: cerebras/qwen-3.8-27b
+    runner_body:
+      data: {developer_role: false, kwargs: {api_key: $CEREBRAS_API_KEY}, model: qwen-3.8-27b, service: pipecat.services.cerebras.llm.CerebrasLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: crusoe/openai/gpt-oss-120b
+    runner_body:
+      data: {kwargs: {api_key: $CRUSOE_API_KEY}, model: openai/gpt-oss-120b, service: pipecat.services.crusoe.llm.CrusoeLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: deepseek/deepseek-flash
+    runner_body:
+      data: {kwargs: {api_key: $DEEPSEEK_API_KEY}, model: deepseek-flash, service: pipecat.services.deepseek.llm.DeepSeekLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: fireworks/nemotron-3-ultra
+    runner_body:
+      data: {kwargs: {api_key: $FIREWORKS_API_KEY}, model: accounts/fireworks/models/nemotron-3-ultra-nvfp4, service: pipecat.services.fireworks.llm.FireworksLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: fireworks/nemotron-3.5-lightning-30b
+    runner_body:
+      data: {kwargs: {api_key: $FIREWORKS_API_KEY}, model: accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b, service: pipecat.services.fireworks.llm.FireworksLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: inception/mercury-2
+    runner_body:
+      data: {kwargs: {api_key: $INCEPTION_API_KEY}, model: mercury-2, service: pipecat.services.inception.llm.InceptionLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: mistral/mistral-small-latest
+    runner_body:
+      data: {kwargs: {api_key: $MISTRAL_API_KEY}, model: mistral-small-latest, service: pipecat.services.mistral.llm.MistralLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: mistral/mistral-large-latest
+    concurrency: 3
+    runner_body:
+      data: {kwargs: {api_key: $MISTRAL_API_KEY}, model: mistral-large-latest, service: pipecat.services.mistral.llm.MistralLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: mistral/ministral-8b-latest
+    runner_body:
+      data: {kwargs: {api_key: $MISTRAL_API_KEY}, model: ministral-8b-latest, service: pipecat.services.mistral.llm.MistralLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: nebius/Qwen/Qwen3-30B-A3B-Instruct-2507
+    runner_body:
+      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: Qwen/Qwen3-30B-A3B-Instruct-2507, service: pipecat.services.nebius.llm.NebiusLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: nebius/google/gemma-3-27b-it
+    runner_body:
+      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: google/gemma-3-27b-it, service: pipecat.services.nebius.llm.NebiusLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+    runner_body:
+      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B, service: pipecat.services.nebius.llm.NebiusLLMService, system_suffix: /no_think}
+    scenarios: *all
+  - bot: bot.py
+    name: novita/moonshotai/kimi-k2.5
+    runner_body:
+      data: {kwargs: {api_key: $NOVITA_API_KEY}, model: moonshotai/kimi-k2.5, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: novita/mistralai/mistral-nemo
+    runner_body:
+      data: {developer_role: false, kwargs: {api_key: $NOVITA_API_KEY}, model: mistralai/mistral-nemo, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: novita/qwen/qwen3.8-flash
+    runner_body:
+      data: {developer_role: false, kwargs: {api_key: $NOVITA_API_KEY}, model: qwen/qwen3.8-flash, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: nvidia/nvidia/nemotron-3-super-120b-a12b
+    concurrency: 2
+    runner_body:
+      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: nvidia/nemotron-3-super-120b-a12b, service: pipecat.services.nvidia.llm.NvidiaLLMService, system_suffix: /no_think}
+    scenarios: *all
+  - bot: bot.py
+    name: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
+    concurrency: 2
+    runner_body:
+      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: nvidia/nemotron-3.5-lightning-30b-a3b, service: pipecat.services.nvidia.llm.NvidiaLLMService, system_suffix: /no_think}
+    scenarios: *all
+  - bot: bot.py
+    name: nvidia/openai/gpt-oss-20b
+    concurrency: 2
+    runner_body:
+      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: openai/gpt-oss-20b, service: pipecat.services.nvidia.llm.NvidiaLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: ollama/gemma4:12b
+    concurrency: 1
+    runner_body:
+      data: {kwargs: {}, model: 'gemma4:12b', service: pipecat.services.ollama.llm.OLLamaLLMService, settings: {extra: {reasoning_effort: none}}}
+    scenarios: *all
+  - bot: bot.py
+    name: ollama/gemma2:9b
+    concurrency: 1
+    runner_body:
+      data: {kwargs: {}, model: 'gemma2:9b', service: pipecat.services.ollama.llm.OLLamaLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: openrouter/meta-llama/llama-3.3-70b-instruct
+    runner_body:
+      data: {kwargs: {api_key: $OPENROUTER_API_KEY}, model: meta-llama/llama-3.3-70b-instruct, service: pipecat.services.openrouter.llm.OpenRouterLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openrouter/meta-llama/llama-3.1-8b-instruct
+    runner_body:
+      data: {kwargs: {api_key: $OPENROUTER_API_KEY}, model: meta-llama/llama-3.1-8b-instruct, service: pipecat.services.openrouter.llm.OpenRouterLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: openrouter/meta-llama/llama-3.2-3b-instruct
+    runner_body:
+      data: {kwargs: {api_key: $OPENROUTER_API_KEY}, model: meta-llama/llama-3.2-3b-instruct, service: pipecat.services.openrouter.llm.OpenRouterLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: openrouter/google/gemma-2-27b-it
+    runner_body:
+      data: {kwargs: {api_key: $OPENROUTER_API_KEY}, model: google/gemma-2-27b-it, service: pipecat.services.openrouter.llm.OpenRouterLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: openrouter/microsoft/phi-4
+    runner_body:
+      data: {kwargs: {api_key: $OPENROUTER_API_KEY}, model: microsoft/phi-4, service: pipecat.services.openrouter.llm.OpenRouterLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: perplexity/sonar
+    runner_body:
+      data: {kwargs: {api_key: $PERPLEXITY_API_KEY}, model: sonar, service: pipecat.services.perplexity.llm.PerplexityLLMService, tools: false}
+    scenarios: *no_tools
+  - bot: bot.py
+    name: qwen/qwen-plus
+    runner_body:
+      data: {kwargs: {api_key: $QWEN_API_KEY}, model: qwen-plus, service: pipecat.services.qwen.llm.QwenLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: qwen/qwen-turbo
+    runner_body:
+      data: {kwargs: {api_key: $QWEN_API_KEY}, model: qwen-turbo, service: pipecat.services.qwen.llm.QwenLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: sambanova/Meta-Llama-3.3-70B-Instruct
+    runner_body:
+      data: {kwargs: {api_key: $SAMBANOVA_API_KEY}, model: Meta-Llama-3.3-70B-Instruct, service: pipecat.services.sambanova.llm.SambaNovaLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: sambanova/gemma-4-31B-it
+    runner_body:
+      data: {kwargs: {api_key: $SAMBANOVA_API_KEY}, model: gemma-4-31B-it, service: pipecat.services.sambanova.llm.SambaNovaLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: sarvam/sarvam-105b
+    runner_body:
+      data: {kwargs: {api_key: $SARVAM_API_KEY}, model: sarvam-105b, service: pipecat.services.sarvam.llm.SarvamLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: together/zai-org/GLM-5.2
+    runner_body:
+      data: {kwargs: {api_key: $TOGETHER_API_KEY}, model: zai-org/GLM-5.2, service: pipecat.services.together.llm.TogetherLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: together/meta-llama/Llama-3.3-70B-Instruct-Turbo
+    runner_body:
+      data: {kwargs: {api_key: $TOGETHER_API_KEY}, model: meta-llama/Llama-3.3-70B-Instruct-Turbo, service: pipecat.services.together.llm.TogetherLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: xai/grok-4.20-non-reasoning
+    runner_body:
+      data: {kwargs: {api_key: $XAI_API_KEY}, model: grok-4.20-non-reasoning, service: pipecat.services.xai.llm.GrokLLMService}
+    scenarios: *all
+  - bot: bot.py
+    name: baseten/zai-org/GLM-5.3
+    runner_body:
+      data: {kwargs: {api_key: $BASETEN_API_KEY}, model: zai-org/GLM-5.3, service: pipecat.services.baseten.llm.BasetenLLMService}
+    scenarios: *all
