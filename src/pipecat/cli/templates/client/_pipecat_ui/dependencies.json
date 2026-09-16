@@ -1,8 +1,8 @@
 {
   "source": {
     "repository": "https://github.com/pipecat-ai/pipecat-ui.git",
-    "ref": "v1.1.0",
-    "commit": "d8e247c0cef6077d90d95752093e7d53acb513e7"
+    "ref": "v1.1.2",
+    "commit": "0079117e70f95a62bff88c118e71467222585cad"
   },
   "shadcn": "4.21.0",
   "items": [

@@ -1,5 +1,6 @@
 "use client";
 
+import { RTVIEvent, type BotOutputData } from "@pipecat-ai/client-js";
 import { PauseIcon, PlayIcon, SearchIcon, Trash2Icon } from "lucide-react";
 import * as React from "react";
 
@@ -26,8 +27,29 @@ const TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   fractionalSecondDigits: 3,
 });
 
-function summarize(data: unknown): string {
+function summarizeBotOutput(data: Partial<BotOutputData>): string {
+  const spoken =
+    data.will_be_spoken === false
+      ? "not spoken"
+      : data.spoken_status !== undefined
+        ? `spoken: ${data.spoken_status}`
+        : data.spoken !== undefined
+          ? `spoken: ${data.spoken}`
+          : null;
+  const details = [
+    data.aggregated_by,
+    data.segment_id !== undefined ? `#${data.segment_id}` : null,
+    spoken,
+  ].filter(Boolean);
+  return `(${details.join(", ")}): ${data.text ?? ""}`;
+}
+
+function summarize(event: PipecatEventLog): string {
+  const { data } = event;
   if (data === undefined) return "";
+  if (event.type === RTVIEvent.BotOutput && typeof data === "object") {
+    return summarizeBotOutput(data as Partial<BotOutputData>);
+  }
   try {
     const json = JSON.stringify(data);
     return json.length > 120 ? `${json.slice(0, 120)}…` : json;
@@ -36,9 +58,43 @@ function summarize(data: unknown): string {
   }
 }
 
+/** Chatter covered by botOutput rows and the metrics panel. */
+const HIDDEN_EVENTS: string[] = [
+  RTVIEvent.Metrics,
+  RTVIEvent.BotTranscript,
+  RTVIEvent.BotLlmStarted,
+  RTVIEvent.BotLlmText,
+  RTVIEvent.BotLlmStopped,
+  RTVIEvent.BotTtsStarted,
+  RTVIEvent.BotTtsText,
+  RTVIEvent.BotTtsStopped,
+];
+
+/**
+ * RTVI 2.0.0+ re-sends a segment's botOutput on every spoken progress update
+ * (about once per TTS word). Keep one row per spoken status change, so an
+ * interrupted segment shows as new/in-progress without a completed row. Keys
+ * on segment_id, never text: separate responses can share wording.
+ */
+function dropRepeatedBotOutput(
+  events: readonly PipecatEventLog[],
+): PipecatEventLog[] {
+  const statuses = new Map<number, string>();
+  return events.filter((event) => {
+    if (event.type !== RTVIEvent.BotOutput) return true;
+    const data = event.data as Partial<BotOutputData> | undefined;
+    if (data?.segment_id === undefined || data.spoken_status === undefined) {
+      return true;
+    }
+    if (statuses.get(data.segment_id) === data.spoken_status) return false;
+    statuses.set(data.segment_id, data.spoken_status);
+    return true;
+  });
+}
+
 function EventRow({ event }: { event: PipecatEventLog }) {
   const [expanded, setExpanded] = React.useState(false);
-  const summary = summarize(event.data);
+  const summary = summarize(event);
   return (
     <div data-slot="console-event" className="font-mono text-xs">
       <button
@@ -71,21 +127,25 @@ export interface ConsoleEventsPanelProps {
 /**
  * Live RTVI event log over the shared use-pipecat-event-stream store:
  * filter-as-you-type, pause/resume, clear, click-to-expand payloads, and
- * scroll pinning that follows the tail until you scroll away. Capture is
- * shared, so a collapsed panel misses nothing. Must be rendered inside a
- * PipecatClientProvider.
+ * scroll pinning that follows the tail until you scroll away. Metrics and bot
+ * LLM/TTS events are hidden, and botOutput shows once per spoken status.
+ * Capture is shared, so a collapsed panel misses nothing. Must be rendered
+ * inside a PipecatClientProvider.
  */
 export function ConsoleEventsPanel({
   collapsed = false,
   className,
 }: ConsoleEventsPanelProps) {
-  const { events, paused, setPaused, clear } = usePipecatEventStream();
+  const { events, paused, setPaused, clear } = usePipecatEventStream({
+    ignoreEvents: HIDDEN_EVENTS,
+  });
   const [filter, setFilter] = React.useState("");
 
   const filtered = React.useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    if (!needle) return events;
-    return events.filter((event) => event.type.toLowerCase().includes(needle));
+    const shown = dropRepeatedBotOutput(events);
+    if (!needle) return shown;
+    return shown.filter((event) => event.type.toLowerCase().includes(needle));
   }, [events, filter]);
 
   // Scroll pinning: stick to the tail unless the user scrolled away.
@@ -155,7 +215,7 @@ export function ConsoleEventsPanel({
         >
           {filtered.length === 0 ? (
             <div className="text-muted-foreground flex h-full min-h-16 items-center justify-center text-xs">
-              {events.length === 0
+              {!filter.trim()
                 ? "Events appear once a session is live."
                 : "No events match the filter."}
             </div>
