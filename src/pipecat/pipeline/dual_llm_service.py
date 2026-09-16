@@ -61,8 +61,8 @@ from pipecat.workers.llm.backend_llm_worker import (
 DELEGATE_TOOL_NAME = "delegate"
 
 #: When the frontend delegates and when it does not, ahead of each request
-#: strategy's own guidance. The frontend's own system instruction is the place
-#: to say what the backend can do, in plain words, when this is not enough.
+#: strategy's own guidance. The frontend's own system instruction says what
+#: the backend is for.
 _DELEGATION_POLICY = (
     "Delegate to the backend when any part of what the user asks needs a backend tool or "
     "careful reasoning, or a correction changes work already requested. Do not delegate "
@@ -521,9 +521,9 @@ class PipecatDualLLMService(Pipeline):
     backend worker to the pipeline worker so the app never wires it up.
 
     The guidance says when to delegate in general terms. The frontend's own
-    system instruction is the place to say what the backend can do, in plain
-    words, when a frontend needs steering: a short list of capabilities, no
-    tool names.
+    system instruction is the place to say what the backend is for, in a
+    sentence of plain words, as the backend's own instruction does: no tool
+    names, nothing to update when a tool changes.
 
     Example::
 
