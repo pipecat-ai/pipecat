@@ -13,6 +13,7 @@ status says whether the server is still working. These tests drive
 frames the service pushes downstream.
 """
 
+import asyncio
 import io
 from types import SimpleNamespace
 
@@ -345,6 +346,35 @@ async def test_held_turn_is_released_when_idle_never_arrives():
     assert service._bot_is_responding is False
 
 
+@pytest.mark.asyncio
+async def test_streaming_content_keeps_held_turn_open():
+    """Server messages restart the watchdog, so a reply still streaming past
+    the timeout window is not forced closed; the watchdog fires only once the
+    server actually goes silent."""
+    service = _make_service()
+    service._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS = 0.1
+    await _start_bot_turn(service)
+
+    await service._handle_server_message(
+        _FakeServerMessage(_FakeServerContent(turn_complete=True, interaction_status="IN_PROGRESS"))
+    )
+    # Stream transcription chunks across several timeout windows.
+    for _ in range(5):
+        await asyncio.sleep(0.05)
+        content = _FakeServerContent()
+        content.output_transcription = SimpleNamespace(text="still talking ")
+        await service._handle_server_message(_FakeServerMessage(content))
+
+    assert LLMFullResponseEndFrame not in _frame_types(service), (
+        "a held turn must stay open while content is still streaming"
+    )
+
+    await service._deferred_turn_complete_timeout_task
+
+    assert _frame_types(service)[-2:] == [TTSStoppedFrame, LLMFullResponseEndFrame]
+    assert service._bot_is_responding is False
+
+
 # ---------------------------------------------------------------------------
 # Unsupported-SDK warning
 # ---------------------------------------------------------------------------
@@ -373,7 +403,9 @@ def test_warns_when_sdk_predates_interaction_status(monkeypatch):
     output = _warnings_while(service, sdk_has_field=False, monkeypatch=monkeypatch)
 
     assert "google-genai" in output
-    assert "2.18.0" in output, "the warning must name the version that fixes it"
+    assert service._INTERACTION_STATUS_MIN_SDK in output, (
+        "the warning must name the version that fixes it"
+    )
 
 
 def test_no_warning_when_sdk_supports_interaction_status(monkeypatch):

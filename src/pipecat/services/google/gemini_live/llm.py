@@ -441,8 +441,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
         return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
-    # Version of google-genai that added LiveServerContent.interaction_status.
-    _INTERACTION_STATUS_MIN_SDK = "2.18.0"
+    # Minimum google-genai with full interaction_status support: 2.18.0 added
+    # the LiveServerContent field, 2.19.0 the IDLE enum value the server sends.
+    _INTERACTION_STATUS_MIN_SDK = "2.19.0"
 
     # Lowest thinking_level the Live thinking models accept (they reject
     # MINIMAL), applied when no level is configured. Lowest keeps reply
@@ -1255,9 +1256,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     _END_FRAME_DEFERRAL_TIMEOUT_SECS = 30.0
 
     # Timeout (in seconds) for a deferred turn_complete — one held open by an
-    # IN_PROGRESS interaction status. If the session never reports going idle,
-    # the bot turn is ended anyway so downstream processors aren't left
-    # waiting on it.
+    # IN_PROGRESS interaction status. Every incoming server message restarts
+    # it, so it measures server silence, not total hold time; if the session
+    # goes quiet without ever reporting idle, the bot turn is ended anyway so
+    # downstream processors aren't left waiting on it.
     _DEFERRED_TURN_COMPLETE_TIMEOUT_SECS = 30.0
 
     def _create_end_frame_deferral_timeout(self):
@@ -1489,6 +1491,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # so process the content-bearing fields before closing the turn.
         sc = message.server_content
         interaction_idle = self._read_interaction_status(sc)
+        # Any server message while a turn is held proves the session is still
+        # alive, so the held-turn watchdog only measures silence.
+        if self._turn_complete_pending_idle:
+            self._start_deferred_turn_complete_timeout()
         if sc and sc.interrupted:
             # NOTE: while the service triggers interruptions in
             # the specific case of barge-ins, it does *not*
@@ -1552,6 +1558,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         status = getattr(server_content, "interaction_status", None) if server_content else None
         if status is None:
             return None
+        logger.debug(f"{self}: interaction_status={status}")
         # Compare on the value: the idle state was renamed REQUIRES_ACTION ->
         # IDLE, and an SDK that predates the rename surfaces IDLE as a
         # synthesized enum member rather than a known one.
@@ -1565,14 +1572,23 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     def _defer_turn_complete_until_idle(self, message: LiveServerMessage):
         """Hold a turn_complete until the session reports going idle."""
         self._turn_complete_pending_idle = message
+        self._start_deferred_turn_complete_timeout()
+
+    def _start_deferred_turn_complete_timeout(self):
+        """(Re)start the held-turn watchdog.
+
+        The watchdog fires only after the server goes silent — a long reply
+        still streaming keeps restarting it — so it forces a held turn closed
+        only when the session goes quiet while stuck IN_PROGRESS.
+        """
         self._cancel_deferred_turn_complete_timeout()
 
         async def _timeout():
             await asyncio.sleep(self._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS)
             if self._turn_complete_pending_idle:
                 logger.warning(
-                    f"Interaction status stayed IN_PROGRESS for "
-                    f"{self._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS}s — ending the bot turn anyway"
+                    f"No server messages for {self._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS}s "
+                    f"with the interaction status stuck IN_PROGRESS — ending the bot turn"
                 )
                 await self._complete_deferred_turn()
 
