@@ -80,3 +80,4 @@ whisker_setup.py
 *.pem
 # Release-eval run artifacts (logs and conversation recordings)
 evals/release/test-runs/
+evals/turn-completion/test-runs/

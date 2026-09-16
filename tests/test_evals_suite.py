@@ -767,3 +767,44 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertEqual(record["ended_by"], "bot")
             self.assertEqual(record["reason"], "no table")
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
+
+
+class TestDispatchOrder(unittest.TestCase):
+    """The queue interleaves entries so one slow provider does not hold every slot."""
+
+    @staticmethod
+    def _run(label: str, scenario: str, attempt: int = 1) -> EvalRun:
+        return EvalRun(
+            bot="bot.py",
+            name=label,
+            scenario=scenario,
+            loaded=None,
+            bot_path=Path("bot.py"),
+            scenario_path=Path(f"{scenario}.yaml"),
+            attempt=attempt,
+        )
+
+    def test_round_robin_across_entries_within_an_attempt(self):
+        runs = [
+            self._run("a", "s1"),
+            self._run("a", "s2"),
+            self._run("a", "s3"),
+            self._run("b", "s1"),
+            self._run("b", "s2"),
+            self._run("c", "s1"),
+        ]
+        order = EvalSuite._dispatch_order(runs)
+        self.assertEqual(
+            [(r.label, r.scenario) for r in order],
+            [("a", "s1"), ("b", "s1"), ("c", "s1"), ("a", "s2"), ("b", "s2"), ("a", "s3")],
+        )
+
+    def test_attempts_stay_attempt_major(self):
+        runs = [
+            self._run("a", "s1", 1),
+            self._run("b", "s1", 1),
+            self._run("a", "s1", 2),
+            self._run("b", "s1", 2),
+        ]
+        order = EvalSuite._dispatch_order(runs)
+        self.assertEqual([r.attempt for r in order], [1, 1, 2, 2])

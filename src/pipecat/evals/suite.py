@@ -885,9 +885,12 @@ class EvalSuite(BaseObject):
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
         Each run gets its own port (``base_port + index``). Runs come off one
-        queue with no barrier between attempts, so a slow bot never holds up the
-        rest. A bot whose entry caps its own concurrency has its runs limited
-        to that as well.
+        queue, taken round-robin across the manifest's entries within each
+        attempt, so the slots spread over every bot from the start rather than
+        draining one entry's scenarios before the next: a slow or rate-limited
+        provider holds only its share of them, and no barrier separates
+        attempts. A bot whose entry caps its own concurrency has its runs
+        limited to that as well.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -929,12 +932,13 @@ class EvalSuite(BaseObject):
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
         sem = asyncio.Semaphore(self.manifest.concurrency)
         bot_sems = self._bot_semaphores()
+        ports = {id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)}
         try:
             await asyncio.gather(
                 *(
                     self._run_one(
                         run,
-                        self.manifest.base_port + i,
+                        ports[id(run)],
                         logs_dir,
                         record_dir,
                         results_path,
@@ -943,7 +947,7 @@ class EvalSuite(BaseObject):
                         debug,
                         params,
                     )
-                    for i, run in enumerate(self.runs)
+                    for run in self._dispatch_order(self.runs)
                 )
             )
         finally:
@@ -985,6 +989,25 @@ class EvalSuite(BaseObject):
                     files.trace.write_text(traceback.format_exc())
             finally:
                 await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+
+    @staticmethod
+    def _dispatch_order(runs: list[EvalRun]) -> list[EvalRun]:
+        """The runs in the order they enter the queue: attempt-major, then round-robin across entries.
+
+        Within an attempt the first run of every entry comes before the second
+        run of any, so a suite's concurrency is spread across its bots instead
+        of consumed by whichever entry the manifest lists first.
+        """
+        by_attempt: dict[int, dict[str, list[EvalRun]]] = {}
+        for run in runs:
+            by_attempt.setdefault(run.attempt, {}).setdefault(run.label, []).append(run)
+        ordered: list[EvalRun] = []
+        for attempt in sorted(by_attempt):
+            queues = list(by_attempt[attempt].values())
+            longest = max(len(q) for q in queues)
+            for i in range(longest):
+                ordered.extend(q[i] for q in queues if i < len(q))
+        return ordered
 
     def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
         """One semaphore per label whose entry caps its concurrency; the lowest cap wins for a label listed twice."""

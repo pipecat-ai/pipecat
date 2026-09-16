@@ -1,0 +1,132 @@
+# The incomplete-turn timeout expired and the framework appended its developer
+# re-prompt. The model must answer ● plus a one-sentence nudge, never ◐/○.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: reprompt
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: reprompt_short
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I'd go to Japan because I love
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+  - expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+      within_ms: 25000
+    - event: response
+      eval: the reply is a single short sentence gently inviting the user to continue
+      within_ms: 25000
+- name: reprompt_long
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: Let me think about that for a moment.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+  - expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+      within_ms: 25000
+    - event: response
+      eval: the reply is a single brief, friendly check-in that offers to continue whenever the user is
+        ready
+      within_ms: 25000
+- name: reprompt_then_user_answers
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  - role: user
+    content: I'd go to Japan because I love
+  - role: assistant
+    content: ◐
+  - role: developer
+    content: |-
+      The user paused briefly. Generate a brief, natural prompt to encourage them to continue.
+
+      IMPORTANT: You MUST respond with ● followed by your message. Do NOT output ◐ or ○ - the user has already been given time to continue.
+
+      Your response should:
+      - Be contextually relevant to what was just discussed
+      - Sound natural and conversational
+      - Be very concise (1 sentence max)
+      - Gently prompt them to continue
+
+      Example format: ● Go ahead, I'm listening.
+
+      Generate your ● response now.
+  - role: assistant
+    content: ● Go ahead, I'm listening.
+  turns:
+  - user: the food, mostly. And the temples.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply engages with the user wanting to visit Japan for the food and temples
+- name: reprompt_then_user_still_thinking
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  - role: user
+    content: Let me think about that for a moment.
+  - role: assistant
+    content: ○
+  - role: developer
+    content: |-
+      The user has been quiet for a while. Generate a friendly check-in message.
+
+      IMPORTANT: You MUST respond with ● followed by your message. Do NOT output ◐ or ○ - the user has already been given plenty of time.
+
+      Your response should:
+      - Acknowledge they might be thinking or busy
+      - Offer to help or continue when ready
+      - Be warm and understanding
+      - Be brief (1 sentence)
+
+      Example format: ● No rush! Let me know when you're ready to continue.
+
+      Generate your ● response now.
+  - role: assistant
+    content: ● No rush! Let me know when you're ready.
+  turns:
+  - user: Still thinking, hang on.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
