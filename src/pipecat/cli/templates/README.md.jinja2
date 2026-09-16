@@ -146,6 +146,43 @@ uv run pipecat eval run evals/starter_audio.yaml -v   # full audio round trip (l
    {% if client_server == "vite" %}
    > **Note:** Environment variables in Vite are bundled into the client and exposed in the browser. For production applications that require secret protection, consider implementing a backend proxy server to handle API requests and manage sensitive credentials securely.
    {% endif %}
+{% if client_framework == "react" %}
+   The client renders the [Pipecat UI](https://ui.pipecat.ai) console: the connect flow, transcript, metrics, device and session info, and a live event stream. Pipecat UI is a shadcn registry, so its components are installed as source under `src/components/pipecat`, `src/hooks` and `src/lib`, and they are yours to edit and style.
+
+   The console is built from those same components. To build your own UI, replace it with a composition of your own; this is the minimal one:
+
+   ```tsx
+   import { PipecatClientProvider } from '@pipecat-ai/client-react';
+
+   import { ConnectButton } from '@/components/pipecat/connect-button';
+   import { Conversation } from '@/components/pipecat/conversation';
+   import { UserAudioControl } from '@/components/pipecat/user-audio-control';
+   import { usePipecatApp } from '@/hooks/use-pipecat-app';
+
+   export const VoiceApp = () => {
+     const { client, connect, disconnect } = usePipecatApp({
+       transportType: 'smallwebrtc',
+       transportFactory: TRANSPORT_FACTORIES.smallwebrtc,
+       ...TRANSPORT_PROPS.smallwebrtc,
+     });
+     if (!client) return null;
+     return (
+       <PipecatClientProvider client={client}>
+         <Conversation />
+         <UserAudioControl />
+         <ConnectButton onConnect={connect} onDisconnect={disconnect} />
+       </PipecatClientProvider>
+     );
+   };
+   ```
+
+   To add more components or pull in upstream changes, use the shadcn CLI; the `@pipecat` registry is already configured in `components.json`:
+
+   ```bash
+   npx shadcn@latest add @pipecat/audio-visualizer-wave
+   npx shadcn@latest add @pipecat/conversation --diff
+   ```
+{% endif %}
 
 4. **Run development server**:
 
@@ -258,7 +295,7 @@ pipecat context-hub install
 
 - [Pipecat Documentation](https://docs.pipecat.ai/)
 {% if generate_client and client_framework == "react" %}
-- [Voice UI Kit Documentation](https://voiceuikit.pipecat.ai/)
+- [Pipecat UI Documentation](https://ui.pipecat.ai)
 {% endif %}
 - [Pipecat GitHub](https://github.com/pipecat-ai/pipecat)
 - [Pipecat Examples](https://github.com/pipecat-ai/pipecat-examples)

@@ -6,6 +6,28 @@ from pipecat.cli.generators.project import ProjectGenerator
 from pipecat.cli.prompts.questions import ProjectConfig
 
 
+def assert_pipecat_ui_source(client_path, src):
+    """Assert the vendored Pipecat UI files and shadcn config are in a React client."""
+    assert (client_path / "components.json").exists()
+    assert "@pipecat" in (client_path / "components.json").read_text()
+    for rel in [
+        "components/pipecat/console/console.tsx",
+        "components/pipecat/connect-button.tsx",
+        "components/pipecat/conversation.tsx",
+        "components/pipecat/user-audio-control.tsx",
+        "components/pipecat/text-input.tsx",
+        "components/ui/select.tsx",
+        "hooks/use-pipecat-app.ts",
+        "hooks/use-pipecat-event-stream.ts",
+        "lib/transports.ts",
+        "lib/utils.ts",
+    ]:
+        assert (src / rel).exists(), f"{rel} missing from generated client"
+    for file in client_path.rglob("*"):
+        if file.is_file() and file.suffix in {".ts", ".tsx", ".css", ".json"}:
+            assert "voice-ui-kit" not in file.read_text(), f"{file} references voice-ui-kit"
+
+
 class TestClientGeneration:
     """Test client generation with different configurations."""
 
@@ -45,6 +67,108 @@ class TestClientGeneration:
         main_tsx = (project_path / "client" / "src" / "main.tsx").read_text()
         assert "{%" not in main_tsx
         assert "TRANSPORT_PROPS" in main_tsx
+
+        # Transport factories only cover the selected transports
+        assert "daily: async" in config_content
+        assert "smallwebrtc: async" in config_content
+        assert "websocket: async" not in config_content
+
+    def test_vite_includes_pipecat_ui_source(self, tmp_path):
+        """Test that the Pipecat UI snapshot is copied into a Vite client."""
+        config = ProjectConfig(
+            project_name="test-vite-ui",
+            bot_type="web",
+            transports=["daily"],
+            mode="cascade",
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+            generate_client=True,
+            client_framework="react",
+            client_server="vite",
+        )
+
+        generator = ProjectGenerator(config)
+        project_path = generator.generate(output_dir=tmp_path)
+        src = project_path / "client" / "src"
+
+        assert_pipecat_ui_source(project_path / "client", src)
+
+    def test_nextjs_includes_pipecat_ui_source(self, tmp_path):
+        """Test that the Pipecat UI snapshot is copied into a Next.js client."""
+        config = ProjectConfig(
+            project_name="test-nextjs-ui",
+            bot_type="web",
+            transports=["smallwebrtc"],
+            mode="cascade",
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+            generate_client=True,
+            client_framework="react",
+            client_server="nextjs",
+        )
+
+        generator = ProjectGenerator(config)
+        project_path = generator.generate(output_dir=tmp_path)
+        src = project_path / "client" / "src"
+
+        assert_pipecat_ui_source(project_path / "client", src)
+        assert (src / "app" / "globals.css").exists()
+        assert (src / "app" / "components" / "TransportSelect.tsx").exists()
+
+    def test_vanilla_client_gets_no_pipecat_ui_source(self, tmp_path):
+        """Test that the snapshot is only copied into React clients."""
+        config = ProjectConfig(
+            project_name="test-vanilla-no-ui",
+            bot_type="web",
+            transports=["daily"],
+            mode="cascade",
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+            generate_client=True,
+            client_framework="vanilla",
+            client_server="vite",
+        )
+
+        generator = ProjectGenerator(config)
+        project_path = generator.generate(output_dir=tmp_path)
+        client = project_path / "client"
+
+        assert not (client / "components.json").exists()
+        assert not (client / "src" / "components").exists()
+        assert not (client / "src" / "hooks").exists()
+        assert not (client / "src" / "lib").exists()
+
+    @pytest.mark.parametrize(
+        "manifest",
+        [None, "not json", '{"items": []}', '{"dependencies": ["not", "a", "map"]}'],
+        ids=["missing", "malformed", "no-dependencies", "wrong-type"],
+    )
+    def test_broken_snapshot_manifest_names_the_sync_script(self, tmp_path, monkeypatch, manifest):
+        """Test that a missing or malformed manifest fails with a pointer to the fix."""
+        snapshot = tmp_path / "snapshot"
+        (snapshot / "src").mkdir(parents=True)
+        if manifest is not None:
+            (snapshot / "dependencies.json").write_text(manifest)
+        monkeypatch.setattr(ProjectGenerator, "_pipecat_ui_dir", staticmethod(lambda: snapshot))
+
+        config = ProjectConfig(
+            project_name="test-broken-manifest",
+            bot_type="web",
+            transports=["daily"],
+            mode="cascade",
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+            generate_client=True,
+            client_framework="react",
+            client_server="vite",
+        )
+
+        with pytest.raises(RuntimeError, match="sync-pipecat-ui.mjs"):
+            ProjectGenerator(config).generate(output_dir=tmp_path / "out")
 
     def test_nextjs_with_single_transport(self, tmp_path):
         """Test Next.js client generation with single transport."""
@@ -119,6 +243,11 @@ class TestClientGeneration:
         # Should NOT include other transports
         assert "@pipecat-ai/small-webrtc-transport" not in package_json
 
+        # Pipecat UI snapshot dependencies come from the recorded manifest
+        assert "@pipecat-ai/client-react" in package_json
+        assert "tailwindcss" in package_json
+        assert "@pipecat-ai/voice-ui-kit" not in package_json
+
     def test_gitignore_includes_client(self, tmp_path):
         """Test that .gitignore includes client directories when client is generated."""
         config = ProjectConfig(
@@ -189,7 +318,6 @@ class TestStaticTypeScript:
         # Check static files
         static_files = [
             "client/src/main.tsx",
-            "client/src/components/App.tsx",
             "client/src/components/TransportSelect.tsx",
         ]
 

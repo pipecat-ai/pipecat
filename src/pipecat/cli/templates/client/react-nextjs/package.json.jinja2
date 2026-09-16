@@ -9,18 +9,19 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^1.12.0",
-    "@pipecat-ai/client-react": "^1.7.1",
+{%- for name, version in ui_dependencies.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
+    "@fontsource-variable/geist": "^5.3.0",
 {%- for transport in transports %}
 {%- if transport.value == 'daily' %}
-    "@pipecat-ai/daily-transport": "^1.6.7",
+    "@pipecat-ai/daily-transport": "^1.6.8",
 {%- elif transport.value == 'smallwebrtc' %}
-    "@pipecat-ai/small-webrtc-transport": "^1.10.5",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.7",
 {%- elif transport.value == 'websocket' %}
-    "@pipecat-ai/websocket-transport": "^1.7.0",
+    "@pipecat-ai/websocket-transport": "^1.7.1",
 {%- endif %}
 {%- endfor %}
-    "@pipecat-ai/voice-ui-kit": "^0.11.0",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
@@ -31,9 +32,8 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^10",
+    "eslint": "^9",
     "eslint-config-next": "^16",
-    "tailwindcss": "^4",
     "typescript": "^6"
   }
 }

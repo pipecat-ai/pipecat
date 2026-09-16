@@ -39,6 +39,9 @@ uv run ruff format --check
 
 # Update dependencies (after editing pyproject.toml)
 uv lock && uv sync
+
+# Refresh the Pipecat UI component snapshot vendored into the CLI's React client templates
+node scripts/sync-pipecat-ui.mjs
 ```
 
 ## Architecture
