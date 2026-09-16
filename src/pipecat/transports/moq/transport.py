@@ -58,8 +58,11 @@ Two modes:
 
 Client mode redials the relay when the session drops (see
 :attr:`MOQParams.reconnect_timeout`). The publish side is kept across
-dials, so the peer sees the same broadcast return, and the peer's tracks
-are subscribed again once its broadcast is announced to the new session.
+dials by content but rebuilt by identity: a redial announces the same
+path from a fresh origin, replaying the transcript log into it, because a
+relay that still holds a dead route for the old publisher never serves a
+re-announce under that publisher's identity. The peer's tracks are
+subscribed again once its broadcast is announced to the new session.
 A token the relay refuses is not retried; the relay accepts the connection
 first and then closes the session as unauthorized, so the refusal is read
 off the session close rather than the dial.
@@ -271,6 +274,11 @@ _RECONNECT_BACKOFF_MAX_S = 8.0
 # session itself reports closed. After the subscriptions end, wait this long
 # for the session before concluding the peer left a session that stayed up.
 _SESSION_CLOSE_GRACE_S = 0.5
+# After subscribing to the peer's tracks, how long to wait for the first
+# record or audio frame before treating the subscription as dead. A relay
+# keeps announcing a path whose route died and serves nothing on it, so an
+# announcement alone is not a sign of life; data is.
+_PEER_DATA_GRACE_S = 5.0
 
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
@@ -501,8 +509,8 @@ class MOQCallbacks(BaseModel):
         on_disconnected: Called when the transport stops running sessions.
         on_reconnecting: Called before each redial after the session dropped,
             with the attempt number, counted from 1 for each outage.
-        on_reconnected: Called when the peer's broadcast is available again
-            through a redialed session, which is what ends an outage.
+        on_reconnected: Called when the peer's data flows again after an
+            outage, which is what ends it; an announcement alone does not.
         on_client_connected: Called when the peer's broadcast is announced.
         on_client_disconnected: Called when the peer is gone: its broadcast
             went away, or the session could not be re-established in time.
@@ -633,6 +641,9 @@ class MOQTransportClient:
         # docstring. The count spans reconnects because the stream does.
         self._epoch = secrets.token_hex(8)
         self._next_seq = 0
+        # Every record published so far, replayed into the stream a redial
+        # creates so a subscriber that joins late still gets the whole log.
+        self._transcript_log: list[dict] = []
         # Dedupe watermark for the peer's transcript stream, kept across
         # redials because the peer's log is replayed to every new
         # subscription.
@@ -647,8 +658,10 @@ class MOQTransportClient:
         self._outage_started: float | None = None
         # Why the current session closed, when the close carried an error.
         self._session_close_error: Exception | None = None
-        # Whether the peer's broadcast was seen on the current session.
-        self._session_saw_peer = False
+        # Whether the current subscription to the peer has delivered anything,
+        # and the event a waiter uses to learn that it has.
+        self._peer_data_seen = False
+        self._peer_data_event: asyncio.Event | None = None
         # Set by the peer's session-ending marker: its tracks are ending
         # because it is leaving, not because a relay between us failed.
         self._peer_goodbye = False
@@ -695,7 +708,17 @@ class MOQTransportClient:
             return
 
         self._audio_out_sample_rate = sample_rate
-        self._audio_out = self._publish_broadcast.publish_audio(
+        self._audio_out = self._publish_audio_track(sample_rate)
+        logger.debug(
+            f"MOQ: publishing audio as Opus "
+            f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
+            f"frame={self._params.audio_out_frame_ms}ms, "
+            f"track={self._params.audio_out_track!r})"
+        )
+
+    def _publish_audio_track(self, sample_rate: int) -> "moq.AudioProducer":
+        """Open the bot's Opus audio track on the current publish broadcast."""
+        return self._publish_broadcast.publish_audio(
             self._params.audio_out_track,
             moq.AudioEncoderInput(
                 format=moq.AudioFormat.S16,
@@ -710,12 +733,37 @@ class MOQTransportClient:
                 frame_duration_ms=self._params.audio_out_frame_ms,
             ),
         )
-        logger.debug(
-            f"MOQ: publishing audio as Opus "
-            f"(pipeline rate={sample_rate}Hz, opus rate={OPUS_SAMPLE_RATE}Hz, "
-            f"frame={self._params.audio_out_frame_ms}ms, "
-            f"track={self._params.audio_out_track!r})"
+
+    def _rebuild_publish_side(self):
+        """Replace the publish origin, broadcast and tracks before a redial.
+
+        The origin carries the publisher identity the relay sees. A redial
+        that re-announces under the identity of a publisher the relay still
+        holds a dead route for leaves the path stuck on that route, while a
+        new identity is parked until the dead route is reaped and then takes
+        the path over. The transcript log is replayed into the new stream
+        with its original ``seq`` and ``epoch``, so subscribers drop what
+        they already have, and the audio track reopens at the same rate.
+        """
+        # The session that carried these is gone; finishing them is
+        # best-effort tidiness.
+        for producer in (self._audio_out, self._transcript_out, self._publish_broadcast):
+            if producer is None:
+                continue
+            try:
+                producer.finish()
+            except Exception:
+                pass
+        self._publish_origin = moq.OriginProducer()
+        self._publish_broadcast = self._publish_origin.create_broadcast(self._broadcast_path)
+        self._transcript_out = self._publish_broadcast.publish_json_stream(
+            self._params.transcript_track, compression=True
         )
+        for record in self._transcript_log:
+            self._transcript_out.append(record)
+        self._audio_out = None
+        if self._audio_out_sample_rate is not None and self._params.audio_out_enabled:
+            self._audio_out = self._publish_audio_track(self._audio_out_sample_rate)
 
     def reset_audio_pacing(self):
         """Re-anchor the publish_audio pacing clock to wall-clock now.
@@ -815,6 +863,7 @@ class MOQTransportClient:
         record[TRANSCRIPT_SEQ_FIELD] = self._next_seq
         record[TRANSCRIPT_EPOCH_FIELD] = self._epoch
         self._next_seq += 1
+        self._transcript_log.append(record)
         self._transcript_out.append(record)
 
     @property
@@ -992,21 +1041,24 @@ class MOQTransportClient:
         """Run one dialed session to its end.
 
         Returns:
-            ``True`` when the peer is gone: it never appeared on this
-            session, or its tracks ended after its session-ending marker.
-            ``False`` when the session itself closed, or when the peer's
-            tracks ended without the marker, which is what a failed relay
-            between the peers looks like: the caller redials and the peer
-            has ``connection_timeout`` to appear on the new session.
-            Raises what the dial raised, so the caller can tell a refused
-            dial from a dropped session.
+            ``True`` when the peer is gone: it never appeared, it said
+            goodbye, or its tracks ended and it did not reappear within
+            ``connection_timeout`` on this session. ``False`` when the
+            session itself closed, or when the peer is announced but its
+            tracks keep ending or serve nothing, which is what a failed
+            relay between the peers looks like: the caller redials with a
+            fresh publisher. Raises what the dial raised, so the caller can
+            tell a refused dial from a dropped session.
         """
         assert self._task_manager is not None, (
             "MOQTransportClient.setup() must run before _run(); "
             "input/output processors forward setup on the pipeline's first frame."
         )
-        # A fresh subscribe origin per dial: announcements belong to the
-        # session that delivered them.
+        # Fresh origins per dial: announcements belong to the session that
+        # delivered them, and a redial must present a new publisher (see
+        # _rebuild_publish_side).
+        if self._connected_once:
+            self._rebuild_publish_side()
         subscribe_origin = moq.OriginProducer()
         logger.debug(f"MOQ: connecting to {self._url} as {self._broadcast_path}")
         async with self._make_transport(self._publish_origin, subscribe_origin) as client:
@@ -1023,7 +1075,7 @@ class MOQTransportClient:
                 await self._callbacks.on_connected()
 
             self._session_close_error = None
-            self._session_saw_peer = False
+            self._peer_data_seen = False
             closed = self._task_manager.create_task(
                 self._session_closed(session), f"{self}::moq_session_closed"
             )
@@ -1036,12 +1088,11 @@ class MOQTransportClient:
                     await asyncio.wait({closed}, timeout=_SESSION_CLOSE_GRACE_S)
                 if closed.done():
                     return False
-                # The session is up and the peer's tracks ended (a consumer
-                # failure propagates instead).
-                consume.result()
-                if not self._session_saw_peer or self._peer_goodbye:
+                # The session is up and the consume loop has decided (a
+                # consumer failure propagates instead).
+                if consume.result():
                     return True
-                logger.warning("MOQ: peer tracks ended without a session-ending marker; redialing")
+                logger.warning("MOQ: dropping the session for a fresh one")
                 return False
             finally:
                 for task in (closed, consume):
@@ -1059,22 +1110,33 @@ class MOQTransportClient:
             logger.debug(f"MOQ: session closed: {e}")
 
     async def _on_peer_available(self):
-        """Record that the peer's broadcast is available in the current session.
+        """Record that the peer's broadcast is announced on the current session.
 
-        The first time, the peer has joined. Any later time the peer is
-        back after this side's session dropped and was redialed: that is
-        what ends the outage and fires ``on_reconnected``, so a relay that
-        accepts a dial and closes the session at once keeps the window
-        running instead of restarting it.
+        The first time, the peer has joined. An announcement alone never
+        ends an outage: a relay keeps announcing a path whose route died,
+        and a relay that accepts a dial and closes the session at once
+        would otherwise restart the window on every attempt. The outage
+        ends when the peer's data flows again (see :meth:`_on_peer_data`).
         """
-        self._session_saw_peer = True
         self._peer_goodbye = False
-        if self._peer_connected:
+        if not self._peer_connected:
+            self._peer_connected = True
+            await self._callbacks.on_client_connected()
+
+    async def _on_peer_data(self):
+        """Record the first record or audio frame after a subscription to the peer.
+
+        Data is the sign of life: it ends an outage in progress and fires
+        ``on_reconnected``.
+        """
+        if self._peer_data_seen:
+            return
+        self._peer_data_seen = True
+        if self._peer_data_event is not None:
+            self._peer_data_event.set()
+        if self._outage_started is not None:
             self._outage_started = None
             await self._callbacks.on_reconnected()
-            return
-        self._peer_connected = True
-        await self._callbacks.on_client_connected()
 
     async def _report_peer_gone(self):
         """Fire ``on_client_disconnected`` once for a peer that had been seen."""
@@ -1162,13 +1224,23 @@ class MOQTransportClient:
             **client_tls,
         )
 
-    async def _consume_peer(self, origin: "moq.OriginProducer"):
+    async def _consume_peer(self, origin: "moq.OriginProducer") -> bool:
         """Wait for the peer broadcast and forward its audio and transcript tracks.
 
-        Returns when the peer's tracks end. Whether that means the peer
-        is gone is the caller's call: in client mode the tracks also end
-        when the session drops, and the peer is reported disconnected
-        only if the redials fail (see :meth:`_report_peer_gone`).
+        Returns:
+            ``True`` when the peer is gone from this session's point of
+            view: it never appeared within ``connection_timeout``, it said
+            goodbye, or its tracks ended and it did not reappear in time.
+            ``False`` when this session should be dropped for a fresh one:
+            the peer is announced but its tracks ended twice, or served
+            nothing. Whether a gone peer is gone for good is the caller's
+            call (see :meth:`_report_peer_gone`).
+
+        In client mode the peer's tracks ending without its session-ending
+        marker gets one more subscription on the same session. A peer that
+        merely redialed re-announces within a moment and the second
+        subscription carries on, which keeps two peers from redialing each
+        other in a loop.
 
         Cancellation flows through the moq consumers themselves: every
         consumer we open is tracked in ``self._active_consumers`` so
@@ -1177,33 +1249,90 @@ class MOQTransportClient:
         an-event pattern needed.
         """
         consumer = origin.consume()
+        retried = False
+        while True:
+            logger.debug(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
+            announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
+            try:
+                peer_broadcast = await asyncio.wait_for(
+                    announced.available(), timeout=self._params.connection_timeout
+                )
+            except TimeoutError:
+                logger.warning(
+                    f"MOQ: peer broadcast {self._peer_broadcast_path!r} did not appear "
+                    f"within {self._params.connection_timeout}s"
+                )
+                return True
+            except (asyncio.CancelledError, StopAsyncIteration):
+                return True
 
-        logger.debug(f"MOQ: waiting for peer broadcast {self._peer_broadcast_path!r}")
-        announced = self._track(consumer.announced_broadcast(self._peer_broadcast_path))
-        try:
-            peer_broadcast = await asyncio.wait_for(
-                announced.available(), timeout=self._params.connection_timeout
-            )
-        except TimeoutError:
+            logger.debug(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
+            await self._on_peer_available()
+            # The first subscription of a fresh call gets no silence
+            # watchdog: a client may hold its first message until it is
+            # ready to hear the bot. Later subscriptions are checked.
+            watchdog = not self._params.serve and (retried or self._outage_started is not None)
+            delivered = await self._forward_peer(peer_broadcast, watchdog)
+            if self._params.serve or self._peer_goodbye:
+                return True
+            if watchdog and not delivered:
+                logger.warning(
+                    f"MOQ: peer broadcast {self._peer_broadcast_path!r} is announced but "
+                    f"served nothing within {_PEER_DATA_GRACE_S:.0f}s"
+                )
+                return False
+            if retried:
+                return False
+            retried = True
             logger.warning(
-                f"MOQ: peer broadcast {self._peer_broadcast_path!r} did not appear "
-                f"within {self._params.connection_timeout}s"
+                "MOQ: peer tracks ended without a session-ending marker; "
+                "subscribing again on this session"
             )
-            return
-        except (asyncio.CancelledError, StopAsyncIteration):
-            return
 
-        logger.debug(f"MOQ: peer broadcast {self._peer_broadcast_path!r} available")
-        await self._on_peer_available()
+    async def _forward_peer(self, peer_broadcast: "moq.BroadcastConsumer", watchdog: bool) -> bool:
+        """Pump the peer's tracks until they end; True when anything arrived.
 
-        # Run the peer audio pump and the peer transcript (RTVI) pump
-        # side by side. Both catch CancelledError internally; on
-        # disconnect, ``consumer.cancel()`` on their moq consumers makes
-        # each loop exit cleanly. ``return_exceptions=True`` so that if
-        # one raises, we still wait for the other to finish instead of
-        # leaving it running as an orphaned, uncancelled task — then we
-        # re-raise the first real exception ourselves so callers see the
-        # same failure they would have without ``return_exceptions``.
+        With ``watchdog`` a subscription that delivers nothing within
+        ``_PEER_DATA_GRACE_S`` is cancelled, since a relay keeps announcing
+        a path whose route died and serves nothing on it.
+        """
+        assert self._task_manager is not None, "MOQTransportClient.setup() must run before _run()"
+        self._peer_data_seen = False
+        self._peer_data_event = asyncio.Event()
+        pumps = self._task_manager.create_task(
+            self._forward_peer_tracks(peer_broadcast), f"{self}::moq_peer_tracks"
+        )
+        try:
+            if watchdog:
+                waiter = self._task_manager.create_task(
+                    self._peer_data_event.wait(), f"{self}::moq_peer_data"
+                )
+                await asyncio.wait(
+                    {pumps, waiter}, timeout=_PEER_DATA_GRACE_S, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not waiter.done():
+                    await self._task_manager.cancel_task(waiter)
+                if not pumps.done() and not self._peer_data_seen:
+                    self._cancel_consumers()
+            await pumps
+        except asyncio.CancelledError:
+            if not pumps.done():
+                await self._task_manager.cancel_task(pumps)
+            raise
+        finally:
+            self._peer_data_event = None
+        return self._peer_data_seen
+
+    async def _forward_peer_tracks(self, peer_broadcast: "moq.BroadcastConsumer"):
+        """Run the peer audio pump and the peer transcript (RTVI) pump side by side.
+
+        Both catch CancelledError internally; on disconnect,
+        ``consumer.cancel()`` on their moq consumers makes each loop exit
+        cleanly. ``return_exceptions=True`` so that if one raises, the
+        other is still waited for instead of being left running as an
+        orphaned task; the first real exception is then re-raised so
+        callers see the same failure they would have without it.
+        """
         results = await asyncio.gather(
             self._forward_peer_audio(peer_broadcast),
             self._forward_peer_transcript(peer_broadcast),
@@ -1212,6 +1341,15 @@ class MOQTransportClient:
         for result in results:
             if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
                 raise result
+
+    def _cancel_consumers(self):
+        """Cancel every tracked moq consumer so its pending ``await`` returns."""
+        for c in self._active_consumers:
+            try:
+                c.cancel()
+            except Exception as e:
+                logger.debug(f"MOQ: consumer.cancel() raised: {e}")
+        self._active_consumers.clear()
 
     async def _forward_peer_audio(self, peer_broadcast: "moq.BroadcastConsumer"):
         """Read the catalog, subscribe to the first audio track, pump PCM."""
@@ -1298,6 +1436,7 @@ class MOQTransportClient:
         try:
             async for frame in consumer:
                 if frame.data:
+                    await self._on_peer_data()
                     pcm = frame.data
                     if source_channels > 1:
                         pcm = _downmix_s16_to_mono(pcm, source_channels)
@@ -1337,6 +1476,7 @@ class MOQTransportClient:
                         f"MOQ: expected RTVI object on transcript stream, got {type(record).__name__}"
                     )
                     continue
+                await self._on_peer_data()
                 message = self._accept_peer_record(record)
                 if message is None:
                     dropped += 1
@@ -1423,12 +1563,7 @@ class MOQTransportClient:
             logger.debug(f"MOQ: could not send session-ending notification: {e}")
 
         # Cancel any open consumers so their async iterations terminate.
-        for c in self._active_consumers:
-            try:
-                c.cancel()
-            except Exception as e:
-                logger.debug(f"MOQ: consumer.cancel() raised: {e}")
-        self._active_consumers.clear()
+        self._cancel_consumers()
 
         # Finish what we published before dropping it. ``finish()`` on the
         # audio track flushes samples still inside the encoder, and
@@ -1772,8 +1907,8 @@ class MOQTransport(BaseTransport):
     - ``on_disconnected`` — the transport stopped running sessions
     - ``on_reconnecting`` — the session dropped and a redial is about to
       start; receives the attempt number (client mode)
-    - ``on_reconnected`` — the peer is reachable again through a redialed
-      session (client mode)
+    - ``on_reconnected`` — the peer's data flows again after an outage
+      (client mode)
     - ``on_client_connected`` — peer broadcast announced (client joined)
     - ``on_client_disconnected`` — the peer is gone: its broadcast went
       away, or the session could not be re-established within
