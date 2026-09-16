@@ -114,6 +114,8 @@ Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
 Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
 timeout in seconds, for expectations without their own `within_ms`), and
 `--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
+A bot whose provider rate-limits concurrent connections can set its own
+`concurrency:` on its manifest entry, under the suite's.
 Everything in the manifest header except the `suite:` list can also be overridden
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest

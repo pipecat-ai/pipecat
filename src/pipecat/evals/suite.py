@@ -28,6 +28,9 @@ Manifest format (YAML)::
         scenarios: [simple_math, greeting]
       - bot: examples/voice/voice-openai.py
         scenarios: [simple_math, interruption]
+      - bot: examples/voice/voice-groq.py
+        concurrency: 2                           # this bot's own cap
+        scenarios: [simple_math, interruption]
       - bot: examples/vision/vision-openai.py
         runner_body:
           path: scenarios/vision-cat.yaml        # passed to the bot as --runner-body
@@ -59,6 +62,11 @@ paths belongs in a file for that reason.
 .. deprecated:: 1.11.0
     Use ``runner_body: {path: <file>}`` instead of a bare ``runner_body: <file>``.
     Will be removed in 2.0.0.
+
+``concurrency`` is how many runs execute at once. An entry may set its own
+``concurrency:`` to cap the runs of that bot below it, for a provider that
+rate-limits concurrent connections; the suite's figure (or ``--concurrency``)
+still bounds the whole.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -360,6 +368,8 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
+        concurrency: How many of this bot's runs may execute at once, when its
+            manifest entry caps that; ``None`` leaves only the suite's cap.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -381,6 +391,7 @@ class EvalRun:
     bot_url: str | None = None
     runner_body_path: Path | None = None
     runner_body: dict | None = None
+    concurrency: int | None = None
     kind: EvalKind = EvalKind.SCRIPT
     attempts: int = 1
     sweep: bool = False
@@ -616,6 +627,11 @@ class EvalManifest:
             bot = str(item["bot"])
             bot_path = (settings.bots_dir / bot).resolve()
             body = cls._runner_body(item.get("runner_body"), base, f"{path}: bot {bot!r}")
+            concurrency = item.get("concurrency")
+            if concurrency is not None and (
+                isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1
+            ):
+                raise ValueError(f"{path}: bot {bot!r} 'concurrency:' must be a positive integer")
             for scenario in item.get("scenarios", []):
                 name, scenario_path = _resolve_scenario(str(scenario), base, settings.scenarios_dir)
                 # A file that fails to load still gets a run, under the
@@ -638,6 +654,7 @@ class EvalManifest:
                             scenario_path=scenario_path,
                             runner_body_path=body.path,
                             runner_body=body.data,
+                            concurrency=concurrency,
                             kind=kind,
                             attempts=attempts,
                             sweep=settings.repeat_given,
@@ -812,7 +829,8 @@ class EvalSuite(BaseObject):
 
         Each run gets its own port (``base_port + index``). Runs come off one
         queue with no barrier between attempts, so a slow bot never holds up the
-        rest.
+        rest. A bot whose entry caps its own concurrency has its runs limited
+        to that as well.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -853,6 +871,7 @@ class EvalSuite(BaseObject):
         self._bound_cpu_threads()
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
         sem = asyncio.Semaphore(self.manifest.concurrency)
+        bot_sems = self._bot_semaphores()
         try:
             await asyncio.gather(
                 *(
@@ -863,6 +882,7 @@ class EvalSuite(BaseObject):
                         record_dir,
                         results_path,
                         sem,
+                        bot_sems.get(run.bot),
                         debug,
                         params,
                     )
@@ -881,11 +901,13 @@ class EvalSuite(BaseObject):
         record_dir: Path | None,
         results_path: Path | None,
         sem: asyncio.Semaphore,
+        bot_sem: asyncio.Semaphore | None,
         debug: bool,
         params: EvalSessionParams,
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-        async with sem:
+        # The bot's own cap comes first, so a run waiting on it holds no suite slot.
+        async with bot_sem or contextlib.nullcontext(), sem:
             files = _RunFiles.for_run(run, logs_dir, record_dir)
             run.status = "running"
             run.started_at = time.monotonic()
@@ -906,6 +928,14 @@ class EvalSuite(BaseObject):
                     files.trace.write_text(traceback.format_exc())
             finally:
                 await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+
+    def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
+        """One semaphore per bot whose entry caps its concurrency; the lowest cap wins for a bot listed twice."""
+        caps: dict[str, int] = {}
+        for run in self.runs:
+            if run.concurrency is not None:
+                caps[run.bot] = min(caps.get(run.bot, run.concurrency), run.concurrency)
+        return {bot: asyncio.Semaphore(cap) for bot, cap in caps.items()}
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""

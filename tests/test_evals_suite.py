@@ -6,6 +6,7 @@
 
 """Tests for the eval suite's manifest parsing, per-run log capture, and run updates."""
 
+import asyncio
 import json
 import os
 import sys
@@ -127,6 +128,26 @@ class TestEvalManifestLoad(unittest.TestCase):
         self.assertFalse(m.record)
         self.assertEqual(m.spawn, "x {bot}")
 
+    def test_an_entry_caps_its_own_concurrency(self):
+        self.manifest_path.write_text(
+            "suite:\n"
+            "  - bot: a.py\n    concurrency: 2\n    scenarios: [x, y]\n"
+            "  - bot: b.py\n    scenarios: [x]\n"
+        )
+        m = EvalManifest.load(self.manifest_path, concurrency=8)
+        self.assertEqual([r.concurrency for r in m.runs], [2, 2, None])
+        # The command line's cap is the suite's, not the entry's.
+        self.assertEqual(m.concurrency, 8)
+
+    def test_entry_concurrency_must_be_a_positive_integer(self):
+        for bad in ("0", "-1", "two", "true", "1.5"):
+            self.manifest_path.write_text(
+                f"suite:\n  - bot: a.py\n    concurrency: {bad}\n    scenarios: [x]\n"
+            )
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalManifest.load(self.manifest_path)
+            self.assertIn("'concurrency:'", str(ctx.exception))
+
 
 class TestCapturePipelineLogs(unittest.TestCase):
     def test_writes_sections_per_pipeline(self):
@@ -244,6 +265,73 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
         # Omitting it stops the reporting.
         await self.suite.run(self.logs_dir)
         self.assertEqual(seen, ["running", "done"] * 2)
+
+
+class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
+    """A bot's own cap limits its runs; the suite's cap limits the rest."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logs_dir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        logger.remove()
+        logger.add(sys.stderr)
+
+    async def test_capped_bot_runs_one_at_a_time_while_others_overlap(self):
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario=f"s{i}",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                concurrency=1 if bot == "capped.py" else None,
+            )
+            for bot in ("capped.py", "free.py")
+            for i in range(3)
+        ]
+        suite = EvalSuite(
+            EvalManifest(
+                runs=runs,
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=4,
+                repeat=1,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        # Stand in for the bot and the harness: each run holds its slot for a
+        # moment, and the test records how many of each bot were held at once.
+        active: dict[str, int] = {}
+        peak: dict[str, int] = {}
+
+        async def spawn(run, port, files):
+            active[run.bot] = active.get(run.bot, 0) + 1
+            peak[run.bot] = max(peak.get(run.bot, 0), active[run.bot])
+            await asyncio.sleep(0.05)
+            active[run.bot] -= 1
+            return None
+
+        async def harness(run, port, files, *, debug, params):
+            return None
+
+        async def finish(run, files, bot, worker, results_path, logs_dir, record_dir):
+            run.status = "done"
+
+        suite._missing_file = lambda run: None
+        suite._spawn_bot = spawn
+        suite._run_harness = harness
+        suite._finish = finish
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["capped.py"], 1)
+        self.assertEqual(peak["free.py"], 3)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
 
 
 class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
