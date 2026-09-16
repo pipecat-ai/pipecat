@@ -13,6 +13,7 @@ voice transcription, streaming responses, and tool usage.
 
 import asyncio
 import io
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -94,6 +95,7 @@ try:
         HistoryConfig,
         HttpOptions,
         LiveConnectConfig,
+        LiveServerContent,
         LiveServerMessage,
         MediaModality,
         MediaResolution,
@@ -435,19 +437,129 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._warn_if_realtime_service_emits_no_turn_frames(emits_turn_frames=False)
         return LLMServiceMetadataFrame(service_name=self.name, is_realtime_service=True)
 
+    # Version of google-genai that added LiveServerContent.interaction_status.
+    _INTERACTION_STATUS_MIN_SDK = "2.18.0"
+
     @property
     def _is_gemini_3(self) -> bool:
         """Check if the current model is a Gemini 3.x model."""
-        return "gemini-3" in (assert_given(self._settings.model) or "")
+        version = self._gemini_version
+        return version is not None and version[0] == 3
+
+    @property
+    def _gemini_version(self) -> tuple[int, int] | None:
+        """Major/minor version parsed from the model id, or None if absent.
+
+        Handles ids that carry the version with or without a minor part
+        (``gemini-3-pro-preview``, ``gemini-3.8-live``, ``gemini-2.0-flash-live-001``).
+        """
+        model = assert_given(self._settings.model) or ""
+        match = re.search(r"gemini(?:-[a-z]+)*-(\d+)(?:\.(\d+))?", model)
+        if not match:
+            return None
+        return (int(match.group(1)), int(match.group(2) or 0))
+
+    @property
+    def _expects_interaction_status(self) -> bool:
+        """Whether the current model reports ``interaction_status``.
+
+        Live thinking models reason in the background between output chunks;
+        for those, ``turn_complete`` alone doesn't mean the turn is over.
+        """
+        model = assert_given(self._settings.model) or ""
+        return "live" in model and "thinking" in model
+
+    def _warn_if_interaction_status_unsupported(self):
+        """Warn (once) when the installed SDK can't surface ``interaction_status``.
+
+        ``google-genai`` strips response fields it doesn't know about, so on an
+        older SDK the status never reaches us and the turn gating silently does
+        nothing — the model's background reasoning would split one reply across
+        several assistant turns.
+        """
+        if not self._expects_interaction_status or self._warned_interaction_status_unsupported:
+            return
+        if "interaction_status" in LiveServerContent.model_fields:
+            return
+        self._warned_interaction_status_unsupported = True
+        logger.warning(
+            f"{self}: the installed google-genai does not support "
+            f"interaction_status, which {self._settings.model} uses to signal "
+            f"that it is still reasoning in the background. Without it, a "
+            f"single reply may be split across multiple assistant turns. "
+            f"Upgrade to google-genai>={self._INTERACTION_STATUS_MIN_SDK}."
+        )
 
     @property
     def _supports_non_blocking_tools(self) -> bool:
         """Whether the current model supports the NON_BLOCKING tool behavior + scheduling hints.
 
-        Gemini 3.x has not yet shipped support for NON_BLOCKING function
-        declarations or for the ``scheduling`` field on FunctionResponse.
+        Before 3.8, Gemini 3.x models did not support NON_BLOCKING function declarations.
+        Thinking models (the first of which is gemini-3.8-live-extended-thinking) require
+        NON_BLOCKING.
         """
-        return not self._is_gemini_3
+        version = self._gemini_version
+        return version is None or version < (3, 0) or version >= (3, 8)
+
+    @property
+    def _tools_default_to_non_blocking(self) -> bool:
+        """Whether the model runs function calls NON_BLOCKING unless declared otherwise.
+
+        The 3.8 Live family flipped the default: function calls execute
+        NON_BLOCKING unless the declaration explicitly asks for BLOCKING.
+        """
+        model = assert_given(self._settings.model) or ""
+        version = self._gemini_version
+        return "live" in model and version is not None and version >= (3, 8)
+
+    @property
+    def _supports_blocking_tools(self) -> bool:
+        """Whether the model accepts BLOCKING function declarations.
+
+        Live thinking models run every function call NON_BLOCKING and don't
+        accept a BLOCKING declaration.
+        """
+        return not self._expects_interaction_status
+
+    def _tag_tool_behaviors(self, tools: list) -> None:
+        """Set each function declaration's ``behavior`` for the current model.
+
+        Tools registered with ``cancel_on_interruption=False`` are declared
+        NON_BLOCKING so Gemini doesn't stall the conversation while they run.
+        Synchronous tools should block — the model finishes its turn only once
+        the result lands, avoiding the "let me look that up for you" filler it
+        produces when it knows the result is async — so where NON_BLOCKING is
+        the model's default they are explicitly declared BLOCKING. Live
+        thinking models accept only NON_BLOCKING: synchronous tools can't
+        block there, which is warned about once.
+
+        https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
+        """
+        declare_blocking = self._tools_default_to_non_blocking and self._supports_blocking_tools
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            decls = tool.get("function_declarations")
+            if not isinstance(decls, list):
+                continue
+            for decl in decls:
+                if not isinstance(decl, dict):
+                    continue
+                name = decl.get("name")
+                if not isinstance(name, str):
+                    continue
+                if self._function_is_async(name):
+                    decl["behavior"] = "NON_BLOCKING"
+                elif declare_blocking:
+                    decl["behavior"] = "BLOCKING"
+                elif self._tools_default_to_non_blocking and not self._sync_tool_warning_logged:
+                    self._sync_tool_warning_logged = True
+                    logger.warning(
+                        f"{self}: {self._settings.model} runs every function call "
+                        f"NON_BLOCKING; synchronous tools like '{name}' won't pause "
+                        f"the conversation while they execute, so the model may keep "
+                        f"talking before the result arrives."
+                    )
 
     def __init__(
         self,
@@ -666,6 +778,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._end_frame_pending_bot_turn_finished: EndFrame | None = None
         self._end_frame_deferral_timeout_task: asyncio.Task | None = None
 
+        # A turn_complete held open because the server reported it was still
+        # working (see `_handle_server_message`), plus its watchdog.
+        self._turn_complete_pending_idle: LiveServerMessage | None = None
+        self._deferred_turn_complete_timeout_task: asyncio.Task | None = None
+        self._warned_interaction_status_unsupported = False
+
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
 
@@ -677,6 +795,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # message in the context only carries the id.
         self._tool_call_id_to_name: dict[str, str] = {}
         self._async_tool_warning_logged: bool = False
+        self._sync_tool_warning_logged: bool = False
 
     def create_client(self):
         """Create the Gemini API client instance. Subclasses can override this."""
@@ -800,6 +919,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     #
 
     async def _handle_interruption(self):
+        # The interruption ends the turn, so a held turn_complete is moot.
+        self._discard_deferred_turn()
         if self._bot_is_responding:
             await self._set_bot_is_responding(False)
             if self._settings.modalities == GeminiModalities.AUDIO:
@@ -1095,6 +1216,12 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     # pipeline from hanging indefinitely.
     _END_FRAME_DEFERRAL_TIMEOUT_SECS = 30.0
 
+    # Timeout (in seconds) for a deferred turn_complete — one held open by an
+    # IN_PROGRESS interaction status. If the session never reports going idle,
+    # the bot turn is ended anyway so downstream processors aren't left
+    # waiting on it.
+    _DEFERRED_TURN_COMPLETE_TIMEOUT_SECS = 30.0
+
     def _create_end_frame_deferral_timeout(self):
         """Start a timeout that releases the deferred EndFrame if turn_complete never arrives."""
         self._cancel_end_frame_deferral_timeout()
@@ -1142,6 +1269,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             )
         else:
             logger.info("Connecting to Gemini service")
+
+        self._warn_if_interaction_status_unsupported()
+
         try:
             # Assemble basic configuration
             modalities = assert_given(self._settings.modalities)
@@ -1277,27 +1407,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
             if tools:
-                # Tag function declarations registered with
-                # cancel_on_interruption=False as NON_BLOCKING so Gemini
-                # doesn't stall the conversation while the tool runs.
-                # Synchronous (default) tools stay BLOCKING so the model
-                # finishes its turn before the result lands — otherwise
-                # we get the "let me look that up for you" filler the
-                # model produces when it knows the result is async.
-                # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
                 if self._supports_non_blocking_tools:
-                    for tool in tools:
-                        if not isinstance(tool, dict):
-                            continue
-                        decls = tool.get("function_declarations")
-                        if not isinstance(decls, list):
-                            continue
-                        for decl in decls:
-                            if not isinstance(decl, dict):
-                                continue
-                            name = decl.get("name")
-                            if isinstance(name, str) and self._function_is_async(name):
-                                decl["behavior"] = "NON_BLOCKING"
+                    self._tag_tool_behaviors(tools)
                 logger.debug(f"Setting tools: {tools}")
                 config.tools = tools
 
@@ -1326,49 +1437,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
-                        # server_content fields are NOT mutually exclusive —
-                        # Gemini 3.x can bundle multiple content fields and
-                        # turn_complete on the same message, so process the
-                        # content-bearing fields before closing the turn.
-                        sc = message.server_content
-                        if sc and sc.interrupted:
-                            # NOTE: while the service triggers interruptions in
-                            # the specific case of barge-ins, it does *not*
-                            # emit UserStarted/StoppedSpeakingFrames, as the
-                            # Gemini Live API does not give us broadly reliable
-                            # signals to base those off of. Pipelines that
-                            # require turn tracking (like those using context
-                            # aggregators) still need an independent way to
-                            # track turns, such as local Silero VAD in
-                            # combination with the context aggregator default
-                            # turn strategies.
-                            logger.debug("Gemini VAD: interrupted signal received")
-                            await self.broadcast_interruption()
-                        if sc and sc.model_turn:
-                            await self._handle_msg_model_turn(message)
-                        if sc and sc.input_transcription:
-                            await self._handle_msg_input_transcription(message)
-                        if sc and sc.output_transcription:
-                            await self._handle_msg_output_transcription(message)
-                        if (
-                            sc
-                            and sc.grounding_metadata
-                            and not sc.model_turn
-                            and not sc.output_transcription
-                        ):
-                            # model_turn/output_transcription already defer
-                            # bundled grounding metadata to turn_complete.
-                            await self._handle_msg_grounding_metadata(message)
-                        if sc and sc.turn_complete:
-                            if not message.usage_metadata:
-                                logger.warning("Received turn_complete without usage_metadata")
-                            await self._handle_msg_turn_complete(message)
-                            if message.usage_metadata:
-                                await self._handle_msg_usage_metadata(message)
-                        if message.tool_call:
-                            await self._handle_msg_tool_call(message)
-                        if message.session_resumption_update:
-                            self._handle_msg_resumption_update(message)
+                        await self._handle_server_message(message)
                 except Exception as e:
                     if not self._disconnecting:
                         should_reconnect = await self._handle_connection_error(e)
@@ -1376,6 +1445,128 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                             await self._reconnect()
                             return  # Exit this connection handler, _reconnect will start a new one
                     break
+
+    async def _handle_server_message(self, message: LiveServerMessage):
+        """Dispatch a single message from the Live API receive stream."""
+        # server_content fields are NOT mutually exclusive — Gemini 3.x can
+        # bundle multiple content fields and turn_complete on the same message,
+        # so process the content-bearing fields before closing the turn.
+        sc = message.server_content
+        interaction_idle = self._read_interaction_status(sc)
+        if sc and sc.interrupted:
+            # NOTE: while the service triggers interruptions in
+            # the specific case of barge-ins, it does *not*
+            # emit UserStarted/StoppedSpeakingFrames, as the
+            # Gemini Live API does not give us broadly reliable
+            # signals to base those off of. Pipelines that
+            # require turn tracking (like those using context
+            # aggregators) still need an independent way to
+            # track turns, such as local Silero VAD in
+            # combination with the context aggregator default
+            # turn strategies.
+            logger.debug("Gemini VAD: interrupted signal received")
+            await self.broadcast_interruption()
+        if sc and sc.model_turn:
+            await self._handle_msg_model_turn(message)
+        if sc and sc.input_transcription:
+            await self._handle_msg_input_transcription(message)
+        if sc and sc.output_transcription:
+            await self._handle_msg_output_transcription(message)
+        if sc and sc.grounding_metadata and not sc.model_turn and not sc.output_transcription:
+            # model_turn/output_transcription already defer
+            # bundled grounding metadata to turn_complete.
+            await self._handle_msg_grounding_metadata(message)
+        if sc and sc.turn_complete:
+            if not message.usage_metadata:
+                logger.warning("Received turn_complete without usage_metadata")
+            if interaction_idle is False:
+                # The server is still reasoning in the background, so this
+                # turn_complete only closes an output chunk. Hold the turn
+                # open until the session reports going idle.
+                self._defer_turn_complete_until_idle(message)
+            else:
+                # This turn_complete is the turn's last, so it supersedes any
+                # earlier one still being held.
+                self._discard_deferred_turn()
+                await self._handle_msg_turn_complete(message)
+            if message.usage_metadata:
+                await self._handle_msg_usage_metadata(message)
+        if message.tool_call:
+            await self._handle_msg_tool_call(message)
+        if message.session_resumption_update:
+            self._handle_msg_resumption_update(message)
+        # Close a held turn only after any bundled tool call has been
+        # dispatched, so the turn ends with the message fully processed.
+        if interaction_idle:
+            await self._complete_deferred_turn()
+
+    def _read_interaction_status(self, server_content: LiveServerContent | None) -> bool | None:
+        """Read the session's idle state from ``server_content``.
+
+        Args:
+            server_content: The ``server_content`` of an incoming message.
+
+        Returns:
+            ``True`` when the server reports being idle, ``False`` while it is
+            still working, and ``None`` when it expresses no opinion — either
+            the model doesn't report a status or the installed ``google-genai``
+            predates the field.
+        """
+        # getattr keeps this a no-op on SDK versions without the field.
+        status = getattr(server_content, "interaction_status", None) if server_content else None
+        if status is None:
+            return None
+        # Compare on the value: the idle state was renamed REQUIRES_ACTION ->
+        # IDLE, and an SDK that predates the rename surfaces IDLE as a
+        # synthesized enum member rather than a known one.
+        value = getattr(status, "value", status)
+        if value in ("IDLE", "REQUIRES_ACTION"):
+            return True
+        if value == "IN_PROGRESS":
+            return False
+        return None
+
+    def _defer_turn_complete_until_idle(self, message: LiveServerMessage):
+        """Hold a turn_complete until the session reports going idle."""
+        self._turn_complete_pending_idle = message
+        self._cancel_deferred_turn_complete_timeout()
+
+        async def _timeout():
+            await asyncio.sleep(self._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS)
+            if self._turn_complete_pending_idle:
+                logger.warning(
+                    f"Interaction status stayed IN_PROGRESS for "
+                    f"{self._DEFERRED_TURN_COMPLETE_TIMEOUT_SECS}s — ending the bot turn anyway"
+                )
+                await self._complete_deferred_turn()
+
+        self._deferred_turn_complete_timeout_task = self.create_task(
+            _timeout(), "deferred_turn_complete_timeout"
+        )
+
+    async def _complete_deferred_turn(self):
+        """Close a turn that was held open while the server was still working."""
+        self._cancel_deferred_turn_complete_timeout()
+        message = self._turn_complete_pending_idle
+        if message is None:
+            return
+        self._turn_complete_pending_idle = None
+        await self._handle_msg_turn_complete(message)
+
+    def _discard_deferred_turn(self):
+        """Drop a held turn without closing it, e.g. after an interruption."""
+        self._cancel_deferred_turn_complete_timeout()
+        self._turn_complete_pending_idle = None
+
+    def _cancel_deferred_turn_complete_timeout(self):
+        """Cancel the deferred-turn-complete watchdog if active."""
+        task = self._deferred_turn_complete_timeout_task
+        self._deferred_turn_complete_timeout_task = None
+        # The watchdog itself ends the turn on expiry, so skip the cancel when
+        # we're running inside it — otherwise it would cut itself off partway
+        # through closing the turn.
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
 
     def _check_and_reset_failure_counter(self):
         """Check if connection has been stable long enough to reset the failure counter.
@@ -1440,6 +1631,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 self._transcription_timeout_task = None
             self._cancel_end_frame_deferral_timeout()
             self._end_frame_pending_bot_turn_finished = None
+            self._discard_deferred_turn()
             if self._session:
                 await self._session.close()
                 self._session = None
