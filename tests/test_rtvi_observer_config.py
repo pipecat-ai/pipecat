@@ -113,7 +113,7 @@ class TestRTVIObserverLLMMarkers(unittest.IsolatedAsyncioTestCase):
         # The context aggregator's marker frame is not the report; the report
         # comes once per response, when it ends.
         observer = RTVIObserver(params=RTVIObserverParams(bot_llm_marker_enabled=True))
-        sent = await self._push(observer, LLMMarkerFrame(marker="●", kind="complete"))
+        sent = await self._push(observer, LLMMarkerFrame(marker="●"))
         self.assertEqual(sent, [])
 
 

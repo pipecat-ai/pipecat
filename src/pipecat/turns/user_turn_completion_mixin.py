@@ -554,9 +554,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         """Push the marker read from the response, and remember it for the response's report."""
         self._response_marker = (marker, kind)
         await self.push_frame(
-            LLMMarkerFrame(
-                marker, append_to_context_immediately=append_to_context_immediately, kind=kind
-            )
+            LLMMarkerFrame(marker, append_to_context_immediately=append_to_context_immediately)
         )
 
     async def _report_response(self):
