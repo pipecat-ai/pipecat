@@ -263,7 +263,9 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
     The ``delegate`` call's one result carries every output, in order; the
     text alone when there was only one. Reasoning summaries are left out.
     The default for a speech-to-speech frontend, whose function calls accept
-    one result.
+    one result. It may not stay the default: if and when those services can
+    take intermediate results, progress could reach such a frontend as it
+    comes, as :class:`SpeakOnPrefersSpokenBackendReplyStrategy` delivers it.
     """
 
     def __init__(self):
