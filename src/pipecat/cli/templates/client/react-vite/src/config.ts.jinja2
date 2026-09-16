@@ -5,6 +5,10 @@
 
 import type { APIRequest, TransportConnectionParams } from '@pipecat-ai/client-js';
 
+import type { TransportFactory } from '@/lib/transports';
+
+export const PROJECT_NAME = '{{ project_name }}';
+
 export type TransportType = 'daily' | 'smallwebrtc' | 'websocket';
 
 export const AVAILABLE_TRANSPORTS: TransportType[] = [
@@ -77,9 +81,38 @@ const websocketResponseTransformer = (
 };
 
 /**
- * Props passed to `PipecatAppBase` for each transport. WebRTC transports
- * connect in one step via `connectParams`; WebSocket starts the bot first and
- * transforms the response into the WebSocket connection params.
+ * Creates the transport for each selected type. Packages are imported lazily so
+ * only the transports this project uses are bundled.
+ */
+export const TRANSPORT_FACTORIES: Partial<Record<TransportType, TransportFactory>> = {
+{%- for transport in transports %}
+{%- if transport.value == 'daily' %}
+  daily: async () => {
+    const { DailyTransport } = await import('@pipecat-ai/daily-transport');
+    return new DailyTransport();
+  },
+{%- elif transport.value == 'smallwebrtc' %}
+  smallwebrtc: async () => {
+    const { SmallWebRTCTransport } = await import(
+      '@pipecat-ai/small-webrtc-transport'
+    );
+    return new SmallWebRTCTransport();
+  },
+{%- elif transport.value == 'websocket' %}
+  websocket: async () => {
+    const { WebSocketTransport } = await import(
+      '@pipecat-ai/websocket-transport'
+    );
+    return new WebSocketTransport();
+  },
+{%- endif %}
+{%- endfor %}
+};
+
+/**
+ * Connection options passed to `usePipecatApp` for each transport. WebRTC
+ * transports connect in one step via `connectParams`; WebSocket starts the bot
+ * first and transforms the response into the WebSocket connection params.
  */
 export interface TransportProps {
   connectParams?: APIRequest | TransportConnectionParams;
