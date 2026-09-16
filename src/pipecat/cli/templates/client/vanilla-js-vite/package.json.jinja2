@@ -9,14 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^1.12.0"
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@pipecat-ai/client-js": "^1.13.1"
 {%- for transport in transports -%}
 {%- if transport.value == 'daily' %},
-    "@pipecat-ai/daily-transport": "^1.6.7"
+    "@pipecat-ai/daily-transport": "^1.6.8"
 {%- elif transport.value == 'smallwebrtc' %},
-    "@pipecat-ai/small-webrtc-transport": "^1.10.5"
+    "@pipecat-ai/small-webrtc-transport": "^1.10.7"
 {%- elif transport.value == 'websocket' %},
-    "@pipecat-ai/websocket-transport": "^1.7.0",
+    "@pipecat-ai/websocket-transport": "^1.7.1",
     "protobufjs": "^7.5.7"
 {%- endif %}
 {%- endfor %}
@@ -24,8 +26,4 @@
   "devDependencies": {
     "vite": "^8.0.16"
   }
-
-
-
-
 }
