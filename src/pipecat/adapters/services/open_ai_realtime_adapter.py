@@ -44,13 +44,25 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         return "openai-realtime"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: str | None = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        service_tools: Any = None,
     ) -> OpenAIRealtimeLLMInvocationParams:
         """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
+
+        The ``tools`` returned are the set the session should carry: the
+        context's own when it has any, else the init-provided ones. Built-in
+        tools ride along with whichever set is in use, and are the set when
+        there is neither.
 
         Args:
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings.
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
 
         Returns:
             Dictionary of parameters for invoking OpenAI Realtime's API.
@@ -64,8 +76,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         return {
             "system_instruction": effective_system,
             "messages": messages.messages,
-            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": self.from_standard_tools(context.tools) or [],
+            "tools": self._realtime_session_tools(context.tools, service_tools) or [],
         }
 
     def get_messages_for_logging(self, context) -> list[dict[str, Any]]:

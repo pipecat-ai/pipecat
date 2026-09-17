@@ -8,8 +8,14 @@
 
 from typing import Any, cast
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
-from pipecat.processors.aggregators.llm_context import LLMContextMessage, LLMSpecificMessage
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
+from pipecat.processors.aggregators.llm_context import (
+    NOT_GIVEN,
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
+from pipecat.utils.types import NotGiven
 
 
 class GeminiLiveLLMAdapter(GeminiLLMAdapter):
@@ -23,6 +29,37 @@ class GeminiLiveLLMAdapter(GeminiLLMAdapter):
     def id_for_llm_specific_messages(self) -> str:
         """Get the identifier used in LLMSpecificMessage instances for Gemini Live."""
         return "gemini-live"
+
+    def get_llm_invocation_params(
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        service_tools: Any = None,
+    ) -> GeminiLLMInvocationParams:
+        """Get Gemini Live-specific LLM invocation parameters from a universal LLM context.
+
+        The ``tools`` returned are the set the session should carry: the
+        context's own when it has any, else the init-provided ones. Built-in
+        tools ride along with whichever set is in use, and are the set when
+        there is neither.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings.
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
+
+        Returns:
+            Dictionary of parameters for Gemini Live's API.
+        """
+        params = super().get_llm_invocation_params(context, system_instruction=system_instruction)
+        params["tools"] = cast(
+            "list[Any] | NotGiven",
+            self._realtime_session_tools(context.tools, service_tools) or NOT_GIVEN,
+        )
+        return params
 
     def _from_universal_context_messages(
         self,
