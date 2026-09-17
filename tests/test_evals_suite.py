@@ -268,7 +268,7 @@ class TestSuiteUpdateEvent(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
-    """A bot's own cap limits its runs; the suite's cap limits the rest."""
+    """An entry holds one slot unless its cap says more; the suite's cap limits the whole."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -279,16 +279,16 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         logger.remove()
         logger.add(sys.stderr)
 
-    async def test_capped_bot_runs_one_at_a_time_while_others_overlap(self):
+    async def test_an_entry_runs_one_at_a_time_unless_its_cap_widens_it(self):
         runs = [
             EvalRun(
                 bot=bot,
                 scenario=f"s{i}",
                 scenario_path=self.logs_dir / "s.yaml",
                 bot_path=self.logs_dir / bot,
-                concurrency=1 if bot == "capped.py" else None,
+                concurrency=3 if bot == "wide.py" else None,
             )
-            for bot in ("capped.py", "free.py")
+            for bot in ("plain.py", "wide.py")
             for i in range(3)
         ]
         suite = EvalSuite(
@@ -329,9 +329,71 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
 
         await suite.run(self.logs_dir)
 
-        self.assertEqual(peak["capped.py"], 1)
-        self.assertEqual(peak["free.py"], 3)
+        self.assertEqual(peak["plain.py"], 1)
+        self.assertEqual(peak["wide.py"], 3)
         self.assertEqual([r.status for r in runs], ["done"] * 6)
+
+    async def test_entries_take_slots_in_manifest_order_and_drain_their_queues(self):
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario=scenario,
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+            )
+            for bot, scenario in (
+                ("a.py", "s1"),
+                ("a.py", "s2"),
+                ("a.py", "s3"),
+                ("b.py", "s1"),
+                ("c.py", "s1"),
+                ("c.py", "s2"),
+            )
+        ]
+        suite = EvalSuite(
+            EvalManifest(
+                runs=runs,
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=1,
+                repeat=1,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        started: list[tuple[str, str]] = []
+
+        async def spawn(run, port, files):
+            started.append((run.bot, run.scenario))
+            return None
+
+        async def harness(run, port, files, *, debug, params):
+            return None
+
+        async def finish(run, files, bot, worker, results_path, logs_dir, record_dir):
+            run.status = "done"
+
+        suite._missing_file = lambda run: None
+        suite._spawn_bot = spawn
+        suite._run_harness = harness
+        suite._finish = finish
+
+        await suite.run(self.logs_dir)
+
+        # With one slot, each entry drains before the next starts, in manifest order.
+        self.assertEqual(
+            started,
+            [
+                ("a.py", "s1"),
+                ("a.py", "s2"),
+                ("a.py", "s3"),
+                ("b.py", "s1"),
+                ("c.py", "s1"),
+                ("c.py", "s2"),
+            ],
+        )
 
 
 class TestRunFiles(unittest.TestCase):
@@ -769,11 +831,13 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
 
 
-class TestDispatchOrder(unittest.TestCase):
-    """The queue interleaves entries so one slow provider does not hold every slot."""
+class TestEntryQueues(unittest.TestCase):
+    """Each entry gets its own queue, in manifest order, sized by its cap."""
 
     @staticmethod
-    def _run(label: str, scenario: str, attempt: int = 1) -> EvalRun:
+    def _run(
+        label: str, scenario: str, attempt: int = 1, concurrency: int | None = None
+    ) -> EvalRun:
         return EvalRun(
             bot="bot.py",
             name=label,
@@ -782,29 +846,48 @@ class TestDispatchOrder(unittest.TestCase):
             bot_path=Path("bot.py"),
             scenario_path=Path(f"{scenario}.yaml"),
             attempt=attempt,
+            concurrency=concurrency,
         )
 
-    def test_round_robin_across_entries_within_an_attempt(self):
+    def test_one_queue_per_entry_in_manifest_order(self):
         runs = [
             self._run("a", "s1"),
             self._run("a", "s2"),
-            self._run("a", "s3"),
             self._run("b", "s1"),
-            self._run("b", "s2"),
+            self._run("a", "s3"),
             self._run("c", "s1"),
         ]
-        order = EvalSuite._dispatch_order(runs)
+        queues = EvalSuite._entry_queues(runs)
         self.assertEqual(
-            [(r.label, r.scenario) for r in order],
-            [("a", "s1"), ("b", "s1"), ("c", "s1"), ("a", "s2"), ("b", "s2"), ("a", "s3")],
+            [[(r.label, r.scenario) for r in q] for _, q in queues],
+            [[("a", "s1"), ("a", "s2"), ("a", "s3")], [("b", "s1")], [("c", "s1")]],
         )
+        self.assertEqual([slots for slots, _ in queues], [1, 1, 1])
 
-    def test_attempts_stay_attempt_major(self):
+    def test_attempts_form_their_own_queues_attempt_major(self):
         runs = [
             self._run("a", "s1", 1),
+            self._run("a", "s2", 1),
             self._run("b", "s1", 1),
             self._run("a", "s1", 2),
+            self._run("a", "s2", 2),
             self._run("b", "s1", 2),
         ]
-        order = EvalSuite._dispatch_order(runs)
-        self.assertEqual([r.attempt for r in order], [1, 1, 2, 2])
+        queues = EvalSuite._entry_queues(runs)
+        self.assertEqual(
+            [[(r.label, r.scenario, r.attempt) for r in q] for _, q in queues],
+            [
+                [("a", "s1", 1), ("a", "s2", 1)],
+                [("b", "s1", 1)],
+                [("a", "s1", 2), ("a", "s2", 2)],
+                [("b", "s1", 2)],
+            ],
+        )
+
+    def test_an_entry_cap_is_its_slots_and_the_lowest_wins(self):
+        runs = [
+            self._run("a", "s1", concurrency=3),
+            self._run("a", "s2", concurrency=2),
+            self._run("b", "s1"),
+        ]
+        self.assertEqual([slots for slots, _ in EvalSuite._entry_queues(runs)], [2, 1])

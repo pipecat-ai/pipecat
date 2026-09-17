@@ -76,10 +76,11 @@ needed when several entries share a bot, as when sweeping a model with
 ``runner_body:``; two entries may not run the same scenario under the same
 label.
 
-``concurrency`` is how many runs execute at once. An entry may set its own
-``concurrency:`` to cap the runs of that bot below it, for a provider that
-rate-limits concurrent connections; the suite's figure (or ``--concurrency``)
-still bounds the whole.
+``concurrency`` is how many runs execute at once. Each entry's runs go one
+after another on a single slot, so its scenarios finish as a block and a slow
+provider holds no more than one slot; an entry may set its own
+``concurrency:`` to hold more than one. The suite's figure (or
+``--concurrency``) bounds the whole.
 
 Manifest-relative paths (``bot``/``bots_dir``, ``scenarios_dir``,
 ``runs_dir``) resolve relative to the manifest file, so a manifest is portable;
@@ -87,9 +88,10 @@ the same values passed as CLI overrides resolve against the working directory.
 
 ``repeat`` (or ``--repeat``) runs every (bot, scenario) pair N times, which is how
 a flaky behavior gets measured rather than sampled: a bot that passes a scenario
-half the time looks identical to a reliable one in a single pass. Attempts are
-interleaved across bots and carry an :attr:`EvalRun.attempt` number that joins
-their artifact filenames, so no attempt overwrites another's logs.
+half the time looks identical to a reliable one in a single pass. Attempts run
+attempt-major, every entry's first attempt before any entry's second, and carry
+an :attr:`EvalRun.attempt` number that joins their artifact filenames, so no
+attempt overwrites another's logs.
 """
 
 import asyncio
@@ -101,6 +103,7 @@ import sys
 import time
 import traceback
 import warnings
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -400,8 +403,8 @@ class EvalRun:
         runner_body: The bot's runner-args body given inline, written to a
             file for the bot when it is spawned; ``None`` when there is none or
             it comes from ``runner_body_path``.
-        concurrency: How many of this bot's runs may execute at once, when its
-            manifest entry caps that; ``None`` leaves only the suite's cap.
+        concurrency: How many suite slots this bot's entry may hold at once,
+            when its manifest entry says; ``None`` is one.
         attempt: 1-based attempt number when the suite repeats (see
             :attr:`EvalManifest.repeat`); always 1 for a single pass.
         status: ``pending``, ``running``, or ``done``.
@@ -494,8 +497,8 @@ class EvalManifest:
         spawn: Spawn command template (``{python}``/``{bot}``/``{port}`` substituted).
         python: Interpreter used to spawn each bot.
         concurrency: How many runs to execute at once.
-        repeat: How many times to run each (bot, scenario) pair. Attempts are
-            interleaved rather than grouped per bot, so every bot meets the same
+        repeat: How many times to run each (bot, scenario) pair. Attempts run
+            attempt-major rather than grouped per bot, so every bot meets the same
             machine conditions in the same stretch of the sweep and a transient
             slowdown shows up as a band across all of them instead of a regression
             in whichever bot happened to be running.
@@ -657,7 +660,7 @@ class EvalManifest:
         times as its file says unless a repeat makes the suite a measurement; a
         file that fails to load still gets its run, which reports the error.
         Attempts are attempt-major (bot A #1, bot B #1, ..., bot A #2), so a
-        sweep spreads each attempt across the bots without fast ones waiting on
+        sweep runs each attempt across the bots without fast ones waiting on
         slow ones.
         """
         runs: list[EvalRun] = []
@@ -884,13 +887,14 @@ class EvalSuite(BaseObject):
     ) -> None:
         """Run all of the suite's runs, in place, with the manifest's concurrency.
 
-        Each run gets its own port (``base_port + index``). Runs come off one
-        queue, taken round-robin across the manifest's entries within each
-        attempt, so the slots spread over every bot from the start rather than
-        draining one entry's scenarios before the next: a slow or rate-limited
-        provider holds only its share of them, and no barrier separates
-        attempts. A bot whose entry caps its own concurrency has its runs
-        limited to that as well.
+        Each run gets its own port (``base_port + index``). Every entry has a
+        queue of its own per attempt, its scenarios in manifest order, and its
+        runs go one after another on the slot it holds, so a slow or
+        rate-limited provider holds no more than that one slot and its
+        scenarios finish as a block. Queues take free slots in manifest order,
+        every entry's first attempt before any entry's second; an entry whose
+        ``concurrency:`` allows it holds that many slots and runs its queue
+        that wide.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -931,28 +935,39 @@ class EvalSuite(BaseObject):
         self._bound_cpu_threads()
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
         sem = asyncio.Semaphore(self.manifest.concurrency)
-        bot_sems = self._bot_semaphores()
         ports = {id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)}
-        try:
-            await asyncio.gather(
-                *(
-                    self._run_one(
-                        run,
-                        ports[id(run)],
-                        logs_dir,
-                        record_dir,
-                        results_path,
-                        sem,
-                        bot_sems.get(run.label),
-                        debug,
-                        params,
+        lanes = []
+        for slots, queue in self._entry_queues(self.runs):
+            for _ in range(min(slots, len(queue))):
+                lanes.append(
+                    self._run_lane(
+                        queue, ports, logs_dir, record_dir, results_path, sem, debug, params
                     )
-                    for run in self._dispatch_order(self.runs)
                 )
-            )
+        try:
+            await asyncio.gather(*lanes)
         finally:
             if handler is not None:
                 self.remove_event_handler("on_update", handler)
+
+    async def _run_lane(
+        self,
+        queue: deque[EvalRun],
+        ports: dict[int, int],
+        logs_dir: Path,
+        record_dir: Path | None,
+        results_path: Path | None,
+        sem: asyncio.Semaphore,
+        debug: bool,
+        params: EvalSessionParams,
+    ) -> None:
+        """Hold one suite slot and run an entry's queued runs on it, one after another."""
+        async with sem:
+            while queue:
+                run = queue.popleft()
+                await self._run_one(
+                    run, ports[id(run)], logs_dir, record_dir, results_path, debug, params
+                )
 
     async def _run_one(
         self,
@@ -961,61 +976,48 @@ class EvalSuite(BaseObject):
         logs_dir: Path,
         record_dir: Path | None,
         results_path: Path | None,
-        sem: asyncio.Semaphore,
-        bot_sem: asyncio.Semaphore | None,
         debug: bool,
         params: EvalSessionParams,
     ) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-        # The bot's own cap comes first, so a run waiting on it holds no suite slot.
-        async with bot_sem or contextlib.nullcontext(), sem:
-            files = _RunFiles.for_run(run, logs_dir, record_dir)
-            run.status = "running"
-            run.started_at = time.monotonic()
-            await self._call_event_handler("on_update", run)
-            bot: asyncio.subprocess.Process | None = None
-            worker: asyncio.subprocess.Process | None = None
-            try:
-                run.error = self._missing_file(run)
-                if run.error is not None:
-                    return
-                bot = await self._spawn_bot(run, port, files)
-                worker = await self._run_harness(run, port, files, debug=debug, params=params)
-            except Exception as e:
-                # The worker reports its own failures in its result; this is a
-                # problem on the suite's side (spawning, reading the result back).
-                run.error = f"error: {type(e).__name__}: {e}"
-                with contextlib.suppress(OSError):
-                    files.trace.write_text(traceback.format_exc())
-            finally:
-                await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+        files = _RunFiles.for_run(run, logs_dir, record_dir)
+        run.status = "running"
+        run.started_at = time.monotonic()
+        await self._call_event_handler("on_update", run)
+        bot: asyncio.subprocess.Process | None = None
+        worker: asyncio.subprocess.Process | None = None
+        try:
+            run.error = self._missing_file(run)
+            if run.error is not None:
+                return
+            bot = await self._spawn_bot(run, port, files)
+            worker = await self._run_harness(run, port, files, debug=debug, params=params)
+        except Exception as e:
+            # The worker reports its own failures in its result; this is a
+            # problem on the suite's side (spawning, reading the result back).
+            run.error = f"error: {type(e).__name__}: {e}"
+            with contextlib.suppress(OSError):
+                files.trace.write_text(traceback.format_exc())
+        finally:
+            await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
 
     @staticmethod
-    def _dispatch_order(runs: list[EvalRun]) -> list[EvalRun]:
-        """The runs in the order they enter the queue: attempt-major, then round-robin across entries.
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[int, deque[EvalRun]]]:
+        """One queue per entry label and attempt, attempt-major then in manifest order, with the slots the entry may hold.
 
-        Within an attempt the first run of every entry comes before the second
-        run of any, so a suite's concurrency is spread across its bots instead
-        of consumed by whichever entry the manifest lists first.
+        A queue keeps its runs in manifest order. Its slots are the lowest
+        ``concurrency:`` among the label's runs, one when none sets it.
         """
-        by_attempt: dict[int, dict[str, list[EvalRun]]] = {}
+        queues: dict[tuple[int, str], deque[EvalRun]] = {}
+        slots: dict[str, int] = {}
         for run in runs:
-            by_attempt.setdefault(run.attempt, {}).setdefault(run.label, []).append(run)
-        ordered: list[EvalRun] = []
-        for attempt in sorted(by_attempt):
-            queues = list(by_attempt[attempt].values())
-            longest = max(len(q) for q in queues)
-            for i in range(longest):
-                ordered.extend(q[i] for q in queues if i < len(q))
-        return ordered
-
-    def _bot_semaphores(self) -> dict[str, asyncio.Semaphore]:
-        """One semaphore per label whose entry caps its concurrency; the lowest cap wins for a label listed twice."""
-        caps: dict[str, int] = {}
-        for run in self.runs:
+            queues.setdefault((run.attempt, run.label), deque()).append(run)
             if run.concurrency is not None:
-                caps[run.label] = min(caps.get(run.label, run.concurrency), run.concurrency)
-        return {label: asyncio.Semaphore(cap) for label, cap in caps.items()}
+                slots[run.label] = min(slots.get(run.label, run.concurrency), run.concurrency)
+        return [
+            (slots.get(label, 1), queue)
+            for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
+        ]
 
     def _missing_file(self, run: EvalRun) -> str | None:
         """Why the run cannot start, when one of its files is missing."""
