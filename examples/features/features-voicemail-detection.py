@@ -4,6 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Outbound-call bot that tells a live person from voicemail with TypeSafe.
+
+The bot places (or, here, receives) a call and needs to know who picked up
+before it says anything. ``VoicemailDetector`` holds the bot's speech back
+while a classifier judges the first thing the other side says. The classifier
+is a ``TypeSafeJudge``: one ``Choice`` question per caller turn, answered in
+about a fifth of a second, with no text generated. A person gets the normal
+LLM conversation; a recording gets a written message once it goes quiet.
+
+Requirements:
+- TYPESAFE_API_KEY
+- DEEPGRAM_API_KEY
+- CARTESIA_API_KEY
+- OPENAI_API_KEY (the conversation LLM; not used for detection)
+
+Run the example:
+uv run examples/features/features-voicemail-detection.py
+"""
+
 import os
 
 from dotenv import load_dotenv
@@ -25,6 +44,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.typesafe import TypeSafeJudge
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -53,6 +73,11 @@ transport_params = {
     ),
 }
 
+VOICEMAIL_MESSAGE = (
+    "Hello, this is Jamie calling about your appointment. "
+    "Please call me back at 555-0123 when you get this."
+)
+
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
@@ -72,9 +97,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
-    classifier_llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
 
-    voicemail = VoicemailDetector(llm=classifier_llm)
+    # TypeSafe judges each caller turn: a live person, or a recording? The
+    # detector waits for a verdict at confidence 0.5 or better, so a lone
+    # "sorry, I can't come to the phone right now" is judged again together
+    # with whatever follows it.
+    voicemail = VoicemailDetector(judge=TypeSafeJudge())
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -86,11 +114,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),
             stt,
-            voicemail.detector(),  # Voicemail detection — between STT and User context aggregator
+            voicemail.detector(),  # Voicemail detection: between STT and the user context aggregator
             user_aggregator,
             llm,
             tts,
-            voicemail.gate(),  # TTS gating — Immediately after the TTS service
+            voicemail.gate(),  # TTS gating: immediately after the TTS service
             transport.output(),
             assistant_aggregator,
         ]
@@ -128,11 +156,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Voicemail detected! Leaving a message...")
 
         # Push frames using standard Pipecat pattern
-        await processor.push_frame(
-            TTSSpeakFrame(
-                "Hello, this is Jamie calling about your appointment. Please call me back at 555-0123 when you get this."
-            )
-        )
+        await processor.push_frame(TTSSpeakFrame(VOICEMAIL_MESSAGE))
 
         # NOTE: A common pattern is to end pipeline after the voicemail is left.
         # Uncomment the following line to end the pipeline after leaving the voicemail.

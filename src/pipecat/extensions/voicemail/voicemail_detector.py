@@ -11,11 +11,13 @@ processing to classify incoming calls as either voicemail messages or live
 conversations. It's specifically designed for outbound calling scenarios where
 a bot needs to determine if a human answered or if the call went to voicemail.
 
-Note:
-    The voicemail module is optimized for text LLMs only.
+The classifier is either a text LLM prompted to answer "CONVERSATION" or
+"VOICEMAIL", or a TypeSafe judge asked a ``Choice`` between the two (see
+:mod:`pipecat.extensions.voicemail.typesafe_classifier`).
 """
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -46,6 +48,9 @@ from pipecat.services.llm_service import LLMService
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
+
+if TYPE_CHECKING:
+    from pipecat.services.typesafe.judge import TypeSafeJudge
 
 # Lifecycle frames that must still flow after a gate closes
 _CLOSED_GATE_ALLOWLIST = (SystemFrame, EndFrame, StopFrame, WorkerFrame)
@@ -352,30 +357,54 @@ class ClassificationProcessor(FrameProcessor):
         logger.debug(f"{self}: Classifying response: '{full_response}'")
 
         if "CONVERSATION" in response:
-            # Human answered - continue normal conversation flow
-            self._decision_made = True
-            logger.info(f"{self}: CONVERSATION detected")
-            await self._gate_notifier.notify()  # Close the classifier gate
-            await self._conversation_notifier.notify()  # Release buffered TTS frames
-            await self._call_event_handler("on_conversation_detected")
-
+            await self.conversation_detected()
         elif "VOICEMAIL" in response:
-            # Voicemail detected - trigger voicemail handling
-            self._decision_made = True
-            self._voicemail_detected = True
-            logger.info(f"{self}: VOICEMAIL detected")
-            await self._gate_notifier.notify()  # Close the classifier gate
-            await self._voicemail_notifier.notify()  # Clear buffered TTS frames
-
-            # Interrupt the current pipeline to stop any ongoing processing
-            await self.broadcast_interruption()
-
-            # Set the voicemail event to trigger the voicemail handler
-            self._voicemail_event.clear()
-
+            await self.voicemail_detected()
         else:
             # This can happen if the LLM is interrupted before completing the response
             logger.debug(f"{self}: No classification found: '{full_response}'")
+
+    @property
+    def decision_made(self) -> bool:
+        """Whether a verdict has been reached. A verdict is final for the call."""
+        return self._decision_made
+
+    async def conversation_detected(self):
+        """Record that a live person answered and let the conversation proceed.
+
+        Closes the classifier gate, releases the TTS frames held back during
+        classification, and fires ``on_conversation_detected``. Does nothing
+        if a verdict was already reached.
+        """
+        if self._decision_made:
+            return
+        self._decision_made = True
+        logger.info(f"{self}: CONVERSATION detected")
+        await self._gate_notifier.notify()  # Close the classifier gate
+        await self._conversation_notifier.notify()  # Release buffered TTS frames
+        await self._call_event_handler("on_conversation_detected")
+
+    async def voicemail_detected(self):
+        """Record that the call reached voicemail and start the response timer.
+
+        Closes the classifier gate, discards the TTS frames held back during
+        classification, interrupts whatever the bot was doing, and fires
+        ``on_voicemail_detected`` once the caller side has been quiet for the
+        configured delay. Does nothing if a verdict was already reached.
+        """
+        if self._decision_made:
+            return
+        self._decision_made = True
+        self._voicemail_detected = True
+        logger.info(f"{self}: VOICEMAIL detected")
+        await self._gate_notifier.notify()  # Close the classifier gate
+        await self._voicemail_notifier.notify()  # Clear buffered TTS frames
+
+        # Interrupt the current pipeline to stop any ongoing processing
+        await self.broadcast_interruption()
+
+        # Set the voicemail event to trigger the voicemail handler
+        self._voicemail_event.clear()
 
     async def _delayed_voicemail_handler(self):
         """Execute the voicemail event handler after the configured delay.
@@ -513,7 +542,8 @@ class VoicemailDetector(ParallelPipeline):
     Architecture:
 
     - Conversation branch: Empty pipeline that allows normal frame flow
-    - Classification branch: Contains the LLM classifier and decision logic
+    - Classification branch: Contains the classifier (an LLM or a TypeSafe
+      judge) and decision logic
 
     The system uses a gate mechanism to control when classification runs and
     a gating system to prevent TTS output until classification is complete.
@@ -545,6 +575,9 @@ class VoicemailDetector(ParallelPipeline):
 
         # For custom prompts, append the required response instruction:
         custom_prompt = "Your custom classification logic here. " + VoicemailDetector.CLASSIFIER_RESPONSE_INSTRUCTION
+
+        # Or classify with a TypeSafe judgment instead of an LLM:
+        detector = VoicemailDetector(judge=TypeSafeJudge())
 
     Events:
         on_conversation_detected: Triggered when a human conversation is detected. The
@@ -589,15 +622,23 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
     def __init__(
         self,
         *,
-        llm: LLMService,
+        llm: LLMService | None = None,
+        judge: "TypeSafeJudge | None" = None,
         voicemail_response_delay: float = 2.0,
         custom_system_prompt: str | None = None,
+        confidence_threshold: float = 0.5,
     ):
         """Initialize the voicemail detector with classification and buffering components.
+
+        Exactly one of ``llm`` and ``judge`` must be given.
 
         Args:
             llm: LLM service used for voicemail vs conversation classification.
                 Should be fast and reliable for real-time classification.
+            judge: A TypeSafe judge used instead of an LLM. The classification
+                becomes one ``Choice`` question per caller turn, answered in
+                about a fifth of a second with no text generated. Requires the
+                ``typesafe`` extra.
             voicemail_response_delay: Delay in seconds after user stops speaking
                 before triggering the voicemail event handler. This allows voicemail
                 responses to be played back after a short delay to ensure the response
@@ -606,7 +647,17 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
                 "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
+                Only applies to ``llm``.
+            confidence_threshold: Only applies to ``judge``. A verdict below this
+                confidence is not acted on; the detector waits for the caller side
+                to say more and judges the whole transcript again. 0 acts on
+                every verdict.
         """
+        if (llm is None) == (judge is None):
+            raise ValueError("VoicemailDetector needs exactly one of llm= or judge=")
+        if judge is not None and custom_system_prompt is not None:
+            raise ValueError("custom_system_prompt only applies to an LLM classifier")
+
         self._classifier_llm = llm
         self._prompt = (
             custom_system_prompt if custom_system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
@@ -617,21 +668,6 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         if custom_system_prompt is not None:
             self._validate_prompt(custom_system_prompt)
 
-        # Set up the LLM context with the classification prompt
-        self._messages: list[LLMContextMessage] = [
-            {
-                "role": "developer",
-                "content": self._prompt,
-            },
-        ]
-
-        # Create the LLM context and aggregators for conversation management
-        self._context = LLMContext(self._messages)
-        self._context_aggregator = LLMContextAggregatorPair(
-            self._context,
-            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
-        )
-
         # Create notification system for coordinating between components
         self._gate_notifier = EventNotifier()  # Signals classification completion
         self._conversation_notifier = EventNotifier()  # Signals conversation detected
@@ -640,26 +676,72 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         # Create the processor components
         self._classifier_gate = ClassifierGate(self._gate_notifier, self._conversation_notifier)
         self._conversation_gate = ConversationGate(self._voicemail_notifier)
-        self._classification_processor = ClassificationProcessor(
-            gate_notifier=self._gate_notifier,
-            conversation_notifier=self._conversation_notifier,
-            voicemail_notifier=self._voicemail_notifier,
-            voicemail_response_delay=voicemail_response_delay,
-        )
         self._voicemail_gate = TTSGate(self._conversation_notifier, self._voicemail_notifier)
 
-        # Initialize the parallel pipeline with conversation and classifier branches
-        super().__init__(
-            # Conversation branch: gate to blocks after voicemail detection
-            [self._conversation_gate],
+        if judge is not None:
+            # A TypeSafe judge reads the caller transcript straight from the
+            # context frame, so the branch needs no prompt and no LLM.
+            from pipecat.extensions.voicemail.typesafe_classifier import (
+                TypeSafeClassificationProcessor,
+            )
+
+            self._messages: list[LLMContextMessage] = []
+            self._classification_processor: ClassificationProcessor = (
+                TypeSafeClassificationProcessor(
+                    judge=judge,
+                    confidence_threshold=confidence_threshold,
+                    gate_notifier=self._gate_notifier,
+                    conversation_notifier=self._conversation_notifier,
+                    voicemail_notifier=self._voicemail_notifier,
+                    voicemail_response_delay=voicemail_response_delay,
+                )
+            )
+        else:
+            # Set up the LLM context with the classification prompt
+            self._messages = [
+                {
+                    "role": "developer",
+                    "content": self._prompt,
+                },
+            ]
+            self._classification_processor = ClassificationProcessor(
+                gate_notifier=self._gate_notifier,
+                conversation_notifier=self._conversation_notifier,
+                voicemail_notifier=self._voicemail_notifier,
+                voicemail_response_delay=voicemail_response_delay,
+            )
+
+        # Create the LLM context and aggregators for conversation management
+        self._context = LLMContext(self._messages)
+        self._context_aggregator = LLMContextAggregatorPair(
+            self._context,
+            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        )
+
+        if judge is not None:
+            # Classification branch: gate -> context -> TypeSafe judgment. The
+            # judgment consumes the context frame, so nothing generated here
+            # reaches the main pipeline.
+            classification_branch = [
+                self._classifier_gate,
+                self._context_aggregator.user(),
+                self._classification_processor,
+            ]
+        else:
             # Classification branch: gate -> context -> LLM -> processor -> context
-            [
+            classification_branch = [
                 self._classifier_gate,
                 self._context_aggregator.user(),
                 self._classifier_llm,
                 self._classification_processor,
                 self._context_aggregator.assistant(),
-            ],
+            ]
+
+        # Initialize the parallel pipeline with conversation and classifier branches
+        super().__init__(
+            # Conversation branch: gate to blocks after voicemail detection
+            [self._conversation_gate],
+            classification_branch,
         )
 
         # Register the voicemail detected event after super().__init__()
