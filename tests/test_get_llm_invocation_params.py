@@ -930,6 +930,62 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         """An empty message list returns empty."""
         self.assertEqual(self.adapter._merge_parallel_tool_calls_for_thinking([], []), [])
 
+    # --- _add_placeholder_thought_signatures ---
+    #
+    # Gemini 3 rejects function calls without a thought signature, so calls
+    # another provider produced get the placeholder Google documents for them.
+
+    PLACEHOLDER = b"skip_thought_signature_validator"
+
+    def test_unsigned_tool_call_gets_placeholder_signature(self):
+        """A tool call converted from a standard message carries the placeholder."""
+        messages = [
+            {"role": "user", "content": "Switch to Gemini."},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "switch_llm", "arguments": '{"llm": "Google"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"ok": true}'},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        call_part = params["messages"][1].parts[0]
+        self.assertEqual(call_part.function_call.id, "call_1")
+        self.assertEqual(call_part.thought_signature, self.PLACEHOLDER)
+
+    def test_signed_parallel_group_left_unsigned_after_first_call(self):
+        """A parallel batch keeps Gemini's shape: the first call signed, the rest unsigned."""
+        messages = [
+            self._tool_call_message("c1", signature="sig-c1"),
+            self._tool_response_message("c1"),
+            self._tool_call_message("c2"),
+            self._tool_response_message("c2"),
+        ]
+        messages = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [self._thought_signature_dict("c1")], messages
+        )
+        self.adapter._add_placeholder_thought_signatures(messages)
+
+        self.assertEqual([p.thought_signature for p in messages[0].parts], ["sig-c1", None])
+
+    def test_placeholder_skips_text_and_user_parts(self):
+        """Text parts and user turns never receive a signature."""
+        messages = [
+            Content(role="user", parts=[Part(text="Hi")]),
+            Content(role="model", parts=[Part(text="Hello")]),
+            self._tool_response_message("c1"),
+        ]
+        self.adapter._add_placeholder_thought_signatures(messages)
+
+        self.assertTrue(all(p.thought_signature is None for m in messages for p in m.parts))
+
 
 class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
