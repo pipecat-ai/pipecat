@@ -21,6 +21,10 @@ Everything it says goes out as LLM text (``LLMFullResponseStartFrame``,
 aggregator, RTVI clients, and text-mode evals all see the lines the way they
 would see a real LLM's reply.
 
+:class:`~pipecat.flows.typesafe_flows_router.TypeSafeFlowsRouter` uses the
+same lines and questions in front of a text LLM, speaking a line only when
+the judgment is sure and leaving the rest of the turns to the LLM.
+
 Requires the ``typesafe`` extra: ``uv add "pipecat-ai[typesafe]"``.
 """
 
@@ -128,6 +132,10 @@ class ToolLines(BaseModel):
         confidence_threshold: Overrides the service's threshold for this
             tool. Raise it for a tool whose mistake costs more, such as
             ending the call.
+        canned_threshold: Overrides
+            :class:`~pipecat.flows.typesafe_flows_router.TypeSafeFlowsRouter`'s
+            threshold for speaking a written line rather than the LLM after
+            this tool.
     """
 
     description: str | None = None
@@ -137,6 +145,7 @@ class ToolLines(BaseModel):
     ask: dict[str, str] = Field(default_factory=dict)
     result: str | None = None
     confidence_threshold: float | None = None
+    canned_threshold: float | None = None
 
 
 class TypeSafeFlowsLLMService(LLMService):
@@ -292,7 +301,7 @@ class TypeSafeFlowsLLMService(LLMService):
 
     async def _respond(self, frame: LLMContextFrame) -> None:
         context = frame.context
-        last = _last_message(context)
+        last = last_message(context)
         role = last.get("role") if last is not None else None
         try:
             # Processing time covers the whole response: rendering a line,
@@ -331,7 +340,7 @@ class TypeSafeFlowsLLMService(LLMService):
 
     async def _respond_to_user(self, context: LLMContext, message: Mapping[str, Any]) -> None:
         node = self._current_node()
-        schemas = _tool_schemas(context)
+        schemas = tool_schemas(context)
         if not schemas:
             await self._reprompt(node)
             return
@@ -374,20 +383,7 @@ class TypeSafeFlowsLLMService(LLMService):
 
         schema = next(s for s in schemas if s.name == tool)
         remembered = self._remembered.setdefault((node, tool), {})
-        for name in schema.properties:
-            stated = result.nouls.get(_stated_question_id(tool, name))
-            value = result.choices.get(_argument_question_id(tool, name))
-            if stated is None or value is None or stated.probability < 0.5:
-                continue
-            if value.confidence < threshold:
-                # The caller said something about it, but not clearly which
-                # value: asking beats guessing.
-                logger.debug(
-                    f"{self}: {tool}.{name} given but {value.choice!r} at confidence "
-                    f"{value.confidence:.2f} is below {threshold:.2f}"
-                )
-                continue
-            remembered[name] = _coerce(value.choice, schema.properties[name])
+        remembered.update(given_arguments(result, schema, threshold))
 
         missing = [name for name in schema.required if name not in remembered]
         if missing:
@@ -417,49 +413,12 @@ class TypeSafeFlowsLLMService(LLMService):
     # Questions
 
     def _questions(self, schemas: list[FunctionSchema]) -> dict[str, Choice | Noul]:
-        """One tool ``Choice``, and per option-bearing argument a presence ``Noul`` and a value ``Choice``.
-
-        Criteria are plain strings unless the tool's lines give examples, in
-        which case they are objects with ``what`` and ``examples`` so the
-        model compares the options on how callers say them.
-        """
-        criteria: dict[str, Any] = {}
-        questions: dict[str, Choice | Noul] = {}
-        for schema in schemas:
-            lines = self._tools.get(schema.name, ToolLines())
-            description = lines.description or schema.description
-            criteria[schema.name] = (
-                {"what": description, "examples": lines.examples} if lines.examples else description
-            )
-            for name, prop in schema.properties.items():
-                options = prop.get("enum") or lines.options.get(name)
-                if not options:
-                    continue
-                about = prop.get("description") or f"the {name}"
-                examples = lines.option_examples.get(name, {})
-                questions[_stated_question_id(schema.name, name)] = Noul(
-                    instructions=f"Does the caller's `user_reply` say anything about this: {about}",
-                    criteria={
-                        "true": "The reply gives or clearly implies a value for it",
-                        "false": "The reply does not mention it",
-                    },
-                )
-                questions[_argument_question_id(schema.name, name)] = Choice(
-                    instructions=(
-                        f"Assuming the caller's `user_reply` gives this: {about} Which value is it?"
-                    ),
-                    criteria={
-                        str(option): (
-                            {"what": f"The caller says {option}", "examples": examples[str(option)]}
-                            if str(option) in examples
-                            else f"The caller says {option}"
-                        )
-                        for option in options
-                    },
-                )
-        criteria[NO_TOOL] = self._no_tool_description
-        questions[TOOL_QUESTION_ID] = Choice(instructions=self._instructions, criteria=criteria)
-        return questions
+        return build_questions(
+            schemas,
+            self._tools,
+            instructions=self._instructions,
+            no_tool_description=self._no_tool_description,
+        )
 
     # Speaking
 
@@ -479,23 +438,8 @@ class TypeSafeFlowsLLMService(LLMService):
         await self.push_frame(LLMFullResponseEndFrame())
 
     def _render(self, text: str, **extra: Any) -> str:
-        values: dict[str, Any] = dict(self._flow_manager.state) if self._flow_manager else {}
-        values.update(extra)
-
-        def value(path: str) -> str:
-            current: Any = values
-            for part in path.split("."):
-                if not isinstance(current, Mapping) or part not in current:
-                    raise FlowError(f"line uses '{{{{ {path} }}}}', which is not in state")
-                current = current[part]
-            return str(current)
-
-        def substitute(match: re.Match) -> str:
-            if match.group(1):
-                return match.group(0)[1:]
-            return value(match.group(2))
-
-        return _PLACEHOLDER.sub(substitute, text)
+        state = self._flow_manager.state if self._flow_manager else {}
+        return render_line(text, state, **extra)
 
     def _current_node(self) -> str | None:
         return self._flow_manager.current_node if self._flow_manager else None
@@ -514,15 +458,155 @@ class TypeSafeFlowsLLMService(LLMService):
         )
 
 
-def _argument_question_id(tool: str, argument: str) -> str:
+def argument_question_id(tool: str, argument: str) -> str:
+    """The id of the ``Choice`` giving an argument's value."""
     return f"{tool}.{argument}"
 
 
-def _stated_question_id(tool: str, argument: str) -> str:
+def stated_question_id(tool: str, argument: str) -> str:
+    """The id of the ``Noul`` saying whether the caller gave an argument at all."""
     return f"{tool}.{argument}.{STATED}"
 
 
-def _last_message(context: LLMContext) -> Mapping[str, Any] | None:
+def build_questions(
+    schemas: list[FunctionSchema],
+    tools: Mapping[str, ToolLines],
+    *,
+    instructions: str = DEFAULT_INSTRUCTIONS,
+    no_tool_description: str = DEFAULT_NO_TOOL_DESCRIPTION,
+) -> dict[str, Choice | Noul]:
+    """The questions for one caller turn against a node's tools.
+
+    One tool ``Choice`` under :data:`TOOL_QUESTION_ID`, with
+    :data:`NO_TOOL` as its last option, and per option-bearing argument a
+    presence ``Noul`` (:func:`stated_question_id`) and a value ``Choice``
+    (:func:`argument_question_id`). Criteria are plain strings unless the
+    tool's lines give examples, in which case they are objects with ``what``
+    and ``examples`` so the model compares the options on how callers say
+    them.
+
+    Args:
+        schemas: The tools the current node offers.
+        tools: Judging criteria and lines per tool name.
+        instructions: The tool question's instructions.
+        no_tool_description: Criteria text of the no-match option.
+
+    Returns:
+        Questions keyed by id, ready for :meth:`TypeSafeJudge.ask`.
+    """
+    criteria: dict[str, Any] = {}
+    questions: dict[str, Choice | Noul] = {}
+    for schema in schemas:
+        lines = tools.get(schema.name, ToolLines())
+        description = lines.description or schema.description
+        criteria[schema.name] = (
+            {"what": description, "examples": lines.examples} if lines.examples else description
+        )
+        for name, prop in schema.properties.items():
+            options = prop.get("enum") or lines.options.get(name)
+            if not options:
+                continue
+            about = prop.get("description") or f"the {name}"
+            examples = lines.option_examples.get(name, {})
+            questions[stated_question_id(schema.name, name)] = Noul(
+                instructions=f"Does the caller's `user_reply` say anything about this: {about}",
+                criteria={
+                    "true": "The reply gives or clearly implies a value for it",
+                    "false": "The reply does not mention it",
+                },
+            )
+            questions[argument_question_id(schema.name, name)] = Choice(
+                instructions=(
+                    f"Assuming the caller's `user_reply` gives this: {about} Which value is it?"
+                ),
+                criteria={
+                    str(option): (
+                        {"what": f"The caller says {option}", "examples": examples[str(option)]}
+                        if str(option) in examples
+                        else f"The caller says {option}"
+                    )
+                    for option in options
+                },
+            )
+    criteria[NO_TOOL] = no_tool_description
+    questions[TOOL_QUESTION_ID] = Choice(instructions=instructions, criteria=criteria)
+    return questions
+
+
+def given_arguments(
+    result: JudgeResult, schema: FunctionSchema, threshold: float
+) -> dict[str, Any]:
+    """The arguments a judgment says the caller gave, coerced to the schema's types.
+
+    An argument counts as given when its presence ``Noul`` is at least 0.5
+    and its value ``Choice`` reaches ``threshold``. A value below the
+    threshold is left out: the caller said something about it, but not
+    clearly which value, and asking beats guessing.
+
+    Args:
+        result: The answers to :func:`build_questions`.
+        schema: The chosen tool.
+        threshold: The confidence a value needs.
+
+    Returns:
+        Argument values keyed by name.
+    """
+    given: dict[str, Any] = {}
+    for name, prop in schema.properties.items():
+        stated = result.nouls.get(stated_question_id(schema.name, name))
+        value = result.choices.get(argument_question_id(schema.name, name))
+        if stated is None or value is None or stated.probability < 0.5:
+            continue
+        if value.confidence < threshold:
+            logger.debug(
+                f"{schema.name}.{name} given but {value.choice!r} at confidence "
+                f"{value.confidence:.2f} is below {threshold:.2f}"
+            )
+            continue
+        given[name] = _coerce(value.choice, prop)
+    return given
+
+
+def render_line(text: str, state: Mapping[str, Any], **extra: Any) -> str:
+    r"""Fill ``{{ key }}`` placeholders in a line from the flow state.
+
+    ``{{ order.size }}`` walks into a stored mapping and ``\{{ key }}`` is
+    left as the literal ``{{ key }}``. Extra keyword values are looked up
+    before the state, so a line may refer to ``{{ args.size }}`` or
+    ``{{ result.minutes }}``.
+
+    Args:
+        text: The line.
+        state: The flow manager's state.
+        **extra: Values the line may refer to besides the state.
+
+    Returns:
+        The line with every placeholder filled in.
+
+    Raises:
+        FlowError: A placeholder names a key that is not in state.
+    """
+    values: dict[str, Any] = dict(state)
+    values.update(extra)
+
+    def value(path: str) -> str:
+        current: Any = values
+        for part in path.split("."):
+            if not isinstance(current, Mapping) or part not in current:
+                raise FlowError(f"line uses '{{{{ {path} }}}}', which is not in state")
+            current = current[part]
+        return str(current)
+
+    def substitute(match: re.Match) -> str:
+        if match.group(1):
+            return match.group(0)[1:]
+        return value(match.group(2))
+
+    return _PLACEHOLDER.sub(substitute, text)
+
+
+def last_message(context: LLMContext) -> Mapping[str, Any] | None:
+    """The most recent standard message in the context, if any."""
     for message in reversed(context.messages):
         if isinstance(message, Mapping):
             return message
@@ -548,7 +632,8 @@ def _parse_result(content: Any) -> Any:
     return content
 
 
-def _tool_schemas(context: LLMContext) -> list[FunctionSchema]:
+def tool_schemas(context: LLMContext) -> list[FunctionSchema]:
+    """The standard tool schemas the context offers, or none."""
     tools = context.tools
     if not is_given(tools) or not isinstance(tools, ToolsSchema):
         return []

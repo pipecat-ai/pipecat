@@ -20,7 +20,7 @@ COPY pyproject.toml README.md LICENSE /pipecat/
 COPY src /pipecat/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python \
-    "/pipecat[cartesia,daily,deepgram,runner,silero,typesafe,webrtc]"
+    "/pipecat[cartesia,daily,deepgram,openai,runner,silero,typesafe,webrtc]"
 
 # The bot and the flow it loads. The base image runs bot.py from /app.
 COPY examples/flows/yaml/food_ordering/bot.py bot.py
