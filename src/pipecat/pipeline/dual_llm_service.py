@@ -132,6 +132,10 @@ class TranscriptBackendRequestStrategy(BackendRequestStrategy):
     :func:`~pipecat.workers.llm.backend_llm_worker._render_transcript_request`.
     The default for a text frontend, whose context is current when the tool
     runs.
+
+    The cursor assumes the conversation accrues. A rewritten context or a
+    failed delegation's turns are not re-sent; the user's next request
+    carries what matters.
     """
 
     frontend_instruction = _DELEGATION_POLICY + (
