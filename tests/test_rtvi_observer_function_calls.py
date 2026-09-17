@@ -10,10 +10,15 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
+    ExternalFunctionCallCancelFrame,
     ExternalFunctionCallFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
+    ExternalFunctionCallStartedFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -32,12 +37,20 @@ def _observer(levels: dict[str, RTVIFunctionCallReportLevel]) -> tuple[RTVIObser
 
 
 def _external(phase: str, parent: str | None = "call_delegate") -> ExternalFunctionCallFrame:
-    return ExternalFunctionCallFrame(
-        phase=phase,  # type: ignore[arg-type]
-        function_name="get_weather",
-        tool_call_id="toolu_1",
-        arguments={"location": "Seattle"},
-        result={"temp": 62} if phase == "stopped" else None,
+    arguments = {"location": "Seattle"}
+    if phase == "started":
+        return ExternalFunctionCallStartedFrame(
+            "get_weather", "toolu_1", parent_tool_call_id=parent
+        )
+    if phase == "in_progress":
+        return ExternalFunctionCallInProgressFrame(
+            "get_weather", "toolu_1", arguments=arguments, parent_tool_call_id=parent
+        )
+    return ExternalFunctionCallResultFrame(
+        "get_weather",
+        "toolu_1",
+        arguments=arguments,
+        result={"temp": 62},
         parent_tool_call_id=parent,
     )
 
@@ -61,6 +74,31 @@ class TestExternalFunctionCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[1].data.arguments, {"location": "Seattle"})
         self.assertEqual(sent[2].data.result, {"temp": 62})
         self.assertEqual([m.data.parent_tool_call_id for m in sent], ["call_delegate"] * 3)
+
+    async def test_an_intermediate_result_leaves_the_call_running(self):
+        """Only a final result stops a call, the pipeline's own or an external one."""
+        observer, sent = _observer({"*": RTVIFunctionCallReportLevel.FULL})
+
+        await observer._report_function_call_frame(
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="call_1",
+                arguments={},
+                result="62",
+                properties=FunctionCallResultProperties(is_final=False),
+            )
+        )
+        await observer._report_function_call_frame(
+            ExternalFunctionCallResultFrame(
+                "get_weather", "toolu_1", arguments={}, result="62", is_final=False
+            )
+        )
+        await observer._report_function_call_frame(
+            ExternalFunctionCallCancelFrame("get_weather", "toolu_1")
+        )
+
+        self.assertEqual([m.type for m in sent], ["llm-function-call-stopped"])
+        self.assertTrue(sent[0].data.cancelled)
 
     async def test_the_report_level_applies_by_the_external_calls_own_name(self):
         observer, sent = _observer(
