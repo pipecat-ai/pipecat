@@ -290,7 +290,10 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
 
     Each output before the final one is recorded as an intermediate tool result;
     the frontend is run on it, and so speaks it, exactly when the output's
-    ``prefers_spoken`` flag asks. The default for a text frontend.
+    ``prefers_spoken`` flag asks. A reasoning summary is recorded under
+    ``reasoning`` rather than ``text``, so the frontend can tell the backend
+    thinking from something to relay, and can say how the work is going if
+    asked. The default for a text frontend.
     """
 
     needs_intermediate_results = True
@@ -303,7 +306,7 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
             await params.result_callback(output.text)
             return
         await params.result_callback(
-            {"text": output.text},
+            {"reasoning" if output.is_thought else "text": output.text},
             properties=FunctionCallResultProperties(is_final=False, run_llm=output.prefers_spoken),
         )
 
