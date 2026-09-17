@@ -249,7 +249,7 @@ async def test_google_run_inference_with_llm_context():
     assert result == "Hello! How can I help you today?"
     service.get_llm_adapter.assert_called_once()
     mock_adapter.get_llm_invocation_params.assert_called_once_with(
-        mock_context, system_instruction=None
+        mock_context, system_instruction=None, ensure_last_message_is_user=False
     )
     service._client.aio.models.generate_content.assert_called_once()
 
@@ -602,7 +602,7 @@ async def test_google_run_inference_system_instruction_overrides_context():
     assert result == "Response"
     # Verify the adapter was called with the correct system_instruction
     mock_adapter.get_llm_invocation_params.assert_called_once_with(
-        mock_context, system_instruction="New system instruction"
+        mock_context, system_instruction="New system instruction", ensure_last_message_is_user=False
     )
 
 
