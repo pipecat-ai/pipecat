@@ -56,6 +56,15 @@ The harness runs the judge, the user's voice, and the bot-speech transcriber
   on is both slower and less accurate. (A scenario's `judge.eval:` block can
   point at any other LLM through a `factory:`, a dotted path to a callable that
   takes the block and returns an OpenAI-compatible service.)
+
+  `service: typesafe` in that block decides with TypeSafe judgments instead of
+  an LLM (needs the `typesafe` extra and `TYPESAFE_API_KEY`): a scripted
+  `eval:` is one yes/no/continue `Choice`, and a simulation run is one request
+  with a yes/no question for the goal and one per bot turn per metric. A verdict
+  takes about a quarter of a second and the same input always gets the same
+  answer. What you give up is the one-sentence reason an LLM judge writes: a
+  TypeSafe verdict's reason is its probabilities, such as `yes 0.08, no 0.90,
+  continue 0.02`.
 - **Local audio models** (audio-mode scenarios only). By default the user's
   voice is synthesized with Kokoro TTS and the bot's speech is transcribed with
   [Moonshine](https://github.com/moonshine-ai/moonshine); a scenario's

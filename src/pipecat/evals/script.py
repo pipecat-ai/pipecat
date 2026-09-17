@@ -211,6 +211,8 @@ Top-level optional fields:
             model: gemma4:12b
             # or, for any other LLM: factory: my_evals.judge (a callable
             # taking this mapping and returning an OpenAI-compatible service)
+            # or, to decide with TypeSafe judgments instead of an LLM:
+            # service: typesafe (see pipecat.evals.typesafe_judge)
           transcription:           # required when modality is audio
             service: moonshine     # STT for the bot's audio (or whisper, or a factory)
             model: small-streaming # optional
