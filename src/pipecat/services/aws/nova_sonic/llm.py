@@ -64,7 +64,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from aws_sdk_bedrock_runtime.client import (
@@ -760,16 +760,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         # Read context
         adapter = self.get_llm_adapter()
         llm_connection_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=assert_given(self._settings.system_instruction)
+            self._context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            service_tools=self._tools,
         )
 
-        # Send prompt start event, specifying tools.
-        # Tools from context take priority over self._tools.
-        tools = (
-            llm_connection_params["tools"]
-            if is_given(self._context.tools)
-            else (adapter.from_standard_tools(self._tools) or [])
-        )
+        # Send prompt start event, specifying tools: the context's own when it
+        # has any, else the init-provided ones; built-in tools ride along either way.
+        tools = llm_connection_params["tools"]
         logger.debug(f"Using tools: {tools}")
         await self._send_prompt_start_event(tools)
 
@@ -1250,14 +1248,11 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return None, []
         adapter = self.get_llm_adapter()
         llm_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=assert_given(self._settings.system_instruction)
+            self._context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            service_tools=self._tools,
         )
-        tools = (
-            llm_params["tools"]
-            if is_given(self._context.tools)
-            else (adapter.from_standard_tools(self._tools) or [])
-        )
-        return llm_params["system_instruction"], tools
+        return llm_params["system_instruction"], llm_params["tools"]
 
     async def _run_sc_handoff(self):
         """Swap the current session with the pre-created next one."""
