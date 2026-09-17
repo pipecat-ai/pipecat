@@ -106,21 +106,99 @@ class EvalEventStream:
         # was generated before the interrupt propagated), and that straggler
         # must not be attributed to the new turn.
         self._awaiting_reply: bool = False
-        # When the driver last sent user input, and when the bot's spoken turn
-        # in progress began (audio mode). A spoken turn that began before the
-        # input is the bot's earlier output, not its reply, however late the
-        # harness's turn analyzer finalizes it.
+        # When the driver last sent user input, and, when that send talked over
+        # the bot, when it did so: the bot's speech from before an interrupting
+        # send is what it was saying, not its reply, however late its
+        # transcription lands (audio mode).
         self._input_sent_at: float = 0.0
+        self._interrupting_send_at: float | None = None
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
         self._bot_quiet = asyncio.Event()
         self._bot_quiet.set()
+        # Whether everything the bot has said is transcribed and closed into a
+        # turn (audio mode): a segment of its speech the VAD still hears,
+        # segments still to be transcribed, and whether a spoken turn is open.
+        # An event, so a driver can wait for the bot's speech to be fully
+        # accounted for before it sends.
+        self._bot_segment_open = False
+        self._bot_segments_pending = 0
+        self._bot_turn_open = False
+        self._bot_transcribed = asyncio.Event()
+        self._bot_transcribed.set()
 
     @property
     def bot_speaking(self) -> bool:
         """Whether the bot reports itself speaking right now."""
         return not self._bot_quiet.is_set()
+
+    @property
+    def interrupting_send_at(self) -> float | None:
+        """Monotonic time of the user's latest send, when it talked over the bot; else ``None``."""
+        return self._interrupting_send_at
+
+    @property
+    def bot_transcribed(self) -> bool:
+        """Whether everything the bot has said is transcribed and closed into a turn."""
+        return self._bot_transcribed.is_set()
+
+    @property
+    def bot_speech_outstanding(self) -> str:
+        """What of the bot's speech is not yet accounted for, for the trace."""
+        parts = []
+        if self._bot_segment_open:
+            parts.append("a segment still being heard")
+        if self._bot_segments_pending:
+            parts.append(f"{self._bot_segments_pending} segment(s) awaiting transcription")
+        if self._bot_turn_open:
+            parts.append("a turn still open")
+        return ", ".join(parts) or "nothing"
+
+    async def wait_bot_transcribed(self, timeout: float) -> bool:
+        """Wait for everything the bot has said to be transcribed and closed into a turn.
+
+        Args:
+            timeout: Seconds to wait at most.
+
+        Returns:
+            Whether the bot's speech is fully accounted for, or False if some
+            of it was still being transcribed at the timeout.
+        """
+        try:
+            await asyncio.wait_for(self._bot_transcribed.wait(), timeout)
+        except TimeoutError:
+            return False
+        return True
+
+    def bot_segment_started(self) -> None:
+        """The VAD hears a segment of the bot's speech."""
+        self._bot_segment_open = True
+        self._bot_transcribed.clear()
+
+    def bot_segment_ended(self) -> None:
+        """A segment of the bot's speech ended and awaits transcription."""
+        self._bot_segment_open = False
+        self._bot_segments_pending += 1
+        self._bot_transcribed.clear()
+
+    def bot_segment_transcribed(self) -> None:
+        """A segment of the bot's speech was transcribed, whether or not it yielded text."""
+        self._bot_segments_pending = max(0, self._bot_segments_pending - 1)
+        self._update_bot_transcribed()
+
+    def bot_turn_started(self) -> None:
+        """The bot began a spoken turn."""
+        self._bot_turn_open = True
+        self._bot_transcribed.clear()
+
+    def _update_bot_transcribed(self) -> None:
+        if (
+            not self._bot_segment_open
+            and self._bot_segments_pending == 0
+            and not self._bot_turn_open
+        ):
+            self._bot_transcribed.set()
 
     async def wait_bot_quiet(self, timeout: float) -> bool:
         """Wait for the bot to stop speaking.
@@ -320,7 +398,7 @@ class EvalEventStream:
     async def bot_turn_stopped(self, text: str) -> None:
         """Append the bot's finished spoken turn as a ``response``, unless it is stale.
 
-        Speech from before the user's latest send never reaches a turn (the
+        Speech from before an interrupting send never reaches a turn (the
         client drops it by its audio's time). A turn is still stale while the
         bot's LLM has not restarted since the send: the bot going on with what
         it was saying, which must not pass for the reply.
@@ -328,6 +406,8 @@ class EvalEventStream:
         Args:
             text: The turn's transcription; nothing is appended when empty.
         """
+        self._bot_turn_open = False
+        self._update_bot_transcribed()
         if not text:
             return
         if self._awaiting_reply:
@@ -342,11 +422,13 @@ class EvalEventStream:
     def turn_boundary(self) -> None:
         """Start a new turn: only what the bot says from now on belongs to it.
 
-        A spoken turn that began before this point, however late its
-        transcription lands, is the previous turn's and is discarded.
+        When the bot is speaking at this point, the turn talks over it, and its
+        speech from before this point, however late its transcription lands,
+        is the previous turn's and is discarded.
         """
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
+        self._interrupting_send_at = self._input_sent_at if self.bot_speaking else None
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""

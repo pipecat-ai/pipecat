@@ -38,6 +38,7 @@ from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client import (
     EvalClient,
     _BotFrameSink,
+    _BotSegmentTranscribedFrame,
     _BotSegmentTranscriptionFrame,
     _BotSpeechGate,
     _PersonaTurnRelay,
@@ -394,6 +395,22 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         await task
         self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
 
+    async def test_the_send_waits_until_the_bot_speech_is_transcribed(self):
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        # The bot is quiet, but the last segment of what it said is still with the STT.
+        stream.bot_segment_ended()
+
+        async def transcribe_soon():
+            await asyncio.sleep(0.15)
+            stream.bot_segment_transcribed()
+
+        task = asyncio.create_task(transcribe_soon())
+        started = asyncio.get_running_loop().time()
+        await driver._await_bot_quiet()
+        await task
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
+
     async def test_an_observing_turn_lets_the_previous_reply_end_first(self):
         # The bot is still speaking turn 1's reply when turn 2, which only
         # listens for the bot's next move, begins: the rest of that reply,
@@ -507,15 +524,18 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
-    """Bot speech from before the user's send is dropped by the time its audio began."""
+    """After a send that talked over the bot, its speech from before it is dropped by the time its audio began."""
 
     async def _run(self, gate, frames, direction=FrameDirection.DOWNSTREAM):
         return await run_test(gate, frames_to_send=frames, frames_to_send_direction=direction)
 
-    async def test_a_segment_from_before_the_send_is_dropped_however_late_it_lands(self):
+    async def test_a_segment_from_before_an_interrupting_send_is_dropped_however_late_it_lands(
+        self,
+    ):
         stream = _stream(bot_audio=True)
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         before = time.monotonic()
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the send talks over the bot
         stream.input_sent()
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
@@ -530,8 +550,24 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         down, _ = await self._run(gate, [stale, fresh])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
 
+    async def test_an_ordinary_send_drops_nothing(self):
+        # The bot was quiet at the send, which waited for its speech to be
+        # transcribed; a transcript of earlier audio arriving anyway is kept.
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        before = time.monotonic()
+        stream.input_sent()
+        old = _BotSegmentTranscriptionFrame(
+            text="earlier audio", user_id="", timestamp="", segment_started_at=before
+        )
+        down, _ = await self._run(gate, [old])
+        self.assertEqual(
+            [f.text for f in down if isinstance(f, TranscriptionFrame)], ["earlier audio"]
+        )
+
     async def test_a_plain_transcript_passes(self):
         stream = _stream(bot_audio=True)
+        stream.frame_to_event(BotStartedSpeakingFrame())
         stream.input_sent()
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         plain = TranscriptionFrame(text="untagged", user_id="", timestamp="")
@@ -540,7 +576,8 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_gate_records_when_each_segment_began_as_it_ends(self):
         starts: deque[float] = deque()
-        gate = _BotSpeechGate(_stream(bot_audio=True), EvalTrace(), starts)
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), starts)
         t0 = time.monotonic()
         await self._run(
             gate,
@@ -549,6 +586,9 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(starts), 1)
         self.assertGreaterEqual(starts[0], t0)
+        # The ended segment awaits transcription, so the bot's speech is not
+        # yet fully accounted for.
+        self.assertFalse(await stream.wait_bot_transcribed(0.01))
 
 
 class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
@@ -572,9 +612,38 @@ class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
         none = await collect(b"silence")
         third = await collect(b"third")
         self.assertEqual((first[0].text, first[0].segment_started_at), ("first", 1.0))
-        self.assertEqual(none, [])
         self.assertEqual((third[0].text, third[0].segment_started_at), ("third", 3.0))
         self.assertEqual(len(starts), 0)
+        # Every run, the empty one included, ends by closing its segment.
+        for frames in (first, none, third):
+            self.assertIsInstance(frames[-1], _BotSegmentTranscribedFrame)
+
+    async def test_the_sink_reports_a_closed_segment_as_transcribed(self):
+        stream = _stream(bot_audio=True)
+        stream.bot_segment_ended()
+        sink = _BotFrameSink(stream)
+        down, _ = await run_test(sink, frames_to_send=[_BotSegmentTranscribedFrame()])
+        self.assertTrue(await stream.wait_bot_transcribed(0.01))
+        self.assertFalse(any(isinstance(f, _BotSegmentTranscribedFrame) for f in down))
+
+
+class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
+    """The bot's speech is accounted for once nothing awaits transcription and no turn is open."""
+
+    async def test_segments_and_turns_hold_the_wait(self):
+        s = _stream(bot_audio=True)
+        self.assertTrue(await s.wait_bot_transcribed(0.01))
+        # A segment the VAD still hears is speech not yet accounted for.
+        s.bot_segment_started()
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        s.bot_segment_ended()
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        s.bot_turn_started()
+        s.bot_segment_transcribed()
+        # The transcript is in, but the turn it feeds is still open.
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        await s.bot_turn_stopped("Hello there!")
+        self.assertTrue(await s.wait_bot_transcribed(0.01))
 
 
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
