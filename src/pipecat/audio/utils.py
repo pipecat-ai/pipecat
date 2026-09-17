@@ -160,7 +160,7 @@ def normalize_value(value, min_value, max_value):
     return normalized_clamped
 
 
-def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
+def calculate_audio_volume(audio: bytes | bytearray | memoryview, sample_rate: int) -> float:
     """Calculate the loudness level of audio data using ITU-R BS.1770.
 
     Args:

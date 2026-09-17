@@ -1,0 +1,195 @@
+# Long histories that condition the model toward the wrong output: many bare
+# markers before a complete input (the failure in pipecat-ai/pipecat#5151), or
+# many complete exchanges before a cutoff.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: drift
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: drift_many_short_then_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  - role: user
+    content: I'd go to
+  - role: assistant
+    content: ◐
+  - role: user
+    content: well, I was thinking
+  - role: assistant
+    content: ◐
+  - role: user
+    content: maybe somewhere in
+  - role: assistant
+    content: ◐
+  - role: user
+    content: Europe, like
+  - role: assistant
+    content: ◐
+  - role: user
+    content: Italy or
+  - role: assistant
+    content: ◐
+  - role: user
+    content: Spain, because of the
+  - role: assistant
+    content: ◐
+  - role: user
+    content: food and the
+  - role: assistant
+    content: ◐
+  turns:
+  - user: history, I guess.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply engages with the user wanting to visit Italy or Spain for the food and history
+- name: drift_many_long_then_complete
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What would you say is your biggest strength?
+  - role: user
+    content: Hmm.
+  - role: assistant
+    content: ○
+  - role: user
+    content: That's a good question.
+  - role: assistant
+    content: ○
+  - role: user
+    content: Let me think.
+  - role: assistant
+    content: ○
+  - role: user
+    content: Well...
+  - role: assistant
+    content: ○
+  turns:
+  - user: I'd say it's patience. I don't get rattled easily.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: drift_bare_complete_history
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  - role: user
+    content: What's the capital of France?
+  - role: assistant
+    content: ●
+  - role: user
+    content: Okay, and Germany?
+  - role: assistant
+    content: ●
+  - role: user
+    content: And what about Spain?
+  - role: assistant
+    content: ●
+  turns:
+  - user: Fine. What's the capital of Italy?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply says the capital of Italy is Rome
+- name: drift_many_complete_then_cutoff
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  - role: user
+    content: What's the capital of France?
+  - role: assistant
+    content: ● The capital of France is Paris.
+  - role: user
+    content: And Germany?
+  - role: assistant
+    content: ● Germany's capital is Berlin.
+  - role: user
+    content: What about Spain?
+  - role: assistant
+    content: ● That would be Madrid.
+  - role: user
+    content: Italy?
+  - role: assistant
+    content: ● Rome is the capital of Italy.
+  - role: user
+    content: Portugal?
+  - role: assistant
+    content: ● Lisbon.
+  turns:
+  - user: And the capital of
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: drift_many_complete_then_time
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  - role: user
+    content: What's the capital of France?
+  - role: assistant
+    content: ● The capital of France is Paris.
+  - role: user
+    content: And Germany?
+  - role: assistant
+    content: ● Germany's capital is Berlin.
+  - role: user
+    content: What about Spain?
+  - role: assistant
+    content: ● That would be Madrid.
+  turns:
+  - user: Hmm, hold on, let me think of another one.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: drift_interrupted_assistant
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  - role: user
+    content: Tell me a long story about the history of Paris.
+  - role: assistant
+    content: ● Paris began as a small settlement of the Parisii, a Celtic tribe, on the Île de la Cité
+      around the third century
+  turns:
+  - user: Actually never mind that. What's the capital of Japan?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply says the capital of Japan is Tokyo instead of continuing the Paris story

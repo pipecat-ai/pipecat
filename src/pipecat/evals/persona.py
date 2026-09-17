@@ -27,8 +27,10 @@ END_CALL_FUNCTION = "end_call"
 END_CALL_SCHEMA = FunctionSchema(
     name=END_CALL_FUNCTION,
     description=(
-        "End the call. Call this instead of speaking once your goal is achieved, "
-        "or once it is clear the assistant cannot help you achieve it."
+        "Hang up the phone. This is the only way to end the call; saying goodbye "
+        "does not end it. Call it as soon as your goal is achieved, or as soon as "
+        "it is clear the assistant cannot help you achieve it. A short goodbye may "
+        "be spoken in the same turn."
     ),
     properties={
         "success": {
@@ -55,9 +57,12 @@ The assistant's words arrive as the user's messages. Reply with only what you \
 would say next: one short spoken turn, in the first person, in plain sentences \
 (no lists, markdown, or stage directions). Ask for or give one thing at a time, \
 as a real caller would, and do not repeat what the assistant has already \
-understood. When your goal is achieved, or it is clear the assistant cannot \
-help, say nothing more and call the {end_call} tool with whether you succeeded \
-and why."""
+understood.
+
+Saying goodbye does not hang up: the call ends only when you call the \
+{end_call} tool. As soon as your goal is achieved, or it is clear the \
+assistant cannot help, call {end_call} with whether you succeeded and why. You \
+may say one short goodbye sentence in the same turn, but you must make the call."""
 
 
 class EvalPersona:

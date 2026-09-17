@@ -39,7 +39,7 @@ class DeepgramFluxTTSSettings(TTSSettings):
     ``voice`` and is not directly settable.
 
     Parameters:
-        speed: Speech-rate multiplier, from 0.85 to 1.15 in steps of 0.05.
+        speed: Speech-rate multiplier, from 0.5 to 1.5 in steps of 0.05.
             ``None`` leaves Flux at its default rate. Applied to the open
             connection, so a speed change keeps the cross-turn acoustic state.
         expressivity: Expressive range on a calm-to-animated axis. ``None``

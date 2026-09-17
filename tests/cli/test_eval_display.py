@@ -16,6 +16,7 @@ from pathlib import Path
 from rich.console import Console
 
 from pipecat.cli.commands.eval import (
+    _build_scenario_runs,
     _eval_verdict,
     _EvalDashboard,
     _expand_scenario_paths,
@@ -98,7 +99,9 @@ class TestScenarioPathExpansion(unittest.TestCase):
         """The judge, user, and simulator blocks a directory's scenarios include have no name."""
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            (directory / "alpha.yaml").write_text("name: alpha\nturns: []\n")
+            (directory / "alpha.yaml").write_text(
+                "name: alpha\nscenarios: [{name: alpha, turns: []}]\n"
+            )
             (directory / "judge_text.yaml").write_text("modality: text\n")
             (directory / "simulator.yaml").write_text("service: openai\n")
             # Not valid YAML: still taken, so the run reports it instead of hiding it.
@@ -116,6 +119,34 @@ class TestScenarioPathExpansion(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(Exception, "No \.yaml or \.yml scenario files found"):
                 _expand_scenario_paths([Path(tmp)])
+
+
+class TestScenarioRuns(unittest.TestCase):
+    def test_a_group_file_becomes_a_run_per_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            group = Path(tmp) / "group.yaml"
+            group.write_text(
+                "name: g\nscenarios:\n  - name: a\n    turns: []\n  - name: b\n    turns: []\n"
+            )
+            single = Path(tmp) / "single.yaml"
+            single.write_text("name: single\nscenarios: [{name: single, turns: []}]\n")
+
+            runs = _build_scenario_runs([group, single], "ws://bot")
+
+        self.assertEqual([r.scenario for r in runs], ["g/a", "g/b", "single/single"])
+        self.assertEqual([r.scenario_path for r in runs], [group, group, single])
+        self.assertTrue(all(r.bot_url == "ws://bot" for r in runs))
+
+    def test_a_file_that_fails_to_load_is_one_failed_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = Path(tmp) / "broken.yaml"
+            broken.write_text("name: broken\n")
+
+            runs = _build_scenario_runs([broken], "ws://bot")
+
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0].status, "done")
+        self.assertIn("failed to load", runs[0].error or "")
 
 
 def _simulation_run(

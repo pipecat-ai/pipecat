@@ -366,6 +366,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # When thinking is enabled, merge parallel tool calls into single messages
         messages = self._merge_parallel_tool_calls_for_thinking(thought_signature_dicts, messages)
 
+        self._add_placeholder_thought_signatures(messages)
+
         # Check if we only have function-related messages (no regular text)
         effective_system = extracted_system or system_instruction
         has_regular_messages = any(
@@ -660,6 +662,29 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 i += 1
 
         return merged_messages
+
+    # Gemini 3 rejects a model turn whose function calls carry no thought
+    # signature, which is what a call from another provider (an LLM switched
+    # mid-conversation) or one injected by the application looks like. Google
+    # documents this placeholder to skip that check; both the Gemini API and
+    # Vertex AI accept it, and the SDK encodes it on the wire as it would a
+    # real signature.
+    _PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
+
+    def _add_placeholder_thought_signatures(self, messages: list[Content]) -> None:
+        """Give function calls in unsigned model turns the placeholder signature.
+
+        A model turn with a signed part is left alone: Gemini signs only the
+        first call of a parallel batch and expects the rest unsigned.
+        """
+        for message in messages:
+            if not isinstance(message, Content) or message.role != "model" or not message.parts:
+                continue
+            if any(getattr(part, "thought_signature", None) for part in message.parts):
+                continue
+            for part in message.parts:
+                if getattr(part, "function_call", None):
+                    part.thought_signature = self._PLACEHOLDER_THOUGHT_SIGNATURE
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: list[dict], messages: list[Content]

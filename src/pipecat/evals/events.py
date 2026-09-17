@@ -24,6 +24,10 @@ scenario ``event:``             RTVI server message(s)
 ``user_transcription``          ``user-transcription`` (final only)
 ``llm_started``                 ``bot-llm-started``
 ``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
+                                response, such as a turn-completion marker, with its
+                                ``kind`` and the response's raw text; sent when the
+                                response ends, only on request
 ``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
@@ -50,6 +54,7 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     TTSTextFrame,
 )
@@ -230,7 +235,8 @@ class EvalEventStream:
         """Translate one frame from the bot into the event it maps to, if any.
 
         The LLM text is buffered and emitted as one ``llm_response`` when the
-        response ends; ``tts_response`` is emitted only in audio mode; the bot's
+        response ends; a marker is its own ``llm_marker`` as soon as it
+        arrives; ``tts_response`` is emitted only in audio mode; the bot's
         reports about the harness (its VAD, speaking, and transcription messages)
         become their events. The audio-mode ``response`` is not made here: the
         aggregator appends it when the bot's spoken turn ends.
@@ -259,6 +265,16 @@ class EvalEventStream:
                 self._llm_text_at = self.elapsed()
             self._text_buffer.append(frame.text)
             return None
+        elif isinstance(frame, LLMMarkerResponseFrame):
+            if self._awaiting_reply:
+                return None
+            return {
+                "type": "llm_marker",
+                "text": frame.marker or "",
+                "kind": frame.kind,
+                "raw": frame.raw,
+                "markers": list(frame.markers),
+            }
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._awaiting_reply:
                 self._text_buffer = []

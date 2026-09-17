@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMTextFrame,
     MetricsFrame,
     TranscriptionFrame,
@@ -105,6 +106,11 @@ class RTVIObserverParams:
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
+        bot_llm_marker_enabled: Indicates if the bot's LLM marker reports
+            (``LLMMarkerResponseFrame``, e.g. from ``filter_incomplete_user_turns``)
+            should be sent. A report carries the marker the LLM emitted and the raw
+            text of the whole response, which is meant for evaluation, not for
+            clients, so this is off by default. Defaults to False.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
         bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
@@ -166,6 +172,7 @@ class RTVIObserverParams:
 
     bot_output_enabled: bool = True
     bot_llm_enabled: bool = True
+    bot_llm_marker_enabled: bool = False
     bot_tts_enabled: bool = True
     bot_speaking_enabled: bool = True
     bot_audio_level_enabled: bool = False
@@ -384,6 +391,9 @@ class RTVIObserver(BaseObserver):
             logger.debug(
                 f"{self}: vad_user_speaking_enabled set to {frame.vad_user_speaking_enabled}"
             )
+        if frame.bot_llm_marker_enabled is not None:
+            self._params.bot_llm_marker_enabled = frame.bot_llm_marker_enabled
+            logger.debug(f"{self}: bot_llm_marker_enabled set to {frame.bot_llm_marker_enabled}")
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
@@ -474,6 +484,17 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
+        elif isinstance(frame, LLMMarkerResponseFrame) and self._params.bot_llm_marker_enabled:
+            await self.send_rtvi_message(
+                RTVI.BotLLMMarkerMessage(
+                    data=RTVI.BotLLMMarkerMessageData(
+                        text=frame.marker or "",
+                        kind=frame.kind,
+                        raw=frame.raw,
+                        markers=list(frame.markers),
+                    )
+                )
+            )
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:

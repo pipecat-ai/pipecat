@@ -61,17 +61,17 @@ Python flows define their functions as direct functions, async functions whose s
 
 Most of these examples are covered by behavioral evals that drive the bot
 end-to-end and assert on which Flows functions fire and what the bot says back.
-The scenarios live in [`scripts/release-evals/`](../../scripts/release-evals/)
+The scenarios live in [`evals/release/`](../../evals/release/)
 alongside the rest of the release eval suite — see the Flows section of its
 README. To run just the flows bots:
 
 ```bash
-scripts/release-evals/run.sh -p flows
+evals/release/run.sh -p flows
 ```
 
 Or iterate on a single bot: run it with `-t eval`, then drive one scenario
 against it with
-`pipecat eval run scripts/release-evals/scenarios/<name>.yaml -v`.
+`pipecat eval run evals/release/scenarios/<name>.yaml -v`.
 
 ## Learn more
 

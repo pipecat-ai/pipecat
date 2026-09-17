@@ -856,6 +856,8 @@ class RimeHttpTTSService(TTSService):
                 payload["pauseBetweenBrackets"] = self._settings.pauseBetweenBrackets
             if self._settings.phonemizeBetweenBrackets is not None:
                 payload["phonemizeBetweenBrackets"] = self._settings.phonemizeBetweenBrackets
+            if self._settings.noTextNormalization is not None:
+                payload["noTextNormalization"] = self._settings.noTextNormalization
 
         try:
             async with self._session.post(

@@ -1,0 +1,1 @@
+- `SarvamLLMService` accepts `deepseekv4-flash`, the DeepSeek V4 Flash model Sarvam serves on `/v2` with a 1M-token context window, tool calling, and reasoning.

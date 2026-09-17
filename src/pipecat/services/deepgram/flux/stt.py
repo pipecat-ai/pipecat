@@ -123,7 +123,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         Args:
             api_key: Deepgram API key for authentication. Required for API access.
-            url: WebSocket URL for the Deepgram Flux API. Defaults to the preview endpoint.
+            url: WebSocket URL for the Deepgram Flux API. Defaults to Deepgram's
+                Flux endpoint, ``wss://api.deepgram.com/v2/listen``.
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline
                 sample rate.
             mip_opt_out: Opt out of the Deepgram Model Improvement Program.

@@ -71,7 +71,7 @@ anthropic = [ "anthropic>=0.49.0,<2" ]
 assemblyai = []
 asyncai = []
 aws = [ "aiobotocore>=3,<4" ]
-aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.4.0; python_version>='3.12'" ]
+aws-nova-sonic = [ "aws_sdk_bedrock_runtime>=0.6.0,<0.10; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
 baseten = []
 bland = []
@@ -89,7 +89,14 @@ fireworks = []
 fish = [ "ormsgpack>=1.7.0,<2" ]
 funasr = [ "funasr>=1.1.0" ]
 gladia = []
-google = [ "google-cloud-speech>=2.33.0,<3", "google-cloud-texttospeech>=2.31.0,<3", "google-genai>=1.68.0,<3" ]
+# The google-genai 2.19 floor skips 3.13/Linux — the one environment where
+# vonage-video-connector installs and pins pydantic<2.12
+google = [
+  "google-cloud-speech>=2.33.0,<3",
+  "google-cloud-texttospeech>=2.31.0,<3",
+  "google-genai>=2.19.0,<3; python_version != '3.13' or platform_system != 'Linux'",
+  "google-genai>=1.68.0,<3",
+]
 gradium = []
 grok = []
 groq = [ "groq>=0.23.0,<2" ]
@@ -129,8 +136,8 @@ qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
 resembleai = []
 rime = []
-runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.1.0"]
-sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
+runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.2.1"]
+sagemaker = [ "aws_sdk_sagemaker_runtime_http2>=0.6.0,<0.10; python_version>='3.12'" ]
 sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
@@ -304,6 +311,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 "examples/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "tests/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "scripts/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"evals/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]

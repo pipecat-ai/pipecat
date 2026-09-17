@@ -529,6 +529,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
+        # A realtime service can run a tool it was configured with before the
+        # first context frame reaches it, so the handlers of its own tools are
+        # registered up front. Context frames re-sync them from then on.
+        self._sync_registered_tool_handlers(None)
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
@@ -950,7 +954,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
             cancellable_by_llm: Whether the LLM may cancel this call while it runs,
                 through the ``cancel_<name>`` tool advertised alongside it. Pair it with
@@ -1062,7 +1068,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 global ``function_call_timeout_secs``. A call that runs past it is
                 cancelled: the handler is thrown an ``asyncio.CancelledError``, the
                 call is settled as cancelled, and inference runs so the LLM can
-                report that it didn't complete. Defaults to ``None`` (fall back to
+                report that it didn't complete. The deadline covers the handler's
+                execution as a whole, so reporting an intermediate result neither
+                clears it nor restarts it. Defaults to ``None`` (fall back to
                 the ``@tool_options`` decorator value, then to the global timeout).
         """
         self._register_direct_function(
@@ -1665,10 +1673,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
             if is_final:
                 runner_item.settled = True
-
-            # Cancel timeout task if it exists
-            if timeout_task and not timeout_task.done():
-                await self.cancel_task(timeout_task)
+                # Only a final result settles the call, so only a final result
+                # clears the deadline. An intermediate update must leave it
+                # armed — otherwise a progress report permanently unbounds a
+                # hanging async tool.
+                if timeout_task and not timeout_task.done():
+                    await self.cancel_task(timeout_task)
 
             await self.broadcast_frame(
                 FunctionCallResultFrame,

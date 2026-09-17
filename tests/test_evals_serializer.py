@@ -109,6 +109,22 @@ class TestEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(frame.vad_user_speaking_enabled)
         # Unset report level stays None, so it isn't disturbed.
         self.assertIsNone(frame.function_call_report_level)
+        self.assertIsNone(frame.bot_llm_marker_enabled)
+
+    async def test_eval_configure_enables_llm_markers(self):
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "9",
+            "data": {
+                "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                "d": {"llm_markers": True},
+            },
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, RTVIConfigureObserverFrame)
+        self.assertTrue(frame.bot_llm_marker_enabled)
+        self.assertIsNone(frame.vad_user_speaking_enabled)
 
     async def test_eval_image_stored_and_not_forwarded(self):
         img = b"\x89PNG-fake-bytes"

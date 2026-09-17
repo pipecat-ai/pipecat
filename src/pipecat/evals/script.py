@@ -6,29 +6,81 @@
 
 """Scripted scenario file format for Pipecat behavioral evaluations.
 
-A scenario is a YAML file describing a scripted conversation and the semantic
-events expected to flow back from the bot. Simple example::
+A scripted scenario describes a conversation and the semantic events expected
+to flow back from the bot. It lives in a scenario file's ``scenarios:`` list
+(:mod:`pipecat.evals.scenario`). Simple example::
 
     name: simple_user_input
-    turns:
-      - user: "hello world"
-        expect:
-          - event: user_started_speaking
-          - event: user_transcription
-            text_contains: "hello world"
+    scenarios:
+      - name: simple_user_input
+        turns:
+          - user: "hello world"
+            expect:
+              - event: user_started_speaking
+              - event: user_transcription
+                text_contains: "hello world"
 
 The harness plays each turn and checks the events the bot emits back, in
-order. A file with a ``persona:`` instead of ``turns:`` is the other kind, a
-simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
+order. A scenario with a ``persona:`` instead of ``turns:`` is the other kind,
+a simulation, where an LLM plays the user (:mod:`pipecat.evals.simulation`).
+The keys below are a scenario's; the file-level ones (``user:``, ``judge:``,
+``context:``, ``stop_on_failure:``) may also sit at the top of the file as
+defaults for every scenario in it.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``vad_user_started_speaking``,
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
-``tts_response``, ``function_call``, ``function_call_stopped``. The
+``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``. The
 ``vad_*`` events are the raw
 VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
 turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+
+``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
+as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
+when the response ends. ``marker:`` says which one: ``complete`` (the turn was
+finished and the bot answers), ``short`` (the user was cut off and the bot
+waits), ``long`` (the user asked for time), or ``incomplete`` (either of the
+last two). A bare ``llm_marker`` asserts only that the bot read a response.
+Markers never reach clients by default; a scenario that asserts on one asks the
+bot to report them::
+
+    turns:
+      - user: "Let me think about it, hmmm"
+        expect:
+          - event: llm_marker
+            marker: incomplete        # the bot held the turn open
+      - user: "I think I'd go to Japan."
+        expect:
+          - event: llm_marker
+            marker: complete          # ... and answered this one
+          - event: response
+            eval: "engages with the user's answer about Japan"
+
+The event also carries the response's raw text, as the LLM produced it before
+the bot held anything back, so a scenario can check how well the LLM follows
+the protocol: ``marker_first`` (nothing before the marker), ``markers`` (how
+many markers the text holds), and ``text_after`` (whether text follows the
+first marker, which a complete turn should have and an incomplete one should
+not)::
+
+    - user: "I'd go to Japan because"
+      expect:
+        - event: llm_marker
+          marker: short
+          marker_first: true
+          markers: 1
+          text_after: false
+
+A marker the LLM lets slip into its reply reaches the user, so the reply's
+own text is worth checking too: ``text_excludes`` fails when the text holds
+the given string, the mirror of ``text_contains``::
+
+    - user: "What is the capital of Germany?"
+      expect:
+        - event: llm_response
+          text_contains: Berlin
+          text_excludes: "●"
 
 The bot's reply can be asserted three ways:
 
@@ -55,6 +107,18 @@ Supported expectation fields (per event):
 
 ``text_contains: <str>``
     substring check on the event's text content, ignoring whitespace differences
+
+``text_excludes: <str>``
+    the reverse: the event's text content must not hold this substring
+
+``marker: <str>``
+    for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
+    or ``incomplete`` for either of the last two
+
+``marker_first: <bool>``, ``markers: <int>``, ``text_after: <bool>``
+    for ``llm_marker`` — checks on the response's raw text: whether the first
+    marker comes before any text, how many markers the text holds, and whether
+    text follows the first marker
 
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by
@@ -208,7 +272,6 @@ from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.evals.scenario_config import _DEFAULT_JUDGE, _parse_judge_block, _parse_user_block
-from pipecat.evals.scenario_loader import _load_mapping
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
@@ -223,6 +286,11 @@ JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
 # text: ``function_call`` when one starts, ``function_call_stopped`` when it ends
 # (its ``args`` say whether it was cancelled or ran to completion).
 FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
+
+# What a ``marker:`` may name on an ``llm_marker`` expectation. The first three
+# are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
+# accepts ``short`` or ``long``.
+MARKER_KINDS = ("complete", "short", "long", "incomplete")
 
 
 @dataclass
@@ -263,6 +331,9 @@ class EvalExpectation:
             asserted unless set explicitly.
         text_contains: Optional substring check on the event's text content
             (``llm_response.text`` or ``user_transcription.transcript``).
+        text_excludes: Optional substring the event's text content must not
+            hold. Checked on the text the expectation matched; with
+            ``text_contains``, on the reply accumulated up to the match.
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
@@ -271,18 +342,32 @@ class EvalExpectation:
             must satisfy. Evaluated by a judge LLM. Only meaningful on the
             bot-generated text events: ``response``, ``llm_response``, and
             ``tts_response``.
+        marker: For an ``llm_marker`` event, the meaning the marker must have:
+            one of :data:`MARKER_KINDS`, where ``incomplete`` accepts ``short``
+            or ``long``.
+        marker_first: For an ``llm_marker`` event, whether the first marker in
+            the response's raw text must come before any text.
+        markers: For an ``llm_marker`` event, how many markers the response's
+            raw text must hold.
+        text_after: For an ``llm_marker`` event, whether text must (True) or
+            must not (False) follow the first marker in the raw text.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``eval``, and ``calls`` are not allowed alongside
-            it.
+            ``text_contains``, ``text_excludes``, ``eval``, ``calls`` and the
+            marker checks are not allowed alongside it.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
+    text_excludes: str | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
+    marker: str | None = None
+    marker_first: bool | None = None
+    markers: int | None = None
+    text_after: bool | None = None
     absent: bool = False
 
     @property
@@ -463,68 +548,27 @@ class EvalScriptScenario:
     source_path: Path | None = None
 
     @classmethod
+    @deprecated(
+        "`EvalScriptScenario.load` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+        "Use `EvalScenarioFile.load` instead."
+    )
     def load(cls, path: str | Path) -> "EvalScriptScenario":
-        """Parse a scenario YAML file into an :class:`EvalScriptScenario`.
+        """Parse a YAML file holding a scenario's own keys at its top level.
+
+        .. deprecated:: 1.11.0
+            Use :meth:`~pipecat.evals.scenario.EvalScenarioFile.load` instead.
+            Will be removed in 2.0.0.
 
         Args:
             path: Path to a YAML file with the scenario schema.
 
         Returns:
             The parsed scenario.
-
-        Raises:
-            ValueError: If the file structure is invalid.
-            FileNotFoundError: If the path doesn't exist.
         """
+        from pipecat.evals.scenario import _load_mapping
+
         path = Path(path)
-        data = _load_mapping(path)
-
-        name = data.get("name")
-        if not name or not isinstance(name, str):
-            raise ValueError(f"{path}: missing or invalid 'name:' field")
-
-        raw_turns = data.get("turns")
-        if not isinstance(raw_turns, list):
-            raise ValueError(f"{path}: 'turns:' must be a list")
-
-        turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
-
-        raw_context = data.get("context")
-        if raw_context is None:
-            context: list[dict] = []
-        elif isinstance(raw_context, list):
-            context = raw_context
-        else:
-            raise ValueError(f"{path}: 'context:' must be a list of message dicts")
-
-        # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
-        # turn via TTS (exercising the bot's STT); text sends it as text.
-        user_audio, user_speech = _parse_user_block(data.get("user"), path)
-        _check_user_audio(turns, user_audio, user_speech, path)
-
-        # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
-        # means the bot speaks and the judge evaluates the transcription of its
-        # actual audio (tts_response); text means the bot's LLM text directly
-        # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
-        bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
-
-        # Resolve the modality-agnostic `response` event and check event/modality
-        # consistency now that the judge modality is known.
-        _resolve_response_events(turns, bot_audio, path)
-
-        return cls(
-            name=name,
-            turns=turns,
-            context=context,
-            judge=judge,
-            bot_audio=bot_audio,
-            transcriber=transcriber,
-            user_audio=user_audio,
-            user_speech=user_speech,
-            trigger_disconnect=bool(data.get("trigger_disconnect", False)),
-            stop_on_failure=bool(data.get("stop_on_failure", True)),
-            source_path=path,
-        )
+        return _parse_script(_load_mapping(path), path)
 
     def wants_response(self) -> bool:
         """Whether any expectation asserts on the transcription of the bot's audio."""
@@ -555,6 +599,72 @@ class EvalScriptScenario:
             if any(exp.event in vad_events for exp in turn.expect):
                 return True
         return False
+
+    def needs_marker_events(self) -> bool:
+        """Whether the scenario asserts on the LLM's markers, which the bot emits only on request."""
+        return any(exp.event == "llm_marker" for turn in self.turns for exp in turn.expect)
+
+
+def _parse_script(data: dict, path: Path) -> EvalScriptScenario:
+    """Parse a scripted scenario's mapping, as read from ``path``.
+
+    Args:
+        data: The scenario's top-level mapping.
+        path: The file it came from; error messages name it and the turns'
+            ``audio:`` and ``image:`` paths resolve relative to it.
+
+    Returns:
+        The parsed scenario.
+
+    Raises:
+        ValueError: If the mapping is invalid.
+    """
+    name = data.get("name")
+    if not name or not isinstance(name, str):
+        raise ValueError(f"{path}: missing or invalid 'name:' field")
+
+    raw_turns = data.get("turns")
+    if not isinstance(raw_turns, list):
+        raise ValueError(f"{path}: 'turns:' must be a list")
+
+    turns = [_parse_turn(t, path, idx) for idx, t in enumerate(raw_turns)]
+
+    raw_context = data.get("context")
+    if raw_context is None:
+        context: list[dict] = []
+    elif isinstance(raw_context, list):
+        context = raw_context
+    else:
+        raise ValueError(f"{path}: 'context:' must be a list of message dicts")
+
+    # user: { modality: audio|text, speech: {...} }. Audio synthesizes each user
+    # turn via TTS (exercising the bot's STT); text sends it as text.
+    user_audio, user_speech = _parse_user_block(data.get("user"), path)
+    _check_user_audio(turns, user_audio, user_speech, path)
+
+    # judge: { modality: audio|text, eval: {...}, transcription: {...} }. Audio
+    # means the bot speaks and the judge evaluates the transcription of its
+    # actual audio (tts_response); text means the bot's LLM text directly
+    # (llm_response, bot skips TTS). Stored as bot_audio/transcriber/judge.
+    bot_audio, transcriber, judge = _parse_judge_block(data.get("judge"), path)
+
+    # Resolve the modality-agnostic `response` event and check event/modality
+    # consistency now that the judge modality is known.
+    _resolve_response_events(turns, bot_audio, path)
+
+    return EvalScriptScenario(
+        name=name,
+        turns=turns,
+        context=context,
+        judge=judge,
+        bot_audio=bot_audio,
+        transcriber=transcriber,
+        user_audio=user_audio,
+        user_speech=user_speech,
+        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        stop_on_failure=bool(data.get("stop_on_failure", True)),
+        source_path=path,
+    )
 
 
 @deprecated(
@@ -746,7 +856,20 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         # An absent expectation matches on event type only: content and call
         # checks describe an event that must arrive, which contradicts absence.
         conflicting = [
-            key for key in ("text_contains", "eval", "calls", "name", "args") if key in e
+            key
+            for key in (
+                "text_contains",
+                "text_excludes",
+                "eval",
+                "calls",
+                "name",
+                "args",
+                "marker",
+                "marker_first",
+                "markers",
+                "text_after",
+            )
+            if key in e
         ]
         if conflicting:
             raise ValueError(
@@ -756,12 +879,36 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
 
     calls = _parse_function_calls(e, event, path, turn_idx, exp_idx) if not absent else None
 
+    where = f"{path}: turn #{turn_idx} expectation #{exp_idx}"
+    marker_keys = [key for key in ("marker", "marker_first", "markers", "text_after") if key in e]
+    if marker_keys and event != "llm_marker":
+        raise ValueError(
+            f"{where} {', '.join(repr(k) + ':' for k in marker_keys)} only applies to "
+            f"the 'llm_marker' event, not {event!r}"
+        )
+    marker = e.get("marker")
+    if marker is not None and marker not in MARKER_KINDS:
+        raise ValueError(
+            f"{where} 'marker:' must be one of {', '.join(MARKER_KINDS)}, not {marker!r}"
+        )
+    for key, kind in (("marker_first", bool), ("text_after", bool), ("markers", int)):
+        value = e.get(key)
+        if value is not None and (
+            not isinstance(value, kind) or isinstance(value, bool) != (kind is bool)
+        ):
+            raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
+
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
+        text_excludes=e.get("text_excludes"),
         calls=calls,
         eval=criterion,
+        marker=marker,
+        marker_first=e.get("marker_first"),
+        markers=e.get("markers"),
+        text_after=e.get("text_after"),
         absent=absent,
     )
 

@@ -209,7 +209,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         llm = InworldRealtimeLLMService(
             api_key=os.getenv("INWORLD_API_KEY"),
-            llm_model="openai/gpt-4.1-nano",
+            llm_model="openai/gpt-4.1-mini",
             voice="Sarah",
             tts_model="inworld-tts-2",
         )
@@ -223,7 +223,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             api_key=os.getenv("INWORLD_API_KEY"),
             settings=InworldRealtimeLLMService.Settings(
                 session_properties=SessionProperties(
-                    model="openai/gpt-4.1-nano",
+                    model="openai/gpt-4.1-mini",
                     temperature=0.7,
                     audio=AudioConfiguration(
                         input=AudioInput(
@@ -270,7 +270,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
         Args:
             api_key: Inworld API key for authentication.
-            llm_model: LLM model to use (e.g. "openai/gpt-4.1-nano").
+            llm_model: LLM model to use (e.g. "openai/gpt-4.1-mini").
                 Shorthand for ``session_properties.model``.
             voice: Voice ID for TTS output (e.g. "Sarah", "Clive").
                 Shorthand for ``session_properties.audio.output.voice``.

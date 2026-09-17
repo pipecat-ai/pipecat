@@ -27,6 +27,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+# Pipecat UI snapshot vendored into the CLI templates has a lib/ of its own
+!src/pipecat/cli/templates/client/_pipecat_ui/src/lib/
 lib64/
 parts/
 sdist/
@@ -77,4 +79,5 @@ whisker_setup.py
 # MoQ transport
 *.pem
 # Release-eval run artifacts (logs and conversation recordings)
-scripts/release-evals/test-runs/
+evals/release/test-runs/
+evals/turn-completion/test-runs/

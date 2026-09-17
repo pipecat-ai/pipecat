@@ -1,0 +1,1 @@
+- Fixed `GoogleLLMService` failing every request with `gemini-3.8-flash`. That model rejects the `minimal` thinking level Pipecat applies by default to Gemini 3 Flash models, so it now gets `low`, the lowest level it accepts.

@@ -146,3 +146,27 @@ async def test_coda_sampling_params_are_included_in_http_payload():
     assert session.payload["top_p"] == 0.9
     assert session.payload["timeScaleFactor"] == 1.2
     assert session.headers["Accept"] == "audio/pcm"
+
+
+@pytest.mark.asyncio
+async def test_mist_text_settings_are_included_in_http_payload():
+    session = _CapturingSession()
+    service = RimeHttpTTSService(
+        api_key="test-api-key",
+        aiohttp_session=session,
+        sample_rate=24000,
+        settings=RimeHttpTTSService.Settings(
+            model="mistv2",
+            voice="luna",
+            pauseBetweenBrackets=True,
+            phonemizeBetweenBrackets=True,
+            noTextNormalization=True,
+        ),
+    )
+
+    _ = [frame async for frame in service.run_tts("Hello", "context")]
+
+    assert session.payload["modelId"] == "mistv2"
+    assert session.payload["pauseBetweenBrackets"] is True
+    assert session.payload["phonemizeBetweenBrackets"] is True
+    assert session.payload["noTextNormalization"] is True

@@ -1,0 +1,1 @@
+- `SonioxTTSService` settings now include `client_reference_id`, the identifier Soniox records with each request in its usage logs, matching the field `SonioxSTTService` already exposes.

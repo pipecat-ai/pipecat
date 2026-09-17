@@ -811,6 +811,12 @@ class TestReasoningParams:
         params = self._params(service)
         assert "reasoning" not in params
 
+    def test_gpt_6_astra_left_untouched(self):
+        """gpt-6-astra reasons but rejects effort="none", so leave it at the default."""
+        service = _make_service(settings=OpenAIResponsesLLMService.Settings(model="gpt-6-astra"))
+        params = self._params(service)
+        assert "reasoning" not in params
+
     def test_gpt5_chat_variant_left_untouched(self):
         """The non-reasoning gpt-5-chat variant is excluded from the default-off logic."""
         service = _make_service(
@@ -830,6 +836,17 @@ class TestReasoningParams:
         params = self._params(service)
         assert params["reasoning"] == {"effort": "high", "summary": "auto"}
         assert params["include"] == ["reasoning.encrypted_content"]
+
+    def test_reasoning_mode_is_passed_through(self):
+        """`mode` reaches the request alongside `effort`."""
+        service = _make_service(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.6-sol",
+                reasoning=OpenAIResponsesLLMService.ReasoningConfig(effort="low", mode="pro"),
+            )
+        )
+        params = self._params(service)
+        assert params["reasoning"] == {"effort": "low", "mode": "pro"}
 
     def test_empty_reasoning_config_falls_back_to_default(self):
         """An all-unset config is treated as unconfigured (none default on gpt-5.x)."""
