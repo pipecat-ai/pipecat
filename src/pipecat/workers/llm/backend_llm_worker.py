@@ -679,7 +679,7 @@ class BackendLLMWorker(LLMContextWorker):
 def _validate_transform_signature(transform: BackendOutputTransform) -> None:
     """Reject a ``transform_output`` that cannot take ``is_final`` as a keyword.
 
-    A transform written before 1.11.0 took the output alone; this turns that
+    A transform written before 1.12.0 took the output alone; this turns that
     into an error at construction rather than on the first delegation.
     """
     try:
