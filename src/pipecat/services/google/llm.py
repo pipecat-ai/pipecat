@@ -361,7 +361,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         )
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+            context,
+            system_instruction=effective_instruction,
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
         messages = params["messages"]
         system = params["system_instruction"]
@@ -510,10 +512,36 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         except Exception as e:
             logger.error(f"Failed to unset thinking budget: {e}")
 
+    # Models known to accept a request whose contents end with a model turn,
+    # continuing that turn as the start of the response. Newer models reject
+    # such requests, so this is a frozen legacy set: any model NOT matching is
+    # assumed to reject them and gets a trailing user message injected when
+    # needed. gemini-3.5-flash accepts them but shares a prefix with
+    # gemini-3.5-flash-lite, which doesn't, so it's left out.
+    _PREFILL_SUPPORTED_PATTERNS = (
+        "gemini-2.",
+        "gemini-3-",
+        "gemini-3.1-",
+        "gemini-pro-latest",
+    )
+
+    def _should_inject_trailing_user_message(self) -> bool:
+        """Whether to fix up requests whose contents end with a model turn.
+
+        Models without support for continuing a trailing model turn reject such
+        requests, so injection is on for every model not known to support it.
+        Subclasses with other model naming can override
+        ``_PREFILL_SUPPORTED_PATTERNS``.
+        """
+        model = self._settings.model or ""
+        return not any(model.startswith(p) for p in self._PREFILL_SUPPORTED_PATTERNS)
+
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
+            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
         )
 
         logger.debug(

@@ -61,7 +61,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return "google"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: str | None = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
     ) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
@@ -69,6 +73,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with a model message. The
+                Gemini API rejects a generate request that ends with a model turn.
 
         Returns:
             Dictionary of parameters for Gemini's API.
@@ -76,6 +83,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         converted = self._from_universal_context_messages(
             self.get_messages(context), system_instruction=system_instruction
         )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
         effective_system = self._resolve_system_instruction(
             converted.system_instruction,
             system_instruction,
@@ -282,6 +291,24 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         """Parameters for converting a single universal context message to Google format."""
 
         tool_call_id_to_name_mapping: dict[str, str]
+
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[Content]) -> list[Content]:
+        """Ensure the message list does not end with a model message.
+
+        When the last message has ``role="model"``, a minimal user message is
+        appended so that the API request is accepted. "." represents a
+        language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1].role == "model":
+            messages.append(Content(role="user", parts=[Part(text=".")]))
+        return messages
 
     def _from_universal_context_messages(
         self,
