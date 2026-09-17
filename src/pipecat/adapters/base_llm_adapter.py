@@ -165,6 +165,31 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             self.id_for_llm_specific_messages, truncate_large_values=truncate_large_values
         )
 
+    def _realtime_session_tools(self, context_tools: Any, service_tools: Any) -> list[Any] | None:
+        """The tools a realtime session carries, in provider format.
+
+        The context's own tools when it has any, else the init-provided ones.
+        Built-in tools ride along with whichever set is in use, and are the
+        set when there is neither.
+
+        Args:
+            context_tools: The context's tools (``NOT_GIVEN`` or ``None`` when it
+                has none).
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
+
+        Returns:
+            The tools, or ``None`` when there are none at all.
+        """
+        own = (
+            context_tools
+            if context_tools is not None and is_given(context_tools)
+            else service_tools
+        )
+        converted = self.from_standard_tools(own)
+        return None if converted is None or not is_given(converted) else converted
+
     def from_standard_tools(self, tools: Any) -> list[Any] | NotGiven | None:
         """Convert tools from standard format to provider format.
 

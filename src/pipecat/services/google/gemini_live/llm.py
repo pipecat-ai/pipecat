@@ -925,18 +925,15 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 self._context, system_instruction=assert_given(self._system_instruction_from_init)
             )
             system_instruction = params["system_instruction"]
-            # Only the context's own tools count as a change; built-in tools
-            # ride along with whichever tool set is in use.
-            tools = params["tools"] if is_given(self._context.tools) else None
             system_instruction_changed = system_instruction != self._system_instruction_from_init
-            if tools and self._tools_from_init:
+            # The context bringing tools of its own warrants a reconnect, without
+            # diffing them against the init-provided ones.
+            context_has_tools = is_given(self._context.tools)
+            if context_has_tools and self._tools_from_init:
                 logger.warning(
                     "Tools provided both at init time and in context; using context-provided value."
                 )
-            # For tools we simply check presence rather than diffing against
-            # init-provided tools, assuming that if context provides tools
-            # they warrant a reconnect.
-            if system_instruction_changed or tools:
+            if system_instruction_changed or context_has_tools:
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
@@ -1261,19 +1258,20 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # These settings from the context take precedence over the ones
             # provided at initialization time.
             adapter = self.get_llm_adapter()
-            system_instruction = None
-            tools = None
             if self._context:
                 params = adapter.get_llm_invocation_params(
                     self._context,
                     system_instruction=assert_given(self._system_instruction_from_init),
+                    service_tools=self._tools_from_init,
                 )
                 system_instruction = params["system_instruction"]
-                tools = params["tools"] if is_given(self._context.tools) else None
+                # The adapter settles the tools: the context's own when it has
+                # any, else the init-provided ones; built-in tools ride along
+                # either way.
+                tools = params["tools"]
             else:
                 system_instruction = self._system_instruction_from_init
-            # Context-provided tools take precedence; fall back to the service's own tools.
-            if not tools:
+                # No context yet: the init-provided tools; built-in tools ride along.
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
