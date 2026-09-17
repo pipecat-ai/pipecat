@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     AggregationType,
     CancelFrame,
     EndFrame,
-    ExternalFunctionCallFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
@@ -969,16 +968,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                 if isinstance(event, BackendToolCall):
                     # Reported for clients, as the Responses-delegation backend's
                     # calls are; the delegation itself is not a call, so no parent.
-                    await self.push_frame(
-                        ExternalFunctionCallFrame(
-                            phase=event.phase,
-                            function_name=event.function_name,
-                            tool_call_id=event.tool_call_id,
-                            arguments=event.arguments,
-                            result=event.result,
-                            cancelled=event.cancelled,
-                        )
-                    )
+                    await self.push_frame(event.to_frame())
                     continue
                 if isinstance(event, _BackendFinalOutput):
                     event = event.output

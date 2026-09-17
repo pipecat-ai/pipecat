@@ -1375,25 +1375,18 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 @dataclass
 class ExternalFunctionCallFrame(SystemFrame):
-    """A function call that ran outside this pipeline, for observers to report.
+    """A phase of a function call that ran outside this pipeline, for observers to report.
 
-    Nothing in the pipeline acts on it. The call ran elsewhere, e.g. in a
+    Nothing in the pipeline acts on one. The call ran elsewhere, e.g. in a
     backend worker's pipeline on behalf of a tool here, and belongs to that
-    pipeline's conversation, not this one. Observers report it as they
-    report this pipeline's own calls, under the call it ran as part of when
-    it has one.
+    pipeline's conversation, not this one. The subclasses mirror the
+    pipeline's own function-call frames, one per phase, and observers report
+    them as they report those, under the call the external one ran as part
+    of when it has one.
 
     Parameters:
-        phase: Where the call is: ``started``, ``in_progress`` or ``stopped``,
-            matching the pipeline's own ``FunctionCallsStartedFrame``,
-            ``FunctionCallInProgressFrame`` and ``FunctionCallResultFrame`` /
-            ``FunctionCallCancelFrame``.
         function_name: Name of the function called.
         tool_call_id: Unique identifier of the call.
-        arguments: Arguments passed to the function, once known.
-        result: The result, once the call has stopped with one.
-        cancelled: Whether the call stopped by cancellation rather than with a
-            result.
         parent_tool_call_id: The ``tool_call_id`` of the function call this
             one ran as part of. A tool's work can involve function calls of
             its own, made by another model on its behalf, e.g. a backend that
@@ -1403,13 +1396,46 @@ class ExternalFunctionCallFrame(SystemFrame):
             pipeline knows as a call.
     """
 
-    phase: Literal["started", "in_progress", "stopped"]
     function_name: str
     tool_call_id: str
-    arguments: Mapping[str, Any] | None = None
-    result: Any = None
-    cancelled: bool = False
-    parent_tool_call_id: str | None = None
+    parent_tool_call_id: str | None = field(default=None, kw_only=True)
+
+
+@dataclass
+class ExternalFunctionCallStartedFrame(ExternalFunctionCallFrame):
+    """An external function call has been made: ``FunctionCallsStartedFrame``'s counterpart, for one call."""
+
+
+@dataclass
+class ExternalFunctionCallInProgressFrame(ExternalFunctionCallFrame):
+    """An external function call is running: ``FunctionCallInProgressFrame``'s counterpart.
+
+    Parameters:
+        arguments: Arguments passed to the function.
+    """
+
+    arguments: Any
+
+
+@dataclass
+class ExternalFunctionCallResultFrame(ExternalFunctionCallFrame):
+    """An external function call produced a result: ``FunctionCallResultFrame``'s counterpart.
+
+    Parameters:
+        arguments: Arguments passed to the function.
+        result: The result.
+        is_final: Whether this result completes the call, or is one of a stream
+            of intermediate results before the final one.
+    """
+
+    arguments: Any
+    result: Any
+    is_final: bool = True
+
+
+@dataclass
+class ExternalFunctionCallCancelFrame(ExternalFunctionCallFrame):
+    """An external function call was cancelled: ``FunctionCallCancelFrame``'s counterpart."""
 
 
 @dataclass

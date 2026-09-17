@@ -34,6 +34,11 @@ from loguru import logger
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import (
     ErrorFrame,
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
+    ExternalFunctionCallStartedFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -136,24 +141,26 @@ class BackendToolCall:
     """One phase of a function call the backend made while working, on its way to the frontend.
 
     The call ran in the backend's own pipeline; the frontend reports it to
-    clients (as an ``ExternalFunctionCallFrame``) and does nothing else with it.
+    clients, as the :class:`~pipecat.frames.frames.ExternalFunctionCallFrame`
+    :meth:`to_frame` builds, and does nothing else with it. The phases mirror
+    the pipeline's own function-call frames.
 
     Parameters:
-        phase: ``started``, ``in_progress`` or ``stopped``.
+        phase: ``started``, ``in_progress``, ``result`` or ``cancelled``.
         function_name: Name of the function called.
         tool_call_id: Unique identifier of the call.
         arguments: Arguments passed to the function, once known.
-        result: The result, once the call has stopped with one.
-        cancelled: Whether the call stopped by cancellation rather than with a
-            result.
+        result: The result, for the ``result`` phase.
+        is_final: For the ``result`` phase, whether the result completes the
+            call rather than being one of a stream of intermediate results.
     """
 
-    phase: Literal["started", "in_progress", "stopped"]
+    phase: Literal["started", "in_progress", "result", "cancelled"]
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any] | None = None
     result: Any = None
-    cancelled: bool = False
+    is_final: bool = True
 
     def to_payload(self) -> dict[str, Any]:
         """Render the call phase as a job update payload.
@@ -168,7 +175,7 @@ class BackendToolCall:
             "tool_call_id": self.tool_call_id,
             "arguments": dict(self.arguments) if self.arguments is not None else None,
             "result": self.result,
-            "cancelled": self.cancelled,
+            "is_final": self.is_final,
         }
 
     @classmethod
@@ -187,7 +194,41 @@ class BackendToolCall:
             tool_call_id=str(payload.get("tool_call_id") or ""),
             arguments=payload.get("arguments"),
             result=payload.get("result"),
-            cancelled=bool(payload.get("cancelled", False)),
+            is_final=bool(payload.get("is_final", True)),
+        )
+
+    def to_frame(self, *, parent_tool_call_id: str | None = None) -> ExternalFunctionCallFrame:
+        """Build the frame that reports this phase in the frontend's pipeline.
+
+        Args:
+            parent_tool_call_id: The frontend's call this one ran as part of,
+                if any.
+
+        Returns:
+            The frame for the phase.
+        """
+        if self.phase == "started":
+            return ExternalFunctionCallStartedFrame(
+                self.function_name, self.tool_call_id, parent_tool_call_id=parent_tool_call_id
+            )
+        if self.phase == "in_progress":
+            return ExternalFunctionCallInProgressFrame(
+                self.function_name,
+                self.tool_call_id,
+                arguments=self.arguments,
+                parent_tool_call_id=parent_tool_call_id,
+            )
+        if self.phase == "result":
+            return ExternalFunctionCallResultFrame(
+                self.function_name,
+                self.tool_call_id,
+                arguments=self.arguments,
+                result=self.result,
+                is_final=self.is_final,
+                parent_tool_call_id=parent_tool_call_id,
+            )
+        return ExternalFunctionCallCancelFrame(
+            self.function_name, self.tool_call_id, parent_tool_call_id=parent_tool_call_id
         )
 
 
@@ -582,13 +623,16 @@ class BackendLLMWorker(LLMContextWorker):
         elif isinstance(frame, FunctionCallResultFrame):
             calls = [
                 BackendToolCall(
-                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                    "result",
+                    frame.function_name,
+                    frame.tool_call_id,
+                    arguments=frame.arguments,
+                    result=frame.result,
+                    is_final=frame.properties is None or frame.properties.is_final,
                 )
             ]
         elif isinstance(frame, FunctionCallCancelFrame):
-            calls = [
-                BackendToolCall("stopped", frame.function_name, frame.tool_call_id, cancelled=True)
-            ]
+            calls = [BackendToolCall("cancelled", frame.function_name, frame.tool_call_id)]
         for call in calls:
             await self.send_job_update(run.job_id, call.to_payload())
 
