@@ -267,13 +267,20 @@ TRANSCRIPT_EPOCH_FIELD = "epoch"
 
 # Client-mode redial schedule: the delay before each attempt doubles from
 # the first value up to the cap, and the outage as a whole is bounded by
-# ``MOQParams.reconnect_timeout``.
+# ``MOQParams.reconnect_timeout``. The cap is what the caller feels once
+# the relay is back — a dial is one QUIC handshake, so it stays low.
 _RECONNECT_BACKOFF_INITIAL_S = 0.5
-_RECONNECT_BACKOFF_MAX_S = 8.0
+_RECONNECT_BACKOFF_MAX_S = 2.0
 # A dropped connection ends the peer's subscriptions a beat before the
 # session itself reports closed. After the subscriptions end, wait this long
 # for the session before concluding the peer left a session that stayed up.
 _SESSION_CLOSE_GRACE_S = 0.5
+# A healthy session receives keepalive/ACK traffic every ~3-5s even when
+# nothing is being published, so an inbound byte counter frozen this long
+# means the network path is dead (see ``_session_stalled``). Comfortably
+# above the keepalive cadence, far under QUIC's ~30s idle timeout.
+_SESSION_STALL_POLL_S = 1.0
+_SESSION_STALL_S = 8.0
 # After subscribing to the peer's tracks, how long to wait for the first
 # record or audio frame before treating the subscription as dead. A relay
 # keeps announcing a path whose route died and serves nothing on it, so an
@@ -341,11 +348,10 @@ class MOQParams(TransportParams):
     """Configuration parameters for MOQ transport.
 
     Parameters:
-        relay_url: Full relay URL (e.g. ``https://relay.example.com:4080/moq``).
+        relay_url: Full relay URL, query string included,
+            (e.g. ``https://relay.example.com:4080/moq?jwt=…``),
             If unset, the transport composes one from the constructor's
-            ``host``/``port``/``path``. Dialed as given on every attempt,
-            query string included, so a relay token such as ``?jwt=…``
-            rides along. Ignored in serve mode.
+            ``host``/``port``/``path``. Ignored in serve mode.
         namespace: Top-level namespace shared by all participants.
         participant_id: This bot's id; the bot publishes under
             ``<namespace>/<participant_id>``. Defaults to ``response``,
@@ -389,8 +395,12 @@ class MOQParams(TransportParams):
             every redialed one.
         reconnect_timeout: Client mode only. How long, in seconds, the
             transport keeps redialing the relay after the session drops
-            before it gives up, counted from the start of the outage.
-            Attempts back off from 0.5 s to 8 s. While it redials the peer
+            before it gives up, counted from when the drop is detected.
+            A relay that vanishes without closing the session (killed
+            process, dead network path) is detected within seconds by
+            watching the connection's traffic counters, rather than
+            waiting out the QUIC idle timeout (~30 s).
+            Attempts back off from 0.5 s to 2 s. While it redials the peer
             is not reported gone; once the window expires the transport
             fires ``on_client_disconnected`` for a peer it had seen and
             pushes a permanent connectivity error. ``0`` disables
@@ -462,7 +472,7 @@ class MOQParams(TransportParams):
     client_tls_roots: list[str] | None = None
     client_tls_fingerprints: list[str] | None = None
     connection_timeout: float = 30.0
-    reconnect_timeout: float = 60.0
+    reconnect_timeout: float = 15.0
     serve: bool = False
     bind: str | None = None
     serve_bind: str | None = None
@@ -1030,9 +1040,13 @@ class MOQTransportClient:
                 _RECONNECT_BACKOFF_MAX_S,
                 remaining,
             )
+            # The redial window opens at detection, not at the loss
+            # itself: a relay that vanished without closing is noticed by
+            # the traffic-stall watchdog (see _session_stalled), so this
+            # line can trail the outage by up to _SESSION_STALL_S.
             logger.warning(
                 f"MOQ: session lost ({error or 'closed'}); redialing in {delay:.1f}s "
-                f"(attempt {attempt}, {remaining:.0f}s left)"
+                f"(attempt {attempt}; will keep redialing for up to {remaining:.0f}s)"
             )
             await self._callbacks.on_reconnecting(attempt)
             await asyncio.sleep(delay)
@@ -1082,8 +1096,19 @@ class MOQTransportClient:
             consume = self._task_manager.create_task(
                 self._consume_peer(subscribe_origin), f"{self}::moq_consume"
             )
+            stalled = self._task_manager.create_task(
+                self._session_stalled(session), f"{self}::moq_session_stalled"
+            )
             try:
-                done, _ = await asyncio.wait({closed, consume}, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(
+                    {closed, consume, stalled}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if stalled in done and closed not in done and consume not in done:
+                    logger.warning(
+                        f"MOQ: no inbound traffic for {_SESSION_STALL_S:.0f}s; "
+                        f"treating the session as dead"
+                    )
+                    return False
                 if closed not in done:
                     await asyncio.wait({closed}, timeout=_SESSION_CLOSE_GRACE_S)
                 if closed.done():
@@ -1095,7 +1120,7 @@ class MOQTransportClient:
                 logger.warning("MOQ: dropping the session for a fresh one")
                 return False
             finally:
-                for task in (closed, consume):
+                for task in (closed, consume, stalled):
                     if not task.done():
                         await self._task_manager.cancel_task(task)
 
@@ -1108,6 +1133,42 @@ class MOQTransportClient:
         except Exception as e:
             self._session_close_error = e
             logger.debug(f"MOQ: session closed: {e}")
+
+    async def _session_stalled(self, session: "moq.Session"):
+        """Return when the session's inbound byte counter stops moving.
+
+        A healthy session receives keepalive/ACK traffic every few
+        seconds even when nothing is being published, so a counter frozen
+        for ``_SESSION_STALL_S`` means the network path is dead. QUIC
+        itself only notices such a loss at its idle timeout (~30 s in
+        moq-native, not tunable through moq-ffi); returning early is what
+        starts the redial within seconds instead. Never returns when the
+        backend reports no counters (the WebSocket fallback), leaving
+        ``session.closed()`` as the only signal.
+        """
+        stats = getattr(session, "stats", None)
+        last: int | None = None
+        stalled_s = 0.0
+        while True:
+            received: int | None = None
+            if stats is not None:
+                try:
+                    received = stats().bytes_received
+                except Exception as e:
+                    logger.debug(f"MOQ: session.stats() raised: {e}")
+                    stats = None
+            if received is None:
+                stats = None
+                await asyncio.sleep(3600)
+                continue
+            if received != last:
+                last = received
+                stalled_s = 0.0
+            else:
+                stalled_s += _SESSION_STALL_POLL_S
+                if stalled_s >= _SESSION_STALL_S:
+                    return
+            await asyncio.sleep(_SESSION_STALL_POLL_S)
 
     async def _on_peer_available(self):
         """Record that the peer's broadcast is announced on the current session.
