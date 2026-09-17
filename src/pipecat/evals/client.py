@@ -187,15 +187,20 @@ class _BotSpeechGate(FrameProcessor):
     before that send is the bot finishing what it was saying, however late it
     lands, and is dropped here so it cannot pass for the reply or be folded
     into it.
+
+    Both need a segmented STT, which transcribes one segment at a time. With
+    any other STT the gate keeps no account of segments and drops nothing, and
+    a send waits only for the bot to stop speaking and its open turn to close.
     """
 
-    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float]"):
+    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
         """Initialize the gate.
 
         Args:
             stream: The event stream, for when the user's input was sent.
             trace: The run's trace, for what the gate drops.
-            starts: Where the start of each ended segment goes, for the STT.
+            starts: Where the start of each ended segment goes, for the STT's
+                tagging; ``None`` with an STT that is not segmented.
         """
         super().__init__()
         self._stream = stream
@@ -205,7 +210,9 @@ class _BotSpeechGate(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
+        if self._starts is None:
+            pass
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
             self._stream.bot_segment_started()
@@ -773,8 +780,9 @@ class EvalClient:
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
-            starts: deque[float] = deque()
+            starts: deque[float] | None = None
             if isinstance(bot_stt, SegmentedSTTService):
+                starts = deque()
                 _tag_bot_segments(bot_stt, starts)
             inbound += [
                 bot_stt,

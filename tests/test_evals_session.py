@@ -574,6 +574,17 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         down, _ = await self._run(gate, [plain])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["untagged"])
 
+    async def test_with_an_unsegmented_stt_the_gate_keeps_no_account_of_segments(self):
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), None)
+        await self._run(
+            gate,
+            [VADUserStartedSpeakingFrame(), VADUserStoppedSpeakingFrame()],
+            direction=FrameDirection.UPSTREAM,
+        )
+        # Nothing awaits a transcription that will never be paired with a segment.
+        self.assertTrue(await stream.wait_bot_transcribed(0.01))
+
     async def test_the_gate_records_when_each_segment_began_as_it_ends(self):
         starts: deque[float] = deque()
         stream = _stream(bot_audio=True)

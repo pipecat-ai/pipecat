@@ -333,6 +333,65 @@ class TestBotConcurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(peak["wide.py"], 3)
         self.assertEqual([r.status for r in runs], ["done"] * 6)
 
+    async def test_an_entry_cap_holds_across_attempts_without_holding_suite_slots(self):
+        # A capped entry repeated three times gets three queues, but only one
+        # of them may run at a time; its waiting lanes hold no suite slot, so
+        # the other entry runs alongside.
+        runs = [
+            EvalRun(
+                bot=bot,
+                scenario="s",
+                scenario_path=self.logs_dir / "s.yaml",
+                bot_path=self.logs_dir / bot,
+                concurrency=1 if bot == "capped.py" else None,
+                attempt=attempt,
+            )
+            for attempt in (1, 2, 3)
+            for bot in ("capped.py", "plain.py")
+        ]
+        suite = EvalSuite(
+            EvalManifest(
+                runs=runs,
+                spawn=DEFAULT_SPAWN,
+                python=sys.executable,
+                concurrency=2,
+                repeat=3,
+                base_port=7900,
+                runs_dir=None,
+                record=False,
+                cache_dir=None,
+            )
+        )
+        active: dict[str, int] = {}
+        peak: dict[str, int] = {}
+        peak_total = 0
+
+        async def spawn(run, port, files):
+            nonlocal peak_total
+            active[run.bot] = active.get(run.bot, 0) + 1
+            peak[run.bot] = max(peak.get(run.bot, 0), active[run.bot])
+            peak_total = max(peak_total, sum(active.values()))
+            await asyncio.sleep(0.05)
+            active[run.bot] -= 1
+            return None
+
+        async def harness(run, port, files, *, debug, params):
+            return None
+
+        async def finish(run, files, bot, worker, results_path, logs_dir, record_dir):
+            run.status = "done"
+
+        suite._missing_file = lambda run: None
+        suite._spawn_bot = spawn
+        suite._run_harness = harness
+        suite._finish = finish
+
+        await suite.run(self.logs_dir)
+
+        self.assertEqual(peak["capped.py"], 1)
+        self.assertEqual(peak_total, 2)
+        self.assertEqual([r.status for r in runs], ["done"] * 6)
+
     async def test_entries_take_slots_in_manifest_order_and_drain_their_queues(self):
         runs = [
             EvalRun(
@@ -859,10 +918,12 @@ class TestEntryQueues(unittest.TestCase):
         ]
         queues = EvalSuite._entry_queues(runs)
         self.assertEqual(
-            [[(r.label, r.scenario) for r in q] for _, q in queues],
+            [[(r.label, r.scenario) for r in q] for _, _, q in queues],
             [[("a", "s1"), ("a", "s2"), ("a", "s3")], [("b", "s1")], [("c", "s1")]],
         )
-        self.assertEqual([slots for slots, _ in queues], [1, 1, 1])
+        self.assertEqual(
+            [(label, slots) for label, slots, _ in queues], [("a", 1), ("b", 1), ("c", 1)]
+        )
 
     def test_attempts_form_their_own_queues_attempt_major(self):
         runs = [
@@ -875,7 +936,7 @@ class TestEntryQueues(unittest.TestCase):
         ]
         queues = EvalSuite._entry_queues(runs)
         self.assertEqual(
-            [[(r.label, r.scenario, r.attempt) for r in q] for _, q in queues],
+            [[(r.label, r.scenario, r.attempt) for r in q] for _, _, q in queues],
             [
                 [("a", "s1", 1), ("a", "s2", 1)],
                 [("b", "s1", 1)],
@@ -890,4 +951,4 @@ class TestEntryQueues(unittest.TestCase):
             self._run("a", "s2", concurrency=2),
             self._run("b", "s1"),
         ]
-        self.assertEqual([slots for slots, _ in EvalSuite._entry_queues(runs)], [2, 1])
+        self.assertEqual([slots for _, slots, _ in EvalSuite._entry_queues(runs)], [2, 1])

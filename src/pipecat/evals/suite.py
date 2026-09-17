@@ -893,8 +893,8 @@ class EvalSuite(BaseObject):
         rate-limited provider holds no more than that one slot and its
         scenarios finish as a block. Queues take free slots in manifest order,
         every entry's first attempt before any entry's second; an entry whose
-        ``concurrency:`` allows it holds that many slots and runs its queue
-        that wide.
+        ``concurrency:`` allows it holds that many slots, across its attempts,
+        and runs its queues that wide.
 
         Args:
             logs_dir: Directory for per-run logs.
@@ -936,12 +936,22 @@ class EvalSuite(BaseObject):
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
         sem = asyncio.Semaphore(self.manifest.concurrency)
         ports = {id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)}
+        entry_sems: dict[str, asyncio.Semaphore] = {}
         lanes = []
-        for slots, queue in self._entry_queues(self.runs):
+        for label, slots, queue in self._entry_queues(self.runs):
+            entry_sem = entry_sems.setdefault(label, asyncio.Semaphore(slots))
             for _ in range(min(slots, len(queue))):
                 lanes.append(
                     self._run_lane(
-                        queue, ports, logs_dir, record_dir, results_path, sem, debug, params
+                        queue,
+                        entry_sem,
+                        ports,
+                        logs_dir,
+                        record_dir,
+                        results_path,
+                        sem,
+                        debug,
+                        params,
                     )
                 )
         try:
@@ -953,6 +963,7 @@ class EvalSuite(BaseObject):
     async def _run_lane(
         self,
         queue: deque[EvalRun],
+        entry_sem: asyncio.Semaphore,
         ports: dict[int, int],
         logs_dir: Path,
         record_dir: Path | None,
@@ -961,8 +972,12 @@ class EvalSuite(BaseObject):
         debug: bool,
         params: EvalSessionParams,
     ) -> None:
-        """Hold one suite slot and run an entry's queued runs on it, one after another."""
-        async with sem:
+        """Hold one of the entry's slots and one suite slot, and run a queue on them, one run after another.
+
+        The entry's slot comes first, so a lane of an entry that is already
+        as wide as it may be waits without sitting on a suite slot.
+        """
+        async with entry_sem, sem:
             while queue:
                 run = queue.popleft()
                 await self._run_one(
@@ -1002,11 +1017,12 @@ class EvalSuite(BaseObject):
             await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
 
     @staticmethod
-    def _entry_queues(runs: list[EvalRun]) -> list[tuple[int, deque[EvalRun]]]:
-        """One queue per entry label and attempt, attempt-major then in manifest order, with the slots the entry may hold.
+    def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int, deque[EvalRun]]]:
+        """One queue per entry label and attempt, attempt-major then in manifest order, with the label and the slots the entry may hold.
 
-        A queue keeps its runs in manifest order. Its slots are the lowest
-        ``concurrency:`` among the label's runs, one when none sets it.
+        A queue keeps its runs in manifest order. An entry's slots are the
+        lowest ``concurrency:`` among its runs, one when none sets it, and
+        they are shared by all of its attempts.
         """
         queues: dict[tuple[int, str], deque[EvalRun]] = {}
         slots: dict[str, int] = {}
@@ -1015,7 +1031,7 @@ class EvalSuite(BaseObject):
             if run.concurrency is not None:
                 slots[run.label] = min(slots.get(run.label, run.concurrency), run.concurrency)
         return [
-            (slots.get(label, 1), queue)
+            (label, slots.get(label, 1), queue)
             for (_, label), queue in sorted(queues.items(), key=lambda item: item[0][0])
         ]
 
