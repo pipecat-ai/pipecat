@@ -240,7 +240,7 @@ _THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=
 async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_flagged(
     monkeypatch,
 ):
-    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _FINAL)
+    _stream(monkeypatch, _PROGRESS, _THOUGHT, _SPOKEN_PROGRESS, _FINAL)
     params = _params()
 
     await _bound(BackendConnector()).delegate(params)
@@ -248,6 +248,10 @@ async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_
     assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
         call(
             {"text": "Let me check."},
+            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
+        ),
+        call(
+            {"reasoning": "Weather first."},
             properties=FunctionCallResultProperties(is_final=False, run_llm=False),
         ),
         call(
