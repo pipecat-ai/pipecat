@@ -510,10 +510,14 @@ class PipecatDualLLMService(Pipeline):
     """A conversational frontend LLM with a backend it delegates to, in one processor.
 
     Put it where the LLM goes in a pipeline. It wraps the frontend service,
-    installs the connector's ``delegate`` tool on it (adding the tool to the
-    context's tools as they pass, and to any tool change), appends the
-    connector's guidance to the frontend's system instruction, and adds a local
-    backend worker to the pipeline worker so the app never wires it up.
+    gives it the connector's ``delegate`` tool, appends the connector's
+    guidance to the frontend's system instruction, and adds a local backend
+    worker to the pipeline worker so the app never wires it up. The tools
+    are the backend's; the frontend has ``delegate`` and no more. (A tool the
+    frontend must keep goes in the context's tools, where ``delegate`` is
+    added alongside it; tools configured on the frontend service itself are
+    not sent once the context has tools, as the service's usual precedence
+    has it.)
 
     The guidance says when to delegate in general terms. The frontend's own
     system instruction is the place to say what the backend is for, in plain
