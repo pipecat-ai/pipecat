@@ -41,8 +41,9 @@ def language_to_minimax_language(language: Language) -> str:
 
     Returns:
         The corresponding MiniMax language name. If ``language`` is not in
-        the verified mapping, falls back to the full language code string and
-        logs a warning (via ``resolve_language(..., use_base_code=False)``).
+        the verified mapping, falls back to its base language's name (``pt-BR``
+        becomes ``Portuguese``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "Afrikaans",
@@ -87,7 +88,7 @@ def language_to_minimax_language(language: Language) -> str:
         Language.ZH: "Chinese",
     }
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 @dataclass

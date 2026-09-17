@@ -16,6 +16,7 @@ from pipecat.services.elevenlabs.stt import (
     ElevenLabsRealtimeSTTService,
     ElevenLabsSTTService,
     audio_format_from_sample_rate,
+    language_to_elevenlabs_language,
 )
 from pipecat.transcriptions.language import Language
 
@@ -126,13 +127,38 @@ async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     assert parsed.netloc == "example.test"
     assert parsed.path == "/v1/speech-to-text/realtime"
     assert query["model_id"] == ["scribe_v2_realtime"]
-    assert query["language_code"] == ["en"]
+    assert query["language_code"] == ["eng"]
     assert query["audio_format"] == ["pcm_16000"]
     assert query["commit_strategy"] == ["vad"]
     assert query["include_timestamps"] == ["true"]
     assert query["vad_threshold"] == ["0.7"]
     assert query["keyterms"] == ["Pipecat", "Scribe V2"]
     assert captured["headers"] == {"xi-api-key": "test-key"}
+
+
+@pytest.mark.parametrize(
+    "language, expected",
+    [
+        (Language.EN, "eng"),
+        (Language.EN_US, "eng"),
+        (Language.ES_MX, "spa"),
+        (Language.YUE, "yue"),
+    ],
+)
+def test_language_to_elevenlabs_language_resolves_regional_variants(language, expected):
+    assert language_to_elevenlabs_language(language) == expected
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_converts_language_on_settings_update():
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        settings=ElevenLabsRealtimeSTTService.Settings(language=Language.EN_US),
+    )
+    assert service._settings.language == "eng"
+
+    await service._update_settings(ElevenLabsRealtimeSTTService.Settings(language=Language.ES_MX))
+    assert service._settings.language == "spa"
 
 
 @pytest.mark.asyncio

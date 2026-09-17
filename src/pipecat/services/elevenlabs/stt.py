@@ -55,8 +55,9 @@ def language_to_elevenlabs_language(language: Language) -> str:
 
     Returns:
         The corresponding service language code. If ``language`` is not in
-        the verified mapping, falls back to the full language code string and
-        logs a warning (via ``resolve_language(..., use_base_code=False)``).
+        the verified mapping, falls back to its base language's code (``en-US``
+        becomes ``eng``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "afr",  # Afrikaans
@@ -160,7 +161,7 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.ZU: "zul",  # Zulu
     }
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class CommitStrategy(StrEnum):
@@ -624,6 +625,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             True, as ElevenLabs Realtime STT service supports metrics generation.
         """
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to ElevenLabs service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The ElevenLabs-specific language code, or None if not supported.
+        """
+        return language_to_elevenlabs_language(language)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed.
