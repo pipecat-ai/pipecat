@@ -1,0 +1,1 @@
+- Added `LiveKitParams.rtc_config` to configure LiveKit ICE transport policy and ICE servers.
