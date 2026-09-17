@@ -6,80 +6,13 @@
 
 """MOQ (Media over QUIC) transport implementation for Pipecat.
 
-Uses the upstream ``moq`` Python library
-(`moq-rs <https://pypi.org/project/moq-rs/>`_) for the QUIC connection,
-MOQ session, announcement discovery, subscription routing, group/frame
-framing, codec-specific catalog management, and Opus encode/decode +
-resampling for raw audio tracks. This module just wires it into the
-pipecat Frame pipeline.
-
-Each participant publishes under a per-participant broadcast path
-``<namespace>/<participant_id>`` (e.g. ``pipecat/response``); the bot
-subscribes to the peer at ``<namespace>/<peer_id>`` (e.g.
-``pipecat/request``). The ids default to the direction each side carries
--- the bot's own broadcast is the ``response``, the peer's the
-``request``. That layer assumes
-both peers agree on a namespace up front; when the paths are instead
-assigned externally, ``response_path``/``request_path`` set them
-directly and the namespace is unused. Audio rides on a
-single Opus track; RTVI JSON rides on a fixed-name ``transcript.json.z``
-track carried by moq's JSON stream helper (``publish_json_stream`` /
-``subscribe_json_stream``). The stream is an ordered, lossless append-log
-of records — every message is delivered in order, unlike the JSON
-*snapshot* helper (``publish_json_snapshot`` / ``subscribe_json_snapshot``)
-which collapses to the latest value and would drop RTVI events a slow
-consumer fell behind on. Compression is enabled (hence the ``.z``
-suffix). The transcript is a side-channel, like moq-boy's
-``status``/``command`` tracks: it deliberately bypasses the catalog
-(which only describes media renditions), so the browser reads it by the
-well-known name rather than by catalog discovery.
-
-Both directions carry the same shape: the bot publishes bot-side RTVI
-events on its own ``transcript`` track and subscribes to the client's
-``transcript`` track for client-side traffic (``client-ready`` for
-protocol negotiation, typed text input, function-call results, etc).
-This makes MoQ a full bidirectional RTVI transport, on par with the
-Daily and WebSocket transports.
-
-Two modes:
-
-- **Server mode** (``serve=True``): the bot binds its own UDP socket via
-  ``moq.Server`` and accepts the browser's direct connection. Removes
-  the need for a separate ``moq-relay`` process for local dev. The
-  self-signed cert fingerprints are exposed via
-  :attr:`MOQTransport.cert_fingerprints` so a browser can pin them.
-- **Client mode** (``serve=False``): the bot dials a relay at
-  ``relay_url`` (or the constructor's ``host``/``port``/``path``) and
-  the browser dials the same relay independently. Neither peer needs a
-  reachable address, so this is the mode that works when the bot sits
-  behind NAT. Both peers must agree on the namespace, since that's what
-  they rendezvous on — the dev runner mints a random one per session
-  and hands it to the browser (see :mod:`pipecat.runner.moq`).
-
-Client mode redials the relay when the session drops (see
-:attr:`MOQParams.reconnect_timeout`). The publish side is kept across
-dials by content but rebuilt by identity: a redial announces the same
-path from a fresh origin, replaying the transcript log into it, because a
-relay that still holds a dead route for the old publisher never serves a
-re-announce under that publisher's identity. The peer's tracks are
-subscribed again once its broadcast is announced to the new session.
-A token the relay refuses is not retried; the relay accepts the connection
-first and then closes the session as unauthorized, so the refusal is read
-off the session close rather than the dial.
-
-Each side appends a ``session-ending`` marker to its transcript stream
-before it leaves. A peer whose tracks end after the marker has hung up. A
-peer whose tracks end without it may be behind a failed relay, which on
-the wire looks the same as a hangup, so the transport redials and gives
-the peer ``connection_timeout`` to reappear before reporting it gone.
-
-Every transcript record carries ``seq`` and ``epoch``. The JSON stream is
-a single group that a subscriber always reads from its first record, so a
-reconnect on either side replays the whole log. The subscriber drops
-records it has already seen (``seq`` at or below the last one for the
-same ``epoch``) and strips both fields before the message reaches the
-pipeline. A record without ``seq`` comes from a peer that predates the
-fields and passes through unchanged.
+This module provides MoQ transport using the ``moq`` Python library
+(`moq-rs <https://pypi.org/project/moq-rs/>`_) for the QUIC session,
+discovery, subscription routing, and Opus encode/decode; this module
+wires it into the pipecat frame pipeline. Each participant publishes an
+audio track and an RTVI JSON transcript track under its own broadcast
+path (``<namespace>/<participant_id>``) and subscribes to the peer's,
+making MoQ a full bidirectional RTVI transport.
 """
 
 import asyncio
@@ -258,10 +191,14 @@ DEFAULT_AUDIO_OUT_TRACK = "bot-audio"
 # suffix marks that the stream is compressed on the wire.
 DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z"
 
-# Transport-level fields on every transcript record. ``seq`` counts records
-# for the life of the publishing transport instance, across reconnects;
-# ``epoch`` identifies that instance, so a fresh peer starts its own count
-# instead of colliding with the previous one's watermark on the subscriber.
+# Transport-level fields on every transcript record. The transcript is a
+# single group that a subscriber always reads from its first record, so a
+# reconnect on either side replays the whole log; these fields are how the
+# subscriber drops what it has already seen (see ``_accept_peer_record``).
+# ``seq`` counts records for the life of the publishing transport instance,
+# across reconnects; ``epoch`` identifies that instance, so a fresh peer
+# starts its own count instead of colliding with the previous one's
+# watermark on the subscriber.
 TRANSCRIPT_SEQ_FIELD = "seq"
 TRANSCRIPT_EPOCH_FIELD = "epoch"
 
@@ -861,7 +798,7 @@ class MOQTransportClient:
         """Append an RTVI message to the transcript JSON stream.
 
         The record is the message plus the ``seq`` and ``epoch`` fields a
-        subscriber uses to drop replays (see the module docstring); the
+        subscriber uses to drop replays (see ``TRANSCRIPT_SEQ_FIELD``); the
         message itself is not modified. The stream helper serializes and
         frames the record, appending it to the ordered log so no message
         is dropped.
@@ -1563,7 +1500,7 @@ class MOQTransportClient:
     def _accept_peer_record(self, record: dict) -> dict | None:
         """Return the RTVI message in a peer transcript record, or ``None`` for a replay.
 
-        Records carry ``seq`` and ``epoch`` (see the module docstring). A
+        Records carry ``seq`` and ``epoch`` (see ``TRANSCRIPT_SEQ_FIELD``). A
         record at or below the last ``seq`` seen for the current ``epoch``
         has already been delivered. A different ``epoch`` is a new peer
         instance whose count starts over. A record without ``seq`` comes
