@@ -14,16 +14,22 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 from loguru import logger
 
+from pipecat.evals.session import EvalSessionParams
 from pipecat.evals.suite import (
     DEFAULT_CONCURRENCY,
     DEFAULT_SPAWN,
+    WORKER_SAFETY_TIMEOUT_S,
+    WORKER_TIMEOUT_MARGIN_S,
     EvalManifest,
     EvalRun,
     EvalSuite,
+    _RunFiles,
     capture_pipeline_logs,
+    worker_timeout_s,
 )
 
 MANIFEST = """
@@ -147,6 +153,50 @@ class TestEvalManifestLoad(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad) as ctx:
                 EvalManifest.load(self.manifest_path)
             self.assertIn("'concurrency:'", str(ctx.exception))
+
+    def test_worker_timeout_is_unset_by_default_and_the_command_line_wins(self):
+        m = EvalManifest.load(self.manifest_path)
+        self.assertIsNone(m.worker_timeout)
+        (self.base / "capped.yaml").write_text("worker_timeout: 900\nsuite: []\n")
+        self.assertEqual(EvalManifest.load(self.base / "capped.yaml").worker_timeout, 900.0)
+        self.assertEqual(
+            EvalManifest.load(self.base / "capped.yaml", worker_timeout=120).worker_timeout, 120
+        )
+
+    def test_a_worker_timeout_must_be_positive(self):
+        (self.base / "bad.yaml").write_text("worker_timeout: 0\nsuite: []\n")
+        with self.assertRaises(ValueError):
+            EvalManifest.load(self.base / "bad.yaml")
+        with self.assertRaises(ValueError):
+            EvalManifest.load(self.manifest_path, worker_timeout=-1)
+
+    def test_an_entry_can_carry_an_env_for_its_bot(self):
+        m = EvalManifest.load(self.manifest_path)
+        self.assertEqual(m.runs[0].env, {})
+        self.manifest_path.write_text(
+            "suite:\n"
+            "  - bot: bot.py\n"
+            "    name: claude (low)\n"
+            "    env: {EFFORT: low, RETRIES: 3}\n"
+            "    scenarios: [greet]\n"
+            "  - bot: bot.py\n"
+            "    name: claude (high)\n"
+            "    env: {EFFORT: high}\n"
+            "    scenarios: [greet]\n"
+        )
+        m = EvalManifest.load(self.manifest_path)
+        self.assertEqual([r.label for r in m.runs], ["claude (low)", "claude (high)"])
+        # Values are strings, since that is what an environment holds.
+        self.assertEqual(m.runs[0].env, {"EFFORT": "low", "RETRIES": "3"})
+        self.assertEqual(m.runs[1].env, {"EFFORT": "high"})
+
+    def test_an_entry_env_must_be_a_mapping(self):
+        self.manifest_path.write_text(
+            "suite:\n  - bot: a.py\n    env: [EFFORT]\n    scenarios: [x]\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            EvalManifest.load(self.manifest_path)
+        self.assertIn("'env:'", str(ctx.exception))
 
 
 class TestCapturePipelineLogs(unittest.TestCase):
@@ -428,6 +478,185 @@ class TestSpawnWithRunnerBody(unittest.IsolatedAsyncioTestCase):
         seen = await self._spawn(run)
         self.assertEqual(seen["argv"][2:], ["--runner-body", str(body)])
         self.assertEqual(Path(seen["cwd"]).resolve(), body.parent)
+
+
+class TestWorkerTimeout(unittest.TestCase):
+    """The cap on a run's harness worker: an override as is, else derived with the constant as floor."""
+
+    def _script(self, budgets: list[int | None]) -> EvalRun:
+        """A run of a scripted scenario with one ``response`` expectation per turn, budgeted as given."""
+        from pipecat.evals.script import EvalExpectation, EvalScriptScenario, EvalScriptTurn
+
+        turns = [
+            EvalScriptTurn(user="hi", expect=[EvalExpectation(event="response", within_ms=b)])
+            for b in budgets
+        ]
+        loaded = EvalScriptScenario(name="s", turns=turns)
+        return EvalRun(bot="b", scenario="s", scenario_path=Path("s.yaml"), loaded=loaded)
+
+    def test_an_override_is_taken_as_is(self):
+        run = self._script([None] * 30)
+        self.assertEqual(worker_timeout_s(run, 60000, 42.0), 42.0)
+
+    def test_a_short_script_gets_the_floor_plus_the_margin(self):
+        run = self._script([30000, None])
+        self.assertEqual(
+            worker_timeout_s(run, 60000, None), WORKER_SAFETY_TIMEOUT_S + WORKER_TIMEOUT_MARGIN_S
+        )
+
+    def test_a_long_script_sums_its_turn_budgets(self):
+        # 30 turns: 20 at the default 60s, 10 at an explicit 45s -> 1650s, over the floor.
+        run = self._script([None] * 20 + [45000] * 10)
+        self.assertEqual(worker_timeout_s(run, 60000, None), 1650 + WORKER_TIMEOUT_MARGIN_S)
+        # The default timeout is the run's, not a constant.
+        self.assertEqual(worker_timeout_s(run, 90000, None), 2250 + WORKER_TIMEOUT_MARGIN_S)
+
+    def test_a_turn_budget_is_its_largest_within_ms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            (base / "scenarios").mkdir()
+            (base / "scenarios" / "long.yaml").write_text(
+                "name: long\n"
+                "scenarios:\n"
+                "  - name: long\n"
+                "    turns:\n"
+                "      - user: hi\n"
+                "        expect:\n"
+                "          - {event: llm_started, within_ms: 5000}\n"
+                "          - {event: response, within_ms: 400000}\n"
+                "      - user: more\n"
+                "        expect: [{event: response}]\n"
+                "      - user: last\n"
+                "        expect: [{event: response, within_ms: 300000}]\n"
+            )
+            (base / "manifest.yaml").write_text("suite:\n  - bot: bot.py\n    scenarios: [long]\n")
+            run = EvalManifest.load(base / "manifest.yaml").runs[0]
+        # 400 + 60 + 300 = 760s, over the floor.
+        self.assertEqual(worker_timeout_s(run, 60000, None), 760 + WORKER_TIMEOUT_MARGIN_S)
+
+    def test_a_scenario_that_did_not_load_gets_the_floor(self):
+        run = EvalRun(bot="b", scenario="nope", scenario_path=Path("nope.yaml"))
+        self.assertEqual(
+            worker_timeout_s(run, 60000, None), WORKER_SAFETY_TIMEOUT_S + WORKER_TIMEOUT_MARGIN_S
+        )
+
+    def test_a_simulation_starts_from_its_max_duration(self):
+        from pipecat.evals.scenario import EvalKind
+        from pipecat.evals.simulation import EvalSimulationScenario
+
+        def simulation(max_duration_s: float) -> EvalRun:
+            loaded = EvalSimulationScenario(
+                name="s",
+                persona="A caller.",
+                goal="Get it done.",
+                success="it got done",
+                max_duration_s=max_duration_s,
+            )
+            return EvalRun(
+                bot="b",
+                scenario="s",
+                scenario_path=Path("s.yaml"),
+                kind=EvalKind.SIMULATION,
+                loaded=loaded,
+            )
+
+        # Below the floor: the floor, the judge still runs after the conversation.
+        self.assertEqual(
+            worker_timeout_s(simulation(120.0), 60000, None),
+            WORKER_SAFETY_TIMEOUT_S + WORKER_TIMEOUT_MARGIN_S,
+        )
+        self.assertEqual(
+            worker_timeout_s(simulation(1800.0), 60000, None), 1800 + WORKER_TIMEOUT_MARGIN_S
+        )
+
+
+class _NeverExits:
+    """A stand-in for a spawned process that never finishes on its own."""
+
+    def __init__(self):
+        self.returncode = None
+        self.killed = False
+
+    async def wait(self):
+        if self.killed:
+            self.returncode = -9
+            return self.returncode
+        await asyncio.Event().wait()
+
+    def kill(self):
+        self.killed = True
+
+    def terminate(self):
+        self.killed = True
+
+
+class TestSuiteSpawning(unittest.IsolatedAsyncioTestCase):
+    """What the suite hands the subprocesses: the run's environment, and the worker's cap."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        (self.base / "bot.py").write_text("")
+        (self.base / "s.yaml").write_text("name: s\nturns: []\n")
+        self.logs_dir = self.base / "logs"
+        self.logs_dir.mkdir()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _suite(self, **manifest_kwargs) -> tuple[EvalSuite, EvalRun]:
+        run = EvalRun(
+            bot="bot.py",
+            name="claude (low)",
+            env={"EFFORT": "low"},
+            scenario="s",
+            scenario_path=self.base / "s.yaml",
+            bot_path=self.base / "bot.py",
+        )
+        manifest = EvalManifest(
+            runs=[run],
+            spawn=DEFAULT_SPAWN,
+            python=sys.executable,
+            concurrency=1,
+            repeat=1,
+            base_port=7900,
+            runs_dir=None,
+            record=False,
+            cache_dir=None,
+            **manifest_kwargs,
+        )
+        return EvalSuite(manifest), run
+
+    async def test_the_runs_env_is_laid_over_the_suites(self):
+        suite, run = self._suite()
+        files = _RunFiles.for_run(run, self.logs_dir, None)
+        seen: list[dict] = []
+
+        async def fake_exec(*argv, **kwargs):
+            seen.append(kwargs)
+            return _NeverExits()
+
+        with mock.patch.dict(os.environ, {"SUITE_VAR": "yes"}):
+            with mock.patch("pipecat.evals.suite.asyncio.create_subprocess_exec", fake_exec):
+                await suite._spawn_bot(run, 7900, files)
+        self.assertEqual(len(seen), 1)
+        env = seen[0]["env"]
+        self.assertEqual(env["EFFORT"], "low")
+        self.assertEqual(env["SUITE_VAR"], "yes")
+
+    async def test_the_worker_is_killed_at_the_manifests_cap(self):
+        suite, run = self._suite(worker_timeout=0.05)
+        files = _RunFiles.for_run(run, self.logs_dir, None)
+        worker = _NeverExits()
+
+        async def fake_exec(*argv, **kwargs):
+            return worker
+
+        with mock.patch("pipecat.evals.suite.asyncio.create_subprocess_exec", fake_exec):
+            await suite._run_harness(run, 7900, files, debug=False, params=EvalSessionParams())
+        self.assertTrue(worker.killed)
+        self.assertIn("harness worker timed out", run.error)
+        self.assertIsNone(run.result)
 
 
 if __name__ == "__main__":

@@ -1187,6 +1187,14 @@ def suite(
         help="Default per-expectation timeout in seconds (for expectations without their own "
         "within_ms).",
     ),
+    worker_timeout: float = typer.Option(
+        None,
+        "-w",
+        "--worker-timeout",
+        help="Override manifest worker_timeout: seconds a run's harness worker may take "
+        "before it is killed. Default: derived from each scenario's turn budgets or "
+        "max_duration_s, with a 600s floor, plus 60s.",
+    ),
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
@@ -1217,6 +1225,7 @@ def suite(
         base_port=base_port,
         record=audio or None,
         cache_dir=cache_dir,
+        worker_timeout=worker_timeout,
     )
 
     suite = EvalSuite(manifest)
