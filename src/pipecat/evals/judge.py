@@ -81,6 +81,34 @@ JUDGE_ASK_TEMPLATE = (
     "Answer yes, no, or continue."
 )
 
+# The judge's instructions for an ``eval:`` on a function call. The call is
+# the subject, and the conversation is context for it, so the verdict is yes or
+# no: a call is not a partial reply, and there is nothing to wait for.
+JUDGE_CALL_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair judge evaluating a function call made by a bot under "
+    "test in a conversation with a user. The 'user' messages are the user; the "
+    "'assistant' messages are the bot's replies so far, given only as context for the "
+    "call. Judge only the call you are asked about, by its name and its arguments, "
+    "against the given criterion. "
+    "When the bot spoke its replies, the 'assistant' text is an automatic speech-to-text "
+    "transcription, so it may contain homophones, misspellings, split or merged words, and "
+    "missing punctuation; judge it by the intended spoken meaning. "
+    "Respond ONLY with a JSON object on a single line containing two fields: "
+    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
+    'Use "yes" if the call satisfies the criterion and "no" if it does not. '
+    "Do not include any other text, explanation, or markdown."
+)
+
+# The ask for an ``eval:`` on a function call. It names the call and gives its
+# arguments as JSON, so the verdict is about that call rather than about what
+# the bot said around it.
+JUDGE_CALL_ASK_TEMPLATE = (
+    "The bot called the function `{name}` with arguments `{args}`. "
+    "Does this call satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
+)
+
 
 RUN_JUDGE_SYSTEM_INSTRUCTION = (
     "You are a strict but fair judge evaluating a complete conversation between a user "
@@ -256,6 +284,28 @@ class EvalJudge:
         """
         ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
         return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+
+    async def evaluate_call(self, name: str, args: dict | None, criterion: str) -> JudgeVerdict:
+        """Judge whether a function call the bot made satisfies ``criterion``, in the conversation so far.
+
+        The judge gets its own instructions for a call: the ask names the call
+        and its arguments, the conversation so far is context, and the verdict
+        is yes or no. A ``continue`` makes no sense for a call — it is not a
+        partial reply — and callers treat it as a ``no``.
+
+        Args:
+            name: The function's name.
+            args: The call's arguments, shown to the judge as JSON.
+            criterion: Natural-language description of what the call should be.
+
+        Returns:
+            A :class:`JudgeVerdict`, cached by ``(call, criterion, conversation)``
+            like :meth:`evaluate`.
+        """
+        ask = JUDGE_CALL_ASK_TEMPLATE.format(
+            name=name, args=json.dumps(args or {}, ensure_ascii=False), criterion=criterion
+        )
+        return await self._evaluate(criterion, JUDGE_CALL_SYSTEM_INSTRUCTION, ask)
 
     async def evaluate_run(
         self,
