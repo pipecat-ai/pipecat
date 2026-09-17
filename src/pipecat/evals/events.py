@@ -111,7 +111,6 @@ class EvalEventStream:
         # input is the bot's earlier output, not its reply, however late the
         # harness's turn analyzer finalizes it.
         self._input_sent_at: float = 0.0
-        self._bot_turn_started_at: float | None = None
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
@@ -313,26 +312,26 @@ class EvalEventStream:
             }
         return None
 
-    def bot_turn_started(self) -> None:
-        """Note that the bot began a spoken turn."""
-        self._bot_turn_started_at = time.monotonic()
+    @property
+    def input_sent_at(self) -> float:
+        """Monotonic time of the user's latest send; bot speech from before it is not the reply."""
+        return self._input_sent_at
 
     async def bot_turn_stopped(self, text: str) -> None:
         """Append the bot's finished spoken turn as a ``response``, unless it is stale.
 
-        A turn is stale when it began before the user's latest send, or when the
-        bot's LLM has not restarted since. An interrupted turn can finalize after
-        the bot has begun its real reply, and must not pass for it.
+        Speech from before the user's latest send never reaches a turn (the
+        client drops it by its audio's time). A turn is still stale while the
+        bot's LLM has not restarted since the send: the bot going on with what
+        it was saying, which must not pass for the reply.
 
         Args:
             text: The turn's transcription; nothing is appended when empty.
         """
-        started = self._bot_turn_started_at
-        self._bot_turn_started_at = None
         if not text:
             return
-        if self._awaiting_reply or (started is not None and started < self._input_sent_at):
-            self._trace.log(f"discard: bot turn from before the send {text!r}")
+        if self._awaiting_reply:
+            self._trace.log(f"discard: bot turn from before the reply {text!r}")
             return
         await self.append({"type": "response", "text": text})
 
