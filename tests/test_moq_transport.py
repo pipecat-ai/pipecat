@@ -47,7 +47,9 @@ Areas covered:
 
 import argparse
 import asyncio
+import itertools
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1011,6 +1013,8 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
             patch.object(moq_transport, "_RECONNECT_BACKOFF_INITIAL_S", 0.001),
             patch.object(moq_transport, "_RECONNECT_BACKOFF_MAX_S", 0.002),
             patch.object(moq_transport, "_SESSION_CLOSE_GRACE_S", 0.01),
+            patch.object(moq_transport, "_SESSION_STALL_POLL_S", 0.005),
+            patch.object(moq_transport, "_SESSION_STALL_S", 0.02),
             patch.object(
                 moq_transport.moq,
                 "Client",
@@ -1125,6 +1129,50 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_error.assert_not_awaited()
         cb.on_disconnected.assert_awaited_once()
         self.assertEqual(self.dials, [self.URL, self.URL])
+
+    async def test_a_session_whose_inbound_traffic_stalls_is_redialed(self):
+        """A dead network path freezes the inbound byte counter long before
+        QUIC's idle timeout reports the session closed; the stall alone
+        forces the redial."""
+        first, second = _FakeSession(), _FakeSession()
+        first.stats = lambda: SimpleNamespace(bytes_received=1000)  # type: ignore[attr-defined]
+        self.script[:] = [first, second]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=2)
+
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        self.assertEqual(self.dials, [self.URL] * 2)
+        client._callbacks.on_reconnecting.assert_awaited_once_with(1)
+
+    async def test_a_session_with_flowing_traffic_is_not_redialed(self):
+        """Keepalive/ACK traffic keeps the counter moving on a healthy
+        session, so the watchdog stays quiet."""
+        counter = itertools.count(1)
+        session = _FakeSession()
+        session.stats = lambda: SimpleNamespace(bytes_received=next(counter))  # type: ignore[attr-defined]
+        self.script[:] = [session]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=1)
+
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        self.assertEqual(self.dials, [self.URL])
+        client._callbacks.on_reconnecting.assert_not_awaited()
+
+    async def test_a_session_reporting_no_counters_is_not_redialed(self):
+        """The WebSocket fallback reports no counters; the watchdog stays
+        dormant and ``session.closed()`` remains the only drop signal."""
+        session = _FakeSession()
+        session.stats = lambda: SimpleNamespace(bytes_received=None)  # type: ignore[attr-defined]
+        self.script[:] = [session]
+        client = self._make_client()
+        self._peer_leaves_after(client, sessions_seen=1)
+
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        self.assertEqual(self.dials, [self.URL])
+        client._callbacks.on_reconnecting.assert_not_awaited()
 
     async def test_the_url_is_dialed_unchanged_on_every_attempt(self):
         """The relay token rides in the query string, so the redial must send
