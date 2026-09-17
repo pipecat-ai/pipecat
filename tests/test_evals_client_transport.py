@@ -4,12 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval harness's client output transport."""
+"""Tests for the eval harness's client transport edges and recorder."""
 
 import asyncio
+import tempfile
+import time
 import types
 import unittest
+import wave
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+import numpy as np
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals import client_transport
@@ -24,6 +30,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
+    OutputAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.websocket.client import WebsocketClientParams
@@ -94,6 +101,139 @@ class TestEvalHarnessOutput(unittest.IsolatedAsyncioTestCase):
             await out.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
         self.assertEqual(len(out._pending), 0)
         self.assertEqual(recorder._user._chunks, [])
+
+    def _output(self, sent: list) -> EvalClientOutputTransport:
+        """An output whose sent frames land in ``sent`` as (at, audio), unlinked."""
+        out = EvalClientOutputTransport(
+            None, _fake_session(), WebsocketClientParams(audio_out_enabled=True)
+        )
+        out._sample_rate = self.SR
+
+        async def capture(frame):
+            sent.append((time.monotonic(), frame.audio))
+
+        async def noop(*args, **kwargs):
+            pass
+
+        out._send_frame = capture
+        out.push_frame = noop
+        return out
+
+    async def test_a_write_returns_once_its_audio_has_gone_out(self):
+        # The media sender's TTSStoppedFrame, and the BotStoppedSpeakingFrame
+        # it makes, follow the last write, so they land at the end of the sent
+        # audio.
+        sent: list = []
+        out = self._output(sent)
+        task = out._send_task = asyncio.create_task(out._send_task_handler())
+        try:
+            utterance = b"\x01\x02" * (self.SR * 12 // 100)  # 120ms -> three 40ms chunks
+            await out.write_audio_frame(
+                OutputAudioRawFrame(audio=utterance, sample_rate=self.SR, num_channels=1)
+            )
+            returned = time.monotonic()
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        speech = [(t, pcm) for t, pcm in sent if pcm != b"\x00" * len(pcm)]
+        self.assertEqual(b"".join(pcm for _, pcm in speech), utterance)
+        self.assertEqual(len(speech), 3)
+        self.assertGreaterEqual(returned, speech[-1][0])
+        self.assertEqual(len(out._pending), 0)
+
+    async def _stalled(self, out: EvalClientOutputTransport) -> asyncio.Task:
+        """Give the output a send task that never sends, and a write waiting on it."""
+        out._send_task = asyncio.create_task(asyncio.sleep(3600))
+        self.addCleanup(out._send_task.cancel)
+        write = asyncio.create_task(
+            out.write_audio_frame(
+                OutputAudioRawFrame(
+                    audio=b"\x01\x00" * (self.SR // 10), sample_rate=self.SR, num_channels=1
+                )
+            )
+        )
+        await asyncio.sleep(0.05)
+        self.assertFalse(write.done())  # nothing has gone out
+        return write
+
+    async def test_an_interruption_releases_a_waiting_write(self):
+        out = self._output([])
+        write = await self._stalled(out)
+        with patch.object(
+            client_transport.WebsocketClientOutputTransport, "process_frame", new=AsyncMock()
+        ):
+            await out.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        self.assertFalse(await asyncio.wait_for(write, 1.0))
+        self.assertEqual(len(out._pending), 0)
+
+    async def test_stopping_the_send_stream_releases_a_waiting_write(self):
+        out = self._output([])
+        write = await self._stalled(out)
+        out.cancel_task = AsyncMock()  # the task manager's, on a set-up processor
+        await out._cancel_send_task()
+        self.assertFalse(await asyncio.wait_for(write, 1.0))
+
+    async def test_a_write_with_no_send_task_does_not_wait(self):
+        # The transport is stopping: nothing would send the audio, and the
+        # media sender draining its queue must not hang on it.
+        out = self._output([])
+        await asyncio.wait_for(
+            out.write_audio_frame(
+                OutputAudioRawFrame(
+                    audio=b"\x01\x00" * (self.SR // 10), sample_rate=self.SR, num_channels=1
+                )
+            ),
+            1.0,
+        )
+
+
+class TestRecorderWrite(unittest.IsolatedAsyncioTestCase):
+    """The recording is stereo: the user on the left channel, the bot on the right."""
+
+    SR = 16000
+    CHUNK = b"\x01\x00" * int(SR * 0.04)  # 40ms
+
+    async def test_each_side_gets_its_own_channel(self):
+        recorder = EvalClientRecorder(self.SR)
+        with patch.object(client_transport, "time") as fake_time:
+            fake_time.monotonic.return_value = 10.0
+            recorder.add_user(self.CHUNK, self.SR)
+            fake_time.monotonic.return_value = 10.04
+            recorder.add_user(self.CHUNK, self.SR)
+            # The bot answers a second later, with one chunk.
+            fake_time.monotonic.return_value = 11.0
+            recorder.add_bot(self.CHUNK, self.SR)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "conversation.wav")
+            self.assertTrue(await recorder.write(path))
+            with wave.open(path, "rb") as wf:
+                self.assertEqual(wf.getnchannels(), 2)
+                self.assertEqual(wf.getframerate(), self.SR)
+                self.assertEqual(wf.getsampwidth(), 2)
+                stereo = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+        left, right = stereo[0::2], stereo[1::2]
+        user = np.frombuffer(self.CHUNK * 2, dtype=np.int16)
+        bot = np.frombuffer(self.CHUNK, dtype=np.int16)
+        # The user's two chunks open the left channel; the right is silent until
+        # the bot's chunk a second in; both channels run to the same end.
+        self.assertEqual(len(left), len(right))
+        self.assertEqual(left[: len(user)].tolist(), user.tolist())
+        self.assertEqual(int(np.abs(left[len(user) :]).sum()), 0)
+        bot_start = int(1.0 * self.SR)
+        self.assertEqual(int(np.abs(right[:bot_start]).sum()), 0)
+        self.assertEqual(right[bot_start : bot_start + len(bot)].tolist(), bot.tolist())
+        self.assertEqual(len(right), bot_start + len(bot))
+
+    async def test_nothing_recorded_writes_nothing(self):
+        recorder = EvalClientRecorder(self.SR)
+        self.assertFalse(recorder.has_audio())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "conversation.wav"
+            self.assertFalse(await recorder.write(str(path)))
+            self.assertFalse(path.exists())
 
 
 class TestRecorderTrack(unittest.IsolatedAsyncioTestCase):

@@ -60,6 +60,7 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    MetricsFrame,
     OutputTransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -67,6 +68,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -87,7 +89,9 @@ BOT_READY_TIMEOUT_S = 10.0
 # Frames the bot produced: the sink turns them into events and stops them here.
 # Everything downstream of the sink speaks for the user (a persona LLM, the user
 # TTS, the output) and must never see the bot's text or reports as its own
-# input. The aggregator's context frame and lifecycle frames pass.
+# input. The aggregator's context frame and lifecycle frames pass. The bot's
+# metrics make no event; the timing observer has read them by the time they
+# reach the sink.
 _BOT_FRAMES = (
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -100,6 +104,7 @@ _BOT_FRAMES = (
     FunctionCallResultFrame,
     FunctionCallCancelFrame,
     InputTransportMessageFrame,
+    MetricsFrame,
 )
 
 
@@ -308,6 +313,7 @@ class EvalClient:
         user_tts: CachingTTSService | None = None,
         bot_stt: STTService | None = None,
         persona: EvalPersona | None = None,
+        observers: list[BaseObserver] | None = None,
     ):
         """Initialize the client.
 
@@ -328,6 +334,9 @@ class EvalClient:
                 whose LLM rides in the pipeline and whose context the
                 aggregators keep up to date with both sides of the conversation;
                 ``None`` for a scripted scenario.
+            observers: Observers to attach to the eval pipeline's worker, such
+                as the :class:`~pipecat.evals.timing.EvalTimingObserver` that
+                times a scripted run's turns.
         """
         self._bot_url = bot_url
         self._stream = stream
@@ -337,6 +346,7 @@ class EvalClient:
         self._user_tts = user_tts
         self._bot_stt = bot_stt
         self._persona = persona
+        self._observers = list(observers or [])
 
         # The eval pipeline's worker (built by start()) and the runner task driving it.
         self._worker: PipelineWorker | None = None
@@ -345,8 +355,9 @@ class EvalClient:
         # Where the user's turns enter the pipeline (built with the processors).
         self._sink: _BotFrameSink | None = None
         self._run_task: asyncio.Task | None = None
-        # Records the conversation audio (bot + user) when record_path is set and
-        # the scenario is audio mode; fed raw audio by the transport, written on stop().
+        # Records the conversation audio (user left, bot right) when record_path is
+        # set and the scenario is audio mode; fed raw audio by the transport,
+        # written on stop().
         self._recorder: EvalClientRecorder | None = None
         # Set by the transport's on_bot_ready handler once the bot completes the
         # RTVI handshake; handshake() waits on it.
@@ -403,6 +414,7 @@ class EvalClient:
             params=self._pipeline_params(),
             enable_rtvi=False,
             cancel_on_idle_timeout=False,
+            observers=self._observers,
         )
 
         @self._worker.event_handler("on_pipeline_error")
@@ -735,7 +747,7 @@ class EvalClient:
             pass
 
     async def _write_recording(self) -> None:
-        """Write the recorded conversation audio (bot + user) to ``record_path``."""
+        """Write the recorded conversation audio (user left, bot right) to ``record_path``."""
         if self._recorder is None or not self._record_path or not self._recorder.has_audio():
             return
         if await self._recorder.write(self._record_path):
