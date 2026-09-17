@@ -58,6 +58,18 @@ class TestVoiceFromConfig(unittest.TestCase):
             tts_cache_key({"service": "kokoro", "voice": "b"}),
         )
 
+    def test_cache_key_distinguishes_speed(self):
+        # A faster render of the same text is different audio.
+        self.assertNotEqual(
+            tts_cache_key({"service": "kokoro", "voice": "v"}),
+            tts_cache_key({"service": "kokoro", "voice": "v", "speed": 1.3}),
+        )
+        # An absent speed and the default rate render the same audio.
+        self.assertEqual(
+            tts_cache_key({"service": "kokoro", "voice": "v"}),
+            tts_cache_key({"service": "kokoro", "voice": "v", "speed": 1.0}),
+        )
+
     def test_cache_key_distinguishes_language(self):
         # Two configs identical except for language must not collide, so an
         # English and a Chinese render of the same text get separate cache slots.
