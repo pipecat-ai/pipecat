@@ -56,6 +56,9 @@ class ExpectationMatcher:
         # a user transcript), surfaced to verbose progress. Empty for events with
         # no text (llm_started, function_call, speaking events).
         self.last_match_text: str = ""
+        # When the most recent expectation matched, so an absence check can tell
+        # a reply that began after it from the rest of the one it matched.
+        self._last_match_at: float = 0.0
 
     def reset_turn(self) -> None:
         """Forget the previous turn's unclaimed function calls."""
@@ -117,6 +120,7 @@ class ExpectationMatcher:
         judge_failure = await self._check_judge(event, expectation, turn_idx, exp_idx)
         if judge_failure is None:
             self.last_match_text = self._match_summary(event)
+            self._last_match_at = time.monotonic()
         return judge_failure
 
     async def _match_aggregating(
@@ -176,6 +180,7 @@ class ExpectationMatcher:
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
                 self.last_match_text = aggregate
+                self._last_match_at = time.monotonic()
                 return None
             if status == "fail":
                 # Only the judge can affirmatively fail an aggregate, and only
@@ -237,14 +242,28 @@ class ExpectationMatcher:
         turn_idx: int,
         exp_idx: int,
     ) -> EvalAssertionFailure | None:
-        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content."""
+        """Pass when no event of this type arrives before the deadline; an arriving one fails at once, with its content.
+
+        A reply reaches the stream in segments, one per pause in the bot's
+        speech, so a ``response`` that continues the reply an earlier
+        expectation matched is not a new one: only a response the bot began
+        after that match counts.
+        """
         self._trace.log(f"match: expecting NO {expectation.event!r} for {budget_ms}ms")
-        try:
-            event = await self._stream.next_event(expectation.event, deadline)
-        except TimeoutError:
-            # The quiet window held: absence confirmed.
-            self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
-            return None
+        while True:
+            try:
+                event = await self._stream.next_event(expectation.event, deadline)
+            except TimeoutError:
+                # The quiet window held: absence confirmed.
+                self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+                return None
+            if expectation.event == "response" and not self._reply_began_after_last_match():
+                self._trace.log(
+                    f"absent: the matched reply goes on, not a new one: "
+                    f"{self._match_summary(event)!r}"
+                )
+                continue
+            break
         return self._failure(
             expectation,
             turn_idx,
@@ -253,6 +272,12 @@ class ExpectationMatcher:
             f"but one arrived: {self._match_summary(event)}",
             "unexpected_event",
         )
+
+    def _reply_began_after_last_match(self) -> bool:
+        """Whether the bot started a reply since the most recent match, by its LLM or its speech."""
+        times = self._stream.latest_event_times
+        began = max(times.get("llm_started", 0.0), times.get("bot_started_speaking", 0.0))
+        return began > self._last_match_at
 
     async def _match_function_calls(
         self,
@@ -314,6 +339,7 @@ class ExpectationMatcher:
             matched.append(str(event.get("name")))
 
         self.last_match_text = ", ".join(matched) or "function call"
+        self._last_match_at = time.monotonic()
         return None
 
     async def _check_call_judge(

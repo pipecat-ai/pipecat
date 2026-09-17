@@ -1170,8 +1170,8 @@ def suite(
         "--repeat",
         help="Run each (bot, scenario) this many times, to measure flakiness, and "
         "each simulation this many times instead of its own runs (1 included); a "
-        "repeated sweep reports rates and exits 0. Attempts interleave across bots "
-        "and each writes its own logs.",
+        "repeated sweep reports rates and exits 0. Attempts run attempt-major across "
+        "bots and each writes its own logs.",
     ),
     base_port: int = typer.Option(None, "--base-port", help="Override manifest base_port."),
     cache_dir: str = typer.Option(None, "--cache-dir", help="Override manifest cache_dir."),

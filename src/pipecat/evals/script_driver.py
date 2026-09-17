@@ -164,12 +164,28 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         return await self._match_expectations(turn, turn_idx)
 
     async def _await_bot_quiet(self) -> None:
-        """Hold the send while the bot is speaking, up to ``BOT_QUIET_MAX_WAIT_S``."""
-        if not self._stream.bot_speaking:
+        """Hold the send while the bot is speaking, and until its speech is transcribed, up to ``BOT_QUIET_MAX_WAIT_S``.
+
+        What the bot said before the send belongs to the turn before, so the
+        send waits for the last of it to be transcribed and closed into a turn:
+        a transcript can land seconds after its audio, and one landing after
+        the send would otherwise be taken for the reply.
+        """
+        if self._stream.bot_speaking:
+            self._trace.log("send: waiting for the bot to finish speaking")
+            if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
+                self._trace.log(
+                    f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending"
+                )
+                return
+        if self._stream.bot_transcribed:
             return
-        self._trace.log("send: waiting for the bot to finish speaking")
-        if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
-            self._trace.log(f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending")
+        self._trace.log("send: waiting for the bot's speech to be transcribed")
+        if not await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S):
+            self._trace.log(
+                f"send: bot speech still being transcribed after {BOT_QUIET_MAX_WAIT_S:g}s "
+                f"({self._stream.bot_speech_outstanding}), sending"
+            )
 
     async def _await_previous_reply(self) -> None:
         """Let a reply the bot is still speaking end before an observing turn starts.
@@ -182,6 +198,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             return
         self._trace.log("observe: waiting for the bot to finish the previous reply")
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
+        await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S)
         self._stream.drop_pending_bot_output("the previous reply")
         self._stream.turn_boundary()
 

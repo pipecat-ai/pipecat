@@ -159,7 +159,9 @@ Supported expectation fields (per event):
     invert the expectation: assert that NO event of this type arrives before the
     ``within_ms`` budget expires (default 60s — set ``within_ms`` explicitly to
     keep the quiet-window wait short). Matches on event type only, so it cannot
-    be combined with ``text_contains``, ``eval:``, or ``calls:``. Used for
+    be combined with ``text_contains``, ``eval:``, or ``calls:``. A ``response``
+    that continues the reply an earlier expectation matched is not a new one;
+    only a reply the bot began after that match counts. Used for
     duplicate-output regressions::
 
         - event: response

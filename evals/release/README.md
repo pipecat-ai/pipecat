@@ -114,8 +114,9 @@ Each run writes to `test-runs/<name>/` (a timestamp when `-n` is omitted):
 Useful flags: `-c/--concurrency`, `-t/--timeout` (default per-expectation
 timeout in seconds, for expectations without their own `within_ms`), and
 `--no-cache` (re-synthesize user audio every turn instead of reusing the cache).
-A bot whose provider rate-limits concurrent connections can set its own
-`concurrency:` on its manifest entry, under the suite's.
+Each manifest entry runs its scenarios one after another on a single slot, so a
+slow provider never holds more than one; an entry that can take more sets its
+own `concurrency:`.
 Everything in the manifest header except the `suite:` list can also be overridden
 on the command line (the command line wins) — `--bots-dir`, `--scenarios-dir`,
 `--runs-dir`, `--base-port`, `--cache-dir`, `--spawn`, `--python` — so a manifest
@@ -132,10 +133,10 @@ time and look reliable in any one run.
 ./run.sh -p function-calling -s async_tool/delivery --repeat 50 -c 3
 ```
 
-Attempts interleave across bots (`A#1, B#1, C#1, A#2, ...`) and run from one queue
-with no barrier between them, so every bot meets the same machine conditions in the
-same stretch — a transient slowdown shows up as a band across all of them rather
-than as a regression in whichever bot happened to be running. Each attempt appends
+Attempts run attempt-major (`A#1, B#1, C#1, A#2, ...`, each entry's scenarios as a
+block) with no barrier between them, so every bot meets the same machine conditions
+in the same stretch — a transient slowdown shows up as a band across all of them
+rather than as a regression in whichever bot happened to be running. Each attempt appends
 its number to its artifact filenames (`..._001.log`, `..._002.log`), so nothing
 overwrites anything.
 

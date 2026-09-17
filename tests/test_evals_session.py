@@ -26,6 +26,7 @@ import tempfile
 import time
 import unittest
 import warnings
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,7 +35,15 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
-from pipecat.evals.client import EvalClient, _BotFrameSink, _PersonaTurnRelay
+from pipecat.evals.client import (
+    EvalClient,
+    _BotFrameSink,
+    _BotSegmentTranscribedFrame,
+    _BotSegmentTranscriptionFrame,
+    _BotSpeechGate,
+    _PersonaTurnRelay,
+    _tag_bot_segments,
+)
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.persona import EvalPersona
@@ -71,6 +80,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.tests.utils import run_test
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -394,6 +404,22 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         await task
         self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
 
+    async def test_the_send_waits_until_the_bot_speech_is_transcribed(self):
+        session = _session(bot_audio=True)
+        driver, stream = session._driver, session._stream
+        # The bot is quiet, but the last segment of what it said is still with the STT.
+        stream.bot_segment_ended()
+
+        async def transcribe_soon():
+            await asyncio.sleep(0.15)
+            stream.bot_segment_transcribed()
+
+        task = asyncio.create_task(transcribe_soon())
+        started = asyncio.get_running_loop().time()
+        await driver._await_bot_quiet()
+        await task
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
+
     async def test_an_observing_turn_lets_the_previous_reply_end_first(self):
         # The bot is still speaking turn 1's reply when turn 2, which only
         # listens for the bot's next move, begins: the rest of that reply,
@@ -401,7 +427,6 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         session = _session(bot_audio=True)
         driver, stream = session._driver, session._stream
         stream.frame_to_event(BotStartedSpeakingFrame())
-        stream.bot_turn_started()
         await stream.append({"type": "response", "text": "Spring in Japan is gorgeous."})
 
         async def finish_reply():
@@ -475,7 +500,7 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):
-    """The bot's finished spoken turn is the reply only if it began after the input."""
+    """The bot's finished spoken turn is the reply only once its LLM has answered the input."""
 
     async def _responses(self, s: EvalEventStream) -> list[str]:
         out = []
@@ -487,38 +512,158 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         s = _stream(bot_audio=True)
         s.input_sent()
         s.frame_to_event(LLMFullResponseStartFrame())  # the bot's new response
-        s.bot_turn_started()
         await s.bot_turn_stopped("Tokyo.")
         self.assertEqual(await self._responses(s), ["Tokyo."])
-
-    async def test_turn_begun_before_input_is_dropped_even_after_llm_restart(self):
-        # The interrupted turn finalizes late, after the bot has already started
-        # its real reply: still not the reply.
-        s = _stream(bot_audio=True)
-        s.bot_turn_started()
-        s.input_sent()
-        s.frame_to_event(LLMFullResponseStartFrame())
-        await s.bot_turn_stopped("Let's take a journey")
-        self.assertEqual(await self._responses(s), [])
 
     async def test_turn_before_llm_restart_is_dropped(self):
         s = _stream(bot_audio=True)
         s.input_sent()
-        s.bot_turn_started()
         await s.bot_turn_stopped("straggler")
         self.assertEqual(await self._responses(s), [])
 
     async def test_bot_first_turn_needs_no_input(self):
         s = _stream(bot_audio=True)
-        s.bot_turn_started()
         await s.bot_turn_stopped("Hello there!")
         self.assertEqual(await self._responses(s), ["Hello there!"])
 
     async def test_empty_turn_is_not_a_response(self):
         s = _stream(bot_audio=True)
-        s.bot_turn_started()
         await s.bot_turn_stopped("")
         self.assertEqual(await self._responses(s), [])
+
+
+class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
+    """After a send that talked over the bot, its speech from before it is dropped by the time its audio began."""
+
+    async def _run(self, gate, frames, direction=FrameDirection.DOWNSTREAM):
+        return await run_test(gate, frames_to_send=frames, frames_to_send_direction=direction)
+
+    async def test_a_segment_from_before_an_interrupting_send_is_dropped_however_late_it_lands(
+        self,
+    ):
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        before = time.monotonic()
+        stream.frame_to_event(BotStartedSpeakingFrame())  # the send talks over the bot
+        stream.input_sent()
+        after = time.monotonic()
+        stale = _BotSegmentTranscriptionFrame(
+            text="He had seen sunken,", user_id="", timestamp="", segment_started_at=before
+        )
+        fresh = _BotSegmentTranscriptionFrame(
+            text="Why don't scientists trust atoms?",
+            user_id="",
+            timestamp="",
+            segment_started_at=after,
+        )
+        down, _ = await self._run(gate, [stale, fresh])
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], [fresh.text])
+
+    async def test_an_ordinary_send_drops_nothing(self):
+        # The bot was quiet at the send, which waited for its speech to be
+        # transcribed; a transcript of earlier audio arriving anyway is kept.
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        before = time.monotonic()
+        stream.input_sent()
+        old = _BotSegmentTranscriptionFrame(
+            text="earlier audio", user_id="", timestamp="", segment_started_at=before
+        )
+        down, _ = await self._run(gate, [old])
+        self.assertEqual(
+            [f.text for f in down if isinstance(f, TranscriptionFrame)], ["earlier audio"]
+        )
+
+    async def test_a_plain_transcript_passes(self):
+        stream = _stream(bot_audio=True)
+        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.input_sent()
+        gate = _BotSpeechGate(stream, EvalTrace(), deque())
+        plain = TranscriptionFrame(text="untagged", user_id="", timestamp="")
+        down, _ = await self._run(gate, [plain])
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["untagged"])
+
+    async def test_with_an_unsegmented_stt_the_gate_keeps_no_account_of_segments(self):
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), None)
+        await self._run(
+            gate,
+            [VADUserStartedSpeakingFrame(), VADUserStoppedSpeakingFrame()],
+            direction=FrameDirection.UPSTREAM,
+        )
+        # Nothing awaits a transcription that will never be paired with a segment.
+        self.assertTrue(await stream.wait_bot_transcribed(0.01))
+
+    async def test_the_gate_records_when_each_segment_began_as_it_ends(self):
+        starts: deque[float] = deque()
+        stream = _stream(bot_audio=True)
+        gate = _BotSpeechGate(stream, EvalTrace(), starts)
+        t0 = time.monotonic()
+        await self._run(
+            gate,
+            [VADUserStartedSpeakingFrame(), VADUserStoppedSpeakingFrame()],
+            direction=FrameDirection.UPSTREAM,
+        )
+        self.assertEqual(len(starts), 1)
+        self.assertGreaterEqual(starts[0], t0)
+        # The ended segment awaits transcription, so the bot's speech is not
+        # yet fully accounted for.
+        self.assertFalse(await stream.wait_bot_transcribed(0.01))
+
+
+class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
+    """Each transcription run takes the start of the segment it transcribes, yield or not."""
+
+    async def test_runs_pair_with_starts_in_order_even_when_one_yields_nothing(self):
+        class _Segmented:
+            async def run_stt(self, audio):
+                if audio == b"silence":
+                    return
+                yield TranscriptionFrame(text=audio.decode(), user_id="", timestamp="")
+
+        stt = _Segmented()
+        starts = deque([1.0, 2.0, 3.0])
+        _tag_bot_segments(stt, starts)  # type: ignore[arg-type]
+
+        async def collect(audio):
+            return [f async for f in stt.run_stt(audio)]
+
+        first = await collect(b"first")
+        none = await collect(b"silence")
+        third = await collect(b"third")
+        self.assertEqual((first[0].text, first[0].segment_started_at), ("first", 1.0))
+        self.assertEqual((third[0].text, third[0].segment_started_at), ("third", 3.0))
+        self.assertEqual(len(starts), 0)
+        # Every run, the empty one included, ends by closing its segment.
+        for frames in (first, none, third):
+            self.assertIsInstance(frames[-1], _BotSegmentTranscribedFrame)
+
+    async def test_the_sink_reports_a_closed_segment_as_transcribed(self):
+        stream = _stream(bot_audio=True)
+        stream.bot_segment_ended()
+        sink = _BotFrameSink(stream)
+        down, _ = await run_test(sink, frames_to_send=[_BotSegmentTranscribedFrame()])
+        self.assertTrue(await stream.wait_bot_transcribed(0.01))
+        self.assertFalse(any(isinstance(f, _BotSegmentTranscribedFrame) for f in down))
+
+
+class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
+    """The bot's speech is accounted for once nothing awaits transcription and no turn is open."""
+
+    async def test_segments_and_turns_hold_the_wait(self):
+        s = _stream(bot_audio=True)
+        self.assertTrue(await s.wait_bot_transcribed(0.01))
+        # A segment the VAD still hears is speech not yet accounted for.
+        s.bot_segment_started()
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        s.bot_segment_ended()
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        s.bot_turn_started()
+        s.bot_segment_transcribed()
+        # The transcript is in, but the turn it feeds is still open.
+        self.assertFalse(await s.wait_bot_transcribed(0.01))
+        await s.bot_turn_stopped("Hello there!")
+        self.assertTrue(await s.wait_bot_transcribed(0.01))
 
 
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
@@ -543,6 +688,32 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(failure)
         self.assertEqual(failure.turn_index, 3)
         self.assertEqual(failure.expectation_index, 2)
+        self.assertIn("I repeat myself", failure.reason)
+
+    async def test_absent_ignores_the_rest_of_the_matched_reply(self):
+        import time
+
+        s = _matcher()
+        # The bot began one reply, and the previous expectation matched its
+        # first segment; a later segment of the same reply is not a new response.
+        await s._stream.append({"type": "bot_started_speaking"})
+        s.last_match_text = "first sentence"
+        s._last_match_at = time.monotonic()
+        s._stream._queue.put_nowait({"type": "response", "text": "second sentence"})
+        expectation = EvalExpectation(event="response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
+        self.assertIsNone(failure)
+
+    async def test_absent_fails_on_a_reply_begun_after_the_match(self):
+        import time
+
+        s = _matcher()
+        s._last_match_at = time.monotonic()
+        await s._stream.append({"type": "bot_started_speaking"})
+        s._stream._queue.put_nowait({"type": "response", "text": "I repeat myself"})
+        expectation = EvalExpectation(event="response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
+        self.assertIsNotNone(failure)
         self.assertIn("I repeat myself", failure.reason)
 
     async def test_absent_ignores_other_event_types(self):
