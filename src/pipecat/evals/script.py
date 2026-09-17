@@ -227,6 +227,7 @@ Top-level optional fields:
             service: kokoro        # local TTS that synthesizes the user turns
             voice: af_heart        # voices are language-specific
             language: en           # optional; must match the voice
+            speed: 1.0             # optional; Kokoro's rate, pauses included
             sample_rate: 16000     # optional
             # or, for any other TTS: factory: my_evals.voice (a callable
             # taking this mapping and returning a local or HTTP TTSService)
@@ -514,7 +515,7 @@ class EvalScriptScenario:
         user_speech: Parsed from the ``user.speech:`` block; the TTS config the
             harness synthesizes user turns with (``None`` in text modality).
             Mapping with ``service``, ``voice``, and optional ``model`` /
-            ``language`` / ``sample_rate`` / ``api_key``. Set ``language`` (a
+            ``language`` / ``speed`` / ``sample_rate`` / ``api_key``. Set ``language`` (a
             code like ``zh``) to synthesize non-English user turns.
         trigger_disconnect: Whether the harness fires the bot's
             ``on_client_disconnected`` handler when this scenario's connection

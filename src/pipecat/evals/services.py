@@ -201,15 +201,19 @@ def kokoro_service(voice_cfg: dict) -> TTSService:
               When omitted, Kokoro keeps its own default (English). Voices are
               language-specific, so a non-English language needs a matching voice
               — ``af_heart`` speaks US English whatever the language is set to.
+            - ``speed``: Optional speech rate multiplier (Kokoro accepts 0.5 to
+              2.0; 1.0 is its default). Pauses scale with it too, so a faster
+              rate also shortens the silences at commas.
     """
     from pipecat.services.kokoro.tts import KokoroTTSService
 
-    return KokoroTTSService(
-        settings=KokoroTTSService.Settings(
-            voice=str(voice_cfg.get("voice", "")),
-            language=_cfg_language(voice_cfg),
-        ),
+    settings = KokoroTTSService.Settings(
+        voice=str(voice_cfg.get("voice", "")),
+        language=_cfg_language(voice_cfg),
     )
+    if voice_cfg.get("speed") is not None:
+        settings.speed = float(voice_cfg["speed"])
+    return KokoroTTSService(settings=settings)
 
 
 @deprecated(
