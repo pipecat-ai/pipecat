@@ -15,9 +15,12 @@ from loguru import logger
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import StartFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 async def get_current_weather(params: FunctionCallParams, location: str, format: str):
@@ -209,6 +212,40 @@ class TestAutoRegister(unittest.TestCase):
         # A second pass must not change anything (and must not raise).
         service._sync_registered_tool_handlers(context.tools)
         self.assertEqual(list(service._functions.keys()), ["end_call"])
+
+
+class _ServiceWithOwnTools(LLMService):
+    """A service configured with its own tools, as the realtime services are."""
+
+    def _service_tools(self):
+        return ToolsSchema(standard_tools=[lookup_order_schema()])
+
+
+class TestServiceToolsRegisterOnStart(unittest.IsolatedAsyncioTestCase):
+    """A service's own tools have their handlers registered as soon as it starts.
+
+    A realtime service can run one of its configured tools before the first
+    context frame reaches it, so the handlers cannot wait for that frame.
+    """
+
+    async def _start(self, service: LLMService) -> None:
+        await service.setup(frame_processor_setup(TaskManager()))
+        await service.start(StartFrame())
+
+    async def test_service_tools_registered_on_start(self):
+        service = _ServiceWithOwnTools()
+        self.assertFalse(service.has_function("lookup_order"))
+
+        await self._start(service)
+
+        self.assertTrue(service.has_function("lookup_order"))
+
+    async def test_start_without_service_tools_registers_nothing(self):
+        service = LLMService()
+
+        await self._start(service)
+
+        self.assertEqual(service._functions, {})
 
 
 class TestAutoRegisterSchemaHandlers(unittest.TestCase):
