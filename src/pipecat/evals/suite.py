@@ -748,6 +748,29 @@ class EvalManifest:
 
 
 @dataclass(frozen=True)
+class _SuiteRunSetup:
+    """What one :meth:`EvalSuite.run` call sets up for every lane it runs.
+
+    Parameters:
+        ports: The port assigned to each run, keyed by the run's ``id()``.
+        logs_dir: Directory for per-run logs.
+        record_dir: Directory for per-run conversation recordings, or ``None``.
+        results_path: JSONL file to append one record per finished run to, or ``None``.
+        slots: The suite's concurrency, as the semaphore a lane holds a slot of.
+        debug: Whether each run saves its combined ``<run>.debug.log``.
+        params: How each run behaves.
+    """
+
+    ports: dict[int, int]
+    logs_dir: Path
+    record_dir: Path | None
+    results_path: Path | None
+    slots: asyncio.Semaphore
+    debug: bool
+    params: EvalSessionParams
+
+
+@dataclass(frozen=True)
 class _RunFiles:
     """Where one run's artifacts go, all named by the run's prefix.
 
@@ -934,26 +957,21 @@ class EvalSuite(BaseObject):
             results_path.parent.mkdir(parents=True, exist_ok=True)
         self._bound_cpu_threads()
         handler = self._add_legacy_update_callback(on_update) if on_update is not None else None
-        sem = asyncio.Semaphore(self.manifest.concurrency)
-        ports = {id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)}
+        setup = _SuiteRunSetup(
+            ports={id(run): self.manifest.base_port + i for i, run in enumerate(self.runs)},
+            logs_dir=logs_dir,
+            record_dir=record_dir,
+            results_path=results_path,
+            slots=asyncio.Semaphore(self.manifest.concurrency),
+            debug=debug,
+            params=params,
+        )
         entry_sems: dict[str, asyncio.Semaphore] = {}
         lanes = []
         for label, slots, queue in self._entry_queues(self.runs):
             entry_sem = entry_sems.setdefault(label, asyncio.Semaphore(slots))
             for _ in range(min(slots, len(queue))):
-                lanes.append(
-                    self._run_lane(
-                        queue,
-                        entry_sem,
-                        ports,
-                        logs_dir,
-                        record_dir,
-                        results_path,
-                        sem,
-                        debug,
-                        params,
-                    )
-                )
+                lanes.append(self._run_lane(queue, entry_sem, setup))
         try:
             await asyncio.gather(*lanes)
         finally:
@@ -961,41 +979,21 @@ class EvalSuite(BaseObject):
                 self.remove_event_handler("on_update", handler)
 
     async def _run_lane(
-        self,
-        queue: deque[EvalRun],
-        entry_sem: asyncio.Semaphore,
-        ports: dict[int, int],
-        logs_dir: Path,
-        record_dir: Path | None,
-        results_path: Path | None,
-        sem: asyncio.Semaphore,
-        debug: bool,
-        params: EvalSessionParams,
+        self, queue: deque[EvalRun], entry_sem: asyncio.Semaphore, setup: _SuiteRunSetup
     ) -> None:
         """Hold one of the entry's slots and one suite slot, and run a queue on them, one run after another.
 
         The entry's slot comes first, so a lane of an entry that is already
         as wide as it may be waits without sitting on a suite slot.
         """
-        async with entry_sem, sem:
+        async with entry_sem, setup.slots:
             while queue:
-                run = queue.popleft()
-                await self._run_one(
-                    run, ports[id(run)], logs_dir, record_dir, results_path, debug, params
-                )
+                await self._run_one(queue.popleft(), setup)
 
-    async def _run_one(
-        self,
-        run: EvalRun,
-        port: int,
-        logs_dir: Path,
-        record_dir: Path | None,
-        results_path: Path | None,
-        debug: bool,
-        params: EvalSessionParams,
-    ) -> None:
+    async def _run_one(self, run: EvalRun, setup: _SuiteRunSetup) -> None:
         """Spawn one bot, run its scenario against it, and record the outcome on ``run``."""
-        files = _RunFiles.for_run(run, logs_dir, record_dir)
+        port = setup.ports[id(run)]
+        files = _RunFiles.for_run(run, setup.logs_dir, setup.record_dir)
         run.status = "running"
         run.started_at = time.monotonic()
         await self._call_event_handler("on_update", run)
@@ -1006,7 +1004,9 @@ class EvalSuite(BaseObject):
             if run.error is not None:
                 return
             bot = await self._spawn_bot(run, port, files)
-            worker = await self._run_harness(run, port, files, debug=debug, params=params)
+            worker = await self._run_harness(
+                run, port, files, debug=setup.debug, params=setup.params
+            )
         except Exception as e:
             # The worker reports its own failures in its result; this is a
             # problem on the suite's side (spawning, reading the result back).
@@ -1014,7 +1014,15 @@ class EvalSuite(BaseObject):
             with contextlib.suppress(OSError):
                 files.trace.write_text(traceback.format_exc())
         finally:
-            await self._finish(run, files, bot, worker, results_path, logs_dir, record_dir)
+            await self._finish(
+                run,
+                files,
+                bot,
+                worker,
+                setup.results_path,
+                setup.logs_dir,
+                setup.record_dir,
+            )
 
     @staticmethod
     def _entry_queues(runs: list[EvalRun]) -> list[tuple[str, int, deque[EvalRun]]]:
