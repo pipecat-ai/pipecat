@@ -35,8 +35,9 @@ Requirements:
 - CARTESIA_API_KEY (for TTS)
 - DEEPGRAM_API_KEY (for STT)
 - TYPESAFE_API_KEY (for the judgments)
-- MODAL_ENDPOINT_URL and MODAL_API_KEY (for PhoneLLM), or OPENAI_API_KEY
-  with LLM_SERVICE=openai
+- MODAL_ENDPOINT_URL and MODAL_API_KEY (for PhoneLLM), plus PHONELLM_MODEL
+  when the endpoint serves the model under a name other than
+  pipecat-ai/phonellm-alpha-1; or OPENAI_API_KEY with LLM_SERVICE=openai
 - DAILY_API_KEY (for the Daily transport)
 """
 

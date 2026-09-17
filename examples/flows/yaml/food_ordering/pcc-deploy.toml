@@ -5,7 +5,8 @@
 #   pipecat cloud deploy
 #
 # The secret set needs CARTESIA_API_KEY, DEEPGRAM_API_KEY, TYPESAFE_API_KEY,
-# and MODAL_ENDPOINT_URL with MODAL_API_KEY for PhoneLLM (or OPENAI_API_KEY
+# and MODAL_ENDPOINT_URL with MODAL_API_KEY for PhoneLLM, plus PHONELLM_MODEL
+# when the endpoint serves the model under another name (or OPENAI_API_KEY
 # with LLM_SERVICE=openai).
 agent_name = "food-ordering-typesafe"
 secret_set = "food-ordering-typesafe-secrets"
