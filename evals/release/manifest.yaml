@@ -259,16 +259,19 @@ suite:
   #
   - bot: function-calling/function-calling-anthropic-async.py
     scenarios:
+      - scripted/weather_function_call
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
   - bot: function-calling/function-calling-google-async.py
     scenarios:
+      - scripted/weather_function_call
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
+      - scripted/weather_function_call
       - scripted/async_tool
       - scripted/function_call_timeout
       # gpt-4.1 answers that it is working on the report without calling
@@ -276,6 +279,7 @@ suite:
       # - scripted/async_tool_cancellation
   - bot: function-calling/function-calling-openai-responses-async.py
     scenarios:
+      - scripted/weather_function_call
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
