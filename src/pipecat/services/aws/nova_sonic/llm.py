@@ -64,7 +64,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from aws_sdk_bedrock_runtime.client import (
@@ -767,7 +767,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         # Tools from context take priority over self._tools.
         tools = (
             llm_connection_params["tools"]
-            if llm_connection_params["tools"]
+            if is_given(self._context.tools)
             else (adapter.from_standard_tools(self._tools) or [])
         )
         logger.debug(f"Using tools: {tools}")
@@ -1254,7 +1254,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         )
         tools = (
             llm_params["tools"]
-            if llm_params["tools"]
+            if is_given(self._context.tools)
             else (adapter.from_standard_tools(self._tools) or [])
         )
         return llm_params["system_instruction"], tools

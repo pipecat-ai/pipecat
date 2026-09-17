@@ -806,8 +806,13 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 system_instruction=assert_given(self._settings.system_instruction),
             )
 
-            # tools given in the context override the tools in the session properties
-            if llm_invocation_params["tools"]:
+            # Tools given in the context override the tools in the session
+            # properties. Built-in tools alone, from an otherwise empty context,
+            # go in only when the session has none of its own; otherwise they
+            # join the session tools as those are converted below.
+            if llm_invocation_params["tools"] and (
+                is_given(self._context.tools) or not settings.tools
+            ):
                 settings.tools = llm_invocation_params["tools"]
 
             # The adapter resolves conflicts between init-provided and
