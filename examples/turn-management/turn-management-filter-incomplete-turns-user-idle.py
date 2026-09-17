@@ -157,7 +157,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {
                 "role": "developer",
-                "content": "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go and why?'",
+                "content": "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go?'",
             }
         )
         await worker.queue_frames([LLMRunFrame()])
