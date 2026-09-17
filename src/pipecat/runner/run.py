@@ -232,6 +232,38 @@ def _start_bot_session(coro) -> asyncio.Task:
     return task
 
 
+# Upload URLs saved through the session-scoped upload route, per session, so a
+# session's files can be removed when it ends.
+_SESSION_UPLOAD_URLS: dict[str, list[str]] = {}
+
+
+async def _delete_session_uploads(session_id: str):
+    """Best-effort deletion of the files uploaded through a session's upload route."""
+    file_urls = _SESSION_UPLOAD_URLS.pop(session_id, None)
+    if not file_urls or RUNNER_FILE_STORAGE is None:
+        return
+    for file_url in file_urls:
+        try:
+            await RUNNER_FILE_STORAGE.delete(file_url)
+        except Exception as e:
+            logger.warning(f"Failed to delete session upload {file_url}: {e}")
+
+
+async def _run_bot_session(coro, session_id: str, active_sessions: dict[str, Any] | None):
+    """Run a bot session, releasing its session resources when it ends.
+
+    Removes the session from `active_sessions` — closing the
+    ``/sessions/{session_id}/...`` routes for it — and deletes any files
+    uploaded through the session's upload route.
+    """
+    try:
+        await coro
+    finally:
+        if active_sessions is not None:
+            active_sessions.pop(session_id, None)
+        await _delete_session_uploads(session_id)
+
+
 def _is_module_available(module: str) -> bool:
     """Check whether a module can be imported without importing it.
 
@@ -642,6 +674,10 @@ def _configure_server_app(args: argparse.Namespace):
     ws_used_tokens: set[str] = set()
 
     _setup_frontend_routes(app)
+    # Registered before the WebRTC routes so POST /sessions/{session_id}/files
+    # wins over the catch-all /sessions/{session_id}/{path:path} proxy (routes
+    # match in registration order).
+    _setup_file_uploads_routes(app, active_sessions)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
@@ -650,7 +686,6 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
-    _setup_file_uploads_route(app)
 
 
 def _setup_unified_start_route(
@@ -831,7 +866,10 @@ def _setup_unified_start_route(
                 runner_args = RunnerArguments(body=body, session_id=session_id)
 
             runner_args.cli_args = args
-            _start_bot_session(bot_module.bot(runner_args))
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
             return result
 
         elif transport == "livekit":
@@ -855,7 +893,10 @@ def _setup_unified_start_route(
                 session_id=session_id,
             )
             runner_args.cli_args = args
-            _start_bot_session(bot_module.bot(runner_args))
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
 
             return StartBotResult(
                 url=livekit_url,
@@ -919,7 +960,10 @@ def _setup_unified_start_route(
             )
             runner_args.cli_args = args
 
-            _start_bot_session(bot_module.bot(runner_args))
+            active_sessions[session_id] = body
+            _start_bot_session(
+                _run_bot_session(bot_module.bot(runner_args), session_id, active_sessions)
+            )
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=15.0)
             except TimeoutError:
@@ -1031,7 +1075,9 @@ def _setup_webrtc_routes(
                 session_id=resolved_session_id,
             )
             runner_args.cli_args = args
-            background_tasks.add_task(bot_module.bot, runner_args)
+            background_tasks.add_task(
+                _run_bot_session, bot_module.bot(runner_args), resolved_session_id, active_sessions
+            )
 
         # Delegate handling to SmallWebRTCRequestHandler
         answer = await small_webrtc_handler.handle_web_request(
@@ -1499,10 +1545,8 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
-def _setup_file_uploads_route(app: FastAPI):
-    @app.post("/files")
-    async def upload_file(file: UploadFile = File(...)):  # noqa: B008
-        """Handle file uploads from clients. Requires --uploads-folder to be set."""
+def _setup_file_uploads_routes(app: FastAPI, active_sessions: dict[str, dict[str, Any]]):
+    async def handle_upload(file: UploadFile, session_id: str | None) -> dict[str, Any]:
         if RUNNER_FILE_STORAGE is None:
             raise HTTPException(
                 503,
@@ -1519,6 +1563,8 @@ def _setup_file_uploads_route(app: FastAPI):
             # clean 500 either way.
             logger.error(f"Failed to save upload: {e}")
             raise HTTPException(500, "Failed to save file") from e
+        if session_id is not None:
+            _SESSION_UPLOAD_URLS.setdefault(session_id, []).append(file_url)
         # Use original filename only for format/mime in response
         original_name = Path(file.filename or "").name
         media_type, _ = mimetypes.guess_type(original_name, strict=False)
@@ -1532,6 +1578,28 @@ def _setup_file_uploads_route(app: FastAPI):
             "source": {"type": "url", "url": file_url},
             "format": media_type,
         }
+
+    @app.post("/sessions/{session_id}/files")
+    async def upload_session_file(session_id: str, file: UploadFile = File(...)):  # noqa: B008
+        """Handle file uploads scoped to a session, mirroring Pipecat Cloud's routes.
+
+        Files uploaded here are deleted when the session ends. Requires
+        --uploads-folder (or a custom storage backend) to be set.
+        """
+        if session_id not in active_sessions:
+            raise HTTPException(404, "Invalid or not-yet-ready session_id")
+        return await handle_upload(file, session_id)
+
+    @app.post("/files")
+    async def upload_file(file: UploadFile = File(...)):  # noqa: B008
+        """Handle file uploads without a session, for transports whose clients never learn one.
+
+        Prefer the session-scoped route: files uploaded here are only removed
+        by the storage backend's own retention (e.g. --uploads-folder-max-files
+        trimming), not at session end. Requires --uploads-folder (or a custom
+        storage backend) to be set.
+        """
+        return await handle_upload(file, None)
 
 
 async def _run_daily_direct(args: argparse.Namespace):
