@@ -96,6 +96,7 @@ To run locally:
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
+- Any transport, with the flow a Flows bot runs: ``python bot.py --flow flow.yaml``
 """
 
 import argparse
@@ -531,13 +532,35 @@ def _get_bot_module():
     )
 
 
+def _apply_cli_args(runner_args: RunnerArguments, args: argparse.Namespace) -> None:
+    """Give a session what it takes from the runner's command line.
+
+    Every transport builds its own :class:`RunnerArguments`, so this is where
+    the fields common to all of them are set: the parsed CLI namespace itself,
+    and the flow config from ``--flow`` (read once at startup by
+    :func:`_read_flow_config`), which reaches the bot just as the config in a
+    ``/start`` request would.
+    """
+    runner_args.cli_args = args
+    runner_args.flow_config = getattr(args, "flow_config", None)
+
+
+def _read_flow_config(path: str | None) -> str | None:
+    """Read the ``--flow`` file, or ``None`` without one.
+
+    The text goes to the bot as it was written; the schema is the bot's to
+    check, with ``FlowConfig.from_yaml``.
+    """
+    return Path(path).read_text() if path else None
+
+
 async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     """Run a bot for telephony transports."""
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
     runner_args = WebSocketRunnerArguments(websocket=websocket, session_id=str(uuid.uuid4()))
-    runner_args.cli_args = args
+    _apply_cli_args(runner_args, args)
 
     await bot_module.bot(runner_args)
 
@@ -551,7 +574,7 @@ async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
         transport_type="websocket",
         session_id=str(uuid.uuid4()),
     )
-    runner_args.cli_args = args
+    _apply_cli_args(runner_args, args)
 
     await bot_module.bot(runner_args)
 
@@ -808,7 +831,10 @@ def _setup_unified_start_route(
                         token_properties=token_properties,
                     )
                     runner_args = DailyRunnerArguments(
-                        room_url=room_url, token=token, body=body, session_id=session_id
+                        room_url=room_url,
+                        token=token,
+                        body=body,
+                        session_id=session_id,
                     )
                     result = StartBotResult(
                         dailyRoom=room_url,
@@ -818,7 +844,7 @@ def _setup_unified_start_route(
             else:
                 runner_args = RunnerArguments(body=body, session_id=session_id)
 
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
             _start_bot_session(bot_module.bot(runner_args))
             return result
 
@@ -842,7 +868,7 @@ def _setup_unified_start_route(
                 body=body,
                 session_id=session_id,
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
             _start_bot_session(bot_module.bot(runner_args))
 
             return StartBotResult(
@@ -905,7 +931,7 @@ def _setup_unified_start_route(
                 session_id=session_id,
                 ready_event=ready_event,
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
 
             _start_bot_session(bot_module.bot(runner_args))
             try:
@@ -1018,7 +1044,7 @@ def _setup_webrtc_routes(
                 body=request.request_data,
                 session_id=resolved_session_id,
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler
@@ -1215,7 +1241,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
                 session_id=str(uuid.uuid4()),
                 body=call,
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
             background_tasks.add_task(bot_module.bot, runner_args)
 
         try:
@@ -1279,9 +1305,11 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(
-                room_url=room_url, token=token, session_id=str(uuid.uuid4())
+                room_url=room_url,
+                token=token,
+                session_id=str(uuid.uuid4()),
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
             _start_bot_session(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
@@ -1388,7 +1416,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
                 body=request_body.model_dump(),
                 session_id=session_id,
             )
-            runner_args.cli_args = args
+            _apply_cli_args(runner_args, args)
 
             _start_bot_session(bot_module.bot(runner_args))
 
@@ -1499,10 +1527,12 @@ async def _run_daily_direct(args: argparse.Namespace):
 
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(
-            room_url=room_url, token=token, session_id=str(uuid.uuid4())
+            room_url=room_url,
+            token=token,
+            session_id=str(uuid.uuid4()),
         )
         runner_args.handle_sigint = True
-        runner_args.cli_args = args
+        _apply_cli_args(runner_args, args)
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()
@@ -1524,9 +1554,13 @@ async def _run_eval(args: argparse.Namespace):
     """
     logger.info("Running with eval transport...")
 
-    runner_args = EvalRunnerArguments(host=args.host, port=args.port, session_id=str(uuid.uuid4()))
+    runner_args = EvalRunnerArguments(
+        host=args.host,
+        port=args.port,
+        session_id=str(uuid.uuid4()),
+    )
     runner_args.handle_sigint = True
-    runner_args.cli_args = args
+    _apply_cli_args(runner_args, args)
 
     # A bot may need session data it would normally receive in the /start request
     # body (e.g. a vision bot's image path). The eval transport has no such
@@ -1539,15 +1573,18 @@ async def _run_eval(args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
-async def _run_vonage():
+async def _run_vonage(args: argparse.Namespace):
     """Run Vonage bot (no FastAPI server)."""
     logger.info("Running Vonage transport...")
 
     application_id, session_id, token = await configure_vonage()
     runner_args = VonageRunnerArguments(
-        application_id=application_id, vonage_session_id=session_id, token=token
+        application_id=application_id,
+        vonage_session_id=session_id,
+        token=token,
     )
     runner_args.handle_sigint = True
+    _apply_cli_args(runner_args, args)
 
     # Get the bot module and run it directly
     bot_module = _get_bot_module()
@@ -1743,6 +1780,17 @@ def main(parser: argparse.ArgumentParser | None = None):
     )
     parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
+        "--flow",
+        type=str,
+        default=None,
+        help=(
+            "Path to a Pipecat Flows config (YAML or JSON) for every session this "
+            "runner starts, as a /start request would carry it: the bot receives its "
+            "text as runner_args.flow_config. Run the bot once per flow to try "
+            "several against one agent."
+        ),
+    )
+    parser.add_argument(
         "--runner-body",
         type=str,
         default=None,
@@ -1922,6 +1970,13 @@ def main(parser: argparse.ArgumentParser | None = None):
 
     args = parser.parse_args()
 
+    # Read --flow once, so a bad path fails at startup rather than per session
+    try:
+        args.flow_config = _read_flow_config(args.flow)
+    except OSError as e:
+        logger.error(f"Could not read --flow {args.flow}: {e}")
+        return
+
     # Validate and clean proxy hostname
     if args.proxy:
         args.proxy = _validate_and_clean_proxy(args.proxy)
@@ -1986,7 +2041,7 @@ def main(parser: argparse.ArgumentParser | None = None):
     # Print startup message
     _print_startup_message(args)
     if args.transport == "vonage":
-        asyncio.run(_run_vonage())
+        asyncio.run(_run_vonage(args))
         print()
         return
 

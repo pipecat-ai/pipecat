@@ -7,10 +7,12 @@
 import argparse
 import io
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -19,10 +21,12 @@ from pydantic import BaseModel
 from starlette.testclient import WebSocketDisconnect
 
 from pipecat.runner.run import (
+    _apply_cli_args,
     _extract_ws_token,
     _generate_ws_token,
     _parse_ice_servers,
     _print_startup_message,
+    _read_flow_config,
     _setup_daily_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
@@ -32,6 +36,7 @@ from pipecat.runner.run import (
     _transport_routes_enabled,
     _verify_and_consume_ws_token,
 )
+from pipecat.runner.types import RunnerArguments
 
 try:
     import jwt as _jwt  # noqa: F401
@@ -930,3 +935,32 @@ class TestStartIceConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlowConfig(unittest.TestCase):
+    """``--flow`` gives every session the runner starts a flow config to run."""
+
+    def test_reads_the_file_as_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            flow = Path(directory) / "flow.yaml"
+            flow.write_text("initial_node: greeting\nnodes: {}\n")
+            self.assertEqual(_read_flow_config(str(flow)), "initial_node: greeting\nnodes: {}\n")
+
+    def test_is_none_without_the_flag(self):
+        self.assertIsNone(_read_flow_config(None))
+
+    def test_a_missing_file_raises_for_the_caller_to_report(self):
+        with self.assertRaises(OSError):
+            _read_flow_config("/nonexistent/flow.yaml")
+
+    def test_sessions_get_what_was_read_at_startup(self):
+        args = argparse.Namespace(flow_config="initial_node: greeting\n")
+        runner_args = RunnerArguments()
+        _apply_cli_args(runner_args, args)
+        self.assertEqual(runner_args.flow_config, "initial_node: greeting\n")
+        self.assertIs(runner_args.cli_args, args)
+
+    def test_no_flow_config_without_the_flag(self):
+        runner_args = RunnerArguments()
+        _apply_cli_args(runner_args, argparse.Namespace())
+        self.assertIsNone(runner_args.flow_config)
