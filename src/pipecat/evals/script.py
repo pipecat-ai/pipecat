@@ -143,11 +143,12 @@ Supported expectation fields (per event):
     natural-language criterion the event's text content must satisfy, evaluated
     by a judge LLM (see :mod:`pipecat.evals.judge`).
 
-    On ``function_call`` and ``function_call_stopped`` the criterion is about
-    the call instead: each call ``calls:`` (or the ``name:``/``args:``
-    shorthand) matches is put to the judge by name and arguments, over the
-    conversation so far, which is how a scenario checks what ``args:`` cannot
-    match verbatim::
+    On ``function_call`` the criterion is about the call instead: each call
+    ``calls:`` (or the ``name:``/``args:`` shorthand) matches is put to the
+    judge by name and arguments, over the conversation so far, which is how a
+    scenario checks what ``args:`` cannot match verbatim. A
+    ``function_call_stopped`` carries no arguments, only how the call ended,
+    so it takes no ``eval:``::
 
         - event: function_call
           calls:
@@ -858,17 +859,18 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         )
 
     criterion = e.get("eval")
-    if (
-        criterion is not None
-        and event not in JUDGEABLE_EVENTS
-        and event not in FUNCTION_CALL_EVENTS
-    ):
+    if criterion is not None and event == "function_call_stopped":
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'eval:' on "
+            f"'function_call_stopped': a stopped call carries no arguments to judge; "
+            f"put the 'eval:' on the 'function_call' instead"
+        )
+    if criterion is not None and event not in JUDGEABLE_EVENTS and event != "function_call":
         logger.warning(
             f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'eval:' on "
             f"event {event!r} — judge only makes sense on bot-generated text "
-            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}) and function calls "
-            f"({', '.join(FUNCTION_CALL_EVENTS)}). Will run but is unlikely to be "
-            "meaningful."
+            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}) and 'function_call'. "
+            "Will run but is unlikely to be meaningful."
         )
 
     absent = e.get("absent", False)

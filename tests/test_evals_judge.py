@@ -295,6 +295,15 @@ class TestJudgeToolCalls(unittest.IsolatedAsyncioTestCase):
         self.assertIn('called the function `submit` with arguments `{"speaker": "Ann"}`', ask)
         self.assertIn("Criterion: submitted for Bob", ask)
 
+    async def test_evaluate_call_instructs_a_yes_or_no_verdict(self):
+        """A call is judged under its own instructions: there is no reply to wait for."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
+        judge = EvalJudge(svc)
+        await judge.evaluate_call("submit", {"speaker": "Ann"}, "submitted for Ann")
+        instruction = svc.calls[0]["system_instruction"]
+        self.assertIn("function call", instruction)
+        self.assertNotIn("continue", instruction)
+
     async def test_evaluate_call_caches_per_call(self):
         """The same criterion on two different calls is two questions."""
         svc = _FakeLLMService(

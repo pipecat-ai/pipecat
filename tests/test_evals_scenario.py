@@ -769,23 +769,40 @@ class TestEvalsScenarioParser(unittest.TestCase):
 
     def test_eval_on_function_call_is_accepted(self):
         """eval: on a function call judges the matched calls, so it is not a misuse."""
-        for event in ("function_call", "function_call_stopped"):
-            s, warnings = self._load_capturing_warnings(
-                f"""
-                name: judged_call
-                turns:
-                  - user: "suggest a session"
-                    expect:
-                      - event: {event}
-                        calls: [{{name: submit_session_suggestion}}]
-                        eval: "the suggestion is about tracing"
-                """
+        s, warnings = self._load_capturing_warnings(
+            """
+            name: judged_call
+            turns:
+              - user: "suggest a session"
+                expect:
+                  - event: function_call
+                    calls: [{name: submit_session_suggestion}]
+                    eval: "the suggestion is about tracing"
+            """
+        )
+        exp = s.turns[0].expect[0]
+        self.assertEqual(exp.event, "function_call")
+        self.assertEqual(exp.calls, [EvalFunctionCall(name="submit_session_suggestion")])
+        self.assertEqual(exp.eval, "the suggestion is about tracing")
+        self.assertEqual(warnings, [])
+
+    def test_eval_on_a_stopped_call_is_rejected(self):
+        """A stopped call carries no arguments, so there is nothing for a judge to see."""
+        with self.assertRaises(ValueError) as ctx:
+            _script(
+                _write(
+                    """
+                    name: judged_stop
+                    turns:
+                      - user: "suggest a session"
+                        expect:
+                          - event: function_call_stopped
+                            calls: [{name: submit_session_suggestion}]
+                            eval: "the suggestion is about tracing"
+                    """
+                )
             )
-            exp = s.turns[0].expect[0]
-            self.assertEqual(exp.event, event)
-            self.assertEqual(exp.calls, [EvalFunctionCall(name="submit_session_suggestion")])
-            self.assertEqual(exp.eval, "the suggestion is about tracing")
-            self.assertEqual(warnings, [])
+        self.assertIn("'function_call_stopped'", str(ctx.exception))
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""

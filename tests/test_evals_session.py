@@ -631,14 +631,6 @@ class TestFunctionCallEval(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure.kind, "function_args_mismatch")
         self.assertEqual(judge.call_asks, [])
 
-    async def test_stopped_calls_are_judged_too(self):
-        judge = _FakeJudge(["yes"])
-        s = _matcher(judge)
-        await s._stream.append(_call("write_report", {"cancelled": True}, stopped=True))
-        exp = self._exp("write_report", event="function_call_stopped")
-        self.assertIsNone(await self._match(s, exp))
-        self.assertEqual(judge.call_asks, [("write_report", {"cancelled": True}, self.CRITERION)])
-
     async def test_no_judge_fails_before_matching(self):
         s = _matcher(judge=None)
         await s._stream.append(_call("submit", self.ARGS))
