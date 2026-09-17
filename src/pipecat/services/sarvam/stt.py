@@ -710,6 +710,12 @@ class SarvamSTTService(STTService):
                             time_now_iso8601(),
                             language,
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
+                            # This service emits one transcript per utterance and
+                            # no interim frames, so every transcript it produces is
+                            # final. Without this, turn-stop strategies cannot take
+                            # their finalized fast path and wait out a timeout meant
+                            # for partial transcripts instead.
+                            finalized=True,
                         )
                     )
         except Exception as e:
