@@ -33,7 +33,9 @@ scenarios:
 
       # ~3s later (under the 5s incomplete-short timeout), the user finishes the
       # thought. Now the turn completes and the bot should respond to the whole answer.
-      - user: "I think I'd go to Japan, to see the temples and try the food."
+      # One short clause: a longer line with a comma pause in the synthesized audio
+      # ends the turn twice, and the first marker is then short.
+      - user: "I'd go to Japan."
         send_after:
           event: vad_user_stopped_speaking
           delay_ms: 3000
