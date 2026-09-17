@@ -54,7 +54,13 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.typesafe_choice_router import default_state_builder
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
-from pipecat.services.typesafe.judge import Choice, JudgeResult, TypeSafeError, TypeSafeJudge
+from pipecat.services.typesafe.judge import (
+    Choice,
+    JudgeResult,
+    Noul,
+    TypeSafeError,
+    TypeSafeJudge,
+)
 from pipecat.utils.types import is_given
 
 TOOL_QUESTION_ID = "tool"
@@ -63,8 +69,8 @@ TOOL_QUESTION_ID = "tool"
 NO_TOOL = "none"
 """The tool choice meaning the turn matches none of the node's tools."""
 
-NOT_STATED = "not stated"
-"""The argument choice meaning the caller did not give that argument."""
+STATED = "stated"
+"""Suffix of the ``Noul`` asking whether the caller gave an argument at all."""
 
 DEFAULT_INSTRUCTIONS = (
     "The bot said `bot_message` and the caller replied `user_reply`. The reply is a "
@@ -104,21 +110,33 @@ class ToolLines(BaseModel):
     Parameters:
         description: What a caller's turn looks like when it calls for this
             tool. Defaults to the tool's schema description.
+        examples: Things a caller says that call for this tool, as spoken.
+            They sharpen the tool choice against its neighbours.
         options: The values each argument can take, keyed by argument name,
             for arguments whose schema has no ``enum``. An argument with
             neither is never filled in.
+        option_examples: Ways a caller says each value, keyed by argument
+            name and then by value, for values a transcript rarely spells
+            the way the schema does (``{"size": {"large": ["big", "the
+            biggest"]}}``).
         ask: Spoken when the tool is chosen but the caller has not given that
             argument yet, keyed by argument name. Placeholders may use
             ``{{ args.<name> }}`` for arguments already given.
         result: Spoken after the tool ran and the flow stayed on the same
             node. Placeholders may use ``{{ result.<key> }}`` for the tool's
             result.
+        confidence_threshold: Overrides the service's threshold for this
+            tool. Raise it for a tool whose mistake costs more, such as
+            ending the call.
     """
 
     description: str | None = None
+    examples: list[str] = Field(default_factory=list)
     options: dict[str, list[str | int | float]] = Field(default_factory=dict)
+    option_examples: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     ask: dict[str, str] = Field(default_factory=dict)
     result: str | None = None
+    confidence_threshold: float | None = None
 
 
 class TypeSafeFlowsLLMService(LLMService):
@@ -130,11 +148,14 @@ class TypeSafeFlowsLLMService(LLMService):
     current node and state.
 
     Each user turn costs one TypeSafe request that asks, in parallel, which
-    tool the turn calls for and which value every option-bearing argument of
-    every tool takes. Only the chosen tool's answers are used. The choice's
-    confidence says how peaked its distribution is, not whether acting on it
-    is safe; ``confidence_threshold`` turns low-confidence picks into a
-    reprompt.
+    tool the turn calls for and, for every option-bearing argument of every
+    tool, whether the caller gave it (a ``Noul``) and which value (a
+    ``Choice``). Only the chosen tool's answers are used. A tool choice below
+    its ``confidence_threshold`` is a reprompt; an argument whose value is
+    below the threshold counts as not given, so the bot asks for it instead of
+    guessing. Confidence says how peaked a distribution is, not whether
+    acting on it is safe, so give a tool with costly mistakes a higher
+    threshold of its own.
 
     Example::
 
@@ -155,7 +176,7 @@ class TypeSafeFlowsLLMService(LLMService):
         tools: Mapping[str, ToolLines] | None = None,
         instructions: str = DEFAULT_INSTRUCTIONS,
         no_tool_description: str = DEFAULT_NO_TOOL_DESCRIPTION,
-        confidence_threshold: float = 0.0,
+        confidence_threshold: float = 0.5,
         flow_manager: FlowManager | None = None,
         warm_up: bool = True,
         **kwargs,
@@ -174,7 +195,9 @@ class TypeSafeFlowsLLMService(LLMService):
             no_tool_description: The criteria text of the choice that means
                 the turn matches no tool.
             confidence_threshold: A tool choice below this confidence is
-                treated as no match.
+                treated as no match, and an argument value below it as not
+                given. A tool's own ``ToolLines.confidence_threshold``
+                overrides it.
             flow_manager: The flow manager, when it already exists. It is
                 normally set through :attr:`flow_manager` after construction.
             warm_up: Whether to open the TypeSafe connection on start.
@@ -338,18 +361,33 @@ class TypeSafeFlowsLLMService(LLMService):
             f"{self}: judged {state} in {result.latency_secs * 1000:.0f}ms: "
             f"{tool_choice.probabilities}"
         )
-        if tool_choice.choice == NO_TOOL or tool_choice.confidence < self._confidence_threshold:
+        tool = tool_choice.choice
+        lines = self._tools.get(tool, ToolLines())
+        threshold = (
+            lines.confidence_threshold
+            if lines.confidence_threshold is not None
+            else self._confidence_threshold
+        )
+        if tool == NO_TOOL or tool_choice.confidence < threshold:
             await self._reprompt(node)
             return
 
-        tool = tool_choice.choice
         schema = next(s for s in schemas if s.name == tool)
-        lines = self._tools.get(tool, ToolLines())
         remembered = self._remembered.setdefault((node, tool), {})
         for name in schema.properties:
-            answer = result.choices.get(_argument_question_id(tool, name))
-            if answer is not None and answer.choice != NOT_STATED:
-                remembered[name] = _coerce(answer.choice, schema.properties[name])
+            stated = result.nouls.get(_stated_question_id(tool, name))
+            value = result.choices.get(_argument_question_id(tool, name))
+            if stated is None or value is None or stated.probability < 0.5:
+                continue
+            if value.confidence < threshold:
+                # The caller said something about it, but not clearly which
+                # value: asking beats guessing.
+                logger.debug(
+                    f"{self}: {tool}.{name} given but {value.choice!r} at confidence "
+                    f"{value.confidence:.2f} is below {threshold:.2f}"
+                )
+                continue
+            remembered[name] = _coerce(value.choice, schema.properties[name])
 
         missing = [name for name in schema.required if name not in remembered]
         if missing:
@@ -378,25 +416,45 @@ class TypeSafeFlowsLLMService(LLMService):
 
     # Questions
 
-    def _questions(self, schemas: list[FunctionSchema]) -> dict[str, Choice]:
-        criteria: dict[str, str] = {}
-        questions: dict[str, Choice] = {}
+    def _questions(self, schemas: list[FunctionSchema]) -> dict[str, Choice | Noul]:
+        """One tool ``Choice``, and per option-bearing argument a presence ``Noul`` and a value ``Choice``.
+
+        Criteria are plain strings unless the tool's lines give examples, in
+        which case they are objects with ``what`` and ``examples`` so the
+        model compares the options on how callers say them.
+        """
+        criteria: dict[str, Any] = {}
+        questions: dict[str, Choice | Noul] = {}
         for schema in schemas:
             lines = self._tools.get(schema.name, ToolLines())
-            criteria[schema.name] = lines.description or schema.description
+            description = lines.description or schema.description
+            criteria[schema.name] = (
+                {"what": description, "examples": lines.examples} if lines.examples else description
+            )
             for name, prop in schema.properties.items():
                 options = prop.get("enum") or lines.options.get(name)
                 if not options:
                     continue
                 about = prop.get("description") or f"the {name}"
+                examples = lines.option_examples.get(name, {})
+                questions[_stated_question_id(schema.name, name)] = Noul(
+                    instructions=f"Does the caller's `user_reply` say anything about this: {about}",
+                    criteria={
+                        "true": "The reply gives or clearly implies a value for it",
+                        "false": "The reply does not mention it",
+                    },
+                )
                 questions[_argument_question_id(schema.name, name)] = Choice(
                     instructions=(
-                        f"In `user_reply`, which value does the caller give for this: {about} "
-                        f"Pick '{NOT_STATED}' when the reply does not give one."
+                        f"Assuming the caller's `user_reply` gives this: {about} Which value is it?"
                     ),
                     criteria={
-                        **{str(option): f"The caller says {option}" for option in options},
-                        NOT_STATED: "The reply does not give this value",
+                        str(option): (
+                            {"what": f"The caller says {option}", "examples": examples[str(option)]}
+                            if str(option) in examples
+                            else f"The caller says {option}"
+                        )
+                        for option in options
                     },
                 )
         criteria[NO_TOOL] = self._no_tool_description
@@ -458,6 +516,10 @@ class TypeSafeFlowsLLMService(LLMService):
 
 def _argument_question_id(tool: str, argument: str) -> str:
     return f"{tool}.{argument}"
+
+
+def _stated_question_id(tool: str, argument: str) -> str:
+    return f"{tool}.{argument}.{STATED}"
 
 
 def _last_message(context: LLMContext) -> Mapping[str, Any] | None:

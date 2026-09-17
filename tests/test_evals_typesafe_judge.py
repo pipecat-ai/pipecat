@@ -10,55 +10,48 @@ import pytest
 
 pytest.importorskip("typesafe_sdk")
 
-from typesafe_sdk import (
-    ChoiceAnswer,
-    NoulAnswer,
-    SystemOneResponse,
-    TypeSafeAPITimeoutError,
-    Usage,
-)
+from typesafe_sdk import NoulAnswer, SystemOneResponse, TypeSafeAPITimeoutError, Usage
 
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.typesafe_judge import (
+    FINISHED_QUESTION_ID,
     GOAL_QUESTION_ID,
-    VERDICT_QUESTION_ID,
+    SATISFIES_QUESTION_ID,
     TypeSafeEvalJudge,
 )
 from pipecat.services.typesafe import TypeSafeJudge
 from tests.typesafe_test_helpers import FakeTypeSafeClient
 
 
-def response(answers: dict) -> SystemOneResponse:
+def response(probabilities: dict[str, float]) -> SystemOneResponse:
     return SystemOneResponse(
-        model="jev-test", usage=Usage(input_tokens=10, output_tokens=2), answers=answers
+        model="jev-test",
+        usage=Usage(input_tokens=10, output_tokens=2),
+        answers={k: NoulAnswer(noul=p) for k, p in probabilities.items()},
     )
 
 
-def verdict_response(probabilities: dict[str, float]) -> SystemOneResponse:
-    choice = max(probabilities, key=lambda k: probabilities[k])
-    return response(
-        {
-            VERDICT_QUESTION_ID: ChoiceAnswer(
-                choice=choice, confidence=probabilities[choice], probabilities=probabilities
-            )
-        }
-    )
+def reply_response(finished: float, satisfies: float) -> SystemOneResponse:
+    return response({FINISHED_QUESTION_ID: finished, SATISFIES_QUESTION_ID: satisfies})
 
 
-def make_judge(client) -> TypeSafeEvalJudge:
-    return TypeSafeEvalJudge(TypeSafeJudge(client=client))
+def make_judge(client, **kwargs) -> TypeSafeEvalJudge:
+    return TypeSafeEvalJudge(TypeSafeJudge(client=client), **kwargs)
 
 
 class TestFromConfig(unittest.TestCase):
     def test_service_typesafe_builds_the_typesafe_judge(self):
-        judge = EvalJudge.from_config({"service": "typesafe", "threshold": 0.7})
+        judge = EvalJudge.from_config(
+            {"service": "typesafe", "threshold": 0.7, "uncertain_band": 0.1}
+        )
         self.assertIsInstance(judge, TypeSafeEvalJudge)
         self.assertEqual(judge._threshold, 0.7)
+        self.assertEqual(judge._uncertain_band, 0.1)
 
 
 class TestEvaluate(unittest.IsolatedAsyncioTestCase):
-    async def test_the_most_probable_option_is_the_verdict(self):
-        client = FakeTypeSafeClient(verdict_response({"yes": 0.91, "no": 0.07, "continue": 0.02}))
+    async def test_a_finished_reply_that_satisfies_is_a_yes(self):
+        client = FakeTypeSafeClient(reply_response(finished=0.97, satisfies=0.91))
         judge = make_judge(client)
         judge.add_user_message("What is the capital of France?")
         judge.add_assistant_message("It's Paris.")
@@ -66,7 +59,7 @@ class TestEvaluate(unittest.IsolatedAsyncioTestCase):
         verdict = await judge.evaluate("says the capital is Paris")
 
         self.assertTrue(verdict.passed)
-        self.assertEqual(verdict.reason, "yes 0.91, no 0.07, continue 0.02")
+        self.assertEqual(verdict.reason, "finished 0.97, satisfies 0.91")
         state, questions = client.requests[0]
         self.assertEqual(
             state,
@@ -76,10 +69,19 @@ class TestEvaluate(unittest.IsolatedAsyncioTestCase):
                 "criterion": "says the capital is Paris",
             },
         )
-        self.assertEqual(set(questions), {VERDICT_QUESTION_ID})
+        self.assertEqual(set(questions), {FINISHED_QUESTION_ID, SATISFIES_QUESTION_ID})
 
-    async def test_streamed_segments_form_one_reply_and_tool_calls_are_left_out(self):
-        client = FakeTypeSafeClient(verdict_response({"yes": 0.2, "no": 0.1, "continue": 0.7}))
+    async def test_a_finished_reply_that_fails_is_a_no(self):
+        client = FakeTypeSafeClient(reply_response(finished=0.95, satisfies=0.1))
+        judge = make_judge(client)
+        judge.add_assistant_message("It's Lyon.")
+
+        verdict = await judge.evaluate("says the capital is Paris")
+
+        self.assertEqual(verdict.verdict, "no")
+
+    async def test_an_unfinished_reply_is_continue_whatever_it_says_so_far(self):
+        client = FakeTypeSafeClient(reply_response(finished=0.2, satisfies=0.05))
         judge = make_judge(client)
         judge.add_user_message("Weather in Paris?")
         judge.add_tool_call("get_weather()")
@@ -94,7 +96,7 @@ class TestEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["conversation"], [{"speaker": "user", "text": "Weather in Paris?"}])
 
     async def test_same_question_is_asked_once(self):
-        client = FakeTypeSafeClient(verdict_response({"yes": 0.9, "no": 0.1, "continue": 0.0}))
+        client = FakeTypeSafeClient(reply_response(finished=0.9, satisfies=0.9))
         judge = make_judge(client)
         judge.add_assistant_message("Hello!")
 
@@ -117,13 +119,7 @@ class TestEvaluate(unittest.IsolatedAsyncioTestCase):
 class TestEvaluateRun(unittest.IsolatedAsyncioTestCase):
     async def test_one_request_decides_the_goal_and_every_turn(self):
         client = FakeTypeSafeClient(
-            response(
-                {
-                    GOAL_QUESTION_ID: NoulAnswer(noul=0.95),
-                    "polite:1": NoulAnswer(noul=0.9),
-                    "polite:2": NoulAnswer(noul=0.2),
-                }
-            )
+            response({GOAL_QUESTION_ID: 0.95, "polite:1": 0.9, "polite:2": 0.2})
         )
         judge = make_judge(client)
         judge.add_user_message("Book a table at six.")
@@ -152,6 +148,18 @@ class TestEvaluateRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(questions), {GOAL_QUESTION_ID, "polite:1", "polite:2"})
         self.assertIn("a table is booked", questions[GOAL_QUESTION_ID].instructions)
         self.assertIn("Bot turn 2", questions["polite:2"].instructions)
+        self.assertIsNotNone(questions["polite:2"].criteria)
+
+    async def test_a_probability_near_the_threshold_is_no_verdict(self):
+        client = FakeTypeSafeClient(response({GOAL_QUESTION_ID: 0.56, "polite:1": 0.44}))
+        judge = make_judge(client, threshold=0.5, uncertain_band=0.15)
+        judge.add_assistant_message("Hi.")
+
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "done")
+
+        self.assertEqual(verdicts.goal.verdict, "none")
+        self.assertEqual(verdicts.goal.reason, "yes 0.56: too close to call")
+        self.assertEqual(verdicts.turns["polite"][0].verdict, "none")
 
     async def test_a_failed_call_gives_no_verdicts(self):
         client = FakeTypeSafeClient(error=TypeSafeAPITimeoutError("slow"))

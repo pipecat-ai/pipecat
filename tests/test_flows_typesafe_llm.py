@@ -14,13 +14,13 @@ import pytest
 
 pytest.importorskip("typesafe_sdk")
 
-from typesafe_sdk import ChoiceAnswer, SystemOneResponse, Usage
+from typesafe_sdk import ChoiceAnswer, NoulAnswer, SystemOneResponse, Usage
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.flows.manager import FlowManager, NodeConfig
 from pipecat.flows.typesafe_llm import (
     NO_TOOL,
-    NOT_STATED,
+    STATED,
     TOOL_QUESTION_ID,
     NodeLines,
     ToolLines,
@@ -77,7 +77,9 @@ NODE_LINES = {
 TOOL_LINES = {
     "select_pizza_order": ToolLines(
         description="The caller gives pizza details",
+        examples=["Pizza please"],
         options={"size": ["small", "medium", "large"]},
+        option_examples={"size": {"large": ["big", "the biggest"]}},
         ask={
             "size": "What size?",
             "pizza_type": "A {{ args.size }}, got it. What kind?",
@@ -87,16 +89,32 @@ TOOL_LINES = {
 }
 
 
-def response(answers: dict[str, str]) -> SystemOneResponse:
-    """A response choosing ``answers[question_id]`` for each question, fully confident."""
+def response(answers: dict[str, str | float | tuple[str, float]]) -> SystemOneResponse:
+    """A response answering each question.
+
+    A string is a fully confident choice, a ``(choice, confidence)`` pair a
+    choice at that confidence, and a float a Noul probability.
+    """
+    built: dict[str, Any] = {}
+    for question_id, answer in answers.items():
+        if isinstance(answer, float):
+            built[question_id] = NoulAnswer(noul=answer)
+        else:
+            choice, confidence = answer if isinstance(answer, tuple) else (answer, 1.0)
+            built[question_id] = ChoiceAnswer(
+                choice=choice, confidence=confidence, probabilities={choice: confidence}
+            )
     return SystemOneResponse(
-        model="jev-test",
-        usage=Usage(input_tokens=10, output_tokens=2),
-        answers={
-            question_id: ChoiceAnswer(choice=choice, confidence=1.0, probabilities={choice: 1.0})
-            for question_id, choice in answers.items()
-        },
+        model="jev-test", usage=Usage(input_tokens=10, output_tokens=2), answers=built
     )
+
+
+def stated(tool: str, *arguments: str) -> dict[str, float]:
+    """Presence answers: the named arguments given, every other option-bearing one not."""
+    return {
+        f"{tool}.{name}.{STATED}": (1.0 if name in arguments else 0.0)
+        for name in ("size", "pizza_type")
+    }
 
 
 def user_turn(*messages: dict[str, Any]) -> LLMContext:
@@ -163,6 +181,7 @@ class TestTypeSafeFlowsLLMService(unittest.IsolatedAsyncioTestCase):
                 TOOL_QUESTION_ID: "select_pizza_order",
                 "select_pizza_order.size": "large",
                 "select_pizza_order.pizza_type": "pepperoni",
+                **stated("select_pizza_order", "size", "pizza_type"),
             }
         )
         context = user_turn({"role": "user", "content": "A large pepperoni please"})
@@ -180,14 +199,64 @@ class TestTypeSafeFlowsLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("select_pizza_order", tool_question.criteria)
         self.assertIn("get_prices", tool_question.criteria)
         self.assertIn(NO_TOOL, tool_question.criteria)
-        self.assertIn(NOT_STATED, questions["select_pizza_order.pizza_type"].criteria)
+        # Presence and value are separate questions; the value choice lists only values.
+        self.assertIn(f"select_pizza_order.pizza_type.{STATED}", questions)
+        self.assertEqual(
+            set(questions["select_pizza_order.pizza_type"].criteria), {"cheese", "pepperoni"}
+        )
+        # Examples make a criterion an object the model compares on.
+        self.assertEqual(
+            questions["select_pizza_order.size"].criteria["large"],
+            {"what": "The caller says large", "examples": ["big", "the biggest"]},
+        )
+        self.assertEqual(tool_question.criteria["select_pizza_order"]["examples"], ["Pizza please"])
+
+    async def test_a_weak_argument_value_is_asked_for_rather_than_guessed(self):
+        self.client.response = response(
+            {
+                TOOL_QUESTION_ID: "select_pizza_order",
+                "select_pizza_order.size": ("large", 0.4),
+                "select_pizza_order.pizza_type": "pepperoni",
+                **stated("select_pizza_order", "size", "pizza_type"),
+            }
+        )
+        context = user_turn({"role": "user", "content": "A regular pepperoni"})
+
+        down, _ = await run_test(
+            self.llm,
+            frames_to_send=[LLMContextFrame(context=context), SleepFrame()],
+        )
+
+        self.assertEqual(texts(down), ["What size?"])
+        self.assertEqual(self.calls, [])
+
+    async def test_a_tool_threshold_overrides_the_service_threshold(self):
+        self.client.response = response(
+            {
+                TOOL_QUESTION_ID: ("get_prices", 0.7),
+                **stated("select_pizza_order"),
+            }
+        )
+        self.llm._tools["get_prices"] = ToolLines(
+            result="Pizzas are {{ result.small }} and up.", confidence_threshold=0.9
+        )
+        context = user_turn({"role": "user", "content": "Um, what's the, uh, cost"})
+
+        down, _ = await run_test(
+            self.llm,
+            frames_to_send=[LLMContextFrame(context=context), SleepFrame()],
+        )
+
+        self.assertEqual(texts(down), ["What size and what kind of pizza?"])
+        self.assertEqual(self.calls, [])
 
     async def test_a_partial_turn_asks_for_the_missing_argument_and_remembers_the_rest(self):
         self.client.response = response(
             {
                 TOOL_QUESTION_ID: "select_pizza_order",
                 "select_pizza_order.size": "large",
-                "select_pizza_order.pizza_type": NOT_STATED,
+                "select_pizza_order.pizza_type": "cheese",
+                **stated("select_pizza_order", "size"),
             }
         )
         first = user_turn({"role": "user", "content": "Large."})
@@ -208,8 +277,9 @@ class TestTypeSafeFlowsLLMService(unittest.IsolatedAsyncioTestCase):
         self.client.response = response(
             {
                 TOOL_QUESTION_ID: "select_pizza_order",
-                "select_pizza_order.size": NOT_STATED,
+                "select_pizza_order.size": "small",
                 "select_pizza_order.pizza_type": "cheese",
+                **stated("select_pizza_order", "pizza_type"),
             }
         )
         second = user_turn(
@@ -227,13 +297,7 @@ class TestTypeSafeFlowsLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls, [{"size": "large", "pizza_type": "cheese"}])
 
     async def test_no_matching_tool_speaks_the_reprompt(self):
-        self.client.response = response(
-            {
-                TOOL_QUESTION_ID: NO_TOOL,
-                "select_pizza_order.size": NOT_STATED,
-                "select_pizza_order.pizza_type": NOT_STATED,
-            }
-        )
+        self.client.response = response({TOOL_QUESTION_ID: NO_TOOL, **stated("select_pizza_order")})
         context = user_turn({"role": "user", "content": "Hang on a second"})
 
         down, _ = await run_test(

@@ -8,11 +8,13 @@
 
 :class:`TypeSafeEvalJudge` answers the same questions as
 :class:`~pipecat.evals.judge.EvalJudge`, from the same conversation record,
-but as typed questions to TypeSafe's Jev: a scripted ``eval:`` expectation is
-one ``Choice`` between yes, no and continue, and a simulation run is one
-request holding a ``Noul`` for the goal plus a ``Noul`` per bot turn per
-metric. Each verdict carries the probability behind it as its reason, in
-place of the sentence an LLM judge writes.
+but as typed yes/no questions to TypeSafe's Jev. A scripted ``eval:``
+expectation is two ``Noul`` questions asked together, whether the bot has
+finished answering and whether the reply satisfies the criterion, and code
+combines them into yes, no or continue. A simulation run is one request
+holding a ``Noul`` for the goal plus one per bot turn per metric. Each
+verdict carries the probabilities behind it as its reason, in place of the
+sentence an LLM judge writes.
 
 Select it in a scenario with::
 
@@ -22,6 +24,8 @@ Select it in a scenario with::
         model: jev-latest      # optional
         timeout: 10            # optional, seconds
         threshold: 0.5         # optional: the yes probability a Noul needs
+        uncertain_band: 0.05   # optional: run verdicts this close to the
+                               # threshold are "none" rather than a coin flip
 
 Requires the ``typesafe`` extra and ``TYPESAFE_API_KEY``.
 """
@@ -33,31 +37,57 @@ from typing import Any
 from loguru import logger
 
 from pipecat.evals.judge import EvalJudge, JudgeVerdict, RunVerdicts
-from pipecat.services.typesafe.judge import Choice, Noul, TypeSafeJudge
+from pipecat.services.typesafe.judge import Noul, NoulCriteria, TypeSafeJudge
 
-VERDICT_QUESTION_ID = "verdict"
-"""Question id of the yes/no/continue ``Choice`` for a scripted expectation."""
+FINISHED_QUESTION_ID = "finished"
+"""Question id of the ``Noul`` asking whether the bot has finished its answer."""
+
+SATISFIES_QUESTION_ID = "satisfies"
+"""Question id of the ``Noul`` asking whether the reply satisfies the criterion."""
 
 GOAL_QUESTION_ID = "goal"
 """Question id of the ``Noul`` deciding a simulation run's goal."""
 
-REPLY_INSTRUCTIONS = (
+REPLY_CONTEXT = (
     "A bot under test is in a conversation with a user. `conversation` is what was said "
     "before the bot's most recent reply, `bot_reply` is that reply so far (it may still be "
     "streaming in), and `criterion` is what the reply should express. When the bot spoke, "
     "`bot_reply` is a speech-to-text transcript, so judge it by the intended spoken "
-    "meaning, never by spelling: 'for' can mean 'four' and 'to' can mean 'two'. Judge only "
-    "`bot_reply`, using `conversation` as context. Does `bot_reply` satisfy `criterion`?"
+    "meaning, never by spelling: 'for' can mean 'four' and 'to' can mean 'two'."
 )
 
-REPLY_CRITERIA = {
-    "yes": "The bot has given its answer and it satisfies the criterion",
-    "no": "The bot has given its answer and it fails the criterion",
-    "continue": (
-        "The bot has not given its answer yet: it says it is checking, looking something "
-        "up, or will report back; or the reply is a greeting or an obviously unfinished "
-        "fragment. There is nothing to judge yet, however fluent the words are"
-    ),
+FINISHED_INSTRUCTIONS = (
+    REPLY_CONTEXT + " Is `bot_reply` far enough along to be judged against `criterion`, "
+    "or is the bot still on its way to the thing `criterion` is about?"
+)
+
+FINISHED_CRITERIA: NoulCriteria = {
+    "true": {
+        "what": (
+            "The reply already contains what `criterion` asks about, right or wrong, or "
+            "the bot has plainly given its answer. A greeting counts when `criterion` asks "
+            "for a greeting or an opening"
+        ),
+        "examples": ["The capital of Germany is Berlin.", "Sorry, I can't help with that."],
+    },
+    "false": {
+        "what": (
+            "The bot has not reached what `criterion` asks about: it says it is checking, "
+            "looking something up, or will report back; or it has so far only greeted or "
+            "said a fragment while `criterion` asks for something more"
+        ),
+        "examples": ["Let me check on that for you.", "The capital of"],
+    },
+}
+
+SATISFIES_INSTRUCTIONS = (
+    REPLY_CONTEXT + " Judging only `bot_reply` and using `conversation` as context, does "
+    "`bot_reply` satisfy `criterion`?"
+)
+
+SATISFIES_CRITERIA: NoulCriteria = {
+    "true": "The reply does what the criterion asks, or is not in the situation the criterion is about",
+    "false": "The reply does something the criterion forbids, or fails to do what it asks",
 }
 
 RUN_RULES = (
@@ -65,11 +95,36 @@ RUN_RULES = (
     "bot's replies are numbered 'Bot turn 1', 'Bot turn 2', and so on; lines marked 'User' "
     "are the user; a line marked '[tool call]' is a function the bot called at that point, "
     "and a completed call is stronger evidence of an action than the bot saying it did it. "
-    "A criterion that forbids something ('never ...', 'does not ...') or applies only in a "
-    "situation ('when ...', 'if ...') is satisfied by a reply that does not do the "
-    "forbidden thing or is not in that situation. When the bot spoke, its text is a "
-    "speech-to-text transcript: judge it by the intended spoken meaning, never by spelling."
+    "When the bot spoke, its text is a speech-to-text transcript: judge it by the intended "
+    "spoken meaning, never by spelling."
 )
+
+GOAL_CRITERIA: NoulCriteria = {
+    "true": (
+        "The transcript shows the goal was reached, by what the bot said or by a completed "
+        "tool call"
+    ),
+    "false": (
+        "The conversation ended before the goal was reached, or the bot did something other "
+        "than what the goal asks"
+    ),
+}
+
+TURN_CRITERIA: NoulCriteria = {
+    "true": {
+        "what": (
+            "The turn does what the criterion asks; or the criterion forbids something and "
+            "the turn does not do it; or the criterion applies only in a situation the turn "
+            "is not in"
+        ),
+    },
+    "false": {
+        "what": (
+            "The turn does something the criterion forbids, or is in the situation the "
+            "criterion is about and fails to do what it asks"
+        ),
+    },
+}
 
 
 def _turn_question_id(name: str, turn: int) -> str:
@@ -80,24 +135,33 @@ class TypeSafeEvalJudge(EvalJudge):
     """Decides scenario verdicts with TypeSafe judgments.
 
     Keeps the conversation exactly as :class:`EvalJudge` does and is fed the
-    same way; only the deciding differs. A scripted expectation becomes one
-    ``Choice`` over the reply so far, answered as whichever of yes, no or
-    continue is most probable. A simulation run becomes one request: a
-    ``Noul`` for the goal and one per bot turn per criterion, each answered
-    yes when its probability reaches ``threshold``. Reasons carry the
-    probabilities, for example ``yes 0.91, no 0.07, continue 0.02``.
+    same way; only the deciding differs. A scripted expectation is two
+    ``Noul`` questions in one request: is the answer finished, and does it
+    satisfy the criterion. The verdict is ``continue`` while the first is
+    below ``threshold``, otherwise yes or no from the second. A simulation
+    run is one request: a ``Noul`` for the goal and one per bot turn per
+    criterion. Each is yes at or above ``threshold`` and no below it, except
+    that a probability within ``uncertain_band`` of the threshold is ``none``:
+    the judge could not tell, which the harness counts as a failure with that
+    reason rather than a verdict. Reasons carry the probabilities, for example
+    ``finished 0.97, satisfies 0.08``.
     """
 
-    def __init__(self, judge: TypeSafeJudge, *, threshold: float = 0.5):
+    def __init__(
+        self, judge: TypeSafeJudge, *, threshold: float = 0.5, uncertain_band: float = 0.05
+    ):
         """Initialize the judge.
 
         Args:
             judge: The TypeSafe client wrapper.
             threshold: The probability a ``Noul`` needs to count as yes.
+            uncertain_band: How close to ``threshold`` a run verdict's
+                probability may be before it is ``none`` instead of yes or no.
         """
         super().__init__(None)
         self._judge = judge
         self._threshold = threshold
+        self._uncertain_band = uncertain_band
 
     @classmethod
     def from_config(cls, judge_config: Mapping[str, Any]) -> "TypeSafeEvalJudge":
@@ -105,7 +169,8 @@ class TypeSafeEvalJudge(EvalJudge):
 
         Args:
             judge_config: The block. Keys: ``model`` (default ``jev-latest``),
-                ``timeout`` in seconds (default 10), ``threshold`` (default 0.5).
+                ``timeout`` in seconds (default 10), ``threshold`` (default
+                0.5), ``uncertain_band`` (default 0.05).
 
         Returns:
             A configured judge.
@@ -116,6 +181,7 @@ class TypeSafeEvalJudge(EvalJudge):
                 timeout=float(judge_config.get("timeout", 10.0)),
             ),
             threshold=float(judge_config.get("threshold", 0.5)),
+            uncertain_band=float(judge_config.get("uncertain_band", 0.05)),
         )
 
     async def _call_judge(
@@ -139,9 +205,12 @@ class TypeSafeEvalJudge(EvalJudge):
             result = await self._judge.ask(
                 state,
                 {
-                    VERDICT_QUESTION_ID: Choice(
-                        instructions=REPLY_INSTRUCTIONS, criteria=REPLY_CRITERIA
-                    )
+                    FINISHED_QUESTION_ID: Noul(
+                        instructions=FINISHED_INSTRUCTIONS, criteria=FINISHED_CRITERIA
+                    ),
+                    SATISFIES_QUESTION_ID: Noul(
+                        instructions=SATISFIES_INSTRUCTIONS, criteria=SATISFIES_CRITERIA
+                    ),
                 },
             )
         except Exception as e:
@@ -149,13 +218,19 @@ class TypeSafeEvalJudge(EvalJudge):
             return JudgeVerdict(
                 verdict="no", reason=f"judge call failed: {e.__class__.__name__}", raw_response=""
             )
-        decision = result.choices.get(VERDICT_QUESTION_ID)
-        raw = json.dumps(decision.probabilities if decision else {}, sort_keys=True)
-        if decision is None:
+        finished = result.nouls.get(FINISHED_QUESTION_ID)
+        satisfies = result.nouls.get(SATISFIES_QUESTION_ID)
+        raw = json.dumps({k: v.probability for k, v in result.nouls.items()}, sort_keys=True)
+        if finished is None or satisfies is None:
             return JudgeVerdict(verdict="no", reason="judge gave no verdict", raw_response=raw)
-        return JudgeVerdict(
-            verdict=decision.choice, reason=_probabilities(decision.probabilities), raw_response=raw
-        )
+        reason = f"finished {finished.probability:.2f}, satisfies {satisfies.probability:.2f}"
+        if finished.probability < self._threshold:
+            verdict = "continue"
+        elif satisfies.probability >= self._threshold:
+            verdict = "yes"
+        else:
+            verdict = "no"
+        return JudgeVerdict(verdict=verdict, reason=reason, raw_response=raw)
 
     async def _judge_run(
         self, lines: list[str], turn_count: int, criteria: dict[str, str], success: str
@@ -166,7 +241,8 @@ class TypeSafeEvalJudge(EvalJudge):
                 instructions=(
                     "Following `rules`, and considering the whole `transcript`, is this goal "
                     f"for the conversation met: {success}"
-                )
+                ),
+                criteria=GOAL_CRITERIA,
             )
         }
         for name, criterion in criteria.items():
@@ -176,7 +252,8 @@ class TypeSafeEvalJudge(EvalJudge):
                         f"Following `rules`, does 'Bot turn {turn}' in `transcript`, judged on "
                         "its own in the light of the conversation before it, satisfy this "
                         f"criterion: {criterion}"
-                    )
+                    ),
+                    criteria=TURN_CRITERIA,
                 )
         logger.debug(
             "Judge evaluating {!r} and {} criteria over {} bot turn(s):\n{}",
@@ -202,11 +279,14 @@ class TypeSafeEvalJudge(EvalJudge):
                 return JudgeVerdict(
                     verdict="none", reason="(judge gave no verdict)", raw_response=raw
                 )
-            passed = answer.probability >= self._threshold
+            p = answer.probability
+            reason = f"yes {p:.2f}"
+            if abs(p - self._threshold) < self._uncertain_band:
+                return JudgeVerdict(
+                    verdict="none", reason=f"{reason}: too close to call", raw_response=raw
+                )
             return JudgeVerdict(
-                verdict="yes" if passed else "no",
-                reason=f"yes {answer.probability:.2f}",
-                raw_response=raw,
+                verdict="yes" if p >= self._threshold else "no", reason=reason, raw_response=raw
             )
 
         return RunVerdicts(
@@ -216,12 +296,6 @@ class TypeSafeEvalJudge(EvalJudge):
                 for name in criteria
             },
         )
-
-
-def _probabilities(probabilities: Mapping[str, float]) -> str:
-    return ", ".join(
-        f"{k} {v:.2f}" for k, v in sorted(probabilities.items(), key=lambda kv: -kv[1])
-    )
 
 
 def _show(state: Mapping[str, Any]) -> str:

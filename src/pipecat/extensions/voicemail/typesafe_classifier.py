@@ -15,6 +15,8 @@ not know the difference.
 Requires the ``typesafe`` extra: ``uv add "pipecat-ai[typesafe]"``.
 """
 
+from typing import Any
+
 from pipecat.services.typesafe.choice_llm import TypeSafeChoiceLLMService
 from pipecat.services.typesafe.judge import TypeSafeJudge
 
@@ -30,19 +32,46 @@ DEFAULT_INSTRUCTIONS = (
     "did the call reach a voicemail or other automated system?"
 )
 
-DEFAULT_CRITERIA = {
-    CONVERSATION: (
-        "A live person answered: a personal greeting such as 'Hello?', 'Hi', 'Yeah?' or "
-        "'John speaking'; a question to the caller such as 'Who is this?' or 'Can I help "
-        "you?'; or other spontaneous speech that expects a reply"
-    ),
-    VOICEMAIL: (
-        "A recording or automated system: a voicemail greeting such as 'you've reached', "
-        "'not available right now', 'leave a message', 'leave your name and number' or "
-        "'I'll get back to you'; a carrier message such as 'not in service', 'mailbox is "
-        "full' or 'has not been set up'; or a business message such as 'our office is "
-        "currently closed'"
-    ),
+DEFAULT_CRITERIA: dict[str, Any] = {
+    CONVERSATION: {
+        "what": (
+            "A live person answered and is talking to the caller: a greeting, a question "
+            "to the caller, or other spontaneous speech that expects a reply"
+        ),
+        "not_for": (
+            "A recorded greeting, even a casual one, that tells the caller what to do "
+            "instead of waiting for them to speak"
+        ),
+        "examples": [
+            "Hello?",
+            "Hi",
+            "Yeah?",
+            "John speaking",
+            "Who is this?",
+            "Can I help you?",
+            "Sorry, I'm in the middle of something, what's up?",
+        ],
+    },
+    VOICEMAIL: {
+        "what": (
+            "A recording or automated system: a voicemail greeting (typically 'you've "
+            "reached', 'not available right now', 'leave a message', 'I'll get back to "
+            "you'), a carrier message ('not in service', 'mailbox is full'), or a business "
+            "message played to every caller ('our office is currently closed')"
+        ),
+        "not_for": (
+            "A person who is busy or distracted but is still speaking to the caller and "
+            "waiting for an answer"
+        ),
+        "examples": [
+            "Hi, you've reached Jamie. Please leave a message.",
+            "This is Sarah, I'm not available right now, leave your name and number.",
+            "I can't come to the phone right now. Leave a message after the tone.",
+            "The number you have dialed is not in service.",
+            "The mailbox is full.",
+            "Thank you for calling. Our office is currently closed.",
+        ],
+    },
 }
 
 
@@ -68,7 +97,7 @@ class TypeSafeVoicemailClassifier(TypeSafeChoiceLLMService):
         *,
         judge: TypeSafeJudge | None = None,
         instructions: str = DEFAULT_INSTRUCTIONS,
-        criteria: dict[str, str] | None = None,
+        criteria: dict[str, Any] | None = None,
         confidence_threshold: float = 0.5,
         **kwargs,
     ):
@@ -80,7 +109,8 @@ class TypeSafeVoicemailClassifier(TypeSafeChoiceLLMService):
             instructions: The question asked about the transcript, which the
                 state exposes as `transcript`.
             criteria: Descriptions of the two options, keyed ``CONVERSATION``
-                and ``VOICEMAIL``. Defaults to :data:`DEFAULT_CRITERIA`.
+                and ``VOICEMAIL``, as strings or as objects with ``what``,
+                ``not_for`` and ``examples``. Defaults to :data:`DEFAULT_CRITERIA`.
             confidence_threshold: Minimum confidence to answer with a verdict.
                 Below it the classifier answers nothing and the detector waits
                 for the caller side to say more.

@@ -105,9 +105,14 @@ NODE_LINES = {
 TOOL_LINES = {
     "select_pizza_order": ToolLines(
         description="The caller gives pizza order details: a size, a kind of pizza, or both",
+        examples=["A large pepperoni", "Medium please", "Cheese", "The veggie one"],
         options={
             "size": ["small", "medium", "large"],
             "pizza_type": ["cheese", "pepperoni", "supreme", "vegetarian"],
+        },
+        option_examples={
+            "size": {"small": ["a small one", "the smallest"], "large": ["big", "the biggest"]},
+            "pizza_type": {"vegetarian": ["veggie", "the vegetable one"]},
         },
         ask={
             "size": "Sure. What size would you like: small, medium, or large?",
@@ -119,9 +124,13 @@ TOOL_LINES = {
     ),
     "select_sushi_order": ToolLines(
         description="The caller gives sushi order details: how many rolls, which roll, or both",
+        examples=["Two California rolls", "Spicy tuna", "Three, please"],
         options={
             "count": list(range(1, 11)),
             "roll_type": ["california", "spicy tuna", "rainbow", "dragon"],
+        },
+        option_examples={
+            "count": {"1": ["one", "a single roll", "just one"], "2": ["two", "a couple"]},
         },
         ask={
             "count": "Sure. How many rolls would you like?",

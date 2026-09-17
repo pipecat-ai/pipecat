@@ -111,7 +111,7 @@ class TypeSafeChoiceLLMService(LLMService):
         *,
         judge: TypeSafeJudge,
         instructions: str,
-        criteria: Mapping[str, str],
+        criteria: Mapping[str, Any],
         confidence_threshold: float = 0.0,
         state_builder: StateBuilder = transcript_state_builder,
         warm_up: bool = True,
@@ -125,8 +125,9 @@ class TypeSafeChoiceLLMService(LLMService):
             instructions: The question asked about the state. Refer to state
                 fields with backticks, for example `transcript`.
             criteria: The labels the service can answer with, each with a
-                description of what matches it. The key is the exact text
-                emitted.
+                description of what matches it: a string, or an object with
+                ``what``, ``not_for`` and ``examples`` fields when the labels
+                need sharper boundaries. The key is the exact text emitted.
             confidence_threshold: A verdict below this confidence is answered
                 with an empty response. 0 answers with every verdict.
             state_builder: Builds the request state from the LLM context.

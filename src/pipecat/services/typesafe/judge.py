@@ -32,6 +32,7 @@ try:
         ChoiceAnswer,
         Noul,
         NoulAnswer,
+        NoulCriteria,
         RetryPolicy,
         Score,
         ScoreAnswer,
@@ -43,8 +44,33 @@ except ModuleNotFoundError as e:
     logger.error('In order to use TypeSafe, you need to `uv add "pipecat-ai[typesafe]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+__all__ = [
+    "DEFAULT_RETRY",
+    "Choice",
+    "ChoiceDecision",
+    "JudgeResult",
+    "Noul",
+    "NoulCriteria",
+    "NoulDecision",
+    "Question",
+    "RetryPolicy",
+    "Score",
+    "ScoreDecision",
+    "TypeSafeError",
+    "TypeSafeJudge",
+]
+
 Question = Choice | Noul | Score
 """A question object from the SDK."""
+
+DEFAULT_RETRY = RetryPolicy(
+    max_retries=1,
+    backoff_initial=0.1,
+    backoff_max=0.2,
+    api_timeout_error=False,
+    timeout=None,
+)
+"""One retry after a short backoff for connection errors and retryable statuses; timeouts are not retried."""
 
 
 class ChoiceDecision(BaseModel):
@@ -117,10 +143,11 @@ class TypeSafeJudge:
     between the processors that need judgments; the component that created it
     closes it.
 
-    The defaults suit a real-time pipeline: requests time out after one second
-    and are not retried, because every consumer in Pipecat falls back to the
-    LLM when a judgment does not arrive, and a retry would only delay that
-    fallback.
+    The defaults suit a real-time pipeline: requests time out after one second,
+    and a request that fails to connect or gets a retryable status (429, 5xx)
+    is retried once after a short backoff. A request that times out is not
+    retried, since a second wait would cost the turn more than the fallback
+    every consumer has for a missing judgment.
 
     Example::
 
@@ -151,7 +178,9 @@ class TypeSafeJudge:
                 environment variable.
             model: Model name sent with every request.
             timeout: Per-request HTTP timeout in seconds.
-            retry: SDK retry policy. Defaults to no retries.
+            retry: SDK retry policy. Defaults to :data:`DEFAULT_RETRY`: one
+                retry after a 100 to 200 ms backoff for connection errors and
+                retryable statuses, none for timeouts.
             base_url: API root override. Defaults to the ``TYPESAFE_BASE_URL``
                 environment variable or the public API.
             client: An already-constructed SDK client to use instead of creating
@@ -160,7 +189,7 @@ class TypeSafeJudge:
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
-        self._retry = retry if retry is not None else RetryPolicy(max_retries=0)
+        self._retry = retry if retry is not None else DEFAULT_RETRY
         self._base_url = base_url
         self._client = client
         self._owns_client = client is None
