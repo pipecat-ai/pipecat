@@ -606,8 +606,11 @@ def resolve_language(
     Args:
         language: The Language enum value to convert.
         language_map: Dictionary mapping Language enums to service language codes.
-        use_base_code: If True, extracts base code (e.g., 'en' from 'en-US').
-                      If False, uses full language code as-is.
+        use_base_code: If True, a regional variant resolves through its base
+                      language: the map's code for the base language (e.g.
+                      'eng' for 'en-US' when the map has ``Language.EN: "eng"``),
+                      or the base code itself (e.g. 'en') when the map has no
+                      entry for it. If False, uses full language code as-is.
 
     Returns:
         The resolved language code for the service.
@@ -619,6 +622,12 @@ def resolve_language(
         >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
         # Logs: "Language en-US not verified. Using base code 'en'."
         "en"
+
+        # Service with its own code per base language (e.g., ElevenLabs STT)
+        >>> LANGUAGE_MAP = {Language.EN: "eng", Language.ES: "spa"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'eng'."
+        "eng"
 
         # Service expecting full codes (e.g., AWS)
         >>> LANGUAGE_MAP = {Language.EN_US: "en-US", Language.ES_ES: "es-ES"}
@@ -636,8 +645,13 @@ def resolve_language(
     lang_str = str(language)
 
     if use_base_code:
-        # Extract base code (e.g., "en" from "en-US")
+        # Extract base code (e.g., "en" from "en-US"), then prefer the map's code
+        # for that base language when the service names it differently.
         base_code = lang_str.split("-")[0].lower()
+        try:
+            base_code = language_map.get(Language(base_code), base_code)
+        except ValueError:
+            pass
         logger.warning(f"Language {language} not verified. Using base code '{base_code}'.")
         return base_code
     else:
