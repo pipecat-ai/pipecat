@@ -18,7 +18,7 @@ scenarios:
       - user: "Hi, you've reached Jamie. I can't take your call right now. Please leave your name and number after the tone and I'll get back to you."
         expect:
           - event: response
-            eval: "the response is a voicemail message from someone named Jamie about an appointment, asking for a call back at a phone number; it is not a reply to what was said"
+            eval: "the bot is leaving a message on the recording it reached: it introduces itself as Jamie, says it is calling about an appointment, and asks for a call back at a phone number; it does not reply conversationally to the greeting"
 
   # A person picks up. The bot answers them.
   - name: person

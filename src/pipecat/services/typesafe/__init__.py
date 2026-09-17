@@ -6,6 +6,7 @@
 
 """TypeSafe System One judgments for Pipecat pipelines."""
 
+from pipecat.services.typesafe.choice_llm import TypeSafeChoiceLLMService
 from pipecat.services.typesafe.judge import (
     ChoiceDecision,
     JudgeResult,
@@ -19,5 +20,6 @@ __all__ = [
     "JudgeResult",
     "NoulDecision",
     "ScoreDecision",
+    "TypeSafeChoiceLLMService",
     "TypeSafeJudge",
 ]

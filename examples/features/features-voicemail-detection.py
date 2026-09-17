@@ -9,7 +9,7 @@
 The bot places (or, here, receives) a call and needs to know who picked up
 before it says anything. ``VoicemailDetector`` holds the bot's speech back
 while a classifier judges the first thing the other side says. The classifier
-is a ``TypeSafeJudge``: one ``Choice`` question per caller turn, answered in
+is a ``TypeSafeVoicemailClassifier``: one ``Choice`` per caller turn, answered in
 about a fifth of a second, with no text generated. A person gets the normal
 LLM conversation; a recording gets a written message once it goes quiet.
 
@@ -30,6 +30,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.extensions.voicemail.typesafe_classifier import TypeSafeVoicemailClassifier
 from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -44,7 +45,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.typesafe import TypeSafeJudge
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -98,11 +98,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # TypeSafe judges each caller turn: a live person, or a recording? The
-    # detector waits for a verdict at confidence 0.5 or better, so a lone
+    # The classifier LLM is a TypeSafe judgment: a live person, or a recording? It
+    # answers nothing below confidence 0.5, so the detector waits and a lone
     # "sorry, I can't come to the phone right now" is judged again together
     # with whatever follows it.
-    voicemail = VoicemailDetector(judge=TypeSafeJudge())
+    voicemail = VoicemailDetector(llm=TypeSafeVoicemailClassifier())
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
