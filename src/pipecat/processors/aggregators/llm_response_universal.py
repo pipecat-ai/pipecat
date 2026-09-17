@@ -2271,16 +2271,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
         before the conversation moved on is indistinguishable from a synchronous
         one, and settles in place: its "started" placeholder becomes the tool
         result, and the LLM sees an ordinary call. The context alone decides.
-        The result is deferred when anything but protocol bookkeeping follows
-        the placeholder: a user message, assistant text, a developer message
-        such as new task instructions, or an intermediate update from this
-        call. Bookkeeping is other calls' placeholders and results, their
-        deferred messages, and assistant messages that carry only tool calls,
-        which a sibling in the same batch writes after this placeholder. A
-        model response that produced no text, or a later batch of tool calls
-        with none, is therefore invisible here. A placeholder that is no
-        longer in the context, because the context was rebuilt while the call
-        ran, also defers.
+        The result is deferred when a user or developer message follows the
+        placeholder: something the user said, new task instructions, or an
+        intermediate update from this call. Assistant messages are ignored,
+        so filler spoken with a ``TTSSpeakFrame`` while the call runs does
+        not defer it, whether the tool handler or an event handler spoke it.
+        The same holds for text the model wrote after seeing the placeholder
+        with no user turn in between, as when an ungrouped sibling's result
+        runs inference; the result still settles in place. Other calls'
+        placeholders, results, and deferred messages are ignored too. A
+        placeholder that is no longer in the context, because the context was
+        rebuilt while the call ran, also defers.
 
         Args:
             in_progress_frame: The call's in-progress frame.
@@ -2301,8 +2302,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 )
                 continue
             role = message.get("role")
-            if role == "tool" or (role == "assistant" and not message.get("content")):
-                # A sibling's placeholder, result, or tool-call message.
+            if role in ("tool", "assistant"):
+                # A sibling's placeholder or result, or assistant output.
                 continue
             payload = async_tool_messages.parse_message(message)
             if payload is not None and payload.tool_call_id != tool_call_id:
