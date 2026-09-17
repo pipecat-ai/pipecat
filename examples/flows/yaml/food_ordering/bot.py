@@ -14,10 +14,12 @@ Flows offers for runtime configuration:
 - handlers.py holds the tools: direct functions whose schema comes
   from their signature and docstring.
 
-This bot reads the YAML from disk when it starts a session. A production bot
-would fetch it from a database or CMS instead, so one deployment can run
-whichever flow the session calls for. Prompts refer to session facts and
-to what handlers have stored as {{ key }}, filled in from the manager's state.
+This bot runs whichever flow the session calls for: the flow config the
+session names, which reaches the bot as runner_args.flow_config, or the
+flow.yaml beside this file. So one deployment serves many flows, and locally
+one bot serves many test runs: pass `--flow other_flow.yaml` to the runner.
+Prompts refer to session facts and to what handlers have stored as
+{{ key }}, filled in from the manager's state.
 
 Requirements:
 - CARTESIA_API_KEY (for TTS)
@@ -127,10 +129,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.add_workers(worker)
 
-    # Load the flow graph and join it to the handlers module. The config is
-    # validated as it loads; constructing the Flow checks that every tool it
-    # names exists and has a valid direct-function signature.
-    config = FlowConfig.from_file(FLOW_CONFIG_PATH)
+    # The flow the session named, or the one beside this bot, joined to the
+    # handlers module. The config is validated as it loads; constructing the
+    # Flow checks that every tool it names exists and has a valid
+    # direct-function signature.
+    config = (
+        FlowConfig.from_yaml(runner_args.flow_config)
+        if runner_args.flow_config
+        else FlowConfig.from_file(FLOW_CONFIG_PATH)
+    )
     flow = Flow(
         config,
         handlers=handlers,
