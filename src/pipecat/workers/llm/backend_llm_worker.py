@@ -25,13 +25,13 @@ that instead.
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from loguru import logger
 
-from pipecat.bus.messages import BusJobRequestMessage
+from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage
 from pipecat.frames.frames import (
     ErrorFrame,
     ExternalFunctionCallCancelFrame,
@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMMessagesAppendFrame,
 )
@@ -387,6 +388,8 @@ class BackendLLMWorker(LLMContextWorker):
       reasoning summaries and what the backend says before calling tools —
       and a :class:`BackendToolCall` payload for each phase of each function
       call the backend makes, so the frontend can report them.
+    - cancellation: a job the requester cancels interrupts the backend's
+      pipeline, so the model stops and the next delegation starts clean.
     - response: the final output as a :class:`BackendOutput` payload, or
       ``{"text": ""}`` if the delegation ended without one. A backend LLM failure fails the job
       with ``JobStatus.ERROR``, so the frontend hears about it as soon as it
@@ -636,6 +639,15 @@ class BackendLLMWorker(LLMContextWorker):
         for call in calls:
             await self.send_job_update(run.job_id, call.to_payload())
 
+    async def on_job_cancelled(self, message: BusJobCancelMessage) -> None:
+        """Stop the model: the requester no longer wants its output.
+
+        The delegation's handler is already cancelled by the time this runs;
+        interrupting the pipeline stops the run in flight and any tool call
+        it is waiting on, so nothing of it reaches the next delegation.
+        """
+        await self.queue_frame(InterruptionFrame())
+
     async def _on_pipeline_error(self, frame: ErrorFrame):
         """End the delegation in progress: the backend cannot finish it.
 
@@ -702,7 +714,7 @@ async def _delegate_to_backend(
     *,
     request: str,
     timeout_secs: float | None = None,
-) -> AsyncIterator[BackendEvent]:
+) -> AsyncGenerator[BackendEvent, None]:
     """Put a request to a :class:`BackendLLMWorker` and yield what it produces.
 
     Args:

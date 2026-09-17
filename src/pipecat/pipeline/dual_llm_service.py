@@ -24,6 +24,7 @@ and takes every output at once, since its function calls accept one
 result.
 """
 
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
@@ -446,20 +447,25 @@ class BackendConnector:
         request = await self.request_strategy.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         finished = False
-        async for event in _delegate_to_backend(
-            params.pipeline_worker,
-            self._context.backend_name,
-            request=request,
-            timeout_secs=self._timeout_secs,
-        ):
-            if isinstance(event, BackendToolCall):
-                await self.report_tool_call(params, event)
-                continue
-            if isinstance(event, _BackendFinalOutput):
-                finished = True
-                await self.reply_strategy.deliver(params, event.output, is_final=True)
-            else:
-                await self.reply_strategy.deliver(params, event, is_final=False)
+        # Closing the stream on the way out, however the loop ends, is what
+        # cancels the backend's job at once.
+        async with aclosing(
+            _delegate_to_backend(
+                params.pipeline_worker,
+                self._context.backend_name,
+                request=request,
+                timeout_secs=self._timeout_secs,
+            )
+        ) as events:
+            async for event in events:
+                if isinstance(event, BackendToolCall):
+                    await self.report_tool_call(params, event)
+                    continue
+                if isinstance(event, _BackendFinalOutput):
+                    finished = True
+                    await self.reply_strategy.deliver(params, event.output, is_final=True)
+                else:
+                    await self.reply_strategy.deliver(params, event, is_final=False)
         if not finished:
             logger.warning(f"Delegation to '{self._context.backend_name}' produced no final output")
             await params.result_callback({"error": "The backend finished without saying anything."})
