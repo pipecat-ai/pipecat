@@ -20,6 +20,9 @@ import pytest
 
 from pipecat.frames.frames import (
     ExternalFunctionCallFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
+    ExternalFunctionCallStartedFrame,
     Frame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -288,12 +291,8 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
     await _bound(BackendConnector()).delegate(params)
 
     (pushed,) = [c.args[0] for c in params.llm.push_frame.await_args_list]
-    assert isinstance(pushed, ExternalFunctionCallFrame)
-    assert (pushed.phase, pushed.function_name, pushed.tool_call_id) == (
-        "in_progress",
-        "get_weather",
-        "toolu_1",
-    )
+    assert isinstance(pushed, ExternalFunctionCallInProgressFrame)
+    assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
     assert pushed.parent_tool_call_id == "call_1"
     # The call is reported, not delivered to the frontend as a result.
     assert params.result_callback.await_args_list == [call("It's 62 and raining.")]  # type: ignore[attr-defined]
@@ -377,9 +376,9 @@ async def test_a_local_backend_is_heard_through_the_delegate_tool():
     assert results[0].properties == FunctionCallResultProperties(is_final=False, run_llm=False)
     # The backend's own call reached the frontend's pipeline as a report only.
     reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
-    assert [(f.phase, f.function_name) for f in reported] == [
-        ("started", "get_weather"),
-        ("in_progress", "get_weather"),
-        ("stopped", "get_weather"),
+    assert [(type(f), f.function_name) for f in reported] == [
+        (ExternalFunctionCallStartedFrame, "get_weather"),
+        (ExternalFunctionCallInProgressFrame, "get_weather"),
+        (ExternalFunctionCallResultFrame, "get_weather"),
     ]
     assert {f.parent_tool_call_id for f in reported} == {"call_1"}

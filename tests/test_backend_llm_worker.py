@@ -214,7 +214,7 @@ async def test_backend_runs_a_tool_loop_and_streams_intermediate_responses():
     assert [(c.phase, c.function_name, c.tool_call_id) for c in backend.tool_calls] == [
         ("started", "get_weather", "call_1"),
         ("in_progress", "get_weather", "call_1"),
-        ("stopped", "get_weather", "call_1"),
+        ("result", "get_weather", "call_1"),
     ]
     assert backend.tool_calls[1].arguments == {"location": "Seattle"}
     assert backend.tool_calls[2].result == {"temp": 62, "conditions": "rain"}
@@ -648,7 +648,7 @@ def test_a_payload_names_its_type():
 
 
 def test_a_tool_call_phase_survives_the_payload_round_trip():
-    call = BackendToolCall("stopped", "get_weather", "c1", arguments={"a": 1}, result={"t": 62})
+    call = BackendToolCall("result", "get_weather", "c1", arguments={"a": 1}, result={"t": 62})
     assert BackendToolCall.from_payload(call.to_payload()) == call
 
 

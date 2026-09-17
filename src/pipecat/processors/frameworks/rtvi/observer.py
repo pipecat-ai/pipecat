@@ -31,7 +31,11 @@ from pipecat.frames.frames import (
     AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ExternalFunctionCallCancelFrame,
     ExternalFunctionCallFrame,
+    ExternalFunctionCallInProgressFrame,
+    ExternalFunctionCallResultFrame,
+    ExternalFunctionCallStartedFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -441,17 +445,41 @@ class RTVIObserver(BaseObserver):
                 "stopped", frame.function_name, frame.tool_call_id, cancelled=True
             )
         elif isinstance(frame, FunctionCallResultFrame):
+            # An intermediate result leaves the call running.
+            if frame.properties is None or frame.properties.is_final:
+                await self._report_function_call(
+                    "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                )
+        elif isinstance(frame, ExternalFunctionCallStartedFrame):
             await self._report_function_call(
-                "stopped", frame.function_name, frame.tool_call_id, result=frame.result
+                "started",
+                frame.function_name,
+                frame.tool_call_id,
+                parent_tool_call_id=frame.parent_tool_call_id,
             )
-        elif isinstance(frame, ExternalFunctionCallFrame):
+        elif isinstance(frame, ExternalFunctionCallInProgressFrame):
             await self._report_function_call(
-                frame.phase,
+                "in_progress",
                 frame.function_name,
                 frame.tool_call_id,
                 arguments=frame.arguments,
-                result=frame.result,
-                cancelled=frame.cancelled,
+                parent_tool_call_id=frame.parent_tool_call_id,
+            )
+        elif isinstance(frame, ExternalFunctionCallResultFrame):
+            if frame.is_final:
+                await self._report_function_call(
+                    "stopped",
+                    frame.function_name,
+                    frame.tool_call_id,
+                    result=frame.result,
+                    parent_tool_call_id=frame.parent_tool_call_id,
+                )
+        elif isinstance(frame, ExternalFunctionCallCancelFrame):
+            await self._report_function_call(
+                "stopped",
+                frame.function_name,
+                frame.tool_call_id,
+                cancelled=True,
                 parent_tool_call_id=frame.parent_tool_call_id,
             )
 
@@ -469,7 +497,7 @@ class RTVIObserver(BaseObserver):
         """Send the function-call message for a phase, as the report level allows.
 
         The pipeline's own calls and calls reported from elsewhere
-        (``ExternalFunctionCallFrame``) go through here alike, so both obey the
+        (the ``ExternalFunctionCall*Frame`` family) go through here alike, so both obey the
         per-function report level. A parent the level suppressed is left off
         its children: a hidden call stays hidden.
         """
