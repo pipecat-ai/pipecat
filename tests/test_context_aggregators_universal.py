@@ -1536,8 +1536,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert tool_messages[0]["content"] == '{"answer": 42}'
         assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
 
-    async def test_async_function_call_after_spoken_filler_is_deferred(self):
-        """Assistant text after the placeholder defers, whether the model or a TTSSpeakFrame wrote it."""
+    async def test_async_function_call_after_spoken_filler_settles_in_place(self):
+        """Filler spoken with a TTSSpeakFrame while the call runs does not defer it."""
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         frames_to_send = [
@@ -1548,9 +1548,9 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 cancel_on_interruption=False,
             ),
             SleepFrame(),
-            LLMMessagesAppendFrame(
-                messages=[{"role": "assistant", "content": "Let me check on that."}]
-            ),
+            TTSStartedFrame(append_to_context=True),
+            TTSTextFrame("Let me check on that.", aggregated_by=AggregationType.SENTENCE),
+            LLMAssistantPushAggregationFrame(),
             SleepFrame(),
             FunctionCallResultFrame(
                 function_name="lookup",
@@ -1560,9 +1560,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 run_llm=False,
             ),
         ]
-        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
-        payload = async_tool_messages.parse_message(context.messages[-1])
-        assert payload is not None and payload.kind == "final"
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+        assert context.messages[-1] == {"role": "assistant", "content": "Let me check on that."}
 
     async def test_async_function_call_after_user_message_is_deferred(self):
         context = LLMContext()
@@ -1590,7 +1592,8 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert payload is not None and payload.kind == "final"
         assert payload.tool_call_id == "1"
 
-    async def test_async_function_call_after_model_response_is_deferred(self):
+    async def test_async_function_call_after_model_response_settles_in_place(self):
+        """Assistant text with no user turn since the placeholder does not defer the call."""
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
         frames_to_send = [
@@ -1614,6 +1617,34 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             ),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
+        tool_messages = [m for m in context.messages if m.get("role") == "tool"]
+        assert tool_messages[0]["content"] == '{"answer": 42}'
+        assert all(async_tool_messages.parse_message(m) is None for m in context.messages)
+
+    async def test_async_function_call_after_developer_message_is_deferred(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "developer", "content": "Now help with billing."}]
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=False,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
         payload = async_tool_messages.parse_message(context.messages[-1])
         assert payload is not None and payload.kind == "final"
 
