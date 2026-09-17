@@ -1557,6 +1557,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._paired_user_aggregator = _paired_user_aggregator
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
+        self._function_call_cancellations_waiting_for_in_progress: dict[
+            str, FunctionCallCancelFrame
+        ] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
         # Markers seen on LLMMarkerFrames, so a service configured with markers
         # other than the defaults still gets them stripped from transcripts.
@@ -1879,6 +1882,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
+        cancellation = self._function_call_cancellations_waiting_for_in_progress.pop(
+            frame.tool_call_id, None
+        )
+        if cancellation:
+            await self._handle_function_call_cancel(cancellation)
+
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         logger.debug(
             f"{self} FunctionCallResultFrame: [{frame.function_name}:{frame.tool_call_id}]"
@@ -2033,6 +2042,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
         function_call = self._function_calls_in_progress.get(frame.tool_call_id)
         if not function_call:
+            if frame.tool_call_id in self._function_calls_in_progress:
+                # A system cancellation can overtake the ordinary in-progress
+                # frame. Remove the placeholder now, then settle the call when
+                # that delayed frame arrives so the context remains ordered.
+                del self._function_calls_in_progress[frame.tool_call_id]
+                if frame.in_progress_frame_sent:
+                    self._function_call_cancellations_waiting_for_in_progress[
+                        frame.tool_call_id
+                    ] = frame
             return
 
         # Update context with the function call cancellation. An async call is

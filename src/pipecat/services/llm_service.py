@@ -227,6 +227,10 @@ class FunctionCallRunnerItem:
             final result, a timeout, or a cancellation. Results reported after
             that are rejected, since the rest of the pipeline has stopped
             tracking the call.
+        in_progress_frame_sent: Whether the in-progress frame has been sent to
+            the pipeline. A subsequent cancellation carries this state so the
+            assistant aggregator can distinguish a queued frame from a call
+            that never started.
     """
 
     registry_item: FunctionCallRegistryItem
@@ -237,6 +241,7 @@ class FunctionCallRunnerItem:
     run_llm: bool | None = None
     group_id: str | None = None
     settled: bool = False
+    in_progress_frame_sent: bool = False
 
 
 # `default=BaseLLMAdapter` (PEP 696) so that unparameterized subclasses
@@ -1596,6 +1601,31 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for runner_item in runner_items:
             await self._sequential_runner_queue.put(runner_item)
 
+    async def _broadcast_function_call_in_progress(
+        self, runner_item: FunctionCallRunnerItem, item: FunctionCallRegistryItem
+    ):
+        """Broadcast a function-call start and record its downstream delivery."""
+        downstream_frame = FunctionCallInProgressFrame(
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=runner_item.arguments,
+            cancel_on_interruption=item.cancel_on_interruption,
+            group_id=runner_item.group_id,
+        )
+        upstream_frame = FunctionCallInProgressFrame(
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=runner_item.arguments,
+            cancel_on_interruption=item.cancel_on_interruption,
+            group_id=runner_item.group_id,
+        )
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+
+        await self.push_frame(downstream_frame)
+        runner_item.in_progress_frame_sent = True
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         # Re-resolve the registry item at execution time. The function may have
         # been unregistered between queuing and execution, in which case we
@@ -1621,18 +1651,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             f"{self} Calling function [{runner_item.function_name}:{runner_item.tool_call_id}] with arguments {runner_item.arguments}"
         )
 
-        # Broadcast function call in-progress. This frame will let our assistant
-        # context aggregator know that we are in the middle of a function
-        # call. Some contexts/aggregators may not need this. But some definitely
-        # do (Anthropic, for example).
-        await self.broadcast_frame(
-            FunctionCallInProgressFrame,
-            function_name=runner_item.function_name,
-            tool_call_id=runner_item.tool_call_id,
-            arguments=runner_item.arguments,
-            cancel_on_interruption=item.cancel_on_interruption,
-            group_id=runner_item.group_id,
-        )
+        await self._broadcast_function_call_in_progress(runner_item, item)
 
         timeout_task: asyncio.Task | None = None
         # Set when the handler raises, so the result settling the call on its
@@ -2027,6 +2046,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             run_llm=run_llm,
+            in_progress_frame_sent=runner_item.in_progress_frame_sent,
         )
         return FunctionCallFromLLM(
             function_name=runner_item.function_name,
