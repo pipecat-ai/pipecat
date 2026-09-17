@@ -42,7 +42,7 @@ from pipecat.pipeline.dual_llm_service import (
     SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
@@ -323,31 +323,31 @@ def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     assert "delegate tool" in composed
 
 
+def _tool_names(converted) -> list[str]:
+    return [t.get("name") or t["function"]["name"] for t in converted]
+
+
 @pytest.mark.asyncio
-async def test_the_service_advertises_the_tool_and_keeps_the_frontend_tools_working():
+async def test_delegate_is_a_built_in_tool_beside_the_frontends_own():
     frontend = _TextFrontend()
-    service = PipecatDualLLMService(frontend=frontend, backend="backend")
-    context = LLMContext(tools=[get_current_time])
-
-    await run_test(service, frames_to_send=[LLMContextFrame(context)])
-
-    assert [t.name for t in context.tools.standard_tools] == ["get_current_time", "delegate"]
-    assert "delegate" in frontend._functions
-    assert "get_current_time" in frontend._functions
-    assert not frontend._functions["delegate"].cancel_on_interruption
-
-
-@pytest.mark.asyncio
-async def test_a_tool_change_keeps_the_tool_in_the_frame_and_the_context():
-    frontend = _RealtimeFrontend()
     service = PipecatDualLLMService(frontend=frontend, backend="backend")
     context = LLMContext(tools=[get_current_time])
     set_tools = LLMSetToolsFrame(tools=[get_weather])
 
     await run_test(service, frames_to_send=[LLMContextFrame(context), set_tools])
 
-    assert [t.name for t in set_tools.tools.standard_tools] == ["get_weather", "delegate"]
-    assert "delegate" in [t.name for t in context.tools.standard_tools]
+    # Never in the context's or a tool change's tool set, so no diff sees it.
+    assert [t.name for t in context.tools.standard_tools] == ["get_current_time"]
+    assert set_tools.tools == [get_weather]
+    # Sent on every inference all the same, beside whatever tools there are.
+    adapter = frontend.get_llm_adapter()
+    assert _tool_names(adapter.from_standard_tools(context.tools)) == [
+        "get_current_time",
+        "delegate",
+    ]
+    assert _tool_names(adapter.from_standard_tools(NOT_GIVEN)) == ["delegate"]
+    assert frontend.has_function("delegate")
+    assert not frontend._functions["delegate"].cancel_on_interruption
 
 
 @pytest.mark.asyncio

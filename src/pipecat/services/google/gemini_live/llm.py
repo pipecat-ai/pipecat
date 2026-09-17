@@ -71,7 +71,7 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .file_api import GeminiFileAPI
 
@@ -925,7 +925,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 self._context, system_instruction=assert_given(self._system_instruction_from_init)
             )
             system_instruction = params["system_instruction"]
-            tools = params["tools"]
+            # Only the context's own tools count as a change; built-in tools
+            # ride along with whichever tool set is in use.
+            tools = params["tools"] if is_given(self._context.tools) else None
             system_instruction_changed = system_instruction != self._system_instruction_from_init
             if tools and self._tools_from_init:
                 logger.warning(
@@ -1267,7 +1269,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     system_instruction=assert_given(self._system_instruction_from_init),
                 )
                 system_instruction = params["system_instruction"]
-                tools = params["tools"]
+                tools = params["tools"] if is_given(self._context.tools) else None
             else:
                 system_instruction = self._system_instruction_from_init
             # Context-provided tools take precedence; fall back to the service's own tools.
