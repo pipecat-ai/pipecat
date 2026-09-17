@@ -42,6 +42,19 @@ END_CALL_EVENT = "end_call"
 # caller who hangs up mid-sentence is not what the simulation tests.
 CLOSING_REPLY_WAIT_S = 15.0
 
+# How long a run waits, in audio mode, after the bot hangs up for the harness
+# to finish transcribing what the bot said last. The bot's audio arrives faster
+# than real time and is paced out afterwards, and the turn analyzer needs a few
+# seconds of silence to close a spoken turn, so the last words of a bot that
+# hangs up as soon as it stops talking land well after the socket closes,
+# sometimes as more than one spoken turn. ``LAST_LINE_WAIT_S`` bounds the whole
+# wait; ``LAST_LINE_QUIET_S`` is how long after a transcription the run waits
+# for another before deciding the bot has said it all: a short trailing
+# segment ("Goodbye!") takes the VAD's stop time plus the turn analyzer's
+# silence cap (3 s) to close.
+LAST_LINE_WAIT_S = 12.0
+LAST_LINE_QUIET_S = 5.0
+
 
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
     """Whether a call the bot made is the one a ``calls:`` entry describes.
@@ -130,8 +143,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
         )
         # Set when the persona hangs up on its own last line: the run then
-        # waits for the bot's reply to it, or this long, before ending.
+        # waits for the bot's reply to it, or this long, before ending. Also
+        # set when the bot hangs up while its last line is still being
+        # transcribed, so the judge reads that line too.
         closing_ends: float | None = None
+        bot_hung_up = False
         while self._ended_by is None:
             lull_ends = self._stream.last_activity + simulation.max_silence_s
             waits = [deadline, lull_ends] + ([closing_ends] if closing_ends is not None else [])
@@ -140,9 +156,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             except TimeoutError:
                 now = time.monotonic()
                 if closing_ends is not None:
-                    # The persona already hung up; the bot's reply was a courtesy.
-                    self._trace.log("persona: no closing reply from the bot; ending the call")
-                    self._ended_by = "end_call"
+                    if bot_hung_up:
+                        self._ended_by = "bot"
+                    else:
+                        # The persona already hung up; the bot's reply was a courtesy.
+                        self._trace.log("persona: no closing reply from the bot; ending the call")
+                        self._ended_by = "end_call"
                     break
                 if now >= deadline:
                     self._ended_by = "max_duration"
@@ -162,7 +181,14 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     self._trace.log("persona: hung up; waiting for the bot's closing turn")
                     closing_ends = time.monotonic() + CLOSING_REPLY_WAIT_S
             elif event["type"] == BOT_ENDED_EVENT:
-                self._ended_by = "bot"
+                if simulation.bot_audio and closing_ends is None:
+                    # The bot's last words are still being paced out and
+                    # transcribed; they are its closing turn.
+                    self._trace.log("bot: hung up; waiting for its last words to be transcribed")
+                    bot_hung_up = True
+                    closing_ends = time.monotonic() + LAST_LINE_WAIT_S
+                else:
+                    self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
                 self._ended_by = "error"
                 failures.append(self._harness_failure(event.get("text", "")))
@@ -173,7 +199,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     self._ended_by = "max_turns"
             elif event["type"] == self._bot_said and event.get("text"):
                 await self._report("bot", event["text"])
-                if closing_ends is not None:
+                if bot_hung_up and closing_ends is not None:
+                    # The turn analyzer may have split the last words into
+                    # more than one turn; give the next a moment to land.
+                    closing_ends = min(closing_ends, time.monotonic() + LAST_LINE_QUIET_S)
+                elif closing_ends is not None:
                     self._ended_by = "end_call"
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.

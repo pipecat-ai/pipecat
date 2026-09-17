@@ -163,11 +163,12 @@ class EvalJudge:
             for a JSON verdict + short reason.
     """
 
-    def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
+    def __init__(self, service: LLMService[Any] | None, *, max_tokens: int = 200):
         """Initialize the judge with a configured pipecat LLM service.
 
         Args:
-            service: A pipecat LLM service exposing ``run_inference()``.
+            service: A pipecat LLM service exposing ``run_inference()``. A
+                subclass that decides verdicts some other way passes None.
             max_tokens: Cap on the judge's response length.
         """
         self._service = service
@@ -186,15 +187,19 @@ class EvalJudge:
 
         A ``factory`` (a dotted path to a callable taking the config) builds the
         LLM service; otherwise the ``service`` name picks a provider, ``ollama``
-        by default. For a fully custom judge, construct ``EvalJudge`` directly
-        and pass it to the session.
+        by default. ``service: typesafe`` builds a
+        :class:`~pipecat.evals.typesafe_judge.TypeSafeEvalJudge`, which decides
+        with TypeSafe judgments instead of an LLM. For a fully custom judge,
+        construct ``EvalJudge`` directly and pass it to the session.
 
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
                 ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
                 (service-specific default if omitted), and an optional ``extra``
                 mapping forwarded to the model as top-level request parameters.
-                ``None`` uses all defaults.
+                ``None`` uses all defaults. For ``typesafe``, the keys are
+                ``model`` (default ``jev-latest``), ``timeout`` (seconds) and
+                ``threshold`` (the yes probability a Noul needs).
 
         Returns:
             A configured EvalJudge.
@@ -210,6 +215,10 @@ class EvalJudge:
             def make_judge_llm(config):
                 return TogetherLLMService(...)  # any service exposing run_inference()
         """
+        if str((judge_config or {}).get("service", "")).lower() == "typesafe":
+            from pipecat.evals.typesafe_judge import TypeSafeEvalJudge
+
+            return TypeSafeEvalJudge.from_config(judge_config or {})
         return cls(llm_service_from_config(judge_config, where="judge.eval"))
 
     def add_user_message(self, text: str | None) -> None:
@@ -315,23 +324,39 @@ class EvalJudge:
                 lines.append(f"[tool call] {entry['content']}")
             else:
                 lines.append(f"User: {entry['content']}")
+        key = _cache_key(
+            json.dumps({"criteria": criteria, "success": success}, sort_keys=True), lines
+        )
+        if key not in self._run_cache:
+            self._run_cache[key] = await self._judge_run(lines, turn, criteria, success)
+        return self._run_cache[key]
+
+    async def _judge_run(
+        self, lines: list[str], turn_count: int, criteria: dict[str, str], success: str
+    ) -> "RunVerdicts":
+        """Decide a run's verdicts from its transcript lines, with one judge call.
+
+        Args:
+            lines: The transcript, one line per user turn, numbered bot turn,
+                or tool call.
+            turn_count: How many bot turns the transcript has.
+            criteria: The per-turn criteria to decide, by name.
+            success: The goal criterion, decided over the whole conversation.
+        """
         listed = "\n".join(f"- {name}: {criterion}" for name, criterion in criteria.items())
         ask = RUN_JUDGE_ASK_TEMPLATE.format(
             transcript="\n".join(lines) or "(nothing was said)",
             criteria=listed or "(none)",
             success=success,
-            turn_count=turn,
+            turn_count=turn_count,
         )
-        key = _cache_key(ask, [])
-        if key not in self._run_cache:
-            # Room for a verdict per turn per criterion, a reason per "no", and
-            # the goal's verdict; a budget sized for one verdict cuts it short.
-            budget = max(300, 4 * turn * len(criteria) + 60 * len(criteria) + 80)
-            response = await self._call_judge_text(
-                success, [], RUN_JUDGE_SYSTEM_INSTRUCTION, ask, max_tokens=budget
-            )
-            self._run_cache[key] = _parse_run_verdicts(response, list(criteria), turn)
-        return self._run_cache[key]
+        # Room for a verdict per turn per criterion, a reason per "no", and
+        # the goal's verdict; a budget sized for one verdict cuts it short.
+        budget = max(300, 4 * turn_count * len(criteria) + 60 * len(criteria) + 80)
+        response = await self._call_judge_text(
+            success, [], RUN_JUDGE_SYSTEM_INSTRUCTION, ask, max_tokens=budget
+        )
+        return _parse_run_verdicts(response, list(criteria), turn_count)
 
     async def _evaluate(self, criterion: str, instruction: str, ask: str) -> JudgeVerdict:
         # The spoken conversation only: a reply is judged on what was said.
@@ -382,6 +407,8 @@ class EvalJudge:
             transcript or "\n".join(f"  {line}" for line in ask.splitlines()),
         )
 
+        if self._service is None:
+            return "\0judge has no LLM service"
         try:
             response = await self._service.run_inference(
                 context=context,

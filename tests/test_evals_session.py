@@ -499,6 +499,37 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         await s.bot_turn_stopped("straggler")
         self.assertEqual(await self._responses(s), [])
 
+    async def test_turn_after_interruption_is_the_reply_without_an_llm(self):
+        # A bot speaking canned lines never sends llm-started. Once it has
+        # reported the interruption its earlier output is gone, so the spoken
+        # turn it begins next is its reply.
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        s._interrupted()
+        s.bot_turn_started()
+        await s.bot_turn_stopped("Great, you're verified. Goodbye!")
+        self.assertEqual(await self._responses(s), ["Great, you're verified. Goodbye!"])
+
+    async def test_turn_begun_before_the_interruption_is_dropped(self):
+        # The bot was still speaking at the send; the interruption cuts that turn,
+        # and however late it finalizes, it is not the reply.
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        s.input_sent()
+        s._interrupted()
+        await s.bot_turn_stopped("Let's take a journey")
+        self.assertEqual(await self._responses(s), [])
+
+    async def test_interruption_before_the_send_does_not_count(self):
+        # An interruption from an earlier turn does not vouch for speech after
+        # a later send; only one reported after that send does.
+        s = _stream(bot_audio=True)
+        s._interrupted()
+        s.input_sent()
+        s.bot_turn_started()
+        await s.bot_turn_stopped("straggler")
+        self.assertEqual(await self._responses(s), [])
+
     async def test_bot_first_turn_needs_no_input(self):
         s = _stream(bot_audio=True)
         s.bot_turn_started()

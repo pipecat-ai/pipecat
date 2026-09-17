@@ -1,0 +1,86 @@
+name: age_verification
+
+# Audio modality, against features/features-typesafe-canned-routing.py: a bot
+# with no LLM that asks whether the caller is over 18 and answers with one of
+# four pre-written lines, chosen by a TypeSafe judgment. Each caller tests one
+# route: a clear yes, a clear no, a question the bot must decline before it
+# gets its answer, and a caller who deflects before answering. The bot hangs
+# up itself after a yes or a no. The bot has no tools, so every scenario also
+# checks that it called none.
+#
+# The `canned_only` metric is the point of the bot: every reply must be one of
+# the four written lines, never improvised speech.
+
+simulator: !include ../simulator.yaml
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+max_turns: 6
+
+max_duration_s: 180
+
+metrics:
+  - name: canned_only
+    criterion: >-
+      the reply is one of these five sentences and nothing else, allowing for
+      transcription differences such as changed punctuation or "18" heard as
+      "eighteen": "Are you over 18? Please say yes or no."; "Great, you're verified. Goodbye!"; "No problem, you must be 18
+      or older. Goodbye!"; "I can't answer questions right now, but I do need to
+      know: are you over 18?"; "Sorry, I didn't catch that. Are you over 18?
+      Please say yes or no."
+    min_score: 1
+  - measure: function_calls
+    calls: []
+  - measure: latency
+    max_value: 5
+
+scenarios:
+  # A clear yes: verified, goodbye, and the bot hangs up.
+  - name: adult
+    persona: |
+      Alex, 34, calling to get age-verified. Cooperative and brief: answers the
+      question with a plain yes, and says goodbye when told they are verified.
+    goal: "Confirm you are over 18 and get told you are verified, then end the call."
+    success: >-
+      the bot asked whether the caller was over 18, and after the caller said
+      yes it told them they were verified
+
+  # A clear no: declined, goodbye, and the bot hangs up.
+  - name: minor
+    persona: |
+      Riley, 15, calling to see if they can use the service. Honest and brief:
+      answers the age question with a plain no, and accepts the answer.
+    goal: "Answer honestly that you are not over 18 and find out whether you can proceed, then end the call."
+    success: >-
+      the bot asked whether the caller was over 18, and after the caller said
+      no it told them they must be 18 or older, without verifying them
+
+  # A question before the answer: the bot must not improvise an answer. It says
+  # it cannot answer questions and asks again; the caller then says yes.
+  - name: question_first
+    persona: |
+      Morgan, 40, cautious about signing up for things. Before answering any
+      question, asks whether this will cost anything. Once told the assistant
+      cannot answer questions, drops it and answers the age question with a
+      plain "yes" and nothing else. Does not hang up until the assistant has
+      said the word "verified".
+    goal: "Ask whether this costs anything; whatever the answer, then say yes to the age question, wait until the assistant says you are verified, and only then end the call."
+    success: >-
+      the bot did not answer the question about cost or make anything up; it
+      said it could not answer questions and asked again whether the caller was
+      over 18, and after the caller said yes it told them they were verified
+
+  # A deflection before the answer: the bot re-asks with its canned line, and
+  # the caller then answers.
+  - name: evasive
+    persona: |
+      Sam, 22, distracted. Replies to the first question with something that is
+      neither yes nor no, like "hang on, let me check with my roommate", then on
+      the next question answers with a plain yes, and says goodbye when verified.
+    goal: "Stall once with an unrelated remark, then confirm you are over 18 and get verified, then end the call."
+    success: >-
+      when the caller stalled, the bot said it did not catch that and asked
+      again whether the caller was over 18, and after the caller said yes it
+      told them they were verified

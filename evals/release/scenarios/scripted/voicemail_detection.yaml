@@ -1,0 +1,29 @@
+name: voicemail_detection
+
+# Audio only, against features/features-voicemail-detection.py: the bot holds
+# its speech until a TypeSafe judgment says who answered. The detector sits
+# between STT and the context aggregator, so the caller's side has to arrive
+# as audio; text input skips it. Two calls: a recording gets the written
+# message and nothing else, a person gets a normal reply.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  # A voicemail greeting. The bot must stay quiet through it, then leave the
+  # written message once the greeting ends.
+  - name: recording
+    turns:
+      - user: "Hi, you've reached Jamie. I can't take your call right now. Please leave your name and number after the tone and I'll get back to you."
+        expect:
+          - event: response
+            eval: "the bot is leaving a message on the recording it reached: it introduces itself as Jamie, says it is calling about an appointment, and asks for a call back at a phone number; it does not reply conversationally to the greeting"
+
+  # A person picks up. The bot answers them.
+  - name: person
+    turns:
+      - user: "Hello? Who is this?"
+        expect:
+          - event: response
+            eval: "the response answers a person who just picked up the phone and asked who is calling: it greets them or explains who is calling, in a conversational way; it is not a voicemail message asking for a call back"

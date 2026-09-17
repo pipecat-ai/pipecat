@@ -96,7 +96,11 @@ class EvalConfigured(Protocol):
 
 
 # The model each LLM service builds with when the block names none.
-_DEFAULT_LLM_MODELS = {"ollama": DEFAULT_OLLAMA_JUDGE_MODEL, "openai": DEFAULT_OPENAI_MODEL}
+_DEFAULT_LLM_MODELS = {
+    "ollama": DEFAULT_OLLAMA_JUDGE_MODEL,
+    "openai": DEFAULT_OPENAI_MODEL,
+    "typesafe": "jev-latest",
+}
 
 
 def _svc_model(

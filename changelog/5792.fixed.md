@@ -1,0 +1,1 @@
+- Wheels built from a plain source tree, with no git metadata or egg-info (as Pipecat Cloud builds do), now include every data file the package needs: the Silero VAD and Smart Turn models, the DTMF and Nova Sonic audio, the Flows config schema, and the frames proto. `pyproject.toml` declares them as package data instead of relying on the version-control file finder.

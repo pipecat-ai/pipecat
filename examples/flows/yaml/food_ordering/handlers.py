@@ -34,6 +34,12 @@ class SushiOrderResult(TypedDict):
 
 class DeliveryEstimateResult(TypedDict):
     time: str
+    minutes: int
+
+
+class PricesResult(TypedDict):
+    pizza: dict[str, float]
+    sushi_roll: float
 
 
 # Pre-action handler
@@ -66,6 +72,8 @@ async def select_pizza_order(flow_manager: FlowManager, size: str, pizza_type: s
         "size": size,
         "pizza_type": pizza_type,
         "price": price,
+        "summary": f"one {size} {pizza_type} pizza",
+        "total": f"${price:.0f}",
     }
 
     return PizzaOrderResult(size=size, type=pizza_type, price=price), TRANSITION_IN_YAML
@@ -86,6 +94,8 @@ async def select_sushi_order(flow_manager: FlowManager, count: int, roll_type: s
         "count": count,
         "roll_type": roll_type,
         "price": price,
+        "summary": f"{count} {roll_type} {'roll' if count == 1 else 'rolls'}",
+        "total": f"${price:.0f}",
     }
 
     return SushiOrderResult(count=count, type=roll_type, price=price), TRANSITION_IN_YAML
@@ -95,5 +105,16 @@ async def get_delivery_estimate(
     flow_manager: FlowManager,
 ):
     """Provide delivery estimate information."""
-    delivery_time = datetime.now() + timedelta(minutes=30)
-    return DeliveryEstimateResult(time=f"{delivery_time}"), TRANSITION_IN_YAML
+    minutes = 30
+    delivery_time = datetime.now() + timedelta(minutes=minutes)
+    return DeliveryEstimateResult(time=f"{delivery_time}", minutes=minutes), TRANSITION_IN_YAML
+
+
+async def get_prices(
+    flow_manager: FlowManager,
+):
+    """Provide the menu prices."""
+    return (
+        PricesResult(pizza={"small": 10.00, "medium": 15.00, "large": 20.00}, sushi_roll=8.00),
+        TRANSITION_IN_YAML,
+    )

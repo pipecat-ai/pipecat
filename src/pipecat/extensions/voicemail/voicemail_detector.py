@@ -527,6 +527,9 @@ class VoicemailDetector(ParallelPipeline):
         classification_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
         detector = VoicemailDetector(llm=classification_llm)
 
+        # Or classify with a TypeSafe judgment instead of a text LLM:
+        detector = VoicemailDetector(llm=TypeSafeVoicemailClassifier())
+
         @detector.event_handler("on_voicemail_detected")
         async def handle_voicemail(processor):
             await processor.push_frame(TTSSpeakFrame("Please leave a message."))
