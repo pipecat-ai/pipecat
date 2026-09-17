@@ -33,7 +33,6 @@ from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
-    ExternalFunctionCallFrame,
     Frame,
     FunctionCallResultProperties,
     LLMContextFrame,
@@ -476,24 +475,15 @@ class BackendConnector:
         """Report a function call the backend made, as the ``delegate`` call's child.
 
         The call ran in the backend's pipeline; here it is only reported, as
-        an :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` the RTVI
-        observer turns into function-call events under the ``delegate`` call.
+        the :class:`~pipecat.frames.frames.ExternalFunctionCallFrame` for its
+        phase, which the RTVI observer turns into function-call events under
+        the ``delegate`` call.
 
         Args:
             params: The ``delegate`` call the backend is working for.
             call: The phase of the backend's call.
         """
-        await params.llm.push_frame(
-            ExternalFunctionCallFrame(
-                phase=call.phase,
-                function_name=call.function_name,
-                tool_call_id=call.tool_call_id,
-                arguments=call.arguments,
-                result=call.result,
-                cancelled=call.cancelled,
-                parent_tool_call_id=params.tool_call_id,
-            )
-        )
+        await params.llm.push_frame(call.to_frame(parent_tool_call_id=params.tool_call_id))
 
 
 # ---------------------------------------------------------------------------
