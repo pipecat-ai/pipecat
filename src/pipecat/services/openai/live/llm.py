@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import re
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -959,23 +960,29 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         answered = False
         try:
-            async for event in _delegate_to_backend(
-                self.pipeline_worker,
-                config.backend.name,
-                request=request,
-                timeout_secs=config.timeout_secs,
-            ):
-                if isinstance(event, BackendToolCall):
-                    # Reported for clients, as the Responses-delegation backend's
-                    # calls are; the delegation itself is not a call, so no parent.
-                    await self.push_frame(event.to_frame())
-                    continue
-                if isinstance(event, _BackendFinalOutput):
-                    event = event.output
-                answered = True
-                await self._send_context_append(
-                    delegation.id, event.text, spoken=event.prefers_spoken
+            # Closing the stream on the way out, however the loop ends, is
+            # what cancels the backend's job at once.
+            async with aclosing(
+                _delegate_to_backend(
+                    self.pipeline_worker,
+                    config.backend.name,
+                    request=request,
+                    timeout_secs=config.timeout_secs,
                 )
+            ) as events:
+                async for event in events:
+                    if isinstance(event, BackendToolCall):
+                        # Reported for clients, as the Responses-delegation
+                        # backend's calls are; the delegation itself is not a
+                        # call, so no parent.
+                        await self.push_frame(event.to_frame())
+                        continue
+                    if isinstance(event, _BackendFinalOutput):
+                        event = event.output
+                    answered = True
+                    await self._send_context_append(
+                        delegation.id, event.text, spoken=event.prefers_spoken
+                    )
             if not answered:
                 # The live model holds the conversation until the delegation
                 # says something, so a run that produced no text still gets a

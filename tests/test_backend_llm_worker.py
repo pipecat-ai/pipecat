@@ -13,6 +13,7 @@ WorkerRunner.
 """
 
 import asyncio
+from contextlib import aclosing
 from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -300,6 +301,47 @@ async def test_tool_only_response_sends_no_update_and_still_completes():
     assert text == "It's raining."
     # The tool-only response produces no text; only the final answer is sent.
     assert [u.text for u in updates] == ["It's raining."]
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_the_requester_abandons_is_cancelled_and_the_next_starts_clean():
+    """Closing the stream cancels the job; the backend stops and takes the next delegation."""
+    started = asyncio.Event()
+
+    async def slow_lookup(params: FunctionCallParams):
+        """Look something up, slowly."""
+        started.set()
+        await asyncio.sleep(30)
+        await params.result_callback({"never": "reached"})
+
+    llm = _ScriptedLLM([[("call", "slow_lookup", "call_1", {})], [("text", "Second time round.")]])
+    backend = BackendLLMWorker(llm=llm, name="backend", context=LLMContext(tools=[slow_lookup]))
+    requester = BaseWorker("requester")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(requester, backend)
+    second: list[BackendOutput] = []
+
+    async def body():
+        try:
+            async with aclosing(
+                _delegate_to_backend(requester, "backend", request="First")
+            ) as events:
+                async for _ in events:
+                    await asyncio.wait_for(started.wait(), 5)
+                    break  # the requester loses interest mid-lookup
+            for _ in range(50):
+                if backend._run is None:
+                    break
+                await asyncio.sleep(0.1)
+            assert backend._run is None
+            async for event in _delegate_to_backend(requester, "backend", request="Second"):
+                if isinstance(event, _BackendFinalOutput):
+                    second.append(event.output)
+        finally:
+            await runner.cancel()
+
+    await asyncio.wait_for(asyncio.gather(runner.run(), body()), timeout=15)
+    assert [o.text for o in second] == ["Second time round."]
 
 
 @pytest.mark.asyncio

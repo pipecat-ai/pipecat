@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline import dual_llm_service
 from pipecat.pipeline.dual_llm_service import (
     BackendConnector,
+    BackendReplyStrategy,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
     OneShotBackendReplyStrategy,
@@ -277,6 +278,31 @@ async def test_one_shot_delivers_a_lone_output_as_text(monkeypatch):
     await _bound(BackendConnector(), realtime=True).delegate(params)
 
     assert params.result_callback.await_args_list == [call("It's 62 and raining.")]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_that_fails_closes_the_stream(monkeypatch):
+    """Closing the stream is what cancels the backend's job, so it must happen at once."""
+    closed = False
+
+    async def fake(worker, backend_name, *, request, timeout_secs):
+        nonlocal closed
+        try:
+            yield _PROGRESS
+            yield _FINAL
+        finally:
+            closed = True
+
+    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
+
+    class _Broken(BackendReplyStrategy):
+        async def deliver(self, params, output, *, is_final):
+            raise RuntimeError("frontend went away")
+
+    with pytest.raises(RuntimeError):
+        await _bound(BackendConnector(reply_strategy=_Broken())).delegate(_params())
+
+    assert closed
 
 
 @pytest.mark.asyncio
