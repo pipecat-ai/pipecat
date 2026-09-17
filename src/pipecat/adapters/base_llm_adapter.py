@@ -25,6 +25,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+from pipecat.utils.types import is_given
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
@@ -168,7 +169,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """Convert tools from standard format to provider format.
 
         Built-in tools are automatically merged into the schema before conversion so that every
-        inference request receives them without the user having to declare them explicitly.
+        inference request receives them without the user having to declare them explicitly;
+        when there are no other tools, they are the tool set.
 
         Args:
             tools: Tools in standard format or provider-specific format.
@@ -183,6 +185,8 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                     standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
                     custom_tools=tools.custom_tools,
                 )
+            elif tools is None or not is_given(tools):
+                tools = ToolsSchema(standard_tools=list(self._builtin_tools.values()))
             else:
                 # User supplied tools in a legacy/provider-specific format.
                 # Built-in tools cannot be safely merged, so they will not be injected.

@@ -31,21 +31,14 @@ from loguru import logger
 
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
-    Frame,
     FunctionCallResultProperties,
-    LLMContextFrame,
-    LLMSetToolsFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import (
-    FrameDirection,
     FrameProcessorSetup,
 )
 from pipecat.services.llm_service import FunctionCallParams, LLMService
-from pipecat.utils.types import NotGiven, is_given
 from pipecat.workers.llm.backend_llm_worker import (
     _DEFAULT_TRANSCRIPT_INSTRUCTION,
     BackendLLMWorker,
@@ -491,33 +484,18 @@ class BackendConnector:
 # ---------------------------------------------------------------------------
 
 
-def _with_tool(tools: ToolsSchema | NotGiven | None, tool: FunctionSchema) -> ToolsSchema | None:
-    """Return ``tools`` with ``tool`` added, or ``None`` if it is already there."""
-    if tools is None or not is_given(tools):
-        return ToolsSchema(standard_tools=[tool])
-    if any(schema.name == tool.name for schema in tools.standard_tools):
-        return None
-    # Direct functions go back in as the callables they came from, so their
-    # handlers still register; the rest of the standard tools are schemas.
-    direct = {wrapper.name: wrapper.function for wrapper in tools.direct_functions}
-    standard: list[Any] = [direct.get(schema.name, schema) for schema in tools.standard_tools] + [
-        tool
-    ]
-    return ToolsSchema(standard_tools=standard, custom_tools=tools.custom_tools)
-
-
 class PipecatDualLLMService(Pipeline):
     """A conversational frontend LLM with a backend it delegates to, in one processor.
 
     Put it where the LLM goes in a pipeline. It wraps the frontend service,
-    gives it the connector's ``delegate`` tool, appends the connector's
-    guidance to the frontend's system instruction, and adds a local backend
-    worker to the pipeline worker so the app never wires it up. The tools
-    are the backend's; the frontend has ``delegate`` and no more. (A tool the
-    frontend must keep goes in the context's tools, where ``delegate`` is
-    added alongside it; tools configured on the frontend service itself are
-    not sent once the context has tools, as the service's usual precedence
-    has it.)
+    installs the connector's ``delegate`` tool on it as a built-in tool,
+    appends the connector's guidance to the frontend's system instruction,
+    and adds a local backend worker to the pipeline worker so the app never
+    wires it up. A built-in tool is sent on every inference beside whatever
+    tools the frontend has, and never enters the context's tool set, so a
+    tool change announced to the model never mentions it. The tools are the
+    backend's; the frontend has ``delegate`` and no more, though a tool it
+    must keep, in its context or configured on the service, stays.
 
     The guidance says when to delegate in general terms. The frontend's own
     system instruction is the place to say what the backend is for, in plain
@@ -564,7 +542,10 @@ class PipecatDualLLMService(Pipeline):
         )
         if instruction := self._connector.frontend_instruction:
             frontend.append_system_instruction(instruction)
-        self._context: LLMContext | None = None
+        frontend.register_function(
+            DELEGATE_TOOL_NAME, self._connector.tool.handler, cancel_on_interruption=False
+        )
+        frontend.get_llm_adapter().builtin_tools[DELEGATE_TOOL_NAME] = self._connector.tool
         super().__init__([frontend])
 
     @property
@@ -588,34 +569,7 @@ class PipecatDualLLMService(Pipeline):
         if isinstance(self._backend, BackendLLMWorker):
             await self.pipeline_worker.add_workers(self._backend)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process a frame, keeping the ``delegate`` tool among the advertised tools.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame flow.
-        """
-        if isinstance(frame, LLMContextFrame):
-            self._context = frame.context
-            self._advertise_in(frame.context)
-        elif isinstance(frame, LLMSetToolsFrame):
-            # An app changing tools mid-session must not drop the delegate
-            # tool. The aggregator upstream has already set the new tools on
-            # the context; a frontend that takes tool changes at runtime reads
-            # the frame, so the tool goes in both.
-            tools = _with_tool(LLMContext._normalize_and_validate_tools(frame.tools), self.tool)
-            if tools is not None:
-                frame.tools = tools
-            if self._context is not None:
-                self._advertise_in(self._context)
-        await super().process_frame(frame, direction)
-
     @property
     def tool(self) -> FunctionSchema:
         """The ``delegate`` tool installed on the frontend."""
         return self._connector.tool
-
-    def _advertise_in(self, context: LLMContext) -> None:
-        tools = _with_tool(context.tools, self.tool)
-        if tools is not None:
-            context.set_tools(tools)
