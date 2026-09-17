@@ -43,6 +43,8 @@ ASSEMBLYAI_SYNC_TTFS_P99: float = 0.65
 AWS_TRANSCRIBE_TTFS_P99: float = 1.90
 AZURE_TTFS_P99: float = 1.80
 CARTESIA_TTFS_P99: float = 0.81
+# Provisional until benchmarked with stt-benchmark.
+CONVOZEN_TTFS_P99: float = 0.80
 DEEPGRAM_TTFS_P99: float = 0.35
 DEEPGRAM_SAGEMAKER_TTFS_P99: float = 0.35
 ELEVENLABS_TTFS_P99: float = 2.01
