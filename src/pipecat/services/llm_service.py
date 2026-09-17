@@ -529,6 +529,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
+        # A realtime service can run a tool it was configured with before the
+        # first context frame reaches it, so the handlers of its own tools are
+        # registered up front. Context frames re-sync them from then on.
+        self._sync_registered_tool_handlers(None)
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
