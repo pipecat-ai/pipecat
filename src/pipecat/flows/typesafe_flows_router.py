@@ -28,7 +28,9 @@ more than what the bot asked for. Then it picks one of three tiers:
 
 Everything the router says goes out as LLM text, so TTS, the assistant
 context aggregator, RTVI clients and text-mode evals see the lines the way
-they see the LLM's replies. The context frame a tool result pushes back to
+they see the LLM's replies. Each decision is logged and sent to RTVI clients
+as a server message of type ``typesafe-router``, so a client's event log
+shows which tier handled every turn. The context frame a tool result pushes back to
 the LLM is not seen by the router, so tool results are always phrased by the
 LLM; ``ToolLines.result`` is not used here.
 
@@ -74,9 +76,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from pipecat.processors.typesafe_choice_router import default_state_builder
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.typesafe.judge import JudgeResult, Noul, NoulCriteria, TypeSafeJudge
+
+SERVER_MESSAGE_TYPE = "typesafe-router"
+"""``type`` of the RTVI server message the router sends for every decision."""
 
 MORE_QUESTION_ID = "more"
 """Id of the ``Noul`` asking whether the caller said more than what the bot asked for."""
@@ -303,11 +309,13 @@ class TypeSafeFlowsRouter(FrameProcessor):
         canned, self._canned_entry = self._canned_entry, False
         lines = self._nodes.get(node or "")
         if canned and lines is not None and lines.say is not None:
-            logger.info(f"{self}: entering node {node!r} with its written line")
+            await self._report(Tier.CANNED, f"entering node {node!r} with its written line")
             if await self._say(lines.say):
                 return
         elif canned:
-            logger.debug(f"{self}: node {node!r} has no written line; the LLM speaks")
+            await self._report(
+                Tier.ROUTED, f"entering node {node!r}: no written line, the LLM speaks"
+            )
         await self._to_llm(frame)
 
     # Caller turns
@@ -398,7 +406,7 @@ class TypeSafeFlowsRouter(FrameProcessor):
                 and stated is not None
                 and stated.probability <= 1 - canned
             ):
-                logger.info(f"{self}: {Tier.CANNED.value} tier: {tool} asks for {first!r}")
+                await self._report(Tier.CANNED, f"{tool} asks for {first!r} with its written line")
                 if await self._say(line, args=dict(remembered)):
                     self._held_frame = None
                     self._judge_task = None
@@ -412,7 +420,7 @@ class TypeSafeFlowsRouter(FrameProcessor):
         self._judge_task = None
         self._canned_entry = sure
         tier = Tier.CANNED if sure else Tier.ROUTED
-        logger.info(f"{self}: {tier.value} tier: running {tool} with {arguments}")
+        await self._report(tier, f"running {tool} with {arguments}")
         # The LLM learns the handlers Flows advertises from the context frames
         # it sees, and a canned turn never reaches it, so sync them here the
         # way a context frame would.
@@ -429,12 +437,21 @@ class TypeSafeFlowsRouter(FrameProcessor):
         )
 
     async def _finish(self, frame: LLMContextFrame, tier: Tier, why: str) -> None:
-        """Log the tier and hand the caller's turn to the LLM."""
-        logger.info(f"{self}: {tier.value} tier: {why}")
+        """Report the tier and hand the caller's turn to the LLM."""
+        await self._report(tier, why)
         self._judge_task = None
         if self._held_frame is frame:
             self._held_frame = None
             await self._to_llm(frame)
+
+    async def _report(self, tier: Tier, detail: str) -> None:
+        """Log a decision and send it to RTVI clients as a server message."""
+        logger.info(f"{self}: {tier.value} tier: {detail}")
+        await self.push_frame(
+            RTVIServerMessageFrame(
+                data={"type": SERVER_MESSAGE_TYPE, "tier": tier.value, "detail": detail}
+            )
+        )
 
     async def _to_llm(self, frame: LLMContextFrame) -> None:
         self._last_said = None

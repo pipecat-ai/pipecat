@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.services.typesafe import TypeSafeJudge
@@ -274,12 +275,16 @@ class TestTypeSafeFlowsRouter(unittest.IsolatedAsyncioTestCase):
             LLMContextFrame(context=self.user_turn({"role": "user", "content": "Large."})),
             expected_down_frames=[
                 LLMServiceMetadataFrame,
+                RTVIServerMessageFrame,
                 LLMFullResponseStartFrame,
                 LLMTextFrame,
                 LLMFullResponseEndFrame,
             ],
         )
         self.assertEqual(texts(down), ["A large, got it. What kind?"])
+        message = next(f for f in down if isinstance(f, RTVIServerMessageFrame))
+        self.assertEqual(message.data["type"], "typesafe-router")
+        self.assertEqual(message.data["tier"], "canned")
         self.assertEqual(self.calls, [])
         self.assertEqual(self.llm.contexts, [])
 
