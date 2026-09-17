@@ -310,6 +310,30 @@ async def test_a_backend_llm_error_fails_the_job():
         await _run_backend(llm)
 
 
+def test_a_transform_that_cannot_take_is_final_is_rejected_at_construction():
+    async def one_argument(output: BackendOutput) -> BackendOutput:
+        return output
+
+    with pytest.raises(TypeError, match="is_final as a keyword"):
+        BackendLLMWorker(
+            llm=_ScriptedLLM([]),
+            name="backend",
+            context=LLMContext(),
+            transform_output=one_argument,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_transform_that_raises_fails_the_job():
+    llm = _ScriptedLLM([[("text", "Done.")]])
+
+    async def broken(output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        raise RuntimeError("boom")
+
+    with pytest.raises(JobError, match="errored"):
+        await _run_backend(llm, transform_output=broken)
+
+
 @pytest.mark.asyncio
 async def test_a_tool_handler_that_raises_leaves_the_delegation_running():
     llm = _ScriptedLLM(

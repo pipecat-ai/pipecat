@@ -24,6 +24,7 @@ that instead.
 """
 
 import asyncio
+import inspect
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -412,6 +413,8 @@ class BackendLLMWorker(LLMContextWorker):
             assistant_params=assistant_params,
         )
         self._run: _BackendRun | None = None
+        if transform_output is not None:
+            _validate_transform_signature(transform_output)
         self._transform_output = transform_output
         self.llm.append_system_instruction(BACKEND_OUTPUT_INSTRUCTIONS)
         self._register_event_handler("on_delegation_started")
@@ -539,15 +542,22 @@ class BackendLLMWorker(LLMContextWorker):
         text = (message.content or "").strip()
         # Default behavior: only the final output asks to be spoken.
         # This behavior can be adjusted by a transform_output callback.
-        if finished:
-            # The final output is the job's response, not an update.
-            final = BackendOutput(text=text, prefers_spoken=True) if text else None
-            if final is not None:
-                final = await self._shape(final, is_final=True)
-            run.final_output = final if final and final.text else None
+        try:
+            if finished:
+                # The final output is the job's response, not an update.
+                final = BackendOutput(text=text, prefers_spoken=True) if text else None
+                if final is not None:
+                    final = await self._shape(final, is_final=True)
+                run.final_output = final if final and final.text else None
+                run.finished.set()
+            elif text:
+                await self._emit(run, BackendOutput(text=text, prefers_spoken=False))
+        except Exception as e:
+            # A transform that raises would otherwise leave the delegation
+            # waiting out the caller's timeout; fail the job instead.
+            logger.error(f"Worker '{self.name}': transform_output failed: {e}")
+            run.error = f"transform_output failed: {e}"
             run.finished.set()
-        elif text:
-            await self._emit(run, BackendOutput(text=text, prefers_spoken=False))
 
     async def _on_function_call_frame(self, frame: Frame):
         """Relay a phase of one of the backend's own function calls as a job update."""
@@ -620,6 +630,26 @@ class BackendLLMWorker(LLMContextWorker):
         if output.text:
             await self.send_job_update(run.job_id, output.to_payload())
         return output
+
+
+def _validate_transform_signature(transform: BackendOutputTransform) -> None:
+    """Reject a ``transform_output`` that cannot take ``is_final`` as a keyword.
+
+    A transform written before 1.11.0 took the output alone; this turns that
+    into an error at construction rather than on the first delegation.
+    """
+    try:
+        parameters = inspect.signature(transform).parameters
+    except (TypeError, ValueError):
+        return
+    if "is_final" in parameters or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+    ):
+        return
+    raise TypeError(
+        "transform_output must take is_final as a keyword: "
+        "async def transform_output(output: BackendOutput, *, is_final: bool) -> BackendOutput"
+    )
 
 
 async def _delegate_to_backend(
