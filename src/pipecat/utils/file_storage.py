@@ -131,7 +131,9 @@ class LocalFileStorage(FileStorage):
         except FileNotFoundError:
             return
         try:
-            await asyncio.to_thread((self._folder / suffix).unlink)
+            # missing_ok: a consumed upload (delete_after_load) may be deleted
+            # again by session-end cleanup.
+            await asyncio.to_thread((self._folder / suffix).unlink, missing_ok=True)
         except OSError as e:
             logger.warning(f"Failed to remove uploaded file {file_url}: {e}")
 
