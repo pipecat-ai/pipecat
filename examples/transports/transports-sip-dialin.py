@@ -40,7 +40,10 @@ SIP-enabled room per call and the transport forwards the caller into it.
 sets the codec preference order. ``SIP_RTP_TIMEOUT`` (seconds) closes the
 call when a peer vanishes without a BYE; ``SIP_INSTANCE_ID`` (a stable
 UUID) lets a registrar replace a restarted bot's binding instead of
-stacking a stale one. For knobs beyond the ``SIP_*`` environment
+stacking a stale one. To debug signaling or media-path problems,
+``SIP_TRACE=1`` logs every SIP message verbatim (SDP included; contains
+auth material — not for production) and ``SIP_NATIVE_LOG_LEVEL=debug``
+captures the native stack's own logs. For knobs beyond the ``SIP_*`` environment
 variables, construct ``SIPConnection(...)`` yourself and pass it to
 ``SIPTransport`` instead of using ``create_transport``::
 
