@@ -43,6 +43,7 @@ from pipecat.pipeline.dual_llm_service import (
     SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
 )
+from pipecat.pipeline.job_context import JobError
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
@@ -272,6 +273,37 @@ async def test_one_shot_delivers_every_output_together(monkeypatch):
     assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
         call({"outputs": ["Let me check.", "Almost there.", "It's 62 and raining."]})
     ]
+
+
+@pytest.mark.asyncio
+async def test_one_shot_delivers_what_it_held_when_no_final_output_comes(monkeypatch):
+    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS)
+    params = _params()
+    connector = _bound(BackendConnector(), realtime=True)
+
+    await connector.delegate(params)
+
+    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+        call({"outputs": ["Let me check.", "Almost there."]})
+    ]
+    assert connector.reply_strategy._progress == {}  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_one_shot_drops_what_it_held_when_the_delegation_fails(monkeypatch):
+    async def fake(worker, backend_name, *, request, timeout_secs):
+        yield _PROGRESS
+        raise JobError("backend errored")
+
+    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
+    params = _params()
+    connector = _bound(BackendConnector(), realtime=True)
+
+    with pytest.raises(JobError):
+        await connector.delegate(params)
+
+    params.result_callback.assert_not_awaited()  # type: ignore[attr-defined]
+    assert connector.reply_strategy._progress == {}  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
