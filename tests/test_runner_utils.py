@@ -301,6 +301,8 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             reg_interval=0,
             rtp_timeout=30,
             instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+            native_log_level="debug",
+            sip_trace=True,
         )
         transport = await create_transport(
             args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
@@ -316,6 +318,8 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             transport._connection._settings.instance_id,
             "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         )
+        self.assertEqual(transport._connection._settings.native_log_level, "debug")
+        self.assertTrue(transport._connection._settings.sip_trace)
 
 
 @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")

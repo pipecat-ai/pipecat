@@ -1551,11 +1551,13 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_AUDIO_CODECS`` (comma-separated codec preference list),
     ``SIP_AUTH_USER`` (credential-list digest username),
     ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
-    ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables), and
-    ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``) —
-    and the bot function is invoked directly. Without a configured account,
-    a temporary SIP client is provisioned on the Daily domain
-    (``DAILY_API_KEY``) and deleted again when the bot exits.
+    ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables),
+    ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``),
+    ``SIP_NATIVE_LOG_LEVEL`` (native stack log capture), and ``SIP_TRACE``
+    (verbatim SIP message trace) — and the bot function is invoked
+    directly. Without a configured account, a temporary SIP client is
+    provisioned on the Daily domain (``DAILY_API_KEY``) and deleted again
+    when the bot exits.
     """
     logger.info("Running with SIP transport...")
 
@@ -1581,6 +1583,8 @@ async def _run_sip(args: argparse.Namespace):
             reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
             rtp_timeout=int(os.getenv("SIP_RTP_TIMEOUT", "0")),
             instance_id=os.getenv("SIP_INSTANCE_ID"),
+            native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
+            sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
             session_id=str(uuid.uuid4()),
         )
         runner_args.handle_sigint = True

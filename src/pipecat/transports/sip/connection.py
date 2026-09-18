@@ -35,6 +35,8 @@ process, one runtime, one user agent for the account, and N connections
 """
 
 import asyncio
+import inspect
+import logging
 from dataclasses import dataclass, replace
 from typing import Optional
 
@@ -64,6 +66,41 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+class _BaresipLogBridge(logging.Handler):
+    """Routes the binding's stdlib ``baresip.*`` records into loguru.
+
+    The binding logs through the standard library (attaching only a
+    NullHandler), so without a bridge the native stack's warnings never
+    reach pipecat's loguru output. Correlation fields (``sip_call_id``,
+    ...) are re-bound so loguru sinks keep seeing them.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame, depth = inspect.currentframe(), 0
+        while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
+            frame = frame.f_back
+            depth += 1
+        fields = ("seq", "cmd", "event", "call", "sip_call_id", "peer")
+        bound = logger.bind(**{f: getattr(record, f) for f in fields if hasattr(record, f)})
+        bound.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
+logging.getLogger("baresip").addHandler(_BaresipLogBridge())
+
+# The binding's log-level names mapped onto the stdlib gate the bridge
+# sits behind.
+_STDLIB_LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -81,6 +118,8 @@ class _RuntimeSettings:
     video_size: tuple = (640, 480)
     video_fps: float = 30.0
     video_bitrate: int = 1_000_000
+    native_log_level: str = "warning"
+    sip_trace: bool = False
 
     def to_config(self) -> Config:
         """These settings as the binding's ``Config`` object.
@@ -98,7 +137,20 @@ class _RuntimeSettings:
             video_size=self.video_size,
             video_fps=self.video_fps,
             video_bitrate=self.video_bitrate,
+            native_log_level=self.native_log_level,
+            sip_trace=self.sip_trace,
         )
+
+    @property
+    def stdlib_log_level(self) -> int:
+        """The stdlib level for the ``baresip`` logger these settings need.
+
+        The SIP trace is emitted at DEBUG, so enabling it must open the
+        gate that far; otherwise the gate follows ``native_log_level``.
+        """
+        if self.sip_trace:
+            return logging.DEBUG
+        return _STDLIB_LOG_LEVELS.get(self.native_log_level, logging.WARNING)
 
 
 class _SharedRuntime:
@@ -135,6 +187,9 @@ class _SharedRuntime:
         """
         async with self._lock:
             if self._runtime is None:
+                # Open the stdlib gate before the stack's first line so
+                # the requested verbosity is captured from the start.
+                logging.getLogger("baresip").setLevel(settings.stdlib_log_level)
                 runtime = Runtime()
                 await runtime.start(settings.to_config())
                 self._runtime = runtime
@@ -145,7 +200,7 @@ class _SharedRuntime:
                     f"settings ({self._settings!r}); all SIPConnections in a process "
                     "must agree on net_interface, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
-                    "and the video parameters"
+                    "native_log_level, sip_trace, and the video parameters"
                 )
             self._owners += 1
             return self._runtime
@@ -225,9 +280,10 @@ class SIPConnection(BaseObject):
     application signatures.
 
     Runtime-wide arguments (``net_interface``, ``expose_headers``,
-    ``max_concurrent_calls``, and the video parameters) configure the
-    process-wide SIP stack and are fixed by the first connection to
-    connect; every later connection must pass the same values.
+    ``max_concurrent_calls``, the logging parameters, and the video
+    parameters) configure the process-wide SIP stack and are fixed by the
+    first connection to connect; every later connection must pass the
+    same values.
 
     Event handlers available:
 
@@ -286,6 +342,8 @@ class SIPConnection(BaseObject):
         video_size: tuple = (640, 480),
         video_fps: float = 30.0,
         video_bitrate: int = 1_000_000,
+        native_log_level: str = "warning",
+        sip_trace: bool = False,
         **kwargs,
     ):
         """Initialize the connection.
@@ -339,6 +397,14 @@ class SIPConnection(BaseObject):
             video_size: Video geometry for both directions. Runtime-wide.
             video_fps: Transmit frame pacing. Runtime-wide.
             video_bitrate: VP8 encoder target in bits/second. Runtime-wide.
+            native_log_level: Lowest severity captured from the native SIP
+                stack's own logging ("debug", "info", "warning", or
+                "error"); records surface in pipecat's log output.
+                Runtime-wide.
+            sip_trace: Log every SIP message sent and received, verbatim —
+                the tool for signaling and SDP/media-path debugging. The
+                trace contains call metadata and digest authentication
+                material, so keep it off in production. Runtime-wide.
             **kwargs: Additional arguments passed to the parent.
         """
         super().__init__(**kwargs)
@@ -364,6 +430,8 @@ class SIPConnection(BaseObject):
             video_size=tuple(video_size),
             video_fps=video_fps,
             video_bitrate=video_bitrate,
+            native_log_level=native_log_level,
+            sip_trace=sip_trace,
         )
         self._runtime: Runtime | None = None
         self._ua: UserAgent | None = None

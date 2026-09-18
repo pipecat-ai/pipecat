@@ -278,6 +278,8 @@ class SIPRunnerArguments(RunnerArguments):
     ``SIP_INSTANCE_ID`` environment variables. Without ``SIP_USER`` and
     ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
     domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
+    For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
+    native stack's logging.
 
     Parameters:
         user: The user part of ``sip:user@domain``.
@@ -295,6 +297,10 @@ class SIPRunnerArguments(RunnerArguments):
         instance_id: A canonical lowercase UUID identifying this endpoint
             across restarts (RFC 5626 ``+sip.instance``); None sends no
             instance parameter.
+        native_log_level: Lowest severity captured from the native SIP
+            stack's own logging ("debug", "info", "warning", or "error").
+        sip_trace: Log every SIP message sent and received, verbatim.
+            Contains authentication material — keep it off in production.
     """
 
     user: str
@@ -306,6 +312,8 @@ class SIPRunnerArguments(RunnerArguments):
     reg_interval: int = 600
     rtp_timeout: int = 0
     instance_id: str | None = None
+    native_log_level: str = "warning"
+    sip_trace: bool = False
 
 
 @dataclass

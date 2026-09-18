@@ -756,6 +756,8 @@ async def create_transport(
             reg_interval=runner_args.reg_interval,
             rtp_timeout=runner_args.rtp_timeout,
             instance_id=runner_args.instance_id,
+            native_log_level=runner_args.native_log_level,
+            sip_trace=runner_args.sip_trace,
         )
         return SIPTransport(connection, params=params)
     elif isinstance(runner_args, VonageRunnerArguments):
