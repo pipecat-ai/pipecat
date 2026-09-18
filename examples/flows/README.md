@@ -58,7 +58,13 @@ config = (
 )
 ```
 
-Locally, point the runner at a flow file, with any transport. One run per flow, which is how you try several flows against one agent:
+A session names its flow in its `/start` request, beside `body` rather than inside it — the flow is the runner's to act on, `body` is the bot's:
+
+```json
+{ "transport": "webrtc", "flow_config": "initial_node: greeting\nnodes: {...}" }
+```
+
+So one running bot serves many flows, a session at a time. Locally, `--flow` sets the default for the sessions that name none, with any transport:
 
 ```bash
 uv run python examples/flows/yaml/food_ordering/bot.py --flow my_flow.yaml

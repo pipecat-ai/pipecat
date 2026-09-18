@@ -154,12 +154,8 @@ class RunnerArguments:
             uniformly, mirroring ``body``.
         session_id: Identifier for this bot session.
         flow_config: The Pipecat Flows config this session runs, as YAML or
-            JSON text, for a bot whose flow is data rather than code. It is the
-            text, not a parsed ``FlowConfig``: load it with
-            ``FlowConfig.from_yaml``. A session names it in its start request,
-            or the development runner reads it from the file given with
-            ``--flow``; ``None`` when the session names none, and the bot runs
-            whichever flow it ships with.
+            JSON text: load it with ``FlowConfig.from_yaml``. ``None`` when the
+            session named none, and the bot runs whichever flow it ships with.
         cli_args: Parsed CLI arguments from the runner, when launched via the
             development runner.
     """
