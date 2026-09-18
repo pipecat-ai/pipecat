@@ -21,7 +21,7 @@ import mimetypes
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -71,7 +71,6 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UninterruptibleFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -123,7 +122,7 @@ class _BotSegmentTranscriptionFrame(TranscriptionFrame):
 
 
 @dataclass
-class _BotSegmentTranscribedFrame(DataFrame, UninterruptibleFrame):
+class _BotSegmentTranscribedFrame(DataFrame):
     """Closes a segment's transcription run, whatever it yielded.
 
     Sent after the run's frames, it reaches the sink once the aggregator has
@@ -132,6 +131,8 @@ class _BotSegmentTranscribedFrame(DataFrame, UninterruptibleFrame):
     this frame passes. Uninterruptible because a transcript that opens a turn
     also raises an interruption, which flushes the queued frames behind it.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
 
 def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:

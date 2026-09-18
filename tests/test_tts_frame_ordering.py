@@ -34,7 +34,7 @@ Also covers the interruption-during-pause deadlock scenario (see test_no_deadloc
 import asyncio
 import unittest
 from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -57,7 +57,6 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UninterruptibleFrame,
 )
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
@@ -82,13 +81,15 @@ class FooFrame(DataFrame):
 
 
 @dataclass
-class UninterruptibleMarkerFrame(ControlFrame, UninterruptibleFrame):
+class UninterruptibleMarkerFrame(ControlFrame):
     """Test-only uninterruptible marker frame used to trigger the deadlock code path.
 
     When this is in the process queue with __should_block_frames=True, and an
     InterruptionFrame arrives, _start_interruption() takes the non-cancel path
     (because of the UninterruptibleFrame) leaving __should_block_frames=True.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     label: str = ""
 
