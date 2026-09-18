@@ -259,8 +259,11 @@ class BackendOutputTransform(Protocol):
     the outputs before it.
     """
 
-    async def __call__(self, output: BackendOutput, *, is_final: bool) -> BackendOutput:
-        """Return the output to send in place of ``output``; blank its text to drop it."""
+    async def __call__(self, output: BackendOutput, *, is_final: bool) -> BackendOutput | None:
+        """Return the output to send in place of ``output``, or ``None`` to send nothing.
+
+        For the final output, ``None`` means the backend had nothing to say.
+        """
         ...
 
 
@@ -434,8 +437,9 @@ class BackendLLMWorker(LLMContextWorker):
             transform_output: Called with each :class:`BackendOutput` the
                 model produces before it is sent, as
                 ``transform_output(output, is_final=...)``, to adjust its
-                text or whether the user may hear it; an output with no text
-                left is not sent. Without one, only the final output asks to be
+                text or whether the user may hear it, or to return ``None``
+                and send nothing (for the final output, that the backend had
+                nothing to say). Without one, only the final output asks to be
                 spoken: a frontend filling the wait is usually mid-sentence
                 when progress arrives, and speaking it talks over them.
                 Outputs the app sends itself are not passed through it
@@ -515,7 +519,7 @@ class BackendLLMWorker(LLMContextWorker):
         finally:
             self._run = None
         # An error fails the job only when it left the backend with nothing to say.
-        if run.error and run.final_output is None:
+        if run.error and not (run.final_output and run.final_output.text):
             logger.warning(f"Worker '{self.name}': job {message.job_id} failed: {run.error}")
             await self.send_job_response(message.job_id, {"text": ""}, status=JobStatus.ERROR)
             return
@@ -589,10 +593,9 @@ class BackendLLMWorker(LLMContextWorker):
         try:
             if finished:
                 # The final output is the job's response, not an update.
-                final = BackendOutput(text=text, prefers_spoken=True) if text else None
-                if final is not None:
-                    final = await self._shape(final, is_final=True)
-                run.final_output = final if final and final.text else None
+                run.final_output = await self._shape(
+                    BackendOutput(text=text, prefers_spoken=True), is_final=True
+                )
                 run.finished.set()
             elif text:
                 await self._emit(run, BackendOutput(text=text, prefers_spoken=False))
@@ -667,7 +670,7 @@ class BackendLLMWorker(LLMContextWorker):
         if run is not None and text:
             await self._emit(run, BackendOutput(text=text, is_thought=True, prefers_spoken=False))
 
-    async def _shape(self, output: BackendOutput, *, is_final: bool) -> BackendOutput:
+    async def _shape(self, output: BackendOutput, *, is_final: bool) -> BackendOutput | None:
         """Run an output through ``transform_output``, if there is one."""
         if self._transform_output is None:
             return output
@@ -675,17 +678,11 @@ class BackendLLMWorker(LLMContextWorker):
 
     async def _emit(
         self, run: "_BackendRun", output: BackendOutput, *, apply_transform_output: bool = True
-    ) -> BackendOutput:
-        """Send one output as a job update, after any configured transform.
-
-        Returns:
-            The output as it was sent, so a caller sees the transformed text.
-        """
-        if apply_transform_output:
-            output = await self._shape(output, is_final=False)
-        if output.text:
-            await self.send_job_update(run.job_id, output.to_payload())
-        return output
+    ) -> None:
+        """Send one output as a job update, after any configured transform."""
+        shaped = await self._shape(output, is_final=False) if apply_transform_output else output
+        if shaped is not None:
+            await self.send_job_update(run.job_id, shaped.to_payload())
 
 
 def _validate_transform_signature(transform: BackendOutputTransform) -> None:
