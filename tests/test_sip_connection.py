@@ -7,6 +7,7 @@
 """Tests for the SIP connection layer."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -140,6 +141,19 @@ async def test_runtime_starts_with_config_object(env):
     assert config.expose_headers == ("X-Case",)
     assert config.rtp_timeout == 30
     assert config.instance_id == "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+
+
+@pytest.mark.asyncio
+async def test_debug_logging_settings_reach_config(env):
+    connection = make_connection(native_log_level="debug", sip_trace=True)
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.native_log_level == "debug"
+    assert config.sip_trace is True
+    # The stdlib gate must open far enough for the DEBUG-level SIP trace.
+    assert logging.getLogger("baresip").level == logging.DEBUG
 
 
 @pytest.mark.asyncio
