@@ -58,6 +58,10 @@ class Language(StrEnum):
     AS = "as"
     AS_IN = "as-IN"
 
+    # Bodo
+    BRX = "brx"
+    BRX_IN = "brx-IN"
+
     # Asturian
     AST = "ast"
 
@@ -314,6 +318,14 @@ class Language(StrEnum):
     KN = "kn"
     KN_IN = "kn-IN"
 
+    # Dogri
+    DOI = "doi"
+    DOI_IN = "doi-IN"
+
+    # Kashmiri
+    KS = "ks"
+    KS_IN = "ks-IN"
+
     # Konkani
     KOK = "kok"
     KOK_IN = "kok-IN"
@@ -372,6 +384,10 @@ class Language(StrEnum):
     # Maithili
     MAI = "mai"
     MAI_IN = "mai-IN"
+
+    # Manipuri (Meitei)
+    MNI = "mni"
+    MNI_IN = "mni-IN"
 
     # Malayalam
     ML = "ml"
@@ -454,6 +470,10 @@ class Language(StrEnum):
 
     # Sanskrit
     SA = "sa"
+
+    # Santali
+    SAT = "sat"
+    SAT_IN = "sat-IN"
 
     # Sindhi
     SD = "sd"

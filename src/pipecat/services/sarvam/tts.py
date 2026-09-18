@@ -20,6 +20,16 @@ Indian languages:
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
+- **bulbul:v4-flash**: Low-latency model with its own speaker catalogue
+    - Supports: pitch (-0.5 to 0.5), loudness (0.1 to 2.5), pace (0.5-2.0)
+    - Does NOT support: temperature (the API pins it to 0.6)
+    - Default sample rate: 24000 Hz
+    - Preprocessing is always enabled
+    - Speakers: 224 wire names encoding voice, language, and style, such as
+      shubh_en_narration_gentle (default) and ritu_hi_edtech. The bulbul:v2 and
+      bulbul:v3 catalogues are not accepted — see :class:`SarvamTTSSpeakerV4Flash`
+    - Access is gated: a subscription without it gets HTTP 422
+
 - **bulbul:v2** (deprecated): Sarvam's previous TTS model. Sarvam's API answers a
   request for it with "Model 'bulbul:v2' has been deprecated. Please use
   'bulbul:v3' instead.", so it cannot synthesize.
@@ -75,11 +85,17 @@ class SarvamTTSModel(StrEnum):
             - Supports temperature parameter
             - Default sample rate: 24000 Hz
             - Preprocessing is always enabled
+        BULBUL_V4_FLASH: Low-latency model with its own speaker catalogue.
+            - Supports pitch (-0.5 to 0.5), loudness (0.1 to 2.5), pace (0.5-2.0)
+            - Does NOT support temperature
+            - Default sample rate: 24000 Hz
+            - Preprocessing is always enabled
     """
 
     BULBUL_V2 = "bulbul:v2"
     BULBUL_V3_BETA = "bulbul:v3-beta"
     BULBUL_V3 = "bulbul:v3"
+    BULBUL_V4_FLASH = "bulbul:v4-flash"
 
 
 class SarvamTTSSpeakerV2(StrEnum):
@@ -131,63 +147,405 @@ class SarvamTTSSpeakerV3(StrEnum):
     SOPHIA = "sophia"
 
 
+class SarvamTTSSpeakerV4Flash(StrEnum):
+    """Available speakers for the bulbul:v4-flash model.
+
+    Speaker names encode the voice, language, and style (for example
+    ``ritu_hi_edtech``). Pick one whose language matches the configured
+    ``language``; the bulbul:v2 and bulbul:v3 catalogues are not accepted.
+    """
+
+    # Assamese
+    KANGKANA_AS_CONVERSATIONAL = "kangkana_as_conversational"
+    MOUCHUMI_AS_CONVERSATIONAL = "mouchumi_as_conversational"
+
+    # Bengali
+    BAPPA_BN_CONVERSATION = "bappa_bn_conversation"
+    ROOPA_BN_CONVERSATIONAL = "roopa_bn_conversational"
+    BIMAL_BN_SUSPENSE = "bimal_bn_suspense"
+
+    # English
+    ADITI_EN_STORIES = "aditi_en_stories"
+    APARNA_EN_COMPANION = "aparna_en_companion"
+    APARNA_EN_EDTECH = "aparna_en_edtech"
+    ASHWIN_EN_SPORTS = "ashwin_en_sports"
+    ASHWIN_EN_SPORTS_ENERGETIC = "ashwin_en_sports_energetic"
+    CHANDRIKA_EN_STORIES = "chandrika_en_stories"
+    DEV_EN_RECOVERY = "dev_en_recovery"
+    DEV_EN_CONVERSATIONAL = "dev_en_conversational"
+    DEVEN_EN_CONVERSATION = "deven_en_conversation"
+    ISHITA_EN_CUSTOMER = "ishita_en_customer"
+    ISHITA_EN_MEDICAL = "ishita_en_medical"
+    ISHITA_EN_NUMBERS = "ishita_en_numbers"
+    ISHITA_EN_SOCIAL = "ishita_en_social"
+    ISHITA_EN_STORIES = "ishita_en_stories"
+    KALPIT_EN_EDTECH = "kalpit_en_edtech"
+    NACHIKET_EN_ADS = "nachiket_en_ads"
+    NEHA_EN_CUSTOMER = "neha_en_customer"
+    NEHA_EN_LATENIGHT = "neha_en_latenight"
+    NUPUR_EN_KIDS = "nupur_en_kids"
+    OJAS_EN_SOCIAL = "ojas_en_social"
+    RITU_EN_EDTECH = "ritu_en_edtech"
+    RITU_EN_LATENIGHT = "ritu_en_latenight"
+    RITU_EN_MEDICAL = "ritu_en_medical"
+    RITU_EN_REELS = "ritu_en_reels"
+    ROHAN_EN_RECOVERY = "rohan_en_recovery"
+    ROOPA_EN_CONVERSATIONAL = "roopa_en_conversational"
+    RUSTOM_EN_SUSPENSE = "rustom_en_suspense"
+    SANCHITA_EN_COMPANION = "sanchita_en_companion"
+    SANCHITA_EN_INSURANCE = "sanchita_en_insurance"
+    SANCHITA_EN_RECOVERY = "sanchita_en_recovery"
+    SANCHITA_EN_MARKET = "sanchita_en_market"
+    SANCHITA_EN_SOCIAL = "sanchita_en_social"
+    SHABANA_EN_EDTECH = "shabana_en_edtech"
+    SHALINI_EN_COMPANION = "shalini_en_companion"
+    SHALINI_EN_CUSTOMER = "shalini_en_customer"
+    SHUBH_EN_NARRATION = "shubh_en_narration"
+    SHUBH_EN_NUMBERS = "shubh_en_numbers"
+    SHUBH_EN_ADS = "shubh_en_ads"
+    SHUBH_EN_RECOVERY = "shubh_en_recovery"
+    SHUBH_EN_AUDIOBOOK = "shubh_en_audiobook"
+    SHUBH_EN_NARRATION_GENTLE = "shubh_en_narration_gentle"
+    SHUBH_EN_SPORTS = "shubh_en_sports"
+    SIMRAN_EN_NARRATION = "simran_en_narration"
+    SIMRAN_EN_AUTOMOBILE = "simran_en_automobile"
+    SIMRAN_EN_CONVERSATION = "simran_en_conversation"
+    SIMRAN_EN_CUSTOMER = "simran_en_customer"
+    SIMRAN_EN_EDTECH = "simran_en_edtech"
+    SIMRAN_EN_EDTECH_BOT = "simran_en_edtech_bot"
+    SIMRAN_EN_SALES = "simran_en_sales"
+    SIMRAN_EN_RECOVERY = "simran_en_recovery"
+    SIMRAN_EN_ADS = "simran_en_ads"
+    SIMRAN_EN_THERAPIST = "simran_en_therapist"
+    SUNNY_EN_SOCIAL = "sunny_en_social"
+    VARUN_EN_ADS = "varun_en_ads"
+    VARUN_EN_SUSPENSE = "varun_en_suspense"
+    ZARINA_EN_CONVERSATION = "zarina_en_conversation"
+    AMELIA_EN_CONVERSATIONAL = "amelia_en_conversational"
+    SOPHIA_EN_CONVERSATIONAL = "sophia_en_conversational"
+    GIRISH_EN_DOCUMENTARY = "girish_en_documentary"
+    GIRISH_EN_DEVOTIONAL = "girish_en_devotional"
+    PAYAL_EN_EDTECH = "payal_en_edtech"
+    SARANG_EN_NARRATION = "sarang_en_narration"
+
+    # English–Hindi mix
+    ISHITA_ENHI_COMPANION = "ishita_enhi_companion"
+    ISHITA_ENHI_CUSTOMER = "ishita_enhi_customer"
+    ISHITA_ENHI_CUSTOMER_EXPRESSIVE = "ishita_enhi_customer_expressive"
+    SANCHITA_ENHI_COMPANION = "sanchita_enhi_companion"
+    SHALINI_ENHI_COMPANION = "shalini_enhi_companion"
+    SHALINI_ENHI_CUSTOMER = "shalini_enhi_customer"
+    SHUBH_ENHI_COMPANION = "shubh_enhi_companion"
+    SHUBH_ENHI_ADS = "shubh_enhi_ads"
+    SHUBH_ENHI_BANKING = "shubh_enhi_banking"
+    SIMRAN_ENHI_COMPANION = "simran_enhi_companion"
+    SIMRAN_ENHI_CUSTOMER = "simran_enhi_customer"
+    SIMRAN_ENHI_BANKING_EXPRESSIVE = "simran_enhi_banking_expressive"
+    SUNNY_ENHI_CUSTOMER = "sunny_enhi_customer"
+
+    # Gujarati
+    BHAVIK_GU_CONVERSATION = "bhavik_gu_conversation"
+    POOJA_GU_CONVERSATIONAL = "pooja_gu_conversational"
+    POOJA_GU_CUSTOMER = "pooja_gu_customer"
+
+    # Hindi
+    AAYAN_HI_CONVERSATIONAL = "aayan_hi_conversational"
+    AMIT_HI_CONVERSATIONAL = "amit_hi_conversational"
+    ASHUTOSH_HI_CONVERSATIONAL = "ashutosh_hi_conversational"
+    KABIR_HI_CONVERSATIONAL = "kabir_hi_conversational"
+    KAVYA_HI_CONVERSATIONAL = "kavya_hi_conversational"
+    MANAN_HI_CONVERSATIONAL = "manan_hi_conversational"
+    RAHUL_HI_CONVERSATIONAL = "rahul_hi_conversational"
+    SUMIT_HI_CONVERSATIONAL = "sumit_hi_conversational"
+    ADITYA_HI_CONVERSATIONAL = "aditya_hi_conversational"
+    ADITYA_HI_SALES = "aditya_hi_sales"
+    ANAND_HI_DOCUMENTARY = "anand_hi_documentary"
+    ANAND_HI_NEWS = "anand_hi_news"
+    APARNA_HI_CUSTOMER = "aparna_hi_customer"
+    APARNA_HI_KYC = "aparna_hi_kyc"
+    ASHOK_HI_CHARACTER = "ashok_hi_character"
+    ASHOK_HI_NEWS = "ashok_hi_news"
+    CHHAVI_HI_KIDS = "chhavi_hi_kids"
+    ISHITA_HI_ADS = "ishita_hi_ads"
+    ISHITA_HI_EDTECH = "ishita_hi_edtech"
+    ISHITA_HI_BANKING = "ishita_hi_banking"
+    ISHITA_HI_ADS_INFORMAL = "ishita_hi_ads_informal"
+    ISHITA_HI_DEVOTIONAL = "ishita_hi_devotional"
+    ISHITA_HI_NUMBERS = "ishita_hi_numbers"
+    ISHITA_HI_SOCIAL = "ishita_hi_social"
+    KUNAL_HI_KIDS = "kunal_hi_kids"
+    MAHESH_HI_DOCUMENTARY = "mahesh_hi_documentary"
+    MANI_HI_DEVOTIONAL = "mani_hi_devotional"
+    MANI_HI_CONVERSATIONAL = "mani_hi_conversational"
+    MOHIT_HI_CONVERSATIONAL = "mohit_hi_conversational"
+    NACHIKET_HI_DEVOTIONAL = "nachiket_hi_devotional"
+    PRIYA_HI_RECOVERY = "priya_hi_recovery"
+    RATAN_HI_LATENIGHT = "ratan_hi_latenight"
+    RATAN_HI_CUSTOMER_EXPRESSIVE = "ratan_hi_customer_expressive"
+    RATAN_HI_DOCUMENTARY = "ratan_hi_documentary"
+    RATAN_HI_DEVOTIONAL = "ratan_hi_devotional"
+    RATAN_HI_RECOVERY = "ratan_hi_recovery"
+    RATAN_HI_SOCIAL = "ratan_hi_social"
+    RATAN_HI_SPORTS = "ratan_hi_sports"
+    RATAN_HI_LATENIGHT_WARM = "ratan_hi_latenight_warm"
+    REHAN_HI_SOCIAL = "rehan_hi_social"
+    RITU_HI_CUSTOMER_UTILITY = "ritu_hi_customer_utility"
+    RITU_HI_KIDS = "ritu_hi_kids"
+    RITU_HI_CONVERSATION = "ritu_hi_conversation"
+    RITU_HI_CUSTOMER = "ritu_hi_customer"
+    RITU_HI_EDTECH = "ritu_hi_edtech"
+    RITU_HI_ADS_FORMAL = "ritu_hi_ads_formal"
+    RITU_HI_BANKING = "ritu_hi_banking"
+    RITU_HI_ADS_INFORMAL = "ritu_hi_ads_informal"
+    RITU_HI_INSURANCE = "ritu_hi_insurance"
+    RITU_HI_EDTECH_BOT = "ritu_hi_edtech_bot"
+    RITU_HI_MEDICAL = "ritu_hi_medical"
+    RITU_HI_SALES = "ritu_hi_sales"
+    RITU_HI_REELS = "ritu_hi_reels"
+    RITU_HI_SOCIAL = "ritu_hi_social"
+    RITU_HI_CUSTOMER_WARM = "ritu_hi_customer_warm"
+    RITU_HI_SOCIAL_LIVELY = "ritu_hi_social_lively"
+    ROOPA_HI_COMPANION = "roopa_hi_companion"
+    ROOPA_HI_NARRATION = "roopa_hi_narration"
+    ROOPA_HI_RECOVERY = "roopa_hi_recovery"
+    ROOPA_HI_MARKET = "roopa_hi_market"
+    ROOPA_HI_CONVERSATIONAL = "roopa_hi_conversational"
+    SANCHITA_HI_ASSISTANT = "sanchita_hi_assistant"
+    SANCHITA_HI_EDTECH = "sanchita_hi_edtech"
+    SANCHITA_HI_BANKING = "sanchita_hi_banking"
+    SANCHITA_HI_FEEDBACK = "sanchita_hi_feedback"
+    SANCHITA_HI_ADS_FORMAL = "sanchita_hi_ads_formal"
+    SANCHITA_HI_ADS_INFORMAL = "sanchita_hi_ads_informal"
+    SANCHITA_HI_INTERVIEW = "sanchita_hi_interview"
+    SANCHITA_HI_ROMANTIC = "sanchita_hi_romantic"
+    SANCHITA_HI_MARKET = "sanchita_hi_market"
+    SANCHITA_HI_SOCIAL = "sanchita_hi_social"
+    SANCHITA_HI_KYC = "sanchita_hi_kyc"
+    SARIKA_HI_CONVERSATION = "sarika_hi_conversation"
+    SHALINI_HI_COMPANION = "shalini_hi_companion"
+    SHALINI_HI_SOCIAL = "shalini_hi_social"
+    SHREYA_HI_CONVERSATIONAL = "shreya_hi_conversational"
+    SHREYA_HI_NEWS = "shreya_hi_news"
+    SHRUTI_HI_EDTECH = "shruti_hi_edtech"
+    SHUBH_HI_CUSTOMER = "shubh_hi_customer"
+    SHUBH_HI_ECOMM = "shubh_hi_ecomm"
+    SHUBH_HI_STORIES_MIXED = "shubh_hi_stories_mixed"
+    SHUBH_HI_DEVOTIONAL = "shubh_hi_devotional"
+    SHUBH_HI_ADS = "shubh_hi_ads"
+    SHUBH_HI_RECOVERY = "shubh_hi_recovery"
+    SHUBH_HI_STORIES_DRAMATIC = "shubh_hi_stories_dramatic"
+    SIMRAN_HI_ASSISTANT = "simran_hi_assistant"
+    SIMRAN_HI_NARRATION = "simran_hi_narration"
+    SIMRAN_HI_AUTOMOBILE = "simran_hi_automobile"
+    SIMRAN_HI_CONVERSATION = "simran_hi_conversation"
+    SIMRAN_HI_NEWS_BREAKING = "simran_hi_news_breaking"
+    SIMRAN_HI_SOCIAL_ENERGETIC = "simran_hi_social_energetic"
+    SIMRAN_HI_SOCIAL_EXCITED = "simran_hi_social_excited"
+    SIMRAN_HI_LATENIGHT = "simran_hi_latenight"
+    SIMRAN_HI_NEWS = "simran_hi_news"
+    SIMRAN_HI_RECOVERY = "simran_hi_recovery"
+    SIMRAN_HI_SALES = "simran_hi_sales"
+    SUCHITRA_HI_ECOMM = "suchitra_hi_ecomm"
+    SUHANI_HI_SOCIAL = "suhani_hi_social"
+    SUNNY_HI_ADS = "sunny_hi_ads"
+    SUNNY_HI_REELS = "sunny_hi_reels"
+    TARUN_HI_CONVERSATIONAL = "tarun_hi_conversational"
+    TARUN_HI_SALES = "tarun_hi_sales"
+    CHAITRA_HI_CUSTOMER = "chaitra_hi_customer"
+    SHILPA_HI_NARRATION = "shilpa_hi_narration"
+    TANYA_HI_NARRATION = "tanya_hi_narration"
+    AARTI_HI_CUSTOMER = "aarti_hi_customer"
+    ADVAIT_HI_CHARACTER = "advait_hi_character"
+    ARYAMAN_HI_ADS = "aryaman_hi_ads"
+    CHIRAG_HI_SOCIAL = "chirag_hi_social"
+    GIRISH_HI_DEVOTIONAL = "girish_hi_devotional"
+    MUKUL_HI_ADS = "mukul_hi_ads"
+    MUKUL_HI_SUSPENSE = "mukul_hi_suspense"
+    SUMAN_HI_COMPANION = "suman_hi_companion"
+    VAIBHAV_HI_SOCIAL = "vaibhav_hi_social"
+    VANDANA_HI_ECOMM = "vandana_hi_ecomm"
+    VIPUL_HI_SOCIAL = "vipul_hi_social"
+
+    # Kannada
+    CHAITRA_KN_CONVERSATION = "chaitra_kn_conversation"
+    CHAITRA_KN_NARRATION = "chaitra_kn_narration"
+    CHETAN_KN_CONVERSATION = "chetan_kn_conversation"
+    SUCHITRA_KN_NARRATION = "suchitra_kn_narration"
+
+    # Marathi
+    ISHITA_MR_CONVERSATIONAL = "ishita_mr_conversational"
+    MRUNAL_MR_NARRATION = "mrunal_mr_narration"
+    NEHA_MR_NARRATION = "neha_mr_narration"
+    NILESH_MR_CONVERSATION = "nilesh_mr_conversation"
+    RITU_MR_INSURANCE = "ritu_mr_insurance"
+    RITU_MR_NARRATION = "ritu_mr_narration"
+    RUPALI_MR_STORIES = "rupali_mr_stories"
+    SOHAM_MR_NARRATION = "soham_mr_narration"
+    MUKUL_MR_STORIES = "mukul_mr_stories"
+
+    # Punjabi
+    ANAND_PA_CONVERSATION = "anand_pa_conversation"
+    ANAND_PA_CUSTOMER = "anand_pa_customer"
+    HARPREET_PA_NARRATION = "harpreet_pa_narration"
+    JASPAL_PA_BANKING = "jaspal_pa_banking"
+
+    # Tamil
+    GOKUL_TA_NARRATION = "gokul_ta_narration"
+    VETRI_TA_ADS = "vetri_ta_ads"
+    VETRI_TA_SUSPENSE = "vetri_ta_suspense"
+    VIJAY_TA_NARRATION = "vijay_ta_narration"
+
+    # Telugu
+    KAVITHA_TE_CONVERSATION = "kavitha_te_conversation"
+    KAVITHA_TE_NARRATION = "kavitha_te_narration"
+    POOJA_TE_CONVERSATION = "pooja_te_conversation"
+    TARUN_TE_NARRATION = "tarun_te_narration"
+
+
 @dataclass(frozen=True)
 class TTSModelConfig:
     """Immutable configuration for a Sarvam TTS model.
 
     Parameters:
+        name: The model name this configuration describes.
         supports_pitch: Whether the model accepts pitch parameter.
         supports_loudness: Whether the model accepts loudness parameter.
         supports_temperature: Whether the model accepts temperature parameter.
         default_sample_rate: Default audio sample rate in Hz.
         default_speaker: Default speaker voice ID.
         pace_range: Valid range for pace parameter (min, max).
+        pitch_range: Valid range for pitch parameter (min, max).
+        loudness_range: Valid range for loudness parameter (min, max).
         preprocessing_always_enabled: Whether preprocessing is always enabled.
         speakers: Tuple of available speaker names for this model.
     """
 
+    name: str
     supports_pitch: bool
     supports_loudness: bool
     supports_temperature: bool
     default_sample_rate: int
     default_speaker: str
     pace_range: tuple[float, float]
+    pitch_range: tuple[float, float]
+    loudness_range: tuple[float, float]
     preprocessing_always_enabled: bool
     speakers: tuple[str, ...]
 
 
+#: Sample rates the streaming surfaces accept. The non-streaming
+#: ``/text-to-speech`` endpoint additionally accepts 32000, 44100, and 48000.
+WEBSOCKET_SAMPLE_RATES: tuple[int, ...] = (8000, 16000, 22050, 24000)
+
 TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
     "bulbul:v2": TTSModelConfig(
+        name="bulbul:v2",
         supports_pitch=True,
         supports_loudness=True,
         supports_temperature=False,
         default_sample_rate=22050,
         default_speaker="anushka",
         pace_range=(0.3, 3.0),
+        pitch_range=(-0.75, 0.75),
+        loudness_range=(0.3, 3.0),
         preprocessing_always_enabled=False,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV2),
     ),
     "bulbul:v3-beta": TTSModelConfig(
+        name="bulbul:v3-beta",
         supports_pitch=False,
         supports_loudness=False,
         supports_temperature=True,
         default_sample_rate=24000,
         default_speaker="shubh",
         pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
         preprocessing_always_enabled=True,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
     "bulbul:v3": TTSModelConfig(
+        name="bulbul:v3",
         supports_pitch=False,
         supports_loudness=False,
         supports_temperature=True,
         default_sample_rate=24000,
         default_speaker="shubh",
         pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
         preprocessing_always_enabled=True,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
+    "bulbul:v4-flash": TTSModelConfig(
+        name="bulbul:v4-flash",
+        supports_pitch=True,
+        supports_loudness=True,
+        supports_temperature=False,
+        default_sample_rate=24000,
+        default_speaker="shubh_en_narration_gentle",
+        pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
+        preprocessing_always_enabled=True,
+        speakers=tuple(s.value for s in SarvamTTSSpeakerV4Flash),
+    ),
 }
+
+
+def resolve_model_config(model: str | None) -> TTSModelConfig:
+    """Look up the configuration for a Sarvam TTS model.
+
+    Args:
+        model: The model name (e.g. ``"bulbul:v3"`` or ``"bulbul:v4-flash"``).
+
+    Returns:
+        The configuration describing the model's capabilities and defaults.
+
+    Raises:
+        ValueError: If the model is not one Sarvam serves.
+    """
+    if model is None or model not in TTS_MODEL_CONFIGS:
+        allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
+        raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+    return TTS_MODEL_CONFIGS[model]
+
+
+def _clamp_to_range(value: float, value_range: tuple[float, float], name: str, model: str) -> float:
+    """Clamp a voice parameter to the range its model accepts."""
+    low, high = value_range
+    if value < low or value > high:
+        logger.warning(f"{name} {value} is outside the {model} range ({low}-{high}). Clamping.")
+        return max(low, min(high, value))
+    return value
+
+
+def _format_error(message: str, code: Any = None, request_id: str | None = None) -> str:
+    """Build an error string that keeps Sarvam's own message and identifiers intact."""
+    context = []
+    if code is not None:
+        context.append(f"code={code}")
+    if request_id:
+        context.append(f"request_id={request_id}")
+    suffix = f" ({', '.join(context)})" if context else ""
+    return f"Sarvam TTS error{suffix}: {message}"
+
+
+def _format_http_error(status: int, body: str) -> str:
+    """Unwrap Sarvam's HTTP error envelope, falling back to the raw body.
+
+    Errors arrive either wrapped in an ``error`` object carrying a code and a
+    request id, or as a bare ``message``.
+    """
+    try:
+        payload = json.loads(body)
+        error = payload.get("error", payload)
+        message = error["message"]
+    except (ValueError, AttributeError, KeyError, TypeError):
+        return f"Sarvam TTS error (HTTP {status}): {body}"
+    return _format_error(
+        message, code=error.get("code", f"HTTP {status}"), request_id=error.get("request_id")
+    )
 
 
 def get_speakers_for_model(model: str) -> list[str]:
@@ -217,8 +575,14 @@ def language_to_sarvam_language(language: Language) -> str:
         logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
+        Language.AS: "as-IN",  # Assamese
+        Language.AS_IN: "as-IN",
         Language.BN: "bn-IN",  # Bengali
         Language.BN_IN: "bn-IN",
+        Language.BRX: "brx-IN",  # Bodo
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",  # Dogri
+        Language.DOI_IN: "doi-IN",
         Language.EN: "en-IN",  # English (India)
         Language.EN_IN: "en-IN",
         Language.GU: "gu-IN",  # Gujarati
@@ -227,18 +591,34 @@ def language_to_sarvam_language(language: Language) -> str:
         Language.HI_IN: "hi-IN",
         Language.KN: "kn-IN",  # Kannada
         Language.KN_IN: "kn-IN",
+        Language.KOK: "kok-IN",  # Konkani
+        Language.KOK_IN: "kok-IN",
+        Language.KS: "ks-IN",  # Kashmiri
+        Language.KS_IN: "ks-IN",
+        Language.MAI: "mai-IN",  # Maithili
+        Language.MAI_IN: "mai-IN",
         Language.ML: "ml-IN",  # Malayalam
         Language.ML_IN: "ml-IN",
+        Language.MNI: "mni-IN",  # Manipuri
+        Language.MNI_IN: "mni-IN",
         Language.MR: "mr-IN",  # Marathi
         Language.MR_IN: "mr-IN",
+        Language.NE: "ne-IN",  # Nepali
         Language.OR: "od-IN",  # Odia
         Language.OR_IN: "od-IN",
         Language.PA: "pa-IN",  # Punjabi
         Language.PA_IN: "pa-IN",
+        Language.SA: "sa-IN",  # Sanskrit
+        Language.SAT: "sat-IN",  # Santali
+        Language.SAT_IN: "sat-IN",
+        Language.SD: "sd-IN",  # Sindhi
+        Language.SD_IN: "sd-IN",
         Language.TA: "ta-IN",  # Tamil
         Language.TA_IN: "ta-IN",
         Language.TE: "te-IN",  # Telugu
         Language.TE_IN: "te-IN",
+        Language.UR: "ur-IN",  # Urdu
+        Language.UR_IN: "ur-IN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
@@ -252,12 +632,17 @@ class SarvamHttpTTSSettings(TTSSettings):
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3 (cannot be disabled).
         pace: Speech pace multiplier, 0.5 to 2.0 on bulbul:v3. Defaults to 1.0.
-        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
-        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-            **Note:** Only supported by the deprecated bulbul:v2; ignored by bulbul:v3.
+        pitch: Voice pitch adjustment. Defaults to 0.0.
+            - bulbul:v4-flash: Range -0.5 to 0.5
+            - bulbul:v2 (deprecated): Range -0.75 to 0.75
+            **Note:** Ignored by bulbul:v3.
+        loudness: Volume multiplier. Defaults to 1.0.
+            - bulbul:v4-flash: Range 0.1 to 2.5
+            - bulbul:v2 (deprecated): Range 0.3 to 3.0
+            **Note:** Ignored by bulbul:v3.
         temperature: Controls output randomness for bulbul:v3 (0.01 to 1.0).
             Lower values = more deterministic, higher = more random. Defaults to 0.6.
+            **Note:** Ignored by bulbul:v4-flash, which the API pins to 0.6.
     """
 
     enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -286,13 +671,53 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
     max_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+def apply_model_constraints(settings: SarvamHttpTTSSettings, config: TTSModelConfig):
+    """Reconcile voice settings with what the selected model accepts.
+
+    Parameters outside the model's range are clamped, and parameters the model
+    ignores are dropped so they are never sent on the wire.
+
+    Args:
+        settings: The settings to adjust in place.
+        config: The selected model's configuration.
+    """
+    model = config.name
+    pace = assert_given(settings.pace)
+    if pace is not None:
+        settings.pace = _clamp_to_range(pace, config.pace_range, "Pace", model)
+
+    if config.preprocessing_always_enabled:
+        settings.enable_preprocessing = True
+
+    pitch = assert_given(settings.pitch)
+    if not config.supports_pitch:
+        if pitch not in (None, 0.0):
+            logger.warning(f"pitch parameter is ignored for {model}")
+        settings.pitch = None
+    elif pitch is not None:
+        settings.pitch = _clamp_to_range(pitch, config.pitch_range, "Pitch", model)
+
+    loudness = assert_given(settings.loudness)
+    if not config.supports_loudness:
+        if loudness not in (None, 1.0):
+            logger.warning(f"loudness parameter is ignored for {model}")
+        settings.loudness = None
+    elif loudness is not None:
+        settings.loudness = _clamp_to_range(loudness, config.loudness_range, "Loudness", model)
+
+    if not config.supports_temperature:
+        if assert_given(settings.temperature) not in (None, 0.6):
+            logger.warning(f"temperature parameter is ignored for {model}")
+        settings.temperature = None
+
+
 class SarvamHttpTTSService(TTSService):
     """Text-to-Speech service using Sarvam AI's API.
 
     Converts text to speech using Sarvam AI's TTS models with support for multiple
     Indian languages. Provides control over voice characteristics.
 
-    **Model:**
+    **Models:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -302,6 +727,15 @@ class SarvamHttpTTSService(TTSService):
         - Speakers: shubh, aditya, ritu, priya, neha, rahul, pooja, rohan, simran,
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
+
+    - **bulbul:v4-flash**:
+        - Supports: pitch (-0.5 to 0.5), loudness (0.1 to 2.5), pace (0.5 to 2.0)
+        - Does NOT support: temperature (will be ignored)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: its own catalogue of 224 wire names such as
+          shubh_en_narration_gentle (default) and ritu_hi_edtech; the v3 names
+          are rejected. See :class:`SarvamTTSSpeakerV4Flash`.
 
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
@@ -317,6 +751,19 @@ class SarvamHttpTTSService(TTSService):
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
                 temperature=0.8,
+            ),
+        )
+
+        # Using bulbul:v4-flash
+        tts_v4 = SarvamHttpTTSService(
+            api_key="your-api-key",
+            aiohttp_session=session,
+            settings=SarvamHttpTTSService.Settings(
+                voice="ritu_hi_edtech",  # Use a v4-flash speaker
+                model="bulbul:v4-flash",
+                language=Language.HI,
+                pitch=0.2,  # Range: -0.5 to 0.5 for v4-flash
+                loudness=1.4,  # Range: 0.1 to 2.5 for v4-flash
             ),
         )
     """
@@ -405,7 +852,8 @@ class SarvamHttpTTSService(TTSService):
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
+                model; "bulbul:v4-flash" is also available.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
@@ -466,11 +914,8 @@ class SarvamHttpTTSService(TTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # Get model configuration (validates model exists)
         resolved_model = assert_given(default_settings.model)
-        if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
-            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+        self._config = resolve_model_config(resolved_model)
 
         if resolved_model == SarvamTTSModel.BULBUL_V2:
             warnings.warn(
@@ -480,8 +925,6 @@ class SarvamHttpTTSService(TTSService):
                 stacklevel=2,
             )
 
-        self._config = TTS_MODEL_CONFIGS[resolved_model]
-
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
@@ -490,30 +933,7 @@ class SarvamHttpTTSService(TTSService):
         if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
-        # Validate and clamp pace to model's valid range
-        pace = assert_given(default_settings.pace)
-        pace_min, pace_max = self._config.pace_range
-        if pace is not None and (pace < pace_min or pace > pace_max):
-            logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            default_settings.pace = max(pace_min, min(pace_max, pace))
-
-        # Force preprocessing for models that require it
-        if self._config.preprocessing_always_enabled:
-            default_settings.enable_preprocessing = True
-
-        # Warn about unsupported model-specific parameters
-        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
-            logger.warning(f"pitch parameter is ignored for {resolved_model}")
-            default_settings.pitch = None
-        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
-            logger.warning(f"loudness parameter is ignored for {resolved_model}")
-            default_settings.loudness = None
-        if not self._config.supports_temperature and default_settings.temperature not in (
-            None,
-            0.6,
-        ):
-            logger.warning(f"temperature parameter is ignored for {resolved_model}")
-            default_settings.temperature = None
+        apply_model_constraints(default_settings, self._config)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -592,7 +1012,7 @@ class SarvamHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    yield ErrorFrame(error=f"Sarvam API error: {error_text}")
+                    yield ErrorFrame(error=_format_http_error(response.status, error_text))
                     return
 
                 response_data = await response.json()
@@ -601,7 +1021,11 @@ class SarvamHttpTTSService(TTSService):
 
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
-                yield ErrorFrame(error="No audio data received")
+                yield ErrorFrame(
+                    error=_format_error(
+                        "No audio data received", request_id=response_data.get("request_id")
+                    )
+                )
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -634,7 +1058,7 @@ class SarvamTTSService(InterruptibleTTSService):
     Provides streaming TTS with real-time audio generation for multiple Indian languages.
     Uses WebSocket for low-latency streaming audio synthesis.
 
-    **Model:**
+    **Models:**
 
     - **bulbul:v3** (default):
         - Does NOT support: pitch, loudness (will be ignored)
@@ -645,7 +1069,18 @@ class SarvamTTSService(InterruptibleTTSService):
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
 
+    - **bulbul:v4-flash**:
+        - Supports: pitch (-0.5 to 0.5), loudness (0.1 to 2.5), pace (0.5 to 2.0)
+        - Does NOT support: temperature (will be ignored)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: its own catalogue of 224 wire names such as
+          shubh_en_narration_gentle (default) and ritu_hi_edtech; the v3 names
+          are rejected. See :class:`SarvamTTSSpeakerV4Flash`.
+
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
+
+    Sample rates are limited to 8000, 16000, 22050, and 24000 Hz on the WebSocket.
 
     **WebSocket Protocol:**
     The service uses a WebSocket connection for real-time streaming. Messages include:
@@ -665,6 +1100,18 @@ class SarvamTTSService(InterruptibleTTSService):
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
                 temperature=0.8,
+            ),
+        )
+
+        # Using bulbul:v4-flash
+        tts_v4 = SarvamTTSService(
+            api_key="your-api-key",
+            settings=SarvamTTSService.Settings(
+                voice="ritu_hi_edtech",  # Use a v4-flash speaker
+                model="bulbul:v4-flash",
+                language=Language.HI,
+                pitch=0.2,  # Range: -0.5 to 0.5 for v4-flash
+                loudness=1.4,  # Range: 0.1 to 2.5 for v4-flash
             ),
         )
 
@@ -784,7 +1231,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current model.
+            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
+                model; "bulbul:v4-flash" is also available.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
@@ -873,11 +1321,8 @@ class SarvamTTSService(InterruptibleTTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # Get model configuration (validates model exists)
         resolved_model = assert_given(default_settings.model)
-        if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
-            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+        self._config = resolve_model_config(resolved_model)
 
         if resolved_model == SarvamTTSModel.BULBUL_V2:
             warnings.warn(
@@ -887,8 +1332,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 stacklevel=2,
             )
 
-        self._config = TTS_MODEL_CONFIGS[resolved_model]
-
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
@@ -897,30 +1340,14 @@ class SarvamTTSService(InterruptibleTTSService):
         if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
-        # Validate and clamp pace to model's valid range
-        pace = assert_given(default_settings.pace)
-        pace_min, pace_max = self._config.pace_range
-        if pace is not None and (pace < pace_min or pace > pace_max):
-            logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            default_settings.pace = max(pace_min, min(pace_max, pace))
+        if sample_rate not in WEBSOCKET_SAMPLE_RATES:
+            allowed = ", ".join(str(rate) for rate in WEBSOCKET_SAMPLE_RATES)
+            raise ValueError(
+                f"Unsupported sample rate {sample_rate}. The Sarvam TTS WebSocket "
+                f"accepts: {allowed}."
+            )
 
-        # Force preprocessing for models that require it
-        if self._config.preprocessing_always_enabled:
-            default_settings.enable_preprocessing = True
-
-        # Warn about unsupported model-specific parameters
-        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
-            logger.warning(f"pitch parameter is ignored for {resolved_model}")
-            default_settings.pitch = None
-        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
-            logger.warning(f"loudness parameter is ignored for {resolved_model}")
-            default_settings.loudness = None
-        if not self._config.supports_temperature and default_settings.temperature not in (
-            None,
-            0.6,
-        ):
-            logger.warning(f"temperature parameter is ignored for {resolved_model}")
-            default_settings.temperature = None
+        apply_model_constraints(default_settings, self._config)
 
         # Initialize parent class
         super().__init__(
@@ -1131,15 +1558,19 @@ class SarvamTTSService(InterruptibleTTSService):
                         )
                         await self.remove_audio_context(context_id)
                 elif msg.get("type") == "error":
-                    error_msg = msg["data"]["message"]
-                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
+                    data = msg.get("data", {})
+                    error_msg = data.get("message", "unknown error")
+                    if data.get("details"):
+                        error_msg = f"{error_msg} details={data['details']}"
+                    error = _format_error(
+                        error_msg, code=data.get("code"), request_id=data.get("request_id")
+                    )
+                    await self.push_error(error_msg=error)
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-                    await self.append_to_audio_context(
-                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
-                    )
+                    await self.append_to_audio_context(context_id, ErrorFrame(error=error))
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
