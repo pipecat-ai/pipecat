@@ -1,6 +1,14 @@
 # The food-ordering flow as data. Loaded by bot.py and bound to
 # the tools in handlers.py. Every function named here is a direct
 # function in that module; its description and parameters come from the code.
+#
+# bot.py drives this graph with TypeSafeFlowsRouter in front of PhoneLLM.
+# TypeSafe judges each caller's turn against the functions below (a
+# transition-only function's description is its criteria) and runs the one
+# the turn calls for. When the judgment is sure, the router speaks a written
+# line from bot.py on entering the next node; otherwise the LLM speaks from
+# the node's prompt below, and a turn TypeSafe cannot place goes to the LLM
+# whole, functions included.
 
 initial_node: initial
 
@@ -92,7 +100,23 @@ nodes:
       - name: revise_order
         transition_only: true
         description: The caller wants to make changes to their order.
-        transition_to: initial
+        transition_to: restart
+
+  restart:
+    task_messages:
+      - role: developer
+        content: >
+          The caller is changing their order. Ask whether they'd like pizza or
+          sushi, then wait for them to use a function to choose.
+    functions:
+      - name: choose_pizza
+        transition_only: true
+        description: The caller wants to order pizza.
+        transition_to: choose_pizza
+      - name: choose_sushi
+        transition_only: true
+        description: The caller wants to order sushi.
+        transition_to: choose_sushi
 
   end:
     task_messages:
@@ -103,3 +127,4 @@ nodes:
 
 global_functions:
   - name: get_delivery_estimate
+  - name: get_prices
