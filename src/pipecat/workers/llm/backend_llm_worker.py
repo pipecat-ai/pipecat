@@ -262,7 +262,8 @@ class BackendOutputTransform(Protocol):
     async def __call__(self, output: BackendOutput, *, is_final: bool) -> BackendOutput | None:
         """Return the output to send in place of ``output``, or ``None`` to send nothing.
 
-        For the final output, ``None`` means the backend had nothing to say.
+        For the final output, ``None`` settles the delegation with nothing
+        for the frontend to speak.
         """
         ...
 
@@ -438,8 +439,9 @@ class BackendLLMWorker(LLMContextWorker):
                 model produces before it is sent, as
                 ``transform_output(output, is_final=...)``, to adjust its
                 text or whether the user may hear it, or to return ``None``
-                and send nothing (for the final output, that the backend had
-                nothing to say). Without one, only the final output asks to be
+                and send nothing (for the final output, settling the
+                delegation with nothing for the frontend to speak). Without
+                one, only the final output asks to be
                 spoken: a frontend filling the wait is usually mid-sentence
                 when progress arrives, and speaking it talks over them.
                 Outputs the app sends itself are not passed through it
@@ -518,14 +520,16 @@ class BackendLLMWorker(LLMContextWorker):
             await run.finished.wait()
         finally:
             self._run = None
-        # An error fails the job only when it left the backend with nothing to say.
+        # An error fails the job only when no final output with text came of the run.
         if run.error and not (run.final_output and run.final_output.text):
             logger.warning(f"Worker '{self.name}': job {message.job_id} failed: {run.error}")
             await self.send_job_response(message.job_id, {"text": ""}, status=JobStatus.ERROR)
             return
         await self.send_job_response(
             message.job_id,
-            run.final_output.to_payload() if run.final_output else {"text": ""},
+            run.final_output.to_payload()
+            if run.final_output
+            else {"text": "", "prefers_spoken": False},
         )
 
     async def say(self, text: str, *, apply_transform_output: bool = False) -> None:

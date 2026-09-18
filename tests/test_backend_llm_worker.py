@@ -508,7 +508,7 @@ async def test_a_transform_returning_none_for_the_final_leaves_the_backend_with_
     text, updates, _ = await _run_backend(llm, transform_output=keep_it)
 
     assert text == ""
-    assert [u.text for u in updates] == [""]
+    assert [(u.text, u.prefers_spoken) for u in updates] == [("", False)]
 
 
 @pytest.mark.asyncio
