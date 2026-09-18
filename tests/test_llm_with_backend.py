@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for PipecatDualLLMService, BackendConnector and the strategies.
+"""Unit tests for LLMWithBackend, BackendConnector and the strategies.
 
 The connector and strategies are exercised directly with a faked delegation
 stream. The service is exercised through ``run_test`` with a scripted
@@ -32,18 +32,18 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
 )
-from pipecat.pipeline import dual_llm_service
-from pipecat.pipeline.dual_llm_service import (
+from pipecat.pipeline import llm_with_backend
+from pipecat.pipeline.job_context import JobError
+from pipecat.pipeline.llm_with_backend import (
     BackendConnector,
     BackendReplyStrategy,
     ConnectorContext,
     ExplicitBackendRequestStrategy,
+    LLMWithBackend,
     OneShotBackendReplyStrategy,
-    PipecatDualLLMService,
     SpeakOnPrefersSpokenBackendReplyStrategy,
     TranscriptBackendRequestStrategy,
 )
-from pipecat.pipeline.job_context import JobError
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
@@ -142,7 +142,7 @@ def _stream(
         for output in outputs:
             yield output
 
-    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
+    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
     return requests
 
 
@@ -299,7 +299,7 @@ async def test_one_shot_drops_what_it_held_when_the_delegation_fails(monkeypatch
         yield _PROGRESS
         raise JobError("backend errored")
 
-    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
+    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
     params = _params()
     connector = _bound(BackendConnector(), realtime=True)
 
@@ -335,7 +335,7 @@ async def test_a_delivery_that_fails_closes_the_stream(monkeypatch):
         finally:
             closed = True
 
-    monkeypatch.setattr(dual_llm_service, "_delegate_to_backend", fake)
+    monkeypatch.setattr(llm_with_backend, "_delegate_to_backend", fake)
 
     class _Broken(BackendReplyStrategy):
         async def deliver(self, params, output, *, is_final):
@@ -423,7 +423,7 @@ async def test_an_empty_final_output_still_settles_the_call(monkeypatch):
 
 def test_the_service_adds_the_connector_guidance_to_the_frontend_prompt():
     frontend = _TextFrontend()
-    PipecatDualLLMService(frontend=frontend, backend="backend")
+    LLMWithBackend(frontend=frontend, backend="backend")
     composed = frontend._settings.system_instruction
     assert composed.startswith("You are a voice assistant.")
     assert "delegate tool" in composed
@@ -436,7 +436,7 @@ def _tool_names(converted) -> list[str]:
 @pytest.mark.asyncio
 async def test_delegate_is_a_built_in_tool_beside_the_frontends_own():
     frontend = _TextFrontend()
-    service = PipecatDualLLMService(frontend=frontend, backend="backend")
+    service = LLMWithBackend(frontend=frontend, backend="backend")
     context = LLMContext(tools=[get_current_time])
     set_tools = LLMSetToolsFrame(tools=[get_weather])
 
@@ -470,7 +470,7 @@ async def test_a_local_backend_is_heard_through_the_delegate_tool():
         context=LLMContext(tools=[get_weather]),
     )
     frontend = _DelegatingFrontend()
-    service = PipecatDualLLMService(frontend=frontend, backend=backend)
+    service = LLMWithBackend(frontend=frontend, backend=backend)
 
     down, _ = await run_test(
         service,

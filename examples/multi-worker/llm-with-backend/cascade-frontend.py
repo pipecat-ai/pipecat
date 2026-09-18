@@ -4,31 +4,31 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A dual-LLM voice agent: a speech-to-speech frontend delegating to a backend LLM.
+"""A voice agent with an LLM and a backend: a cascade frontend delegating to a backend LLM.
 
-The frontend is OpenAI Realtime, holding the spoken conversation with no
+The frontend keeps the conversation moving with a small, fast model and no
 tools of its own. Anything that needs tools or careful reasoning it hands to
-a backend running Claude, and relays what comes back. ``PipecatDualLLMService`` wires
+a backend running Claude, and relays what comes back. ``LLMWithBackend`` wires
 the two together: it installs the ``delegate`` tool on the frontend and runs
 the backend as a worker of its own.
 
-With a speech-to-speech frontend the defaults have the model word the
-request itself (its context can lag the audio, so the backend cannot read the
-conversation) and deliver everything the backend produced at once, since a realtime
-function call takes one result. ``cascade-frontend.py`` puts a cascade
-pipeline in the frontend's place, against the same backend and the same
-prompts.
+With a text frontend the defaults hand the backend the conversation itself
+(the frontend words nothing) and relay the backend's progress as it comes.
+``realtime-frontend.py`` puts a speech-to-speech model in the frontend's
+place, against the same backend.
 
 Architecture::
 
-    Main worker (transport + PipecatDualLLMService)
-      ├── frontend: realtime model, ``delegate`` tool
+    Main worker (transport + STT + LLMWithBackend + TTS)
+      ├── frontend: fast LLM, ``delegate`` tool
       └── backend: BackendLLMWorker (Claude + tools), delegated to over a job
 
 Requirements:
 
 - OPENAI_API_KEY
 - ANTHROPIC_API_KEY
+- DEEPGRAM_API_KEY
+- CARTESIA_API_KEY
 """
 
 import os
@@ -37,13 +37,17 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.dual_llm_service import PipecatDualLLMService
+from pipecat.pipeline.llm_with_backend import LLMWithBackend
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frameworks.rtvi import (
     RTVIFunctionCallReportLevel,
     RTVIObserverParams,
@@ -51,15 +55,10 @@ from pipecat.processors.frameworks.rtvi import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.realtime.events import (
-    AudioConfiguration,
-    AudioInput,
-    InputAudioTranscription,
-    SemanticTurnDetection,
-    SessionProperties,
-)
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import BackendLLMWorker
@@ -124,50 +123,60 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    llm = PipecatDualLLMService(
-        frontend=OpenAIRealtimeLLMService(
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    tts = CartesiaTTSService(
+        api_key=os.environ["CARTESIA_API_KEY"],
+        settings=CartesiaTTSService.Settings(
+            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline
+        ),
+    )
+
+    # Thinking summaries stream back to the frontend as "thought" outputs.
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=AnthropicLLMService(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            settings=AnthropicLLMService.Settings(
+                system_instruction=BACKEND_INSTRUCTIONS,
+                thinking=AnthropicLLMService.ThinkingConfig(type="adaptive", display="summarized"),
+            ),
+        ),
+        context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
+    )
+
+    # A backend that takes a while can say so the moment work is handed to
+    # it: the frontend says the line while the backend works, instead of
+    # waiting in silence. Even a quick lookup here is a few model round trips,
+    # so the line is worth it; drop it for a backend that answers at once.
+    @backend.event_handler("on_delegation_started")
+    async def on_delegation_started(backend, request):
+        await backend.say("Let me look into that, this takes a moment.")
+
+    llm = LLMWithBackend(
+        frontend=OpenAILLMService(
             api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAIRealtimeLLMService.Settings(
-                system_instruction=FRONTEND_INSTRUCTIONS,
-                session_properties=SessionProperties(
-                    audio=AudioConfiguration(
-                        input=AudioInput(
-                            transcription=InputAudioTranscription(),
-                            turn_detection=SemanticTurnDetection(),
-                        )
-                    ),
-                ),
-            ),
+            settings=OpenAILLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
-        backend=BackendLLMWorker(
-            name="backend",
-            llm=AnthropicLLMService(
-                api_key=os.environ["ANTHROPIC_API_KEY"],
-                settings=AnthropicLLMService.Settings(
-                    system_instruction=BACKEND_INSTRUCTIONS,
-                    thinking=AnthropicLLMService.ThinkingConfig(
-                        type="adaptive", display="summarized"
-                    ),
-                ),
-            ),
-            context=LLMContext(tools=[get_current_weather, get_restaurant_recommendation]),
-        ),
+        backend=backend,
     )
 
     # The frontend's only tool, ``delegate``, is installed by the service;
     # the real tools live in the backend.
-    context = LLMContext(
-        [{"role": "developer", "content": "Greet the user and ask how you can help."}],
+    context = LLMContext()
+    aggregators = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            user_aggregator,
+            stt,
+            aggregators.user(),
             llm,
+            tts,
             transport.output(),
-            assistant_aggregator,
+            aggregators.assistant(),
         ]
     )
 
@@ -196,6 +205,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
+        context.add_message(
+            {"role": "developer", "content": "Greet the user and ask how you can help."}
+        )
         await worker.queue_frame(LLMRunFrame())
 
     @transport.event_handler("on_client_disconnected")
