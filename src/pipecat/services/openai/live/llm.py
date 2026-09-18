@@ -979,6 +979,8 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
                         continue
                     if isinstance(event, _BackendFinalOutput):
                         event = event.output
+                    if not event.text:
+                        continue
                     answered = True
                     await self._send_context_append(
                         delegation.id, event.text, spoken=event.prefers_spoken
