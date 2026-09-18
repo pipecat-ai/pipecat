@@ -275,7 +275,9 @@ class SIPRunnerArguments(RunnerArguments):
     route; the development runner reads the account from the ``SIP_USER``,
     ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
     ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, and
-    ``SIP_INSTANCE_ID`` environment variables.
+    ``SIP_INSTANCE_ID`` environment variables. Without ``SIP_USER`` and
+    ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
+    domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
 
     Parameters:
         user: The user part of ``sip:user@domain``.

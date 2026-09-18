@@ -10,7 +10,14 @@ The bot registers with a SIP server and answers incoming calls. Run it with
 an account on any SIP server::
 
     SIP_USER=1001 SIP_PASS=secret SIP_DOMAIN=sip.example.com \\
-        python transports-sip-dialin.py -t sip
+        uv run python transports-sip-dialin.py -t sip
+
+Or with no account at all: set ``DAILY_API_KEY`` and the runner provisions a
+temporary SIP client on your Daily domain, prints its dialable URI, and
+deletes it again when the bot exits — dial the printed URI from any SIP
+client::
+
+    DAILY_API_KEY=... uv run python transports-sip-dialin.py -t sip
 
 The same bot runs unchanged under ``-t daily``, ``-t webrtc``, or ``-t eval``
 — only the transport params entry differs.
@@ -19,7 +26,7 @@ Under ``-t daily``, SIP dial-in needs the Daily room created with the ``sip``
 property (a plain run creates a standard browser room). Ask the dev runner
 for one through its ``/start`` endpoint::
 
-    python transports-sip-dialin.py -t daily
+    uv run python transports-sip-dialin.py -t daily
     curl -X POST http://localhost:7860/start \\
         -H "Content-Type: application/json" \\
         -d '{"createDailyRoom": true, "dailyRoomProperties": {"sip": {}}}'
