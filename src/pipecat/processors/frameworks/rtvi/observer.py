@@ -503,7 +503,11 @@ class RTVIObserver(BaseObserver):
         """
         report_level = self._get_function_call_report_level(function_name)
         if report_level == RTVIFunctionCallReportLevel.DISABLED:
-            self._suppressed_tool_call_ids.add(tool_call_id)
+            # Remembered while the call runs, so its children stay parentless.
+            if phase == "stopped":
+                self._suppressed_tool_call_ids.discard(tool_call_id)
+            else:
+                self._suppressed_tool_call_ids.add(tool_call_id)
             return
         named = report_level in (
             RTVIFunctionCallReportLevel.NAME,
