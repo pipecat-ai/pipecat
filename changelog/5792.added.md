@@ -1,0 +1,1 @@
+- Added the `typesafe` extra and `TypeSafeJudge`, a client for TypeSafe System One judgments: typed `Choice`, `Noul` and `Score` answers with probabilities, asked together in one request.
