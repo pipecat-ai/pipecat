@@ -253,12 +253,30 @@ class BackendReplyStrategy:
         """
         raise NotImplementedError
 
+    async def end(
+        self, params: FunctionCallParams, *, delivered: bool, failed: bool = False
+    ) -> None:
+        """Wrap up a delegation that is over.
+
+        Called once per delegation, after its last output or after it
+        failed. A strategy holding outputs back lets go of them here.
+
+        Args:
+            params: The ``delegate`` call.
+            delivered: Whether a final output settled the call.
+            failed: Whether the delegation failed. The frontend service then
+                settles the call with the error, so nothing is delivered here.
+        """
+        if not delivered and not failed:
+            await params.result_callback({"error": "The backend finished without saying anything."})
+
 
 class OneShotBackendReplyStrategy(BackendReplyStrategy):
     """Delivers everything the backend produced at once, when it is done.
 
     The ``delegate`` call's one result carries every output, in order; the
-    text alone when there was only one. Reasoning summaries are left out.
+    text alone when there was only one, and whatever came when the backend
+    ends without a final output. Reasoning summaries are left out.
     The default for a speech-to-speech frontend, whose function calls accept
     one result. It may not stay the default: if and when those services can
     take intermediate results, progress could reach such a frontend as it
@@ -283,6 +301,18 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
             await params.result_callback({"outputs": [*progress, output.text]})
         else:
             await params.result_callback(output.text)
+
+    async def end(
+        self, params: FunctionCallParams, *, delivered: bool, failed: bool = False
+    ) -> None:
+        """Let go of the held outputs: delivered if the backend ended without a final one."""
+        progress = self._progress.pop(params.tool_call_id, [])
+        if delivered or failed:
+            return
+        if progress:
+            await params.result_callback({"outputs": progress})
+        else:
+            await super().end(params, delivered=delivered, failed=failed)
 
 
 class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
@@ -454,28 +484,32 @@ class BackendConnector:
         request = await self.request_strategy.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
         finished = False
-        # Closing the stream on the way out, however the loop ends, is what
-        # cancels the backend's job at once.
-        async with aclosing(
-            _delegate_to_backend(
-                params.pipeline_worker,
-                self._context.backend_name,
-                request=request,
-                timeout_secs=self._timeout_secs,
-            )
-        ) as events:
-            async for event in events:
-                if isinstance(event, BackendToolCall):
-                    await self.report_tool_call(params, event)
-                    continue
-                if isinstance(event, _BackendFinalOutput):
-                    finished = True
-                    await self.reply_strategy.deliver(params, event.output, is_final=True)
-                else:
-                    await self.reply_strategy.deliver(params, event, is_final=False)
+        try:
+            # Closing the stream on the way out, however the loop ends, is
+            # what cancels the backend's job at once.
+            async with aclosing(
+                _delegate_to_backend(
+                    params.pipeline_worker,
+                    self._context.backend_name,
+                    request=request,
+                    timeout_secs=self._timeout_secs,
+                )
+            ) as events:
+                async for event in events:
+                    if isinstance(event, BackendToolCall):
+                        await self.report_tool_call(params, event)
+                        continue
+                    if isinstance(event, _BackendFinalOutput):
+                        finished = True
+                        await self.reply_strategy.deliver(params, event.output, is_final=True)
+                    else:
+                        await self.reply_strategy.deliver(params, event, is_final=False)
+        except BaseException:
+            await self.reply_strategy.end(params, delivered=False, failed=True)
+            raise
         if not finished:
             logger.warning(f"Delegation to '{self._context.backend_name}' produced no final output")
-            await params.result_callback({"error": "The backend finished without saying anything."})
+        await self.reply_strategy.end(params, delivered=finished)
 
     async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
         """Report a function call the backend made, as the ``delegate`` call's child.
