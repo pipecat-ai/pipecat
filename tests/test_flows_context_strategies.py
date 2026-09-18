@@ -23,6 +23,7 @@ from pipecat.flows.types import ContextStrategy, ContextStrategyConfig, NodeConf
 from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
+    LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
 from pipecat.services.anthropic.llm import AnthropicLLMService
@@ -166,6 +167,28 @@ class TestContextStrategies(unittest.IsolatedAsyncioTestCase):
         second_call = self.mock_worker.queue_frames.call_args_list[0]
         second_frames = second_call[0][0]
         self.assertTrue(any(isinstance(f, LLMMessagesUpdateFrame) for f in second_frames))
+
+    async def test_context_and_tools_frames_are_uninterruptible(self):
+        """A node's context and tools frames survive an interruption, under either strategy."""
+        for strategy, frame_type in [
+            (ContextStrategy.APPEND, LLMMessagesAppendFrame),
+            (ContextStrategy.RESET, LLMMessagesUpdateFrame),
+        ]:
+            with self.subTest(strategy=strategy):
+                flow_manager = FlowManager(
+                    worker=self.mock_worker,
+                    llm=self.mock_llm,
+                    context_aggregator=self.mock_context_aggregator,
+                    context_strategy=ContextStrategyConfig(strategy=strategy),
+                )
+                await flow_manager.initialize()
+                self.mock_worker.queue_frames.reset_mock()
+
+                await flow_manager._set_node("node", self.sample_node)
+                frames = self.mock_worker.queue_frames.call_args_list[0][0][0]
+                checked = [f for f in frames if isinstance(f, (frame_type, LLMSetToolsFrame))]
+                self.assertEqual(len(checked), 2)
+                self.assertTrue(all(not f.interruptible for f in checked))
 
     async def test_reset_with_summary_success(self):
         """Test successful RESET_WITH_SUMMARY strategy."""
