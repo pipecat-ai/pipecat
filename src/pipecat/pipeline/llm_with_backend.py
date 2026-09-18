@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A dual LLM: a conversational frontend delegating to a backend.
+"""An LLM with a backend: a conversational frontend delegating the rest.
 
 The frontend is any LLM service, text or speech-to-speech, and holds the
 conversation. The backend is a :class:`~pipecat.workers.llm.backend_llm_worker.BackendLLMWorker`
 running a heavier model with the tools, and does the work the frontend hands
-off. :class:`PipecatDualLLMService` wraps the frontend so the pair drops into a
+off. :class:`LLMWithBackend` wraps the frontend so the pair drops into a
 pipeline where an LLM goes, and installs the ``delegate`` tool that joins
 them.
 
@@ -513,10 +513,12 @@ class BackendConnector:
 # ---------------------------------------------------------------------------
 
 
-class PipecatDualLLMService(Pipeline):
-    """A conversational frontend LLM with a backend it delegates to, in one processor.
+class LLMWithBackend(Pipeline):
+    """A conversational LLM, kept fast and light, with a backend that does the work it hands off.
 
-    Put it where the LLM goes in a pipeline. It wraps the frontend service,
+    Put it where the LLM goes in a pipeline. It is a :class:`Pipeline`, not an
+    :class:`LLMService`: functions, settings updates, event handlers and a
+    ``FlowManager`` go on :attr:`frontend`. It wraps the frontend service,
     installs the connector's ``delegate`` tool on it as a built-in tool,
     appends the connector's guidance to the frontend's system instruction,
     and adds a local backend worker to the pipeline worker so the app never
@@ -533,7 +535,7 @@ class PipecatDualLLMService(Pipeline):
 
     Example::
 
-        llm = PipecatDualLLMService(
+        llm = LLMWithBackend(
             frontend=OpenAILLMService(...),
             backend=BackendLLMWorker(
                 llm=AnthropicLLMService(...),

@@ -51,7 +51,7 @@ A Pipecat **worker** is a unit of work attached to a shared bus. Workers exchang
 | [`code-assistant/`](code-assistant/)          | Voice access to your codebase via a Claude Agent SDK worker behind `job(...)`.    |
 | [`sensor-controller/`](sensor-controller/)    | Voice agent forwards questions to a sidecar `PipelineWorker` owning a simulated sensor. |
 | [`openclaw-agent/`](openclaw-agent/)          | Voice loop stays responsive while an OpenClaw agent works; steer or stop it mid-task. |
-| [`dual-llm/`](dual-llm/)                      | A fast conversational frontend (cascade or realtime) delegating to a tool-using backend via `PipecatDualLLMService`. |
+| [`llm-with-backend/`](llm-with-backend/)      | A fast conversational frontend (cascade or realtime) delegating to a tool-using backend via `LLMWithBackend`. |
 
 ### Distributed (separate processes, network bus)
 
