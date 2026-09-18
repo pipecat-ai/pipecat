@@ -45,6 +45,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -461,6 +462,7 @@ class BaseOutputTransport(FrameProcessor):
 
             # Indicates if the bot is currently speaking.
             self._bot_speaking = False
+            self._tts_context_id: str | None = None
             # Indicates if TTS audio has been received since the last stop.
             self._tts_audio_received = False
             # Last time a BotSpeakingFrame was pushed.
@@ -597,6 +599,7 @@ class BaseOutputTransport(FrameProcessor):
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
+            self._tts_context_id = None
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -713,9 +716,9 @@ class BaseOutputTransport(FrameProcessor):
                 f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
             )
 
-            downstream_frame = BotStartedSpeakingFrame()
+            downstream_frame = BotStartedSpeakingFrame(context_id=self._tts_context_id)
             downstream_frame.transport_destination = self._destination
-            upstream_frame = BotStartedSpeakingFrame()
+            upstream_frame = BotStartedSpeakingFrame(context_id=self._tts_context_id)
             upstream_frame.transport_destination = self._destination
 
             # Setting the siblings id
@@ -842,12 +845,17 @@ class BaseOutputTransport(FrameProcessor):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
+            elif isinstance(frame, TTSStartedFrame):
+                # Follow playback order; synthesis can already be on a later context.
+                self._tts_context_id = frame.context_id
+                await self._transport.write_transport_frame(frame)
             elif isinstance(frame, TTSStoppedFrame):
                 # We will only trigger bot stopped speaking based on the TTSStoppedFrame,
                 # if we have received audio from TTS
                 if self._tts_audio_received:
                     logger.debug("Bot stopped speaking based on TTSStoppedFrame")
                     await self._bot_stopped_speaking()
+                self._tts_context_id = None
             else:
                 await self._transport.write_transport_frame(frame)
 

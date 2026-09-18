@@ -1349,9 +1349,12 @@ class BotStartedSpeakingFrame(SystemFrame):
 
     Emitted upstream and downstream by the BaseTransportOutput to indicate the
     bot started speaking.
+
+    Parameters:
+        context_id: TTS context playing when speech starts, if available.
     """
 
-    pass
+    context_id: str | None = None
 
 
 @dataclass
