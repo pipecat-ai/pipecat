@@ -29,6 +29,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -176,6 +178,10 @@ class TelnyxFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
+            return json.dumps(frame.message)
 
         # Return None for unhandled frames
         return None
