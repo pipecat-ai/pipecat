@@ -115,20 +115,6 @@ class _FakeClock:
         return SimpleNamespace(monotonic_ns=lambda: self._now_ns, time=lambda: 1_000.0)
 
 
-def warming_for(duration_secs: float):
-    """Build a stand-in for the framework's deferred-import warming.
-
-    Warming is loaded once per process, so a test that used the real one would
-    measure a full load or an already-cached no-op depending on what ran before
-    it.
-    """
-
-    def warm():
-        time.sleep(duration_secs)
-
-    return warm
-
-
 class FastProcessor(FrameProcessor):
     """A processor with no start delay."""
 
@@ -205,8 +191,8 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         # Setting up is what this processor cost, and start() added nothing.
         self.assertGreaterEqual(timing.duration_secs, timing.setup_duration_secs)
 
-    async def test_a_started_pipeline_reports_its_phases_and_warming(self):
-        """The report a real pipeline produces covers both phases and warming.
+    async def test_a_started_pipeline_reports_its_phases(self):
+        """The report a real pipeline produces covers both startup phases.
 
         The barrier holds all three processors inside setup() together, so the
         concurrency the setup phase is built on holds however slowly the
@@ -222,17 +208,16 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         async def on_report(obs, report):
             reports.append(report)
 
-        with patch("pipecat.pipeline.worker.warm_deferred_imports", warming_for(0.0)):
-            await run_test(
-                Pipeline(processors),
-                frames_to_send=[TextFrame(text="hello")],
-                expected_down_frames=[TextFrame],
-                observers=[observer],
-                # A setup that does not overlap spends a timeout per processor
-                # before reaching the assertion below, which the default start
-                # timeout would cut short and report as a failure to start.
-                start_timeout=5.0,
-            )
+        await run_test(
+            Pipeline(processors),
+            frames_to_send=[TextFrame(text="hello")],
+            expected_down_frames=[TextFrame],
+            observers=[observer],
+            # A setup that does not overlap spends a timeout per processor
+            # before reaching the assertion below, which the default start
+            # timeout would cut short and report as a failure to start.
+            start_timeout=5.0,
+        )
 
         self.assertTrue(
             all(p.overlapped for p in processors),
@@ -250,9 +235,7 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             ),
             3,
         )
-        # Warming reaches the report from the worker that ran it, through the
-        # observer the pipeline fans its events out to.
-        self.assertIsNotNone(report.warmup)
+        self.assertIsNone(report.warmup)
         self.assertGreaterEqual(report.total_duration_secs, report.setup_phase_secs)
 
     async def test_phases_split_the_span_where_setting_up_ends(self):
