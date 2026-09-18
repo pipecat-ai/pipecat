@@ -243,6 +243,7 @@ class XAISTTService(WebsocketSTTService):
             params["language"] = s.language
 
         optional_fields = {
+            "model": s.model,
             "interim_results": s.interim_results,
             "endpointing": s.endpointing,
             "multichannel": s.multichannel,
