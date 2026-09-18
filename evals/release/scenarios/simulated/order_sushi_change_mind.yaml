@@ -31,6 +31,8 @@ scenarios:
       - name: order_recorded
         measure: function_calls
         calls: [choose_sushi, select_sushi_order, revise_order, choose_pizza, select_pizza_order, complete_order]
+      - measure: latency
+        max_value: 5
 
     max_turns: 12
 
