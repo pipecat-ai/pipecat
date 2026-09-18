@@ -230,8 +230,9 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
 class BackendReplyStrategy:
     """Turns each :class:`BackendOutput` into what the frontend hears about it.
 
-    The final output settles the ``delegate`` call; what the frontend hears
-    of the outputs before it, and when, is what strategies differ on.
+    The final output settles the ``delegate`` call, and always comes, with
+    empty text when the backend ended with nothing to say. What the frontend
+    hears of the outputs before it, and when, is what strategies differ on.
     """
 
     #: Whether the strategy reports outputs before the final one as
@@ -253,30 +254,27 @@ class BackendReplyStrategy:
         """
         raise NotImplementedError
 
-    async def end(
-        self, params: FunctionCallParams, *, delivered: bool, failed: bool = False
-    ) -> None:
-        """Wrap up a delegation that is over.
+    async def abandon(self, params: FunctionCallParams) -> None:
+        """Drop anything held for a delegation that failed.
 
-        Called once per delegation, after its last output or after it
-        failed. A strategy holding outputs back lets go of them here.
+        The frontend service settles the call with the error, so nothing is
+        delivered here. The base holds nothing.
 
         Args:
             params: The ``delegate`` call.
-            delivered: Whether a final output settled the call.
-            failed: Whether the delegation failed. The frontend service then
-                settles the call with the error, so nothing is delivered here.
         """
-        if not delivered and not failed:
-            await params.result_callback({"error": "The backend finished without saying anything."})
+
+    async def _nothing_said(self, params: FunctionCallParams) -> None:
+        """Settle the call when the backend's final output is empty."""
+        await params.result_callback({"error": "The backend finished without saying anything."})
 
 
 class OneShotBackendReplyStrategy(BackendReplyStrategy):
     """Delivers everything the backend produced at once, when it is done.
 
     The ``delegate`` call's one result carries every output, in order; the
-    text alone when there was only one, and whatever came when the backend
-    ends without a final output. Reasoning summaries are left out.
+    text alone when there was only one, and whatever came before when the
+    final output is empty. Reasoning summaries are left out.
     The default for a speech-to-speech frontend, whose function calls accept
     one result. It may not stay the default: if and when those services can
     take intermediate results, progress could reach such a frontend as it
@@ -297,22 +295,17 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
             self._progress.setdefault(params.tool_call_id, []).append(output.text)
             return
         progress = self._progress.pop(params.tool_call_id, [])
-        if progress:
-            await params.result_callback({"outputs": [*progress, output.text]})
+        outputs = [*progress, output.text] if output.text else progress
+        if len(outputs) > 1:
+            await params.result_callback({"outputs": outputs})
+        elif outputs:
+            await params.result_callback(outputs[0])
         else:
-            await params.result_callback(output.text)
+            await self._nothing_said(params)
 
-    async def end(
-        self, params: FunctionCallParams, *, delivered: bool, failed: bool = False
-    ) -> None:
-        """Let go of the held outputs: delivered if the backend ended without a final one."""
-        progress = self._progress.pop(params.tool_call_id, [])
-        if delivered or failed:
-            return
-        if progress:
-            await params.result_callback({"outputs": progress})
-        else:
-            await super().end(params, delivered=delivered, failed=failed)
+    async def abandon(self, params: FunctionCallParams) -> None:
+        """Drop the held outputs."""
+        self._progress.pop(params.tool_call_id, None)
 
 
 class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
@@ -333,7 +326,10 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
     ) -> None:
         """Record progress as an intermediate result, run the frontend as flagged."""
         if is_final:
-            await params.result_callback(output.text)
+            if output.text:
+                await params.result_callback(output.text)
+            else:
+                await self._nothing_said(params)
             return
         await params.result_callback(
             {"reasoning" if output.is_thought else "text": output.text},
@@ -483,7 +479,6 @@ class BackendConnector:
         assert self._context is not None, "connector not bound"
         request = await self.request_strategy.compose_request(params)
         logger.debug(f"Delegating to '{self._context.backend_name}': {request!r}")
-        finished = False
         try:
             # Closing the stream on the way out, however the loop ends, is
             # what cancels the backend's job at once.
@@ -500,16 +495,12 @@ class BackendConnector:
                         await self.report_tool_call(params, event)
                         continue
                     if isinstance(event, _BackendFinalOutput):
-                        finished = True
                         await self.reply_strategy.deliver(params, event.output, is_final=True)
                     else:
                         await self.reply_strategy.deliver(params, event, is_final=False)
         except BaseException:
-            await self.reply_strategy.end(params, delivered=False, failed=True)
+            await self.reply_strategy.abandon(params)
             raise
-        if not finished:
-            logger.warning(f"Delegation to '{self._context.backend_name}' produced no final output")
-        await self.reply_strategy.end(params, delivered=finished)
 
     async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
         """Report a function call the backend made, as the ``delegate`` call's child.
