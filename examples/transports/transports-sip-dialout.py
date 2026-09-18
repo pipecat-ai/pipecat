@@ -12,7 +12,14 @@ environment variable::
 
     SIP_USER=1001 SIP_PASS=secret SIP_DOMAIN=sip.example.com \\
         SIP_DIALOUT_URI=sip:2002@sip.example.com \\
-        python transports-sip-dialout.py -t sip
+        uv run python transports-sip-dialout.py -t sip
+
+With no account configured, set ``DAILY_API_KEY`` and the runner provisions
+a temporary SIP client on your Daily domain to place the call from (deleted
+again when the bot exits)::
+
+    DAILY_API_KEY=... SIP_DIALOUT_URI=sip:someone@sip.example.com \\
+        uv run python transports-sip-dialout.py -t sip
 
 or with a runner body file (``--runner-body body.json``)::
 
@@ -35,7 +42,7 @@ accept REGISTER::
         SIP_AUTH_USER=my-cred-user SIP_PASS=my-cred-pass \\
         SIP_REG_INTERVAL=0 \\
         SIP_DIALOUT_URI=sip:+15551234567@my-trunk.pstn.twilio.com \\
-        python transports-sip-dialout.py -t sip
+        uv run python transports-sip-dialout.py -t sip
 
 Set ``SIP_DIALOUT_DTMF`` (e.g. ``1234#``) to send DTMF tones once the
 callee answers — useful for navigating an IVR.
@@ -46,7 +53,7 @@ which requires the dial-out entitlement on your Daily domain. Ask the dev
 runner for one through its ``/start`` endpoint::
 
     SIP_DIALOUT_URI=sip:2002@sip.example.com \\
-        python transports-sip-dialout.py -t daily
+        uv run python transports-sip-dialout.py -t daily
     curl -X POST http://localhost:7860/start \\
         -H "Content-Type: application/json" \\
         -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}}'

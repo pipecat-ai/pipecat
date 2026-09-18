@@ -1553,45 +1553,57 @@ async def _run_sip(args: argparse.Namespace):
     ``SIP_REG_INTERVAL`` (0 for registration-less trunk mode),
     ``SIP_RTP_TIMEOUT`` (dead-call detection, seconds; 0 disables), and
     ``SIP_INSTANCE_ID`` (a stable UUID for RFC 5626 ``+sip.instance``) —
-    and the bot function is invoked directly.
+    and the bot function is invoked directly. Without a configured account,
+    a temporary SIP client is provisioned on the Daily domain
+    (``DAILY_API_KEY``) and deleted again when the bot exits.
     """
     logger.info("Running with SIP transport...")
 
-    user = os.getenv("SIP_USER")
-    domain = os.getenv("SIP_DOMAIN")
-    if not user or not domain:
-        logger.error("SIP transport requires the SIP_USER and SIP_DOMAIN environment variables.")
-        return
+    from pipecat.runner.sip import cleanup, configure
 
-    codecs = os.getenv("SIP_AUDIO_CODECS")
-    runner_args = SIPRunnerArguments(
-        user=user,
-        domain=domain,
-        password=os.getenv("SIP_PASS", ""),
-        transport=os.getenv("SIP_TRANSPORT", "udp"),
-        audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip()) if codecs else None,
-        auth_user=os.getenv("SIP_AUTH_USER"),
-        reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
-        rtp_timeout=int(os.getenv("SIP_RTP_TIMEOUT", "0")),
-        instance_id=os.getenv("SIP_INSTANCE_ID"),
-        session_id=str(uuid.uuid4()),
-    )
-    runner_args.handle_sigint = True
-    runner_args.cli_args = args
+    async with aiohttp.ClientSession() as session:
+        try:
+            config = await configure(session)
+        except Exception as e:
+            logger.error(f"SIP transport: {e}")
+            return
 
-    # A bot may need session data it would normally receive in the /start
-    # request body (e.g. a dial-out destination). The SIP transport has no
-    # such endpoint, so the body is read from a JSON file passed with
-    # --runner-body.
-    if args.runner_body:
-        runner_args.body = json.loads(Path(args.runner_body).read_text())
+        codecs = os.getenv("SIP_AUDIO_CODECS")
+        runner_args = SIPRunnerArguments(
+            user=config.user,
+            domain=config.domain,
+            password=config.password,
+            transport=config.transport,
+            audio_codecs=tuple(c.strip() for c in codecs.split(",") if c.strip())
+            if codecs
+            else None,
+            auth_user=os.getenv("SIP_AUTH_USER"),
+            reg_interval=int(os.getenv("SIP_REG_INTERVAL", "600")),
+            rtp_timeout=int(os.getenv("SIP_RTP_TIMEOUT", "0")),
+            instance_id=os.getenv("SIP_INSTANCE_ID"),
+            session_id=str(uuid.uuid4()),
+        )
+        runner_args.handle_sigint = True
+        runner_args.cli_args = args
 
-    bot_module = _get_bot_module()
+        # A bot may need session data it would normally receive in the /start
+        # request body (e.g. a dial-out destination). The SIP transport has no
+        # such endpoint, so the body is read from a JSON file passed with
+        # --runner-body.
+        if args.runner_body:
+            runner_args.body = json.loads(Path(args.runner_body).read_text())
 
-    print(f"📞 SIP account: {user}@{domain}")
-    print()
+        bot_module = _get_bot_module()
 
-    await bot_module.bot(runner_args)
+        print(f"📞 SIP account: {config.user}@{config.domain}")
+        if config.sip_uri:
+            print(f"📞 Dial-in URI: {config.sip_uri}")
+        print()
+
+        try:
+            await bot_module.bot(runner_args)
+        finally:
+            await cleanup(session, config)
 
 
 async def _run_vonage():
