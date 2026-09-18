@@ -760,6 +760,36 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(client.hung_up)
 
+    async def test_the_bot_hanging_up_waits_for_its_last_words(self):
+        # In audio mode the bot's last words are transcribed a few seconds
+        # after it hangs up, sometimes as two spoken turns; the judge must
+        # read all of them.
+        judge = _FakeConversationJudge(["yes"])
+        driver, stream, _, _ = _driver(_simulation(bot_audio=True, max_duration_s=30.0), judge)
+
+        async def conversation():
+            stream.bot_turn_started()
+            await stream.bot_turn_stopped("Are you over 18?")
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes."})
+            stream._interrupted()
+            stream.bot_turn_started()
+            await stream.append({"type": BOT_ENDED_EVENT})
+            await asyncio.sleep(0.2)
+            await stream.bot_turn_stopped("Great, you're verified.")
+            await asyncio.sleep(0.2)
+            stream.bot_turn_started()
+            await stream.bot_turn_stopped("Goodbye!")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertEqual(
+            driver.conversation()[-1],
+            {"role": "assistant", "content": "Great, you're verified. Goodbye!"},
+        )
+
     async def test_the_bots_tool_calls_are_the_judges_evidence(self):
         judge = _FakeConversationJudge(["yes"])
         driver, stream, llm, _ = _driver(_simulation(), judge)

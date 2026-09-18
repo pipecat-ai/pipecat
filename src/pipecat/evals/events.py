@@ -71,7 +71,10 @@ class EvalEventStream:
     the bot produced before the user's latest send is not the reply to it. An
     LLM response still streaming at the send, or cut by an interruption, is
     dropped until the bot's next ``llm-started``, and a spoken turn that began
-    before the send is dropped when it ends.
+    before the send is dropped when it ends. A bot that answers without an LLM
+    (canned ``TTSSpeakFrame`` lines) never sends ``llm-started``; its reply is
+    the spoken turn it begins after reporting the interruption, since that
+    report means it flushed whatever it was saying before.
     """
 
     def __init__(self, *, bot_audio: bool, trace: EvalTrace):
@@ -111,6 +114,11 @@ class EvalEventStream:
         # harness's turn analyzer finalizes it.
         self._input_sent_at: float = 0.0
         self._bot_turn_started_at: float | None = None
+        # Whether the bot has reported an interruption since the send. Its
+        # output was flushed then, so a spoken turn it begins afterwards is a
+        # reply even if no llm-started announces it (a bot speaking canned
+        # lines has no LLM to announce anything).
+        self._output_flushed: bool = False
         # Whether the bot is speaking, by its own report: cleared when it
         # starts, set when it stops or is interrupted. An event, so a driver
         # that must not talk over the bot can wait for it without polling.
@@ -307,15 +315,24 @@ class EvalEventStream:
         return None
 
     def bot_turn_started(self) -> None:
-        """Note that the bot began a spoken turn."""
-        self._bot_turn_started_at = time.monotonic()
+        """Note that the bot began a spoken turn.
+
+        Speech the bot begins after the send and after reporting an
+        interruption is its reply, LLM or not: the interruption flushed its
+        earlier output, so nothing older can be starting now.
+        """
+        now = time.monotonic()
+        self._bot_turn_started_at = now
+        if self._awaiting_reply and self._output_flushed and now >= self._input_sent_at:
+            self._awaiting_reply = False
 
     async def bot_turn_stopped(self, text: str) -> None:
         """Append the bot's finished spoken turn as a ``response``, unless it is stale.
 
-        A turn is stale when it began before the user's latest send, or when the
-        bot's LLM has not restarted since. An interrupted turn can finalize after
-        the bot has begun its real reply, and must not pass for it.
+        A turn is stale when it began before the user's latest send, or when
+        neither the bot's LLM nor a post-interruption spoken turn has started
+        since. An interrupted turn can finalize after the bot has begun its real
+        reply, and must not pass for it.
 
         Args:
             text: The turn's transcription; nothing is appended when empty.
@@ -341,11 +358,13 @@ class EvalEventStream:
         """
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
+        self._output_flushed = False
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
         self.drop_pending_bot_output("on interruption")
         self._awaiting_reply = True
+        self._output_flushed = True
         self._bot_quiet.set()
 
     def _message_to_event(self, message) -> dict | None:
