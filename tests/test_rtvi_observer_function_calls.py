@@ -150,6 +150,8 @@ class TestExternalFunctionCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m.type for m in sent], ["llm-function-call-in-progress"])
         self.assertEqual(sent[0].data.function_name, "get_weather")
         self.assertIsNone(sent[0].data.parent_tool_call_id)
+        # Forgotten once the hidden call stops, so the set does not grow.
+        self.assertEqual(observer._suppressed_tool_call_ids, set())
 
     async def test_a_shown_parent_stays_on_its_children(self):
         observer, sent = _observer({"*": RTVIFunctionCallReportLevel.NAME})
