@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
-from pipecat.frames.frames import Frame, UninterruptibleFrame
+from pipecat.frames.frames import Frame
 
 
 class FrameQueue(asyncio.Queue):
@@ -45,11 +45,8 @@ class FrameQueue(asyncio.Queue):
         self._frame_getter = frame_getter
         self._uninterruptible_count: int = 0
 
-    def has_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
+    def has_frame(self, frame_type: type[Frame]) -> bool:
         """Return True if any frame of the given type is in the queue.
-
-        ``frame_type`` may be ``Frame``, ``UninterruptibleFrame`` (a mixin, not a
-        ``Frame`` subclass), or any concrete frame type.
 
         Note:
             This inspects the internal `_queue` (deque) of asyncio.Queue.

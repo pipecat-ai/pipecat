@@ -105,7 +105,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default and False for `UninterruptibleFrame` subclasses such as `EndFrame` and `StopFrame`; set it on a frame before pushing it to decide for that frame alone.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 

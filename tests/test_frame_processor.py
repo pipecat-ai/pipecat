@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     StopFrame,
     SystemFrame,
     TextFrame,
-    UninterruptibleFrame,
     UserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -159,8 +158,9 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
     async def test_uninterruptible_frames(self):
         @dataclass
-        class TestUninterruptibleFrame(DataFrame, UninterruptibleFrame):
+        class TestUninterruptibleFrame(DataFrame):
             text: str
+            interruptible: bool = field(default=False, init=False)
 
         class DelayTestFrameProcessor(FrameProcessor):
             """This processor just delays processing non-InterruptionFrame so we
@@ -199,8 +199,9 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""
 
         @dataclass
-        class MarkerFrame(DataFrame, UninterruptibleFrame):
+        class MarkerFrame(DataFrame):
             text: str
+            interruptible: bool = field(default=False, init=False)
 
         class DelayTestFrameProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):

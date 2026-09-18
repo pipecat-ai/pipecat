@@ -751,6 +751,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "UninterruptibleFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.11.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "interruptible",
+      "message": "`UninterruptibleFrame` is deprecated since 1.11.0 and will be removed in 2.0.0. Use the `interruptible` field with `default=False` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "SmartTurnMetricsData",
       "module": "pipecat.metrics.metrics",
       "kind": "class",

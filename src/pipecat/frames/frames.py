@@ -79,9 +79,10 @@ class Frame:
         transport_source: Name of the transport source that created this frame.
         transport_destination: Name of the transport destination for this frame.
         interruptible: Whether an interruption may drop this frame from a
-            processor's queue or cancel its processing. True for most frames;
-            False by default for :class:`UninterruptibleFrame` subclasses. Set
-            it on a frame before pushing it to decide for that frame alone.
+            processor's queue or cancel its processing. True unless the frame's
+            class declares ``interruptible: bool = field(default=False,
+            init=False)``, as :class:`EndFrame` does. Set it on a frame before
+            pushing it to decide for that frame alone.
     """
 
     id: int = field(init=False)
@@ -91,7 +92,7 @@ class Frame:
     metadata: dict[str, Any] = field(init=False)
     transport_source: str | None = field(init=False)
     transport_destination: str | None = field(init=False)
-    interruptible: bool = field(init=False)
+    interruptible: bool = field(default=True, init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
@@ -101,7 +102,8 @@ class Frame:
         self.metadata: dict[str, Any] = {}
         self.transport_source: str | None = None
         self.transport_destination: str | None = None
-        self.interruptible: bool = not isinstance(self, UninterruptibleFrame)
+        if isinstance(self, UninterruptibleFrame):
+            self.interruptible = False
 
     def __str__(self):
         return self.name
@@ -149,17 +151,22 @@ class ControlFrame(Frame):
 #
 
 
+@deprecated(
+    "`UninterruptibleFrame` is deprecated since 1.11.0 and will be removed in 2.0.0. "
+    "Use the `interruptible` field with `default=False` instead."
+)
 @dataclass
 class UninterruptibleFrame:
-    """A marker for data or control frames that are uninterruptible by default.
+    """A marker for frames that are uninterruptible by default.
 
-    Frames with this mixin start with :attr:`Frame.interruptible` False. They
-    are still ordered normally, but unlike other frames they are preserved
-    during interruptions: they remain in internal queues and any task
-    processing them will not be cancelled, so they are always delivered and
-    processed to completion. The flag decides, so a frame of any class can be
-    made uninterruptible for one push by setting it, and a frame of a class
-    with this mixin can be made interruptible the same way.
+    .. deprecated:: 1.11.0
+        Use the ``interruptible`` field with ``default=False`` instead::
+
+            interruptible: bool = field(default=False, init=False)
+
+        Will be removed in 2.0.0.
+
+    Frames with this mixin start with :attr:`Frame.interruptible` False.
     """
 
     pass
@@ -833,7 +840,7 @@ class FunctionCallResultProperties:
 
 
 @dataclass
-class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
+class FunctionCallResultFrame(DataFrame):
     """Frame containing the result of an LLM function call.
 
     This is an uninterruptible frame because once a result is generated we
@@ -851,6 +858,8 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
             read, rather than anything the handler returned.
 
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     function_name: str
     tool_call_id: str
@@ -1832,7 +1841,7 @@ class WorkerSystemFrame(SystemFrame):
 
 
 @dataclass
-class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
+class EndWorkerFrame(WorkerFrame):
     """Frame to request graceful pipeline worker closure.
 
     This is used to notify the pipeline worker that the pipeline should be
@@ -1844,6 +1853,8 @@ class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
         reason: Optional reason for pushing an end frame.
     """
 
+    interruptible: bool = field(default=False, init=False)
+
     reason: Any | None = None
 
     def __str__(self):
@@ -1851,7 +1862,7 @@ class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
+class StopWorkerFrame(WorkerFrame):
     """Frame to request pipeline worker stop while keeping processors running.
 
     This is used to notify the pipeline worker that it should be stopped as
@@ -1860,7 +1871,7 @@ class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
     (the default direction) so frames queued ahead of it are flushed first.
     """
 
-    pass
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -1996,7 +2007,7 @@ with warnings.catch_warnings():
 
 
 @dataclass
-class EndFrame(ControlFrame, UninterruptibleFrame):
+class EndFrame(ControlFrame):
     """Frame indicating pipeline has ended and should shut down.
 
     Indicates that a pipeline has ended and frame processors and pipelines
@@ -2005,13 +2016,15 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
     that this is a control frame, which means it will be received in the order it
     was sent.
 
-    This frame is marked as UninterruptibleFrame to ensure it is not lost when
-    an InterruptionFrame is processed. Terminal frames must survive interruption
-    to guarantee proper pipeline shutdown.
+    This frame is uninterruptible so it is not lost when an InterruptionFrame
+    is processed. Terminal frames must survive interruption to guarantee proper
+    pipeline shutdown.
 
     Parameters:
         reason: Optional reason for pushing an end frame.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     reason: Any | None = None
 
@@ -2020,23 +2033,23 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopFrame(ControlFrame, UninterruptibleFrame):
+class StopFrame(ControlFrame):
     """Frame indicating pipeline should stop but keep processors running.
 
     Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
     the pipeline task.
 
-    This frame is marked as UninterruptibleFrame to ensure it is not lost when
-    an InterruptionFrame is processed. Terminal frames must survive interruption
-    to guarantee proper pipeline control.
+    This frame is uninterruptible so it is not lost when an InterruptionFrame
+    is processed. Terminal frames must survive interruption to guarantee proper
+    pipeline control.
     """
 
-    pass
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
-class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
+class PipelineFlushFrame(ControlFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
     Pushed downstream; the pipeline worker's sink bounces it back upstream, the
@@ -2046,8 +2059,8 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
     upstream. Useful to wait for the pipeline to drain (e.g. after an
     interruption) before injecting a new frame.
 
-    This frame is marked as UninterruptibleFrame so the probe survives an
-    InterruptionFrame and still completes its trip.
+    This frame is uninterruptible so the probe survives an InterruptionFrame
+    and still completes its trip.
 
     Parameters:
         event: Set by the worker when the probe completes its round-trip. The
@@ -2062,6 +2075,8 @@ class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
             into another pipeline is answered there, out of sight of whoever is
             waiting, so the answering worker reports progress back to this name.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     event: asyncio.Event | None = field(default=None, compare=False)
     returning: bool = field(default=False, compare=False)
@@ -2257,7 +2272,7 @@ class LLMContextSummaryRequestFrame(ControlFrame):
 
 
 @dataclass
-class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
+class LLMContextSummaryResultFrame(ControlFrame):
     """Frame containing the result of context summarization.
 
     Sent by LLM services back to aggregators after generating a summary.
@@ -2272,6 +2287,8 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
         error: Error message if summarization failed, None on success.
     """
 
+    interruptible: bool = field(default=False, init=False)
+
     request_id: str
     summary: str
     last_summarized_index: int
@@ -2279,7 +2296,7 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
-class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
+class FunctionCallInProgressFrame(ControlFrame):
     """Frame signaling that a function call is currently executing.
 
     This is an uninterruptible frame because we always want to update the
@@ -2299,6 +2316,8 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
             same LLM response batch. Used to determine when the last call in a
             group completes so the LLM can be triggered exactly once.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     function_name: str
     tool_call_id: str
@@ -2368,7 +2387,7 @@ TSettings = TypeVar("TSettings", bound=ServiceSettings, default=ServiceSettings,
 
 
 @dataclass
-class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame, Generic[TSettings]):
+class ServiceUpdateSettingsFrame(ControlFrame, Generic[TSettings]):
     """Base frame for updating service settings.
 
     Supports both a ``settings`` dict (for backward compatibility) and a
@@ -2392,6 +2411,8 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame, Generic[TSe
             rather than only the active one. Set this for provider-neutral
             settings that must survive a service switch.
     """
+
+    interruptible: bool = field(default=False, init=False)
 
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: TSettings | None = None
@@ -2480,13 +2501,17 @@ class FilterEnableFrame(FilterControlFrame):
 
 
 @dataclass
-class AudioBufferStartRecordingFrame(ControlFrame, UninterruptibleFrame):
+class AudioBufferStartRecordingFrame(ControlFrame):
     """Frame instructing audio buffer processors to start recording."""
+
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
-class AudioBufferStopRecordingFrame(ControlFrame, UninterruptibleFrame):
+class AudioBufferStopRecordingFrame(ControlFrame):
     """Frame instructing audio buffer processors to stop recording and flush."""
+
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass

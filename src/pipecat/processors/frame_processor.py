@@ -40,7 +40,6 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TTSAudioRawFrame,
-    UninterruptibleFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData, STTUsage
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
@@ -1240,15 +1239,14 @@ class FrameProcessor(BaseObject):
         """Reset non-system frame processing queue."""
         self.__process_queue.reset()
 
-    def has_queued_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
+    def has_queued_frame(self, frame_type: type[Frame]) -> bool:
         """Return True if a frame of the given type is waiting in the processing queue.
 
         Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
-        enqueued types) with no queue scanning.  ``frame_type`` may be any
-        ``Frame`` subclass or ``UninterruptibleFrame`` (a mixin).
+        enqueued types) with no queue scanning.
 
         Args:
-            frame_type: The frame class (or mixin) to look for.
+            frame_type: The frame class to look for.
 
         Returns:
             True if at least one matching frame is queued.

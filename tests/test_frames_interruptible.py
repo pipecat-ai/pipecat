@@ -7,8 +7,16 @@
 """The interruptible flag on frames: its defaults and how a frame overrides them."""
 
 import unittest
+import warnings
+from dataclasses import dataclass, field
 
-from pipecat.frames.frames import EndFrame, FunctionCallResultFrame, TextFrame
+from pipecat.frames.frames import (
+    DataFrame,
+    EndFrame,
+    FunctionCallResultFrame,
+    TextFrame,
+    UninterruptibleFrame,
+)
 
 
 class TestInterruptibleFlag(unittest.TestCase):
@@ -28,3 +36,21 @@ class TestInterruptibleFlag(unittest.TestCase):
         end = EndFrame()
         end.interruptible = True
         self.assertTrue(end.interruptible)
+
+    def test_a_class_declares_its_default_through_the_field(self):
+        @dataclass
+        class Sticky(DataFrame):
+            interruptible: bool = field(default=False, init=False)
+
+        self.assertFalse(Sticky().interruptible)
+
+    def test_the_marker_still_works_and_warns(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @dataclass
+            class Marked(DataFrame, UninterruptibleFrame):
+                pass
+
+        self.assertTrue(any(w.category is DeprecationWarning for w in caught))
+        self.assertFalse(Marked().interruptible)
