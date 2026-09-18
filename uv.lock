@@ -15,7 +15,7 @@ supported-markers = [
 
 [[package]]
 name = "accelerate"
-version = "1.10.1"
+version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -27,9 +27,9 @@ dependencies = [
     { name = "safetensors" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/72/ff3961c19ee395c3d30ac630ee77bfb0e1b46b87edc504d4f83bb4a89705/accelerate-1.10.1.tar.gz", hash = "sha256:3dea89e433420e4bfac0369cae7e36dcd6a56adfcfd38cdda145c6225eab5df8", size = 392446, upload-time = "2025-08-25T13:57:06.21Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/b5/1d3ed029ac71d3f2961346829a268da923698e9fd63f218f78841f216bfd/accelerate-1.15.0.tar.gz", hash = "sha256:5654f8c5eaa0d4fa68b33e287a97765da6849bf6d51dcac874e73fbbddfb6134", size = 422615, upload-time = "2026-09-09T13:04:49.078Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/a0/d9ef19f780f319c21ee90ecfef4431cbeeca95bec7f14071785c17b6029b/accelerate-1.10.1-py3-none-any.whl", hash = "sha256:3621cff60b9a27ce798857ece05e2b9f56fcc71631cfb31ccf71f0359c311f11", size = 374909, upload-time = "2025-08-25T13:57:04.55Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/4c/34f0450479d01195027260da68d8a3880683f1640c3ca5adf64acb3185f1/accelerate-1.15.0-py3-none-any.whl", hash = "sha256:97eacca0b73e45cb867dbf8c5d5d4dc32219544300e0c8992c7334dc2ef33cec", size = 394295, upload-time = "2026-09-09T13:04:47.331Z" },
 ]
 
 [[package]]
@@ -5897,7 +5897,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", marker = "extra == 'moondream'", specifier = "~=1.10.0" },
+    { name = "accelerate", marker = "extra == 'moondream'", specifier = ">=1.10.0,<2" },
     { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=3.1.0" },
     { name = "aiobotocore", marker = "extra == 'aws'", specifier = ">=3,<4" },
     { name = "aiofiles", specifier = ">=24.1.0,<27" },
@@ -5916,7 +5916,7 @@ requires-dist = [
     { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.29.0,<1" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.1.1,<8" },
     { name = "docstring-parser", specifier = ">=0.16,<1" },
-    { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },
+    { name = "einops", marker = "extra == 'moondream'", specifier = ">=0.8.0,<1" },
     { name = "fastapi", marker = "extra == 'runner'", specifier = ">=0.115.6,<1" },
     { name = "fastapi", marker = "extra == 'websocket'", specifier = ">=0.115.6,<1" },
     { name = "faster-whisper", marker = "extra == 'whisper'", specifier = "~=1.2.1" },
@@ -5978,7 +5978,7 @@ requires-dist = [
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.3" },
     { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
-    { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
+    { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = ">=3.0.0,<4" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "questionary", marker = "extra == 'cli'", specifier = ">=2.0.0,<3" },
     { name = "redis", extras = ["hiredis"], marker = "extra == 'redis'", specifier = ">=5.0.0" },
@@ -5996,11 +5996,11 @@ requires-dist = [
     { name = "speechmatics-agent-stt", marker = "extra == 'speechmatics'", specifier = "~=0.1.0" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
-    { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
+    { name = "timm", marker = "extra == 'moondream'", specifier = ">=1.0.13,<2" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
     { name = "torchaudio", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
-    { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=4.48.0,<6" },
-    { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0,<6" },
+    { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=5.10.0,<6" },
+    { name = "transformers", marker = "extra == 'moondream'", specifier = ">=5.10.0,<6" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.20.0,<1" },
     { name = "typing-extensions", specifier = ">=4.9" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
@@ -7278,12 +7278,12 @@ wheels = [
 
 [[package]]
 name = "pyvips"
-version = "3.0.0"
+version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cffi" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/a2/d8ecd2f7ffa084870ba071a584aac44800a89f3c77b305999be7dc8b7bb3/pyvips-3.0.0.tar.gz", hash = "sha256:79459975e4a16089b0eaafed26eb1400ae66ebc16d3ff3a7d2241abcf19dc9e8", size = 56806, upload-time = "2025-04-28T10:07:43.784Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/f3/90993aab504fa2e1f28fcc09aa16b6ea4f00e75a037d9136e737855833e2/pyvips-3.2.0.tar.gz", hash = "sha256:5fa47cdce4e7f450747c118c12fde913e0710850c6015d8ec4f5af490003a347", size = 72067, upload-time = "2026-08-29T13:31:03.773Z" }
 
 [package.optional-dependencies]
 binary = [
