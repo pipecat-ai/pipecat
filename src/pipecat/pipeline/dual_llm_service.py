@@ -254,11 +254,11 @@ class BackendReplyStrategy:
         """
         raise NotImplementedError
 
-    async def abandon(self, params: FunctionCallParams) -> None:
-        """Drop anything held for a delegation that failed.
+    async def fail(self, params: FunctionCallParams) -> None:
+        """Handle the delegation failing.
 
-        The frontend service settles the call with the error, so nothing is
-        delivered here. The base holds nothing.
+        The frontend service settles the call with the error. The base does
+        nothing.
 
         Args:
             params: The ``delegate`` call.
@@ -303,7 +303,7 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
         else:
             await self._nothing_said(params)
 
-    async def abandon(self, params: FunctionCallParams) -> None:
+    async def fail(self, params: FunctionCallParams) -> None:
         """Drop the held outputs."""
         self._progress.pop(params.tool_call_id, None)
 
@@ -501,7 +501,7 @@ class BackendConnector:
                     else:
                         await self.reply_strategy.deliver(params, event, is_final=False)
         except BaseException:
-            await self.reply_strategy.abandon(params)
+            await self.reply_strategy.fail(params)
             raise
 
     async def report_tool_call(self, params: FunctionCallParams, call: BackendToolCall) -> None:
