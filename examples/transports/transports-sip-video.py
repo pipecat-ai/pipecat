@@ -11,7 +11,13 @@ video back — call it from a video-capable SIP client (e.g. Linphone) to see
 and hear yourself. Requires the video extra (``pipecat-ai[sip-video]``)::
 
     SIP_USER=1001 SIP_PASS=secret SIP_DOMAIN=sip.example.com \\
-        python transports-sip-video.py -t sip
+        uv run python transports-sip-video.py -t sip
+
+Or with no account at all: set ``DAILY_API_KEY`` and the runner provisions a
+temporary SIP client on your Daily domain (deleted again when the bot
+exits), printing the URI to dial::
+
+    DAILY_API_KEY=... uv run python transports-sip-video.py -t sip
 """
 
 from dotenv import load_dotenv
