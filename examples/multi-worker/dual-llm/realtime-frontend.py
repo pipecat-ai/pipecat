@@ -71,8 +71,8 @@ FRONTEND_INSTRUCTIONS = """You are a friendly, concise voice assistant. Your res
 aloud, so keep them to one or two natural sentences without any formatting.
 The backend answers questions about the weather and restaurants."""
 
-BACKEND_INSTRUCTIONS = """You are the backend of a voice assistant. Use the available tools to
-answer questions about the weather and restaurants."""
+BACKEND_INSTRUCTIONS = """Use the available tools to answer questions about the weather and
+restaurants."""
 
 
 transport_params = {
