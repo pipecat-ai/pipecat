@@ -499,6 +499,33 @@ async def test_transform_output_can_rewrite_text_and_speakability():
 
 
 @pytest.mark.asyncio
+async def test_a_transform_returning_none_for_the_final_leaves_the_backend_with_nothing_to_say():
+    llm = _ScriptedLLM([[("text", "Not for the user.")]])
+
+    async def keep_it(output: BackendOutput, *, is_final: bool) -> BackendOutput | None:
+        return None
+
+    text, updates, _ = await _run_backend(llm, transform_output=keep_it)
+
+    assert text == ""
+    assert [u.text for u in updates] == [""]
+
+
+@pytest.mark.asyncio
+async def test_a_transform_that_empties_the_text_still_sends_the_output():
+    llm = _ScriptedLLM(
+        [[("text", "Checking."), ("call", "get_weather", "call_1", {})], [("text", "Done.")]]
+    )
+
+    async def empty_progress(output: BackendOutput, *, is_final: bool) -> BackendOutput:
+        return output if is_final else replace(output, text="")
+
+    _, updates, _ = await _run_backend(llm, transform_output=empty_progress)
+
+    assert [u.text for u in updates] == ["", "Done."]
+
+
+@pytest.mark.asyncio
 async def test_the_response_carries_the_transformed_final_output():
     """The final update and the return value are the same answer, transform included."""
     llm = _ScriptedLLM([[("text", "raw answer")]])
@@ -569,7 +596,7 @@ async def test_an_apps_own_output_is_sent_as_given_past_the_transform():
         await params.result_callback("told")
 
     async def silence_progress(output: BackendOutput, *, is_final: bool) -> BackendOutput:
-        return output if is_final else replace(output, text="")
+        return output if is_final else None
 
     backend = BackendLLMWorker(
         llm=llm,
