@@ -516,6 +516,9 @@ class BackendConnector:
 class LLMWithBackend(Pipeline):
     """A conversational LLM, kept fast and light, with a backend that does the work it hands off.
 
+    **Alpha.** The API is unstable: names, arguments, the strategies and the
+    job contract are likely to change between releases.
+
     Put it where the LLM goes in a pipeline. It is a :class:`Pipeline`, not an
     :class:`LLMService`: functions, settings updates, event handlers and a
     ``FlowManager`` go on :attr:`frontend`. It wraps the frontend service,
@@ -562,6 +565,7 @@ class LLMWithBackend(Pipeline):
             connector: How delegation works. A default
                 :class:`BackendConnector` when omitted.
         """
+        logger.warning("LLMWithBackend is alpha: its API is likely to change between releases.")
         self._frontend = frontend
         self._backend = backend
         self._connector = connector or BackendConnector()
