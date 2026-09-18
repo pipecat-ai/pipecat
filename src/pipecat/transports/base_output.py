@@ -581,7 +581,7 @@ class BaseOutputTransport(FrameProcessor):
 
             if self._audio_queue.has_uninterruptible or self._mixer:
                 # Keep the audio task running but drain all interruptible frames
-                # so the pending UninterruptibleFrames are still delivered. With
+                # so the pending uninterruptible ones are still delivered. With
                 # a mixer, cancelling the task would also stop mixer-only output
                 # during the restart, causing an audible gap in the background
                 # audio (made worse by telephony serializers that clear the

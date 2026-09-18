@@ -195,6 +195,35 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_interruptible_flag_decides_for_a_frame(self):
+        """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""
+
+        @dataclass
+        class MarkerFrame(DataFrame, UninterruptibleFrame):
+            text: str
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        kept = TextFrame(text="kept")
+        kept.interruptible = False
+        dropped = MarkerFrame(text="dropped")
+        dropped.interruptible = True
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+        frames_to_send = [kept, dropped, SleepFrame(), InterruptionFrame()]
+        expected_down_frames = [InterruptionFrame, TextFrame]
+        received, _ = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([f.text for f in received if isinstance(f, TextFrame)], ["kept"])
+
     async def test_broadcast_frame(self):
         """Test that broadcast_frame creates two separate frames with fresh IDs."""
         downstream_frames: list[Frame] = []

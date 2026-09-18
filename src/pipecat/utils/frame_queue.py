@@ -14,7 +14,7 @@ from pipecat.frames.frames import Frame, UninterruptibleFrame
 
 
 class FrameQueue(asyncio.Queue):
-    """An asyncio.Queue that tracks whether any UninterruptibleFrame is enqueued.
+    """An asyncio.Queue that tracks whether any uninterruptible frame is enqueued.
 
     Extends ``asyncio.Queue`` and maintains an O(1) ``has_uninterruptible``
     flag so interrupt-handling code can decide whether to cancel a task or
@@ -26,8 +26,9 @@ class FrameQueue(asyncio.Queue):
     itself as the frame. Queues that also carry non-frame items should return
     ``None`` from their getter for those.
 
-    Also exposes a ``reset()`` helper that drains all non-``UninterruptibleFrame``
-    items while keeping uninterruptible ones in place.
+    Also exposes a ``reset()`` helper that drains all interruptible items while
+    keeping uninterruptible ones (``Frame.interruptible`` False) in place. A
+    frame counts as it was when enqueued.
     """
 
     def __init__(self, frame_getter: Callable[[Any], Frame | None] = lambda item: item):
@@ -67,26 +68,30 @@ class FrameQueue(asyncio.Queue):
 
     @property
     def has_uninterruptible(self) -> bool:
-        """Return True if any UninterruptibleFrame is currently in the queue."""
+        """Return True if any uninterruptible frame is currently in the queue."""
         return self._uninterruptible_count > 0
 
+    def _is_uninterruptible(self, item: Any) -> bool:
+        frame = self._frame_getter(item)
+        return frame is not None and not frame.interruptible
+
     def _put(self, item: Any) -> None:
-        if isinstance(self._frame_getter(item), UninterruptibleFrame):
+        if self._is_uninterruptible(item):
             self._uninterruptible_count += 1
         super()._put(item)
 
     def _get(self) -> Any:
         item = super()._get()
-        if isinstance(self._frame_getter(item), UninterruptibleFrame):
+        if self._is_uninterruptible(item):
             self._uninterruptible_count -= 1
         return item
 
     def reset(self) -> None:
-        """Remove all non-UninterruptibleFrame items, keeping uninterruptible ones."""
+        """Remove all interruptible items, keeping uninterruptible ones."""
         kept: asyncio.Queue = asyncio.Queue()
         while not self.empty():
             item = self.get_nowait()
-            if isinstance(self._frame_getter(item), UninterruptibleFrame):
+            if self._is_uninterruptible(item):
                 kept.put_nowait(item)
             self.task_done()
         while not kept.empty():

@@ -402,7 +402,7 @@ class TTSService(AIService):
         #           must be emitted in-order relative to surrounding audio contexts.
         #   None  – shutdown sentinel (sent by stop()).
         # Created once here so it survives interruptions: on interruption we call reset()
-        # which drops non-UninterruptibleFrame items while keeping uninterruptible ones
+        # which drops interruptible items while keeping uninterruptible ones
         # (e.g. FunctionCallResultFrame) that must not be lost mid-flight.
         self._serialization_queue: FrameQueue = FrameQueue(
             frame_getter=lambda item: item if isinstance(item, Frame) else None
@@ -1046,7 +1046,7 @@ class TTSService(AIService):
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
-        # Drops non-UninterruptibleFrame items while keeping uninterruptible ones
+        # Drops interruptible items while keeping uninterruptible ones
         # (e.g. FunctionCallResultFrame) that must not be lost mid-flight.
         self._serialization_queue.reset()
         audio_contexts = self.get_audio_contexts()
@@ -1059,11 +1059,11 @@ class TTSService(AIService):
         self._create_audio_context_task()
         # When pause_frame_processing=True, the process task may be blocked at
         # __process_event.wait() because pause_processing_frames() was called
-        # after LLMFullResponseEndFrame and an UninterruptibleFrame was dequeued
+        # after LLMFullResponseEndFrame and an uninterruptible frame was dequeued
         # before the interrupt arrived. _start_interruption() in the base class
-        # handles the common case (non-uninterruptible frames) by cancelling and
-        # recreating the process task. But when _start_interruption() detects an
-        # UninterruptibleFrame it only resets the queue, leaving the process task
+        # handles the common case (interruptible frames) by cancelling and
+        # recreating the process task. But when _start_interruption() finds an
+        # uninterruptible frame it only resets the queue, leaving the process task
         # blocked. BotStoppedSpeakingFrame never arrives (no audio played), so we
         # must resume here to prevent a permanent deadlock.
         await self._maybe_resume_frame_processing()

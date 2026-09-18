@@ -1130,9 +1130,8 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            current_is_uninterruptible = isinstance(
-                self.__process_current_frame, UninterruptibleFrame
-            )
+            current = self.__process_current_frame
+            current_is_uninterruptible = current is not None and not current.interruptible
             if current_is_uninterruptible:
                 # The frame currently being processed is uninterruptible, so we
                 # must not cancel it. Just flush non-uninterruptible frames from

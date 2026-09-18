@@ -78,6 +78,10 @@ class Frame:
         metadata: Dictionary for arbitrary frame metadata.
         transport_source: Name of the transport source that created this frame.
         transport_destination: Name of the transport destination for this frame.
+        interruptible: Whether an interruption may drop this frame from a
+            processor's queue or cancel its processing. True for most frames;
+            False by default for :class:`UninterruptibleFrame` subclasses. Set
+            it on a frame before pushing it to decide for that frame alone.
     """
 
     id: int = field(init=False)
@@ -87,6 +91,7 @@ class Frame:
     metadata: dict[str, Any] = field(init=False)
     transport_source: str | None = field(init=False)
     transport_destination: str | None = field(init=False)
+    interruptible: bool = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
@@ -96,6 +101,7 @@ class Frame:
         self.metadata: dict[str, Any] = {}
         self.transport_source: str | None = None
         self.transport_destination: str | None = None
+        self.interruptible: bool = not isinstance(self, UninterruptibleFrame)
 
     def __str__(self):
         return self.name
@@ -145,13 +151,15 @@ class ControlFrame(Frame):
 
 @dataclass
 class UninterruptibleFrame:
-    """A marker for data or control frames that must not be interrupted.
+    """A marker for data or control frames that are uninterruptible by default.
 
-    Frames with this mixin are still ordered normally, but unlike other frames,
-    they are preserved during interruptions: they remain in internal queues and
-    any task processing them will not be cancelled. This ensures the frame is
-    always delivered and processed to completion.
-
+    Frames with this mixin start with :attr:`Frame.interruptible` False. They
+    are still ordered normally, but unlike other frames they are preserved
+    during interruptions: they remain in internal queues and any task
+    processing them will not be cancelled, so they are always delivered and
+    processed to completion. The flag decides, so a frame of any class can be
+    made uninterruptible for one push by setting it, and a frame of a class
+    with this mixin can be made interruptible the same way.
     """
 
     pass
