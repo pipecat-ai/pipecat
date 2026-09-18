@@ -240,7 +240,8 @@ class _BackendFinalOutput:
     """The output that settles a delegation, yielded last by :func:`_delegate_to_backend`.
 
     Parameters:
-        output: The final output, from the job's response.
+        output: The final output, from the job's response; its text is empty
+            when the backend ended with nothing to say.
     """
 
     output: BackendOutput
@@ -735,8 +736,9 @@ async def _delegate_to_backend(
     Yields:
         Each :class:`BackendOutput` as the backend produces it, the final
         output last as a :class:`_BackendFinalOutput`, and each
-        :class:`BackendToolCall` phase as the backend's calls run. A delegation
-        that ends with nothing to say yields no final output.
+        :class:`BackendToolCall` phase as the backend's calls run. The final
+        output always comes, with empty text when the backend ended with
+        nothing to say.
 
     Raises:
         JobError: If the backend fails, is cancelled, or times out.
@@ -757,6 +759,4 @@ async def _delegate_to_backend(
                     yield output
             elif update_type == TOOL_CALL_UPDATE_TYPE:
                 yield BackendToolCall.from_payload(event.data)
-        final = BackendOutput.from_payload(backend_job.response)
-        if final.text:
-            yield _BackendFinalOutput(final)
+        yield _BackendFinalOutput(BackendOutput.from_payload(backend_job.response))
