@@ -243,3 +243,31 @@ class SmartTurnMetricsData(TurnMetricsData):
 
     inference_time_ms: float = 0.0
     server_total_time_ms: float = 0.0
+
+
+class AICAudioQualityMetricsData(MetricsData):
+    """Audio-quality scores from the ai-coustics Tyto analysis model.
+
+    Each score is in the range ``0.0``–``1.0``. For every field **except**
+    ``speaker_loudness``, lower values indicate less problematic audio; the
+    scores predict the likelihood that the analyzed audio degrades downstream
+    models (speech-to-text, VAD, turn-taking, speech-to-speech). Emitted by
+    :class:`pipecat.processors.audio.aic_tyto_analyzer.AICTytoAnalyzer`.
+
+    Parameters:
+        risk_score: Overall likelihood of downstream-model degradation.
+        speaker_reverb: Reverberation on the primary speaker.
+        speaker_loudness: Primary-speaker loudness (not a lower-is-better score).
+        interfering_speech: Presence of competing/background speech.
+        codec_degradation: Audio degradation caused by lossy codecs.
+        noise: Non-speech background noise.
+        packet_loss: Audio artifacts consistent with network packet loss.
+    """
+
+    risk_score: float
+    speaker_reverb: float
+    speaker_loudness: float
+    interfering_speech: float
+    codec_degradation: float
+    noise: float
+    packet_loss: float
