@@ -1417,6 +1417,14 @@ class BaseWorker(BaseObject, BusSubscriber):
                 await handler(message)
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            if job_id in self._active_jobs:
+                await self.send_job_response(
+                    job_id,
+                    response={"error": str(e)},
+                    status=JobStatus.ERROR,
+                )
+            raise
         finally:
             self._job_handler_tasks.pop(job_id, None)
 
