@@ -532,6 +532,38 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._responses(s), [])
 
 
+class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
+    """A send over a speaking bot drops what its open turn holds of the bot's earlier speech."""
+
+    class _Turns:
+        def __init__(self):
+            self.resets = 0
+
+        async def reset(self):
+            self.resets += 1
+
+    async def test_a_send_over_a_speaking_bot_resets_its_turn(self):
+        client = _client(bot_audio=True)
+        _capture_injected(client)
+        turns = self._Turns()
+        client._bot_turns = turns  # type: ignore[assignment]
+        client._stream.frame_to_event(BotStartedSpeakingFrame())
+
+        await client.say("Actually, tell me a joke instead.")
+
+        self.assertEqual(turns.resets, 1)
+
+    async def test_a_send_to_a_quiet_bot_leaves_its_turn_alone(self):
+        client = _client(bot_audio=True)
+        _capture_injected(client)
+        turns = self._Turns()
+        client._bot_turns = turns  # type: ignore[assignment]
+
+        await client.say("What is the capital of Germany?")
+
+        self.assertEqual(turns.resets, 0)
+
+
 class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
     """After a send that talked over the bot, its speech from before it is dropped by the time its audio began."""
 
