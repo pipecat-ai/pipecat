@@ -362,6 +362,23 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
 
 
 @pytest.mark.asyncio
+async def test_an_output_with_no_text_is_skipped_by_both_strategies(monkeypatch):
+    blank = BackendOutput(text="", prefers_spoken=True)
+    for realtime in (False, True):
+        _stream(monkeypatch, blank, _PROGRESS, blank, _FINAL)
+        params = _params()
+
+        await _bound(BackendConnector(), realtime=realtime).delegate(params)
+
+        results = [c.args[0] for c in params.result_callback.await_args_list]  # type: ignore[attr-defined]
+        assert "" not in results
+        assert results[-1] in (
+            "It's 62 and raining.",
+            {"outputs": ["Let me check.", "It's 62 and raining."]},
+        )
+
+
+@pytest.mark.asyncio
 async def test_a_delegation_with_nothing_to_say_still_settles_the_call(monkeypatch):
     _stream(monkeypatch, _PROGRESS, _EMPTY_FINAL)
     params = _params()
