@@ -77,12 +77,12 @@ OUTPUT_UPDATE_TYPE = "output"
 #: The ``type`` of a job update that carries a :class:`BackendToolCall`.
 TOOL_CALL_UPDATE_TYPE = "tool_call"
 
-#: Appended to the backend LLM's system instruction: its output is relayed to
-#: a listener by the frontend, whatever the app's prompt says the backend does.
+#: Appended to the backend LLM's system instruction: where its output goes,
+#: whatever the app's prompt says the backend does.
 BACKEND_OUTPUT_INSTRUCTIONS = (
-    "Your replies are relayed to a user by a voice assistant. Reply in concise, "
-    "conversational plain text it can say aloud: no Markdown, no raw JSON. Never claim "
-    "an action completed without a tool result confirming it."
+    "You are the backend of a voice assistant. What you write goes to the assistant, which "
+    "decides what the user hears and says it in its own words. Write plain text it can "
+    "speak from: no Markdown, no raw JSON."
 )
 
 
