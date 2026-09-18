@@ -939,7 +939,7 @@ if __name__ == "__main__":
 
 
 class TestFlowConfig(unittest.TestCase):
-    """``--flow`` gives every session the runner starts a flow config to run."""
+    """``--flow`` is read once at startup and applied to each session."""
 
     def test_reads_the_file_as_text(self):
         with tempfile.TemporaryDirectory() as directory:

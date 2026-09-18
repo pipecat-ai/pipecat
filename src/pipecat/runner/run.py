@@ -541,10 +541,7 @@ def _apply_cli_args(runner_args: RunnerArguments, args: argparse.Namespace) -> N
     :func:`_read_flow_config`).
 
     A session that named its own flow in its ``/start`` request keeps it;
-    ``--flow`` is the default for the sessions that named none. One runner can
-    therefore serve a different flow per session and still have something to
-    fall back on, which is what a deployed bot needs: one process, many
-    sessions, each potentially trying a different flow.
+    ``--flow`` is the default for the sessions that named none.
     """
     runner_args.cli_args = args
     if runner_args.flow_config is None:
@@ -1835,10 +1832,9 @@ def main(parser: argparse.ArgumentParser | None = None):
         type=str,
         default=None,
         help=(
-            "Path to a Pipecat Flows config (YAML or JSON) for every session this "
-            "runner starts, as a /start request would carry it: the bot receives its "
-            "text as runner_args.flow_config. Run the bot once per flow to try "
-            "several against one agent."
+            "Path to a Pipecat Flows config (YAML or JSON) for the sessions that "
+            "don't name one in their /start request: the bot receives its text as "
+            "runner_args.flow_config."
         ),
     )
     parser.add_argument(
