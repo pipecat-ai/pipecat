@@ -240,8 +240,7 @@ class _BackendFinalOutput:
     """The output that settles a delegation, yielded last by :func:`_delegate_to_backend`.
 
     Parameters:
-        output: The final output, from the job's response; its text is empty
-            when the backend ended with nothing to say.
+        output: The final output, from the job's response.
     """
 
     output: BackendOutput
@@ -388,9 +387,7 @@ class BackendLLMWorker(LLMContextWorker):
     - updates: a :class:`BackendOutput` payload for every piece of progress —
       reasoning summaries and what the backend says before calling tools —
       and a :class:`BackendToolCall` payload for each phase of each function
-      call the backend makes, so the frontend can report them. An output with
-      no text is not sent, and is ignored if it arrives; only the final
-      output means something empty.
+      call the backend makes, so the frontend can report them.
     - cancellation: a job the requester cancels interrupts the backend's
       pipeline, so the model stops and the next delegation starts clean.
     - response: the final output as a :class:`BackendOutput` payload, or
@@ -739,8 +736,7 @@ async def _delegate_to_backend(
         Each :class:`BackendOutput` as the backend produces it, the final
         output last as a :class:`_BackendFinalOutput`, and each
         :class:`BackendToolCall` phase as the backend's calls run. The final
-        output always comes, with empty text when the backend ended with
-        nothing to say.
+        output always comes; an output's text may be empty.
 
     Raises:
         JobError: If the backend fails, is cancelled, or times out.
@@ -756,11 +752,7 @@ async def _delegate_to_backend(
                 continue
             update_type = event.data.get("type", OUTPUT_UPDATE_TYPE)
             if update_type == OUTPUT_UPDATE_TYPE:
-                output = BackendOutput.from_payload(event.data)
-                # Progress with no text is nothing to deliver; the final
-                # output, below, is delivered whatever its text.
-                if output.text:
-                    yield output
+                yield BackendOutput.from_payload(event.data)
             elif update_type == TOOL_CALL_UPDATE_TYPE:
                 yield BackendToolCall.from_payload(event.data)
         yield _BackendFinalOutput(BackendOutput.from_payload(backend_job.response))
