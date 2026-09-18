@@ -154,10 +154,44 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
 
 
+class TestBaseOutputTransportChunkInterruptibility(unittest.IsolatedAsyncioTestCase):
+    """A chunk cut from the audio buffer keeps the ``interruptible`` flag of the audio it holds."""
+
+    async def test_chunks_carry_the_flag_of_their_audio(self):
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+            half = chunk_size // 2
+
+            def frame(audio: bytes, *, interruptible: bool) -> TTSAudioRawFrame:
+                f = TTSAudioRawFrame(
+                    audio=audio, sample_rate=sender.sample_rate, num_channels=1, context_id="ctx"
+                )
+                f.interruptible = interruptible
+                return f
+
+            # One protected chunk, then a chunk that spans a protected frame and
+            # a plain one, then a plain chunk.
+            for f in (
+                frame(b"\x01" * chunk_size, interruptible=False),
+                frame(b"\x02" * half, interruptible=False),
+                frame(b"\x03" * half, interruptible=True),
+                frame(b"\x04" * chunk_size, interruptible=True),
+            ):
+                await transport.process_frame(f, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            written = [call.args[0] for call in transport.write_audio_frame.call_args_list]
+            self.assertEqual([w.interruptible for w in written], [False, False, True])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
 class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
     """Test for the trailing-partial-chunk audio buffer.
 
-    ``MediaSender._audio_buffer`` only enqueues complete ``audio_chunk_size``
+    ``MediaSender`` only enqueues complete ``audio_chunk_size``
     chunks (see ``handle_audio_frame``); whatever hasn't reached a full chunk
     stays buffered. When ``TTSStoppedFrame`` arrives, that leftover audio is
     padded with silence to a full chunk and queued for playback (see
@@ -201,7 +235,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             await transport.process_frame(partial_chunk, FrameDirection.DOWNSTREAM)
 
             # It's sitting in the buffer, not yet queued for playback.
-            self.assertEqual(len(sender._audio_buffer), partial_len)
+            self.assertEqual(sender._buffered_audio_bytes, partial_len)
 
             # TTSStoppedFrame marks the end of the turn: the leftover audio
             # should be padded with silence and flushed, not discarded.
@@ -220,7 +254,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             expected = full_audio + partial_audio + silence_padding
             self.assertEqual(written, expected)
             # The buffer should be drained by the flush, not just cleared.
-            self.assertEqual(sender._audio_buffer, bytearray())
+            self.assertEqual(sender._buffered_audio_bytes, 0)
         finally:
             await transport.cancel(CancelFrame())
 
@@ -237,7 +271,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             chunk_size = sender.audio_chunk_size
 
             # Audio shorter than a single chunk: never queued by
-            # `handle_audio_frame`, only ever sitting in `_audio_buffer`.
+            # `handle_audio_frame`, only ever sitting in the buffer.
             partial_audio = b"\x03\x04" * (chunk_size // 4)
             partial_chunk = TTSAudioRawFrame(
                 audio=partial_audio,
@@ -246,7 +280,7 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
                 context_id="ctx1",
             )
             await transport.process_frame(partial_chunk, FrameDirection.DOWNSTREAM)
-            self.assertEqual(len(sender._audio_buffer), len(partial_audio))
+            self.assertEqual(sender._buffered_audio_bytes, len(partial_audio))
             self.assertFalse(sender._bot_speaking)
 
             await transport.process_frame(
