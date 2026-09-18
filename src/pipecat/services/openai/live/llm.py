@@ -185,7 +185,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     decides on its own when to answer, when to stop talking when the user
     speaks over it, and when to *delegate* work — search, reasoning, tool use
     — to a backend text model while the conversation continues. In the
-    dual-LLM terms used throughout, the live model is the *frontend* (the
+    frontend/backend terms used throughout, the live model is the *frontend* (the
     conversational model) and the delegated-to model is the *backend*. There
     is no client-side turn detection or response triggering: the pipeline
     streams audio in and plays audio out.
