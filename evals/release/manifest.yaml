@@ -364,6 +364,14 @@ suite:
     scenarios: [scripted/dtmf_menu]
 
   #
+  # Voicemail detection: the bot holds its speech until a TypeSafe judgment
+  # says whether a person or a recording answered. Audio only: the detector
+  # reads the caller's side after STT, which text input skips.
+  #
+  - bot: features/features-voicemail-detection.py
+    scenarios: [scripted/voicemail_detection]
+
+  #
   # Video avatar services
   #
   - bot: video-avatar/video-avatar-tavus-video-service.py
