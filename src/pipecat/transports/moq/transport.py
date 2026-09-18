@@ -212,12 +212,13 @@ _RECONNECT_BACKOFF_MAX_S = 2.0
 # session itself reports closed. After the subscriptions end, wait this long
 # for the session before concluding the peer left a session that stayed up.
 _SESSION_CLOSE_GRACE_S = 0.5
-# A healthy session receives keepalive/ACK traffic every ~3-5s even when
+# A healthy session receives keepalive/ACK traffic every ~2.5-5s even when
 # nothing is being published, so an inbound byte counter frozen this long
-# means the network path is dead (see ``_session_stalled``). Comfortably
-# above the keepalive cadence, far under QUIC's ~30s idle timeout.
+# means the network path is dead (see ``_session_stalled``). 3x the worst
+# observed gap — a false trigger rebuilds a healthy session — yet half of
+# QUIC's ~30s idle timeout.
 _SESSION_STALL_POLL_S = 1.0
-_SESSION_STALL_S = 8.0
+_SESSION_STALL_S = 15.0
 # After subscribing to the peer's tracks, how long to wait for the first
 # record or audio frame before treating the subscription as dead. A relay
 # keeps announcing a path whose route died and serves nothing on it, so an
@@ -334,12 +335,15 @@ class MOQParams(TransportParams):
             transport keeps redialing the relay after the session drops
             before it gives up, counted from when the drop is detected.
             A relay that vanishes without closing the session (killed
-            process, dead network path) is detected within seconds by
-            watching the connection's traffic counters, rather than
-            waiting out the QUIC idle timeout (~30 s).
-            Attempts back off from 0.5 s to 2 s. While it redials the peer
-            is not reported gone; once the window expires the transport
-            fires ``on_client_disconnected`` for a peer it had seen and
+            process, dead network path) is noticed by a traffic-stall
+            watchdog well before the QUIC idle timeout (~30 s) would
+            report it.
+            Attempts back off from 0.5 s to 2 s. The window must outlast
+            a load balancer failing a dead relay out (~30 s), since until
+            then redials can be pinned to the dead target.
+            While it redials the peer is not reported gone; once the
+            window expires the transport fires ``on_client_disconnected``
+            for a peer it had seen and
             pushes a permanent connectivity error. ``0`` disables
             redialing, so a dropped session ends the transport as a
             normal close. A token the relay refuses, whether at the dial
@@ -409,7 +413,7 @@ class MOQParams(TransportParams):
     client_tls_roots: list[str] | None = None
     client_tls_fingerprints: list[str] | None = None
     connection_timeout: float = 30.0
-    reconnect_timeout: float = 15.0
+    reconnect_timeout: float = 60.0
     serve: bool = False
     bind: str | None = None
     serve_bind: str | None = None
@@ -1079,13 +1083,13 @@ class MOQTransportClient:
         for ``_SESSION_STALL_S`` means the network path is dead. QUIC
         itself only notices such a loss at its idle timeout (~30 s in
         moq-native, not tunable through moq-ffi); returning early is what
-        starts the redial within seconds instead. Never returns when the
+        starts the redial at the stall threshold instead. Never returns when the
         backend reports no counters (the WebSocket fallback), leaving
         ``session.closed()`` as the only signal.
         """
         stats = getattr(session, "stats", None)
         last: int | None = None
-        stalled_s = 0.0
+        last_changed = time.monotonic()
         while True:
             received: int | None = None
             if stats is not None:
@@ -1100,11 +1104,9 @@ class MOQTransportClient:
                 continue
             if received != last:
                 last = received
-                stalled_s = 0.0
-            else:
-                stalled_s += _SESSION_STALL_POLL_S
-                if stalled_s >= _SESSION_STALL_S:
-                    return
+                last_changed = time.monotonic()
+            elif time.monotonic() - last_changed >= _SESSION_STALL_S:
+                return
             await asyncio.sleep(_SESSION_STALL_POLL_S)
 
     async def _on_peer_available(self):
