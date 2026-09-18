@@ -264,17 +264,13 @@ class BackendReplyStrategy:
             params: The ``delegate`` call.
         """
 
-    async def _nothing_said(self, params: FunctionCallParams) -> None:
-        """Settle the call when the backend had nothing to say."""
-        await params.result_callback({"error": "The backend finished without saying anything."})
-
 
 class OneShotBackendReplyStrategy(BackendReplyStrategy):
     """Delivers everything the backend produced at once, when it is done.
 
-    The ``delegate`` call's one result carries every output, in order; the
-    text alone when there was only one, and whatever came before when the
-    final output is empty. Reasoning summaries are left out.
+    The ``delegate`` call's one result carries every output, in order, under
+    ``outputs``; one alone, or none, under ``text``. Reasoning summaries are
+    left out.
     The default for a speech-to-speech frontend, whose function calls accept
     one result. It may not stay the default: if and when those services can
     take intermediate results, progress could reach such a frontend as it
@@ -298,10 +294,8 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
         outputs = [*progress, output.text] if output.text else progress
         if len(outputs) > 1:
             await params.result_callback({"outputs": outputs})
-        elif outputs:
-            await params.result_callback(outputs[0])
         else:
-            await self._nothing_said(params)
+            await params.result_callback({"text": outputs[0] if outputs else ""})
 
     async def fail(self, params: FunctionCallParams) -> None:
         """Drop the held outputs."""
@@ -311,9 +305,9 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
 class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
     """Relays the backend's progress as it comes, spoken as the backend's flag says.
 
-    Each output before the final one is recorded as an intermediate tool result;
-    the frontend is run on it, and so speaks it, exactly when the output's
-    ``prefers_spoken`` flag asks. A reasoning summary is recorded under
+    Each output is recorded as a tool result, the final one settling the
+    call, and the frontend is run on it, and so speaks it, exactly when the
+    output's ``prefers_spoken`` flag asks. A reasoning summary is recorded under
     ``reasoning`` rather than ``text``, so the frontend can tell the backend
     thinking from something to relay, and can say how the work is going if
     asked. The default for a text frontend.
@@ -324,18 +318,14 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
     async def deliver(
         self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
     ) -> None:
-        """Record progress as an intermediate result, run the frontend as flagged."""
-        if is_final:
-            if output.text:
-                await params.result_callback(output.text)
-            else:
-                await self._nothing_said(params)
-            return
-        if not output.text:
+        """Record the output as a tool result, and run the frontend as flagged."""
+        if not is_final and not output.text and not output.prefers_spoken:
             return
         await params.result_callback(
             {"reasoning" if output.is_thought else "text": output.text},
-            properties=FunctionCallResultProperties(is_final=False, run_llm=output.prefers_spoken),
+            properties=FunctionCallResultProperties(
+                is_final=is_final, run_llm=output.prefers_spoken
+            ),
         )
 
 
@@ -360,8 +350,7 @@ class BackendConnector:
     +-------------------+--------------------------------------+----------------------------------------------+
 
     A delegation that fails raises out of the tool handler, which the frontend
-    service settles as an error result; one that ends with nothing to say settles
-    the call by saying so. The function calls the backend makes on the way are
+    service settles as an error result. The function calls the backend makes on the way are
     reported in the frontend's pipeline as children of the ``delegate`` call,
     for clients to show; nothing else in the pipeline sees them.
 
