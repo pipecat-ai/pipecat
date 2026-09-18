@@ -52,6 +52,8 @@ async def test_context_follows_playback_and_survives_starvation(destination, fir
                 TTSStoppedFrame(context_id=owner),
             ):
                 frame.transport_destination = destination
+                if isinstance(frame, TTSStartedFrame):
+                    frame.metadata["response_id"] = owner
                 await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
 
         assert sender._tts_context_id is None
@@ -75,6 +77,11 @@ async def test_context_follows_playback_and_survives_starvation(destination, fir
         ]
         assert [frame.context_id for frame in starts] == ["first"] * 4 + ["second"] * 2 + [None] * 2
         assert all(frame.transport_destination == destination for frame in starts)
+        assert [frame.metadata.get("response_id") for frame in starts] == (
+            ["first"] * 4 + ["second"] * 2 + [None] * 2
+        )
+        starts[0].metadata["response_id"] = "changed"
+        assert starts[1].metadata["response_id"] == "first"
     finally:
         await sender.cleanup()
 
@@ -96,9 +103,12 @@ async def test_interruption_clears_playback_context():
     sender._create_clock_task = lambda: None
     sender._audio_queue = FrameQueue()
     try:
-        await sender._handle_frame(TTSStartedFrame(context_id="interrupted"))
+        start = TTSStartedFrame(context_id="interrupted")
+        start.metadata["response_id"] = "interrupted"
+        await sender._handle_frame(start)
         await sender.handle_interruptions(InterruptionFrame())
         await sender._bot_started_speaking()
         assert all(call.args[0].context_id is None for call in transport.push_frame.call_args_list)
+        assert all(not call.args[0].metadata for call in transport.push_frame.call_args_list)
     finally:
         await sender.cleanup()

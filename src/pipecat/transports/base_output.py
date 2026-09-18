@@ -463,6 +463,7 @@ class BaseOutputTransport(FrameProcessor):
             # Indicates if the bot is currently speaking.
             self._bot_speaking = False
             self._tts_context_id: str | None = None
+            self._tts_context_metadata: dict[str, Any] = {}
             # Indicates if TTS audio has been received since the last stop.
             self._tts_audio_received = False
             # Last time a BotSpeakingFrame was pushed.
@@ -600,6 +601,7 @@ class BaseOutputTransport(FrameProcessor):
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
             self._tts_context_id = None
+            self._tts_context_metadata = {}
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -718,8 +720,10 @@ class BaseOutputTransport(FrameProcessor):
 
             downstream_frame = BotStartedSpeakingFrame(context_id=self._tts_context_id)
             downstream_frame.transport_destination = self._destination
+            downstream_frame.metadata.update(self._tts_context_metadata)
             upstream_frame = BotStartedSpeakingFrame(context_id=self._tts_context_id)
             upstream_frame.transport_destination = self._destination
+            upstream_frame.metadata.update(self._tts_context_metadata)
 
             # Setting the siblings id
             upstream_frame.broadcast_sibling_id = downstream_frame.id
@@ -848,6 +852,7 @@ class BaseOutputTransport(FrameProcessor):
             elif isinstance(frame, TTSStartedFrame):
                 # Follow playback order; synthesis can already be on a later context.
                 self._tts_context_id = frame.context_id
+                self._tts_context_metadata = frame.metadata.copy()
                 await self._transport.write_transport_frame(frame)
             elif isinstance(frame, TTSStoppedFrame):
                 # We will only trigger bot stopped speaking based on the TTSStoppedFrame,
@@ -856,6 +861,7 @@ class BaseOutputTransport(FrameProcessor):
                     logger.debug("Bot stopped speaking based on TTSStoppedFrame")
                     await self._bot_stopped_speaking()
                 self._tts_context_id = None
+                self._tts_context_metadata = {}
             else:
                 await self._transport.write_transport_frame(frame)
 

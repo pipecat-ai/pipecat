@@ -1348,7 +1348,8 @@ class BotStartedSpeakingFrame(SystemFrame):
     """Frame indicating the bot started speaking.
 
     Emitted upstream and downstream by the BaseTransportOutput to indicate the
-    bot started speaking.
+    bot started speaking. For TTS playback, metadata is copied from the
+    corresponding TTSStartedFrame.
 
     Parameters:
         context_id: TTS context playing when speech starts, if available.
