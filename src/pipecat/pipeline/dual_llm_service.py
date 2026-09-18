@@ -230,9 +230,9 @@ class ExplicitBackendRequestStrategy(BackendRequestStrategy):
 class BackendReplyStrategy:
     """Turns each :class:`BackendOutput` into what the frontend hears about it.
 
-    The final output settles the ``delegate`` call, and always comes, with
-    empty text when the backend ended with nothing to say. What the frontend
-    hears of the outputs before it, and when, is what strategies differ on.
+    The final output settles the ``delegate`` call and always comes. What the
+    frontend hears of the outputs before it, and when, is what strategies
+    differ on. An output with no text is the strategy's to read.
     """
 
     #: Whether the strategy reports outputs before the final one as
@@ -265,7 +265,7 @@ class BackendReplyStrategy:
         """
 
     async def _nothing_said(self, params: FunctionCallParams) -> None:
-        """Settle the call when the backend's final output is empty."""
+        """Settle the call when the backend had nothing to say."""
         await params.result_callback({"error": "The backend finished without saying anything."})
 
 
@@ -289,7 +289,7 @@ class OneShotBackendReplyStrategy(BackendReplyStrategy):
         self, params: FunctionCallParams, output: BackendOutput, *, is_final: bool
     ) -> None:
         """Hold outputs back; deliver them all with the last."""
-        if output.is_thought:
+        if output.is_thought or (not output.text and not is_final):
             return
         if not is_final:
             self._progress.setdefault(params.tool_call_id, []).append(output.text)
@@ -330,6 +330,8 @@ class SpeakOnPrefersSpokenBackendReplyStrategy(BackendReplyStrategy):
                 await params.result_callback(output.text)
             else:
                 await self._nothing_said(params)
+            return
+        if not output.text:
             return
         await params.result_callback(
             {"reasoning" if output.is_thought else "text": output.text},
