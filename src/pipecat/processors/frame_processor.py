@@ -1262,6 +1262,21 @@ class FrameProcessor(BaseObject):
             await self.cancel_task(self.__process_frame_task)
             self.__process_frame_task = None
 
+    async def _process_frame_now(
+        self,
+        frame: Frame,
+        direction: FrameDirection,
+        callback: FrameCallback | None = None,
+    ):
+        """Process a frame immediately, bypassing the input and process queues.
+
+        Subclasses use this to let a frame skip the queues — and therefore any
+        active ``pause_processing_frames()`` gate — while still firing the
+        ``on_before_process_frame`` / ``on_after_process_frame`` events and the
+        frame callback.
+        """
+        await self.__process_frame(frame, direction, callback)
+
     async def __process_frame(
         self, frame: Frame, direction: FrameDirection, callback: FrameCallback | None
     ):
