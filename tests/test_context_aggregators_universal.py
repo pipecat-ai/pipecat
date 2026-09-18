@@ -1422,6 +1422,33 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_function_call_result_runs_llm_after_user_stops_speaking(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+            ),
+            UserStartedSpeakingFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
     async def test_function_call_cancel(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
