@@ -323,13 +323,13 @@ class BackendConnector:
     strategy delivers what the backend produces. Either may be given, or left
     to the connector to pick by frontend kind once it is bound:
 
-    +------------------+------------------------------------+--------------------------------------+
-    |                  | request                            | reply                                |
-    +==================+====================================+======================================+
-    | text frontend    | ``TranscriptBackendRequestStrategy`` | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
-    +------------------+------------------------------------+--------------------------------------+
-    | realtime frontend| ``ExplicitBackendRequestStrategy``   | ``OneShotBackendReplyStrategy``      |
-    +------------------+------------------------------------+--------------------------------------+
+    +-------------------+--------------------------------------+----------------------------------------------+
+    |                   | request                              | reply                                        |
+    +===================+======================================+==============================================+
+    | text frontend     | ``TranscriptBackendRequestStrategy`` | ``SpeakOnPrefersSpokenBackendReplyStrategy`` |
+    +-------------------+--------------------------------------+----------------------------------------------+
+    | realtime frontend | ``ExplicitBackendRequestStrategy``   | ``OneShotBackendReplyStrategy``              |
+    +-------------------+--------------------------------------+----------------------------------------------+
 
     A delegation that fails raises out of the tool handler, which the frontend
     service settles as an error result; one that ends with nothing to say settles
