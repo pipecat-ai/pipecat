@@ -260,7 +260,10 @@ async def test_speak_on_prefers_spoken_relays_progress_and_runs_the_frontend_as_
             {"text": "Almost there."},
             properties=FunctionCallResultProperties(is_final=False, run_llm=True),
         ),
-        call("It's 62 and raining."),
+        call(
+            {"text": "It's 62 and raining."},
+            properties=FunctionCallResultProperties(is_final=True, run_llm=True),
+        ),
     ]
 
 
@@ -314,7 +317,9 @@ async def test_one_shot_delivers_a_lone_output_as_text(monkeypatch):
 
     await _bound(BackendConnector(), realtime=True).delegate(params)
 
-    assert params.result_callback.await_args_list == [call("It's 62 and raining.")]  # type: ignore[attr-defined]
+    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+        call({"text": "It's 62 and raining."})
+    ]
 
 
 @pytest.mark.asyncio
@@ -358,12 +363,17 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
     assert (pushed.function_name, pushed.tool_call_id) == ("get_weather", "toolu_1")
     assert pushed.parent_tool_call_id == "call_1"
     # The call is reported, not delivered to the frontend as a result.
-    assert params.result_callback.await_args_list == [call("It's 62 and raining.")]  # type: ignore[attr-defined]
+    assert params.result_callback.await_args_list == [  # type: ignore[attr-defined]
+        call(
+            {"text": "It's 62 and raining."},
+            properties=FunctionCallResultProperties(is_final=True, run_llm=True),
+        )
+    ]
 
 
 @pytest.mark.asyncio
-async def test_an_output_with_no_text_is_skipped_by_both_strategies(monkeypatch):
-    blank = BackendOutput(text="", prefers_spoken=True)
+async def test_empty_progress_is_skipped_unless_the_backend_asks_for_it_spoken(monkeypatch):
+    blank = BackendOutput(text="", prefers_spoken=False)
     for realtime in (False, True):
         _stream(monkeypatch, blank, _PROGRESS, blank, _FINAL)
         params = _params()
@@ -371,23 +381,39 @@ async def test_an_output_with_no_text_is_skipped_by_both_strategies(monkeypatch)
         await _bound(BackendConnector(), realtime=realtime).delegate(params)
 
         results = [c.args[0] for c in params.result_callback.await_args_list]  # type: ignore[attr-defined]
-        assert "" not in results
+        assert {"text": ""} not in results
         assert results[-1] in (
-            "It's 62 and raining.",
+            {"text": "It's 62 and raining."},
             {"outputs": ["Let me check.", "It's 62 and raining."]},
         )
 
+    _stream(monkeypatch, BackendOutput(text="", prefers_spoken=True), _FINAL)
+    params = _params()
+
+    await _bound(BackendConnector()).delegate(params)
+
+    assert params.result_callback.await_args_list[0] == call(  # type: ignore[attr-defined]
+        {"text": ""}, properties=FunctionCallResultProperties(is_final=False, run_llm=True)
+    )
+
 
 @pytest.mark.asyncio
-async def test_a_delegation_with_nothing_to_say_still_settles_the_call(monkeypatch):
+async def test_an_empty_final_output_still_settles_the_call(monkeypatch):
     _stream(monkeypatch, _PROGRESS, _EMPTY_FINAL)
     params = _params()
 
     await _bound(BackendConnector()).delegate(params)
 
     assert params.result_callback.await_args_list[-1] == call(  # type: ignore[attr-defined]
-        {"error": "The backend finished without saying anything."}
+        {"text": ""}, properties=FunctionCallResultProperties(is_final=True, run_llm=True)
     )
+
+    _stream(monkeypatch, _EMPTY_FINAL)
+    params = _params()
+
+    await _bound(BackendConnector(), realtime=True).delegate(params)
+
+    assert params.result_callback.await_args_list == [call({"text": ""})]  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +478,10 @@ async def test_a_local_backend_is_heard_through_the_delegate_tool():
     )
 
     results = [f for f in down if isinstance(f, FunctionCallResultFrame)]
-    assert [r.result for r in results] == [{"text": "Let me check."}, "It's 62 and raining."]
+    assert [r.result for r in results] == [
+        {"text": "Let me check."},
+        {"text": "It's 62 and raining."},
+    ]
     assert results[0].properties == FunctionCallResultProperties(is_final=False, run_llm=False)
     # The backend's own call reached the frontend's pipeline as a report only.
     reported = [f for f in down if isinstance(f, ExternalFunctionCallFrame)]
