@@ -235,6 +235,7 @@ _PROGRESS = BackendOutput(text="Let me check.", prefers_spoken=False)
 _SPOKEN_PROGRESS = BackendOutput(text="Almost there.", prefers_spoken=True)
 _FINAL = _BackendFinalOutput(BackendOutput(text="It's 62 and raining."))
 _THOUGHT = BackendOutput(text="Weather first.", is_thought=True, prefers_spoken=False)
+_EMPTY_FINAL = _BackendFinalOutput(BackendOutput(text=""))
 
 
 @pytest.mark.asyncio
@@ -276,8 +277,8 @@ async def test_one_shot_delivers_every_output_together(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_one_shot_delivers_what_it_held_when_no_final_output_comes(monkeypatch):
-    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS)
+async def test_one_shot_delivers_what_it_held_when_the_final_output_is_empty(monkeypatch):
+    _stream(monkeypatch, _PROGRESS, _SPOKEN_PROGRESS, _EMPTY_FINAL)
     params = _params()
     connector = _bound(BackendConnector(), realtime=True)
 
@@ -362,7 +363,7 @@ async def test_the_backends_calls_are_reported_as_children_of_the_delegate_call(
 
 @pytest.mark.asyncio
 async def test_a_delegation_with_nothing_to_say_still_settles_the_call(monkeypatch):
-    _stream(monkeypatch, _PROGRESS)
+    _stream(monkeypatch, _PROGRESS, _EMPTY_FINAL)
     params = _params()
 
     await _bound(BackendConnector()).delegate(params)
