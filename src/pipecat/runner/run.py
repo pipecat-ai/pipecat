@@ -538,11 +538,17 @@ def _apply_cli_args(runner_args: RunnerArguments, args: argparse.Namespace) -> N
     Every transport builds its own :class:`RunnerArguments`, so this is where
     the fields common to all of them are set: the parsed CLI namespace itself,
     and the flow config from ``--flow`` (read once at startup by
-    :func:`_read_flow_config`), which reaches the bot just as the config in a
-    ``/start`` request would.
+    :func:`_read_flow_config`).
+
+    A session that named its own flow in its ``/start`` request keeps it;
+    ``--flow`` is the default for the sessions that named none. One runner can
+    therefore serve a different flow per session and still have something to
+    fall back on, which is what a deployed bot needs: one process, many
+    sessions, each potentially trying a different flow.
     """
     runner_args.cli_args = args
-    runner_args.flow_config = getattr(args, "flow_config", None)
+    if runner_args.flow_config is None:
+        runner_args.flow_config = getattr(args, "flow_config", None)
 
 
 def _read_flow_config(path: str | None) -> str | None:
@@ -649,23 +655,30 @@ def _configure_server_app(args: argparse.Namespace):
     # flow and the /sessions/{session_id}/... proxy routes.
     active_sessions: dict[str, dict[str, Any]] = {}
 
+    # session_id -> the flow config that session named. Kept because a WebRTC
+    # bot starts later, when the offer arrives and the /start request is gone.
+    session_flows: dict[str, str] = {}
+
     # Consumed WebSocket tokens (one-time use). Shared across both WebSocket
     # endpoint families (/ws and /ws-client).
     ws_used_tokens: set[str] = set()
 
     _setup_frontend_routes(app)
-    _setup_webrtc_routes(app, args, active_sessions)
+    _setup_webrtc_routes(app, args, active_sessions, session_flows)
     _setup_daily_routes(app, args)
     _setup_telephony_routes(app, args, ws_used_tokens)
     _setup_websocket_routes(app, args, ws_used_tokens)
-    _setup_unified_start_route(app, args, active_sessions)
+    _setup_unified_start_route(app, args, active_sessions, session_flows)
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
 
 
 def _setup_unified_start_route(
-    app: FastAPI, args: argparse.Namespace, active_sessions: dict[str, dict[str, Any]]
+    app: FastAPI,
+    args: argparse.Namespace,
+    active_sessions: dict[str, dict[str, Any]],
+    session_flows: dict[str, str],
 ):
     """Register the unified POST /start and GET /status endpoints.
 
@@ -720,8 +733,24 @@ def _setup_unified_start_route(
                 "createDailyRoom": true,
                 "dailyRoomProperties": {...},
                 "dailyMeetingTokenProperties": {...},
-                "body": {...}
+                "body": {...},
+
+                // Any transport: the Pipecat Flows config this session runs,
+                // as YAML or JSON text. It reaches the bot as
+                // `runner_args.flow_config`; without it the bot runs the file
+                // given to `--flow`, or whatever flow it ships with.
+                "flow_config": "<the flow, as YAML or JSON text>"
             }
+
+        ``flow_config`` sits beside ``body`` rather than inside it because it is
+        the runner's to act on and ``body`` is the bot's. Telephony sessions
+        cannot use it: their bot starts when the provider connects to ``/ws``,
+        which carries nothing from this request.
+
+        A platform that stores flows may let a session name one by id instead,
+        and resolve it to the text before the bot is started. This runner has
+        nothing to resolve an id against, so it warns and ignores a
+        ``flow_id``; the flow itself is the only form it takes.
 
         For WebRTC, ``iceConfig`` in the response carries the servers the runner
         was started with (``--ice-servers`` or ``PIPECAT_ICE_SERVERS``). When the
@@ -734,6 +763,15 @@ def _setup_unified_start_route(
         except Exception as e:
             logger.error(f"Failed to parse request body: {e}")
             request_data = {}
+
+        # The flow this session runs, if it named one. `--flow` is the default
+        # for a session that did not, applied by `_apply_cli_args`.
+        session_flow = request_data.get("flow_config")
+        if request_data.get("flow_id"):
+            logger.warning(
+                "Ignoring flow_id: this runner has no store to resolve one against. "
+                "Send the flow itself as flow_config, or start the runner with --flow."
+            )
 
         # Determine transport: explicit field → legacy Daily hint → CLI default → webrtc
         transport = request_data.get("transport")
@@ -765,6 +803,8 @@ def _setup_unified_start_route(
             # WebRTC: register the session; the bot starts when the WebRTC offer arrives.
             session_id = str(uuid.uuid4())
             active_sessions[session_id] = request_data.get("body", {})
+            if session_flow:
+                session_flows[session_id] = session_flow
 
             result = StartBotResult(
                 sessionId=session_id,
@@ -835,6 +875,7 @@ def _setup_unified_start_route(
                         token=token,
                         body=body,
                         session_id=session_id,
+                        flow_config=session_flow,
                     )
                     result = StartBotResult(
                         dailyRoom=room_url,
@@ -842,7 +883,9 @@ def _setup_unified_start_route(
                         sessionId=session_id,
                     )
             else:
-                runner_args = RunnerArguments(body=body, session_id=session_id)
+                runner_args = RunnerArguments(
+                    body=body, session_id=session_id, flow_config=session_flow
+                )
 
             _apply_cli_args(runner_args, args)
             _start_bot_session(bot_module.bot(runner_args))
@@ -867,6 +910,7 @@ def _setup_unified_start_route(
                 token=agent_token,
                 body=body,
                 session_id=session_id,
+                flow_config=session_flow,
             )
             _apply_cli_args(runner_args, args)
             _start_bot_session(bot_module.bot(runner_args))
@@ -930,6 +974,7 @@ def _setup_unified_start_route(
                 body=body,
                 session_id=session_id,
                 ready_event=ready_event,
+                flow_config=session_flow,
             )
             _apply_cli_args(runner_args, args)
 
@@ -982,7 +1027,10 @@ def _setup_frontend_routes(app: FastAPI):
 
 
 def _setup_webrtc_routes(
-    app: FastAPI, args: argparse.Namespace, active_sessions: dict[str, dict[str, Any]]
+    app: FastAPI,
+    args: argparse.Namespace,
+    active_sessions: dict[str, dict[str, Any]],
+    session_flows: dict[str, str],
 ):
     """Set up WebRTC-specific routes."""
     if not _transport_routes_enabled("webrtc"):
@@ -1043,6 +1091,9 @@ def _setup_webrtc_routes(
                 webrtc_connection=connection,
                 body=request.request_data,
                 session_id=resolved_session_id,
+                # Named back at /start, which is where a WebRTC session says
+                # what it wants; by now that request is long gone.
+                flow_config=session_flows.get(resolved_session_id),
             )
             _apply_cli_args(runner_args, args)
             background_tasks.add_task(bot_module.bot, runner_args)
