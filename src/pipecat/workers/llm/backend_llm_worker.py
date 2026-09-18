@@ -388,7 +388,9 @@ class BackendLLMWorker(LLMContextWorker):
     - updates: a :class:`BackendOutput` payload for every piece of progress —
       reasoning summaries and what the backend says before calling tools —
       and a :class:`BackendToolCall` payload for each phase of each function
-      call the backend makes, so the frontend can report them.
+      call the backend makes, so the frontend can report them. An output with
+      no text is not sent, and is ignored if it arrives; only the final
+      output means something empty.
     - cancellation: a job the requester cancels interrupts the backend's
       pipeline, so the model stops and the next delegation starts clean.
     - response: the final output as a :class:`BackendOutput` payload, or
@@ -755,6 +757,8 @@ async def _delegate_to_backend(
             update_type = event.data.get("type", OUTPUT_UPDATE_TYPE)
             if update_type == OUTPUT_UPDATE_TYPE:
                 output = BackendOutput.from_payload(event.data)
+                # Progress with no text is nothing to deliver; the final
+                # output, below, is delivered whatever its text.
                 if output.text:
                     yield output
             elif update_type == TOOL_CALL_UPDATE_TYPE:
