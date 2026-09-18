@@ -739,19 +739,19 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             llm_invocation_params = adapter.get_llm_invocation_params(
                 self._context,
                 system_instruction=assert_given(self._settings.system_instruction),
+                service_tools=settings.tools,
             )
-
-            # tools given in the context override the tools in the session properties
-            if llm_invocation_params["tools"]:
-                settings.tools = cast(list[events.InworldTool], llm_invocation_params["tools"])
 
             # The adapter resolves conflicts between init-provided and
             # context-provided system instructions (preferring init-provided).
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
 
-        # Convert ToolsSchema to list of dicts if needed
-        if settings.tools and isinstance(settings.tools, ToolsSchema):
+            # The adapter settles the tools too: the context's own when it has
+            # any, else the init-provided ones; built-in tools ride along either way.
+            settings.tools = cast(list[events.InworldTool], llm_invocation_params["tools"])
+        else:
+            # No context yet: the init-provided tools; built-in tools ride along.
             settings.tools = cast(
                 list[events.InworldTool], adapter.from_standard_tools(settings.tools)
             )

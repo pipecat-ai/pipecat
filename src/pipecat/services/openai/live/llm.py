@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import re
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -61,7 +62,8 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm.backend_llm_worker import (
-    BackendOutput,
+    BackendToolCall,
+    _BackendFinalOutput,
     _delegate_to_backend,
     _render_transcript_request,
 )
@@ -183,7 +185,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
     decides on its own when to answer, when to stop talking when the user
     speaks over it, and when to *delegate* work — search, reasoning, tool use
     — to a backend text model while the conversation continues. In the
-    two-layer terms used throughout, the live model is the *frontend* (the
+    frontend/backend terms used throughout, the live model is the *frontend* (the
     conversational model) and the delegated-to model is the *backend*. There
     is no client-side turn detection or response triggering: the pipeline
     streams audio in and plays audio out.
@@ -957,24 +959,32 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         self._delegated_before = True
 
         answered = False
-
-        async def on_update(output: BackendOutput):
-            nonlocal answered
-            answered = True
-            await self._send_context_append(
-                delegation.id, output.text, spoken=output.prefers_spoken
-            )
-
         try:
-            # Every output, the final answer included, arrives through
-            # on_update, so the job's return value is not needed here.
-            await _delegate_to_backend(
-                self.pipeline_worker,
-                config.backend.name,
-                request=request,
-                on_update=on_update,
-                timeout_secs=config.timeout_secs,
-            )
+            # Closing the stream on the way out, however the loop ends, is
+            # what cancels the backend's job at once.
+            async with aclosing(
+                _delegate_to_backend(
+                    self.pipeline_worker,
+                    config.backend.name,
+                    request=request,
+                    timeout_secs=config.timeout_secs,
+                )
+            ) as events:
+                async for event in events:
+                    if isinstance(event, BackendToolCall):
+                        # Reported for clients, as the Responses-delegation
+                        # backend's calls are; the delegation itself is not a
+                        # call, so no parent.
+                        await self.push_frame(event.to_frame())
+                        continue
+                    if isinstance(event, _BackendFinalOutput):
+                        event = event.output
+                    if not event.text:
+                        continue
+                    answered = True
+                    await self._send_context_append(
+                        delegation.id, event.text, spoken=event.prefers_spoken
+                    )
             if not answered:
                 # The live model holds the conversation until the delegation
                 # says something, so a run that produced no text still gets a

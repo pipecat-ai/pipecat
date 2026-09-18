@@ -22,6 +22,7 @@ import pytest
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    ExternalFunctionCallFrame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
@@ -49,6 +50,7 @@ from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.workers.llm import BackendOutput
+from pipecat.workers.llm.backend_llm_worker import BackendToolCall, _BackendFinalOutput
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -1094,16 +1096,13 @@ def _client_delegation(delegation_id: str) -> events.DelegationMetadata:
 async def test_client_delegation_sends_the_fragments_since_the_last_one(monkeypatch):
     calls = []
 
-    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
+    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
         calls.append((worker, backend_name, request, timeout_secs))
-        await on_update(BackendOutput(text="Checking the weather.", prefers_spoken=True))
-        await on_update(BackendOutput(text="Still looking.", is_thought=True, prefers_spoken=False))
-        await on_update(
-            BackendOutput(
-                text="It's 62 and raining in Seattle.", is_final=True, prefers_spoken=True
-            )
+        yield BackendOutput(text="Checking the weather.", prefers_spoken=True)
+        yield BackendOutput(text="Still looking.", is_thought=True, prefers_spoken=False)
+        yield _BackendFinalOutput(
+            BackendOutput(text="It's 62 and raining in Seattle.", prefers_spoken=True)
         )
-        return "It's 62 and raining in Seattle."
 
     service, recorder = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
 
@@ -1149,9 +1148,10 @@ async def test_the_backend_reads_whole_utterances_not_fragments(monkeypatch):
     """Frame-boundary fragments are joined back up, spacing and all."""
     calls = []
 
-    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
+    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
         calls.append(request)
-        return ""
+        for output in ():
+            yield output
 
     service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
 
@@ -1183,9 +1183,10 @@ async def test_a_reset_starts_the_next_delegation_transcript_afresh(monkeypatch)
     """A new session has no previous delegation for a transcript to run from."""
     requests: list[str] = []
 
-    async def fake_delegate_to_backend(worker, backend_name, *, request, on_update, timeout_secs):
+    async def fake_delegate_to_backend(worker, backend_name, *, request, timeout_secs):
         requests.append(request)
-        return ""
+        for output in ():
+            yield output
 
     service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
     service._connect = AsyncMock()
@@ -1210,6 +1211,7 @@ async def test_a_reset_starts_the_next_delegation_transcript_afresh(monkeypatch)
 async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
     async def failing_delegate_to_backend(*args, **kwargs):
         raise JobError("timed out")
+        yield
 
     service, recorder = await _client_delegation_service(monkeypatch, failing_delegate_to_backend)
     service.push_error = AsyncMock()
@@ -1224,9 +1226,30 @@ async def test_client_delegation_failure_is_reported_to_the_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_backends_calls_are_reported_without_a_parent(monkeypatch):
+    async def fake_delegate_to_backend(*args, **kwargs):
+        yield BackendToolCall("in_progress", "get_weather", "toolu_1", arguments={"location": "DC"})
+        yield _BackendFinalOutput(BackendOutput(text="75 and nice."))
+
+    service, _ = await _client_delegation_service(monkeypatch, fake_delegate_to_backend)
+    service.push_frame = AsyncMock()
+
+    await service._run_client_delegation(_client_delegation("item_d1"))
+
+    (pushed,) = [c.args[0] for c in service.push_frame.await_args_list]
+    assert isinstance(pushed, ExternalFunctionCallFrame)
+    assert (pushed.function_name, pushed.tool_call_id, pushed.parent_tool_call_id) == (
+        "get_weather",
+        "toolu_1",
+        None,
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkeypatch):
     async def silent_delegate_to_backend(*args, **kwargs):
-        return ""
+        for output in ():
+            yield output
 
     service, recorder = await _client_delegation_service(monkeypatch, silent_delegate_to_backend)
 
@@ -1238,10 +1261,9 @@ async def test_a_delegation_that_produced_nothing_still_answers_the_model(monkey
 
 @pytest.mark.asyncio
 async def test_long_delegation_results_are_chunked_at_sentence_boundaries(monkeypatch):
-    async def _delegate_to_backend(*args, on_update, **kwargs):
+    async def _delegate_to_backend(*args, **kwargs):
         text = " ".join(f"Sentence number {i} is here." for i in range(120))
-        await on_update(BackendOutput(text=text, prefers_spoken=True))
-        return ""
+        yield BackendOutput(text=text, prefers_spoken=True)
 
     service, recorder = await _client_delegation_service(monkeypatch, _delegate_to_backend)
     await service._run_client_delegation(_client_delegation("item_d1"))
