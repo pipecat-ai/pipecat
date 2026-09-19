@@ -221,7 +221,7 @@ class TestJudgeFromConfig(unittest.TestCase):
     def test_factory_escape_hatch(self):
         j = EvalJudge.from_config({"factory": "tests.test_evals_services._fake_judge_llm"})
         self.assertIsNotNone(j)
-        self.assertEqual(j._service[0], "FAKE_JUDGE")
+        self.assertEqual(j.classifier.llm[0], "FAKE_JUDGE")
 
 
 if __name__ == "__main__":

@@ -62,6 +62,11 @@ class BaseEvalDriver(ABC, Generic[R]):
     async def run(self) -> list[EvalAssertionFailure]:
         """Drive the conversation to its end and return the failures."""
 
+    async def close(self) -> None:
+        """Close the judge, once the run has ended."""
+        if self._judge is not None:
+            await self._judge.close()
+
     @abstractmethod
     def result(
         self,

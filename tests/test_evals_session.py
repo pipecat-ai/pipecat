@@ -337,6 +337,10 @@ class _FakeJudge:
         self.segments: list[str] = []
         # The calls judged.
         self.call_asks: list[tuple[str, dict | None, str]] = []
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
 
     def add_user_message(self, text):
         pass
@@ -1061,6 +1065,17 @@ class TestResponseTranscriptionSkip(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertIn("response", result.skipped)
         self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_a_skipped_run_closes_its_judge(self):
+        scenario = EvalScriptScenario(
+            name="t",
+            bot_audio=False,
+            turns=[EvalScriptTurn(user="x", expect=[EvalExpectation(event="response", eval="ok")])],
+        )
+        judge = _FakeJudge([])
+        result = await EvalScriptSession(scenario, "ws://localhost:0", judge=judge).run()
+        self.assertIsNotNone(result.skipped)
+        self.assertTrue(judge.closed)
 
 
 class TestTextContainsResolution(unittest.TestCase):
@@ -2146,11 +2161,31 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         # A run that never reached the bot scored nothing.
         self.assertEqual([t.status for t in result.turns], ["not_run"])
 
+    async def test_a_run_that_never_reaches_the_bot_closes_its_judge(self):
+        scenario = EvalScriptScenario(
+            name="no_bot",
+            turns=[
+                EvalScriptTurn(user="x", expect=[EvalExpectation(event="llm_response", eval="ok")])
+            ],
+        )
+        judge = _FakeJudge([])
+        result = await EvalScriptSession.from_scenario(
+            scenario,
+            f"ws://localhost:{_free_port()}",
+            params=EvalSessionParams(connect_timeout_s=0.5),
+            judge=judge,
+        ).run()
+        self.assertEqual(result.failures[0].event_name, "<connect>")
+        self.assertTrue(judge.closed)
+
     async def test_unexpected_error_surfaced_not_swallowed(self):
         # An unexpected error mid-run (here a judge raising) must be reported as a
         # structured failure with its traceback, not propagate out raw and get
         # swallowed as a bare "error:" with no eval.log.
         class _BoomJudge:
+            async def close(self):
+                pass
+
             def add_user_message(self, text):
                 raise RuntimeError("judge boom")
 
@@ -2410,6 +2445,9 @@ class _YesJudge:
         self.transcript: list[dict] = []
         self.criteria: list[str] = []
         self.run_criteria: dict[str, str] = {}
+
+    async def close(self):
+        pass
 
     def add_user_message(self, text):
         self.transcript.append({"role": "user", "content": text})

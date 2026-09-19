@@ -312,6 +312,9 @@ class _FakeConversationJudge:
         self.criteria: list[str] = []
         self.run_criteria: dict[str, str] = {}
 
+    async def close(self):
+        pass
+
     def add_user_message(self, text):
         self.transcript.append({"role": "user", "content": text})
 

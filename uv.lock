@@ -5723,6 +5723,7 @@ deepgram = [
     { name = "deepgram-sdk" },
 ]
 evals = [
+    { name = "httpx", extra = ["http2"] },
     { name = "jinja2" },
     { name = "kokoro-onnx" },
     { name = "moonshine-voice" },
@@ -5978,6 +5979,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["cli"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'lemonslice'" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'tavus'" },
+    { name = "pipecat-ai", extras = ["jev"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["kokoro"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["mcp"], marker = "extra == 'keenable'" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'evals'" },
