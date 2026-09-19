@@ -8,6 +8,7 @@
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -68,8 +69,9 @@ class LLMContextSummarizer(BaseObject):
 
     When ``auto_trigger=True`` (the default), summarization is triggered
     automatically based on the configured thresholds in
-    ``LLMAutoContextSummarizationConfig``. When ``auto_trigger=False``,
-    threshold checks are skipped and summarization only happens when an
+    ``LLMAutoContextSummarizationConfig`` or a custom
+    ``should_summarize_callback``. When ``auto_trigger=False``, automatic
+    checks are skipped and summarization only happens when an
     ``LLMSummarizeContextFrame`` is explicitly pushed into the pipeline.
 
     Both modes can coexist: set ``auto_trigger=True`` and also push
@@ -107,6 +109,7 @@ class LLMContextSummarizer(BaseObject):
         context: LLMContext,
         config: LLMAutoContextSummarizationConfig | None = None,
         auto_trigger: bool = True,
+        should_summarize_callback: Callable[[LLMContext], bool] | None = None,
     ):
         """Initialize the context summarizer.
 
@@ -115,16 +118,20 @@ class LLMContextSummarizer(BaseObject):
             config: Auto-summarization configuration controlling both trigger
                 thresholds and default summary generation parameters. If None,
                 uses default ``LLMAutoContextSummarizationConfig`` values.
-            auto_trigger: Whether to automatically trigger summarization when
-                thresholds are reached. When False, summarization only happens
-                when an ``LLMSummarizeContextFrame`` is pushed into the pipeline.
-                Defaults to True.
+            auto_trigger: Whether to automatically trigger summarization. When
+                False, summarization only happens when an
+                ``LLMSummarizeContextFrame`` is pushed into the pipeline. Defaults
+                to True.
+            should_summarize_callback: Optional predicate for automatic
+                summarization. When provided, it replaces threshold evaluation
+                after automatic triggering and in-progress guards are checked.
         """
         super().__init__()
 
         self._context = context
         self._auto_config = config or LLMAutoContextSummarizationConfig()
         self._auto_trigger = auto_trigger
+        self._should_summarize_callback = should_summarize_callback
 
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
@@ -254,16 +261,16 @@ class LLMContextSummarizer(BaseObject):
     def _should_summarize(self) -> bool:
         """Determine if context summarization should be triggered.
 
-        Evaluates whether the current context has reached either the token
-        threshold or message count threshold that warrants compression.
-        Either threshold can be ``None`` to disable that check; at least one
-        must be set (enforced at config construction time).
+        Uses ``should_summarize_callback`` when configured. Otherwise, evaluates
+        whether the current context has reached either the token threshold or
+        message count threshold that warrants compression. Either threshold can
+        be ``None`` to disable that check; at least one must be set (enforced at
+        config construction time).
 
         Returns:
             True when ``auto_trigger`` is enabled, no summarization is in
-            progress, and either the token count exceeds ``max_context_tokens``
-            or the message count since the last summary exceeds
-            ``max_unsummarized_messages`` — whichever of the two is set.
+            progress, and the configured callback returns True or a configured
+            threshold is exceeded.
         """
         logger.trace(f"{self}: Checking if context summarization is needed")
 
@@ -273,6 +280,9 @@ class LLMContextSummarizer(BaseObject):
         if self._summarization_in_progress:
             logger.debug(f"{self}: Summarization already in progress")
             return False
+
+        if self._should_summarize_callback is not None:
+            return self._should_summarize_callback(self._context)
 
         # Estimate tokens in context
         total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
