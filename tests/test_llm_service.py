@@ -1192,6 +1192,41 @@ class TestFunctionCallBatchInference(unittest.IsolatedAsyncioTestCase):
     async def test_one_inference_after_the_batch_sequentially(self):
         await self._assert_one_inference_after_the_batch(run_in_parallel=False)
 
+    async def test_yielding_announcement_does_not_duplicate_or_reopen_calls(self):
+        """Frame hooks may yield while sibling tool tasks are ready to run."""
+        llm = _BatchingLLM()
+        llm.register_function("prompt", _prompt)
+        llm.register_function("slow", _prompt)
+        announced_ids = []
+        announcement_counts_at_results = []
+
+        @llm.event_handler("on_before_push_frame")
+        async def yield_during_announcement(service, frame):
+            if isinstance(frame, FunctionCallInProgressFrame):
+                await asyncio.sleep(0)
+
+        @llm.event_handler("on_after_push_frame")
+        async def record_announcement(service, frame):
+            if isinstance(frame, FunctionCallInProgressFrame):
+                announced_ids.append(frame.tool_call_id)
+            elif isinstance(frame, FunctionCallResultFrame):
+                announcement_counts_at_results.append(len(announced_ids))
+
+        aggregators = LLMContextAggregatorPair(LLMContext())
+        pipeline = Pipeline([aggregators.user(), llm, aggregators.assistant()])
+        await run_test(pipeline, frames_to_send=[LLMRunFrame(), SleepFrame(0.5)])
+
+        # Each announcement has one downstream and one upstream copy.
+        self.assertEqual(
+            announced_ids, ["call_1", "call_1", "call_2", "call_2", "call_3", "call_3"]
+        )
+        self.assertEqual(announcement_counts_at_results, [6] * 6)
+        self.assertEqual(len(llm.inferences), 2)
+        self.assertEqual(
+            llm.inferences[1],
+            [(call_id, '"prompt result"') for call_id in ("call_1", "call_2", "call_3")],
+        )
+
 
 class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
     """Coverage for `LLMService.append_system_instruction`."""

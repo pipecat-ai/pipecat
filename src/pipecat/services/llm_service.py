@@ -13,7 +13,7 @@ import json
 import uuid
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -227,6 +227,8 @@ class FunctionCallRunnerItem:
             included, in the order the LLM issued them. Whichever of them runs
             first announces the whole batch before running its handler.
         announced: Whether this call's in-progress frame has been broadcast.
+        announcement_lock: Shared batch lock held until every in-progress
+            frame has been broadcast, including when frame delivery yields.
         settled: Whether the call has already reached a terminal state — a
             final result, a timeout, or a cancellation. Results reported after
             that are rejected, since the rest of the pipeline has stopped
@@ -242,6 +244,7 @@ class FunctionCallRunnerItem:
     group_id: str | None = None
     batch: Sequence[FunctionCallRunnerItem] = ()
     announced: bool = False
+    announcement_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     settled: bool = False
 
 
@@ -1543,8 +1546,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 )
             )
 
+        announcement_lock = asyncio.Lock()
         for runner_item in runner_items:
             runner_item.batch = runner_items
+            runner_item.announcement_lock = announcement_lock
 
         if self._run_in_parallel:
             await self._run_parallel_function_calls(runner_items)
@@ -1569,19 +1574,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Args:
             runner_item: The call about to run.
         """
-        if runner_item.announced:
-            return
-
-        for item in runner_item.batch or (runner_item,):
-            item.announced = True
-            await self.broadcast_frame(
-                FunctionCallInProgressFrame,
-                function_name=item.function_name,
-                tool_call_id=item.tool_call_id,
-                arguments=item.arguments,
-                cancel_on_interruption=item.registry_item.cancel_on_interruption,
-                group_id=item.group_id,
-            )
+        async with runner_item.announcement_lock:
+            for item in runner_item.batch or (runner_item,):
+                if item.announced:
+                    continue
+                await self.broadcast_frame(
+                    FunctionCallInProgressFrame,
+                    function_name=item.function_name,
+                    tool_call_id=item.tool_call_id,
+                    arguments=item.arguments,
+                    cancel_on_interruption=item.registry_item.cancel_on_interruption,
+                    group_id=item.group_id,
+                )
+                item.announced = True
 
     async def _create_sequential_runner_task(self):
         if not self._sequential_runner_task:
