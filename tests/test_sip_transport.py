@@ -18,9 +18,12 @@ pytest.importorskip("baresip")
 
 from pipecat.frames.frames import (  # noqa: E402
     ClientConnectedFrame,
+    InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
+    KeypadEntry,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 from pipecat.transports.base_output import BaseOutputTransport  # noqa: E402
@@ -257,7 +260,7 @@ async def test_dtmf_event_and_frame_push():
     set_active_call(connection, handle=9, incoming=True)
     recorded = record_events(transport, ["on_dtmf_event"])
 
-    await connection._call_event_handler("dtmf", SimpleNamespace(digit="5", duration_ms=80))
+    await connection._call_event_handler("dtmf", SimpleNamespace(digit="5", duration_ms=80), "9")
     await settle()
 
     assert recorded[0][1][0] == {"sessionId": "9", "tone": "5"}
@@ -272,7 +275,7 @@ async def test_dtmf_a_to_d_filtered_but_reported():
     set_active_call(connection, handle=9, incoming=True)
     recorded = record_events(transport, ["on_dtmf_event"])
 
-    await connection._call_event_handler("dtmf", SimpleNamespace(digit="A", duration_ms=80))
+    await connection._call_event_handler("dtmf", SimpleNamespace(digit="A", duration_ms=80), "9")
     await settle()
 
     assert recorded[0][1][0]["tone"] == "A"
@@ -419,17 +422,17 @@ async def test_write_audio_frame_bails_when_call_dies_mid_retry():
 
 @pytest.mark.asyncio
 async def test_audio_warning_routed_by_direction():
+    # Direction and session id ride on the event itself, captured when
+    # the warning fired — the call may already be detached by now.
     transport, connection = make_transport()
     recorded = record_events(transport, ["on_dialin_warning", "on_dialout_warning"])
 
-    set_active_call(connection, handle=9, incoming=True)
-    await connection._call_event_handler("audio_warning", "rx underrun")
+    await connection._call_event_handler("audio_warning", "rx underrun", "in", "9")
     await settle()
     assert recorded[0][0] == "on_dialin_warning"
     assert recorded[0][1][0] == {"sessionId": "9", "errorMsg": "rx underrun"}
 
-    set_active_call(connection, handle=7, incoming=False)
-    await connection._call_event_handler("audio_warning", "tx starved")
+    await connection._call_event_handler("audio_warning", "tx starved", "out", "7")
     await settle()
     assert recorded[1][0] == "on_dialout_warning"
 
@@ -511,6 +514,80 @@ async def test_dialout_failure_fires_dialout_error():
         "errorMsg": "busy here",
         "error": "CallBusy",
     }
+
+
+@pytest.mark.asyncio
+async def test_write_dtmf_native_without_call_does_not_raise():
+    # A DTMF frame can arrive with no active call (queued across a
+    # hangup); raising would kill the media sender task for the session.
+    transport, connection = make_transport()
+    output = transport.output()
+
+    await output._write_dtmf_native(OutputDTMFFrame(button=KeypadEntry.ONE))
+
+    connection.send_dtmf.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_connect_failure_fires_on_error():
+    transport, connection = make_transport()
+    connection.connect = AsyncMock(side_effect=RuntimeError("401 Unauthorized"))
+    recorded = record_events(transport, ["on_error"])
+    output = transport.output()
+
+    with patch.object(BaseOutputTransport, "setup", AsyncMock()):
+        with pytest.raises(RuntimeError):
+            await output.setup(Mock())
+    await settle()
+
+    assert recorded[0][1][0] == "401 Unauthorized"
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_pushes_input_frames():
+    from pipecat.transports.sip.transport import SIPInputTransport
+
+    transport, connection = make_transport()
+    input_transport = SIPInputTransport(transport, connection, transport._params)
+    input_transport._streaming = True
+    input_transport._sample_rate = 8000  # pipeline rate == call rate: no resampling
+    input_transport.push_audio_frame = AsyncMock()
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000))
+    pcm = b"\x01\x00" * 160  # 20 ms at 8 kHz
+    # One poll with audio, one empty poll, then cancellation — which
+    # must escape the reader untouched.
+    connection.read_audio = Mock(side_effect=[pcm, b"", asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await input_transport._receive_audio()
+
+    frame = input_transport.push_audio_frame.await_args.args[0]
+    assert isinstance(frame, InputAudioRawFrame)
+    assert frame.audio == pcm
+    assert frame.sample_rate == 8000
+    assert frame.num_channels == 1
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_resamples_to_pipeline_rate():
+    from pipecat.transports.sip.transport import SIPInputTransport
+
+    transport, connection = make_transport()
+    input_transport = SIPInputTransport(transport, connection, transport._params)
+    input_transport._streaming = True
+    input_transport._sample_rate = 16000  # call is 8 kHz: upsample
+    input_transport.push_audio_frame = AsyncMock()
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000))
+    pcm = b"\x01\x00" * 160
+    connection.read_audio = Mock(side_effect=[pcm, pcm, asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await input_transport._receive_audio()
+
+    input_transport.push_audio_frame.assert_awaited()
+    frame = input_transport.push_audio_frame.await_args.args[0]
+    assert frame.sample_rate == 16000
+    assert len(frame.audio) > 0
 
 
 @pytest.mark.asyncio
