@@ -715,7 +715,7 @@ class LLMRunFrame(DataFrame):
 
 
 @dataclass
-class LLMMessagesAppendFrame(DataFrame):
+class LLMMessagesAppendFrame(DataFrame, UninterruptibleFrame):
     """Frame containing LLM messages to append to current context.
 
     A frame containing a list of LLM messages that need to be added to the
@@ -731,7 +731,7 @@ class LLMMessagesAppendFrame(DataFrame):
 
 
 @dataclass
-class LLMMessagesUpdateFrame(DataFrame):
+class LLMMessagesUpdateFrame(DataFrame, UninterruptibleFrame):
     """Frame containing LLM messages to replace current context.
 
     A frame containing a list of new LLM messages to replace the current
@@ -764,7 +764,7 @@ class LLMMessagesTransformFrame(DataFrame):
 
 
 @dataclass
-class LLMSetToolsFrame(DataFrame):
+class LLMSetToolsFrame(DataFrame, UninterruptibleFrame):
     """Frame containing tools for LLM function calling.
 
     Used to change the set of tools advertised to the LLM mid-conversation.
