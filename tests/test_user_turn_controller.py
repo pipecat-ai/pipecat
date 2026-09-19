@@ -89,6 +89,88 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_muted_stop_frame_does_not_strand_user_speaking(self):
+        """A stop frame suppressed by a mute strategy must still clear speaking state.
+
+        `_user_speaking` is edge-triggered derived state and nothing re-derives it
+        from ground truth, so a discarded stop edge latches it True and every
+        guard that reads it fails closed for the rest of the call — including
+        `_trigger_user_turn_stop` and its own timeout watchdog.
+
+        `process_muted_frame` applies the state transition without running any
+        strategy, so the muted user still cannot drive a turn decision.
+        """
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        stopped = False
+        started = False
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started
+            started = True
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal stopped
+            stopped = True
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        self.assertTrue(started)
+
+        # The user stops, but a mute window is open so the frame never reaches
+        # `process_frame`. Without the state transition below the turn can never
+        # be finalized again.
+        started = False
+        await controller.process_muted_frame(VADUserStoppedSpeakingFrame())
+
+        # The muted frame must not have driven any turn decision.
+        self.assertFalse(started)
+        self.assertFalse(stopped)
+
+        # But the turn is now finalizable, which is the whole point.
+        await controller.process_frame(UserTurnInferenceCompletedFrame())
+        self.assertTrue(stopped)
+
+        await controller.cleanup()
+
+    async def test_muted_start_frame_does_not_set_user_speaking(self):
+        """Only the `False` transition is applied to muted frames.
+
+        Suppressing a start is the mute strategy working as intended, so a muted
+        start frame must not mark the user as speaking — that would reintroduce
+        the latch from the other direction.
+        """
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+
+        started = False
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal started
+            started = True
+
+        await controller.process_muted_frame(VADUserStartedSpeakingFrame())
+        self.assertFalse(started)
+
+        await controller.cleanup()
+
     async def test_default_user_turn_strategies(self):
         controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
