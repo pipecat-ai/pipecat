@@ -115,6 +115,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         params: InputParams | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        ws_send_timeout: float | None = 5.0,
         enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
         **kwargs,
@@ -150,6 +151,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 recommendation and this setting with it.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
+            ws_send_timeout: Maximum time in seconds to send audio or a control
+                message before closing the stalled connection. Audio sends
+                reconnect and retry once. Defaults to 5.0; None disables the
+                timeout.
             enable_eager_end_of_turn: Whether to answer Flux's predicted end
                 of turn ahead of the committed one, so the gap between the two
                 is spent generating a response rather than waiting. The response
@@ -252,7 +257,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self, reconnect_on_error=False)
+        WebsocketService.__init__(self, reconnect_on_error=False, ws_send_timeout=ws_send_timeout)
 
         self._api_key = api_key
         self._url = url
@@ -273,14 +278,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             self._websocket is None
         ):  # should never happen — caller should gate on _transport_is_active()
             return
-        await self._websocket.send(audio)
+        await self._send_websocket_message(audio)
 
     async def _transport_send_json(self, message: dict):
         if (
             self._websocket is None
         ):  # should never happen — caller should gate on _transport_is_active()
             return
-        await self._websocket.send(json.dumps(message))
+        await self._send_websocket_message(json.dumps(message))
 
     def _transport_is_active(self) -> bool:
         return self._websocket is not None and self._websocket.state is State.OPEN
