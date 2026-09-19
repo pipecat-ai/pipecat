@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Daily SIP client configuration utilities.
+"""SIP account configuration utilities for the development runner.
 
 This module provides helper functions for provisioning the SIP account a bot
 registers with. It uses an existing account specified via environment

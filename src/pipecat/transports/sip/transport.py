@@ -131,11 +131,6 @@ from pipecat.transports.sip.connection import SIPConnection
 AUDIO_IN_POLL_SECS = 0.01
 AUDIO_IN_CATCHUP = 4
 
-# How often the input reader polls the call for a decoded video frame.
-# The call delivers newest-frame semantics, so polling faster than the
-# sender's fps just returns None between frames.
-VIDEO_IN_POLL_SECS = 1 / 30
-
 # The call's transmit buffer never blocks: writes return the bytes
 # accepted and reject the rest, while the native transmit clock drains
 # the buffer at exactly real time (padding silence when it runs dry).
@@ -143,8 +138,10 @@ VIDEO_IN_POLL_SECS = 1 / 30
 # filled at most AUDIO_OUT_BUFFER_SECS ahead of the transmit clock —
 # enough cushion to ride out event-loop jitter — and retries a rejected
 # remainder every AUDIO_OUT_RETRY_SECS. An interruption flushes the
-# buffer (flush_tx), so at most one in-flight frame (~20 ms) of stale
-# bot speech survives it.
+# buffer (flush_tx), so with the default sender at most one in-flight
+# frame (~20 ms) of stale bot speech survives it. (A mixer keeps the
+# sender task alive across interruptions, so a write parked in its
+# retry loop can land its remainder after the flush.)
 AUDIO_OUT_BUFFER_SECS = 0.08
 AUDIO_OUT_RETRY_SECS = 0.01
 
@@ -197,7 +194,12 @@ class SIPParams(TransportParams):
 
     Parameters:
         auto_answer: Answer inbound calls as soon as they arrive. Video
-            is accepted when the params enable a video direction.
+            is accepted when the params enable a video direction. With
+            ``auto_answer=False`` the transport leaves the call ringing:
+            answer or decline it on the application's own
+            :class:`~pipecat.transports.sip.connection.SIPConnection`
+            (``connection.answer()`` / ``connection.reject()``) from an
+            ``incoming`` event handler.
         trunk: Domain (or host:port) that turns a ``phoneNumber``
             dial-out into ``sip:+E164@trunk``. Without it, dial-out
             requires a full ``sipUri``.
@@ -234,7 +236,11 @@ class SIPInputTransport(BaseInputTransport):
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and attach the shared connection."""
         await super().setup(setup)
-        await self._connection.connect()
+        try:
+            await self._connection.connect()
+        except Exception as e:
+            await self._transport._report_error(str(e))
+            raise
 
     async def start(self, frame: StartFrame):
         """Mark the transport ready, then start the audio reader."""
@@ -282,9 +288,13 @@ class SIPInputTransport(BaseInputTransport):
             self._resampler = create_stream_resampler(quality=_RESAMPLER_QUALITY)
 
     async def _receive_video(self):
+        # Poll at the configured frame pacing; the call delivers
+        # newest-frame semantics, so polling faster than the sender's
+        # fps just returns None between frames.
+        poll_secs = 1 / (float(self._params.video_out_framerate) or 30)
         try:
             while True:
-                await asyncio.sleep(VIDEO_IN_POLL_SECS)
+                await asyncio.sleep(poll_secs)
                 frame = self._connection.read_video_frame()
                 if frame is None:
                     continue
@@ -348,7 +358,11 @@ class SIPOutputTransport(BaseOutputTransport):
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the transport and attach the shared connection."""
         await super().setup(setup)
-        await self._connection.connect()
+        try:
+            await self._connection.connect()
+        except Exception as e:
+            await self._transport._report_error(str(e))
+            raise
 
     async def start(self, frame: StartFrame):
         """Mark the transport ready."""
@@ -445,7 +459,15 @@ class SIPOutputTransport(BaseOutputTransport):
         return True
 
     async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
-        await self._connection.send_dtmf(frame.to_string())
+        if not frame.buttons:
+            return
+        # Route through the transport's never-raise surface: a DTMF frame
+        # can arrive with no active call (queued across a hangup, or
+        # before establishment), and an exception here would kill the
+        # media sender task for the rest of the session.
+        error = await self._transport.send_dtmf({"tones": frame.to_string()})
+        if error:
+            logger.warning(f"{self} unable to send DTMF: {error}")
 
 
 class SIPTransport(BaseTransport):
@@ -784,6 +806,9 @@ class SIPTransport(BaseTransport):
         self._left = True
         await self._call_event_handler("on_before_leave")
 
+    async def _report_error(self, error: str):
+        await self._call_event_handler("on_error", error)
+
     async def _on_connected(self, connection):
         await self._call_event_handler("on_connected")
 
@@ -861,10 +886,10 @@ class SIPTransport(BaseTransport):
         }
         await self._call_event_handler("on_dialout_error", error)
 
-    async def _on_dtmf(self, connection, digit_event):
+    async def _on_dtmf(self, connection, digit_event, session_id):
         # No "method" key: the binding's DigitEvent does not say how the
         # digit arrived, and guessing would fake Daily's field.
-        data = {"sessionId": self._connection.session_id, "tone": digit_event.digit}
+        data = {"sessionId": session_id, "tone": digit_event.digit}
         await self._call_event_handler("on_dtmf_event", data)
         try:
             button = KeypadEntry(digit_event.digit)
@@ -887,9 +912,9 @@ class SIPTransport(BaseTransport):
         # participant update.
         await self._call_event_handler("on_participant_updated", self._participant(data))
 
-    async def _on_audio_warning(self, connection, warning):
-        data = {"sessionId": self._connection.session_id, "errorMsg": str(warning)}
-        if self._connection.call_direction == "in":
+    async def _on_audio_warning(self, connection, warning, direction, session_id):
+        data = {"sessionId": session_id, "errorMsg": str(warning)}
+        if direction == "in":
             await self._call_event_handler("on_dialin_warning", data)
         else:
             await self._call_event_handler("on_dialout_warning", data)
