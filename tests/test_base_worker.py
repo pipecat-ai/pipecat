@@ -29,7 +29,12 @@ from pipecat.bus import (
 )
 from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
-from pipecat.pipeline.job_context import JobGroupParams, JobParams, JobStatus
+from pipecat.pipeline.job_context import (
+    JobGroupError,
+    JobGroupParams,
+    JobParams,
+    JobStatus,
+)
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -1318,6 +1323,51 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_msgs[0].job_id, job_id)
         self.assertEqual(request_msgs[0].target, "worker")
         self.assertEqual(request_msgs[0].payload, {"key": "val"})
+
+    async def test_repeated_requests_do_not_accumulate_watches(self):
+        """A ready worker's watch list stays empty across repeated requests."""
+        parent = await self._attach(BaseWorker("parent"))
+        await self.registry.register(WorkerReadyData(worker_name="worker", runner="test-runner"))
+
+        for _ in range(5):
+            await parent.request_job("worker", params=JobParams(payload={"k": "v"}))
+
+        self.assertNotIn("worker", self.registry._watches)
+
+    async def test_timed_out_requests_do_not_accumulate_watches(self):
+        """A request that times out waiting for a worker removes its watch."""
+        parent = await self._attach(BaseWorker("parent"))
+
+        for _ in range(5):
+            with self.assertRaises(JobGroupError):
+                await parent.request_job("ghost", params=JobParams(timeout=0.01))
+
+        self.assertNotIn("ghost", self.registry._watches)
+
+    async def test_cancelled_request_does_not_leave_a_watch(self):
+        """Cancelling a request while it waits for a worker removes its watch."""
+        parent = await self._attach(BaseWorker("parent"))
+
+        pending = asyncio.ensure_future(parent.request_job("ghost", params=JobParams()))
+        await asyncio.sleep(0)
+        # Cancelling before the watch exists would make this test vacuous.
+        self.assertEqual(len(self.registry._watches["ghost"]), 1)
+
+        pending.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+
+        self.assertNotIn("ghost", self.registry._watches)
+
+    async def test_job_group_removes_every_watch_it_installed(self):
+        """A group waiting on several workers cleans up all of their watches."""
+        parent = await self._attach(BaseWorker("parent"))
+        await register_tasks(self.registry, "w1", "w2")
+
+        await parent.request_job_group("w1", "w2", params=JobGroupParams(payload={"a": 1}))
+
+        self.assertNotIn("w1", self.registry._watches)
+        self.assertNotIn("w2", self.registry._watches)
 
     async def test_request_job_group_multiple_tasks(self):
         """request_job_group() with multiple tasks sends messages for each."""
