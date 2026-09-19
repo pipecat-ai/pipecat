@@ -32,6 +32,21 @@ the connection's ``user`` (it becomes the From header); there is no per-call
 caller ID as on Daily — presenting a different one means a different
 ``SIPConnection``.
 
+Custom INVITE headers ride on the dial-out settings too: add a ``headers``
+dict. One use is presenting a caller ID via ``P-Asserted-Identity`` when the
+From user cannot be the number itself — a Daily-provisioned SIP client dialing
+a Twilio trunk, where From is the client's username and Twilio would otherwise
+reject the call ("Caller ID is unauthorized"). Pass a runner body file
+(``--runner-body body.json``)::
+
+    {"dialout_settings": {
+        "sipUri": "sip:+15551234567@my-trunk.pstn.twilio.com",
+        "headers": {"P-Asserted-Identity": "<sip:+15559876543@my-trunk.pstn.twilio.com>"}}}
+
+The presented number must still be a DID you own or a verified caller ID, and
+any SIP proxy in the path (Daily's registrar, say) must forward the header to
+the trunk for it to take effect.
+
 For Twilio Elastic SIP Trunking, the caller ID must be a number on your
 trunk (or a verified caller ID), authentication uses the trunk's credential
 list, and ``reg_interval=0`` is required — Twilio termination does not
