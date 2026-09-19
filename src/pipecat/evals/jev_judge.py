@@ -29,6 +29,7 @@ Any other block, or none, gets the LLM judge. All the options::
           service: ollama        #   (the default LLM judge if omitted,
           model: gemma4:12b      #   none if set to false)
         explain_below: 0.75      # optional; see "The explainer" below
+        allow_continue: true     # optional; false judges a reply yes or no only
 
 The API key comes from ``TYPESAFE_API_KEY``. Because the explainer is on by
 default, a Jev judge still needs the explainer's model running (Ollama, for
@@ -41,9 +42,14 @@ The harness asks three kinds of question, and each is a Jev request:
 - A reply, for an ``eval:`` on a scripted turn. The state holds the
   conversation so far and, separately, the bot's latest reply. The answers
   are ``yes`` (the reply meets the criterion), ``no`` (it's a real answer
-  that doesn't), and ``continue`` (the bot hasn't answered yet: it only
+  that doesn't, including a reply that waits for the user instead), and
+  ``continue`` (the bot is still working toward its answer: it only
   greeted, said it's checking, or the reply is still arriving). On
-  ``continue`` the harness waits for more of the reply and asks again.
+  ``continue`` the harness waits for more of the reply and asks again. A
+  suite whose judged replies are all final answers, with nothing for the bot
+  to fetch first, sets ``allow_continue: false``, and a reply is then yes or
+  no; a reply that is still arriving is still judged again as more of it
+  comes.
 - A function call, for an ``eval:`` on a ``function_call``. The state holds
   the call's name and arguments and the conversation as context. The
   answer is yes or no.
@@ -153,10 +159,15 @@ _TRANSCRIPTION_NOTE = (
 
 _REPLY_OUTCOMES = {
     "yes": "The bot has given its answer, and the answer satisfies the criterion.",
-    "no": "The bot has given its answer, and the answer does not satisfy the criterion.",
+    "no": (
+        "The bot has given its answer, and the answer does not satisfy the criterion. A reply "
+        "that waits for the user (asking them to take their time or to go on) instead of "
+        "giving what the criterion asks for is a no."
+    ),
     "continue": (
-        "The bot has not given its answer yet: it only greets, says it is checking, looking "
-        "something up, or will report back, or the reply is an obviously incomplete fragment."
+        "The bot is still working toward its answer: it only greets, says it is checking or "
+        "looking something up and will report back, or the reply is an obviously incomplete "
+        "fragment."
     ),
 }
 
@@ -188,6 +199,8 @@ class JevEvalJudge(BaseEvalJudge):
         explainer: An LLM judge asked for the reason behind a ``no`` or an
             unsure verdict, or ``None`` to report Jev's probabilities alone.
         explain_below: A ``yes`` less sure than this is explained too.
+        allow_continue: Whether a reply may be judged ``continue``; when
+            ``False``, a reply is ``yes`` or ``no``.
     """
 
     def __init__(
@@ -200,6 +213,7 @@ class JevEvalJudge(BaseEvalJudge):
         timeout: float = 2.5,
         explainer: EvalJudge | None = None,
         explain_below: float = 0.75,
+        allow_continue: bool = True,
     ):
         """Initialize the judge.
 
@@ -215,11 +229,13 @@ class JevEvalJudge(BaseEvalJudge):
             explainer: An LLM judge asked for the reason behind a ``no`` or an
                 unsure verdict, or ``None`` to report Jev's probabilities alone.
             explain_below: A ``yes`` less sure than this is explained too.
+            allow_continue: Whether a reply may be judged ``continue``; when
+                ``False``, a reply is ``yes`` or ``no``.
 
         Raises:
             ValueError: If there is no API key.
         """
-        super().__init__()
+        super().__init__(allow_continue=allow_continue)
         api_key = api_key or os.environ.get("TYPESAFE_API_KEY")
         if not api_key:
             raise ValueError("The Jev judge needs an API key: set TYPESAFE_API_KEY.")
@@ -243,6 +259,11 @@ class JevEvalJudge(BaseEvalJudge):
             explainer._transcript = self._transcript
         self._explainer = explainer
         self._explain_below = explain_below
+        self._reply_outcomes = (
+            _REPLY_OUTCOMES
+            if self._allow_continue
+            else {k: v for k, v in _REPLY_OUTCOMES.items() if k != "continue"}
+        )
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
 
@@ -254,21 +275,29 @@ class JevEvalJudge(BaseEvalJudge):
             judge_config: Mapping with ``service: typesafe`` and optional keys
                 ``model``, ``endpoint`` (the API's base URL), ``explainer``
                 (an LLM judge block, as ``judge.eval:`` takes; the default LLM
-                judge when omitted, none when ``false``) and ``explain_below``.
+                judge when omitted, none when ``false``), ``explain_below`` and
+                ``allow_continue``.
 
         Returns:
             A configured JevEvalJudge.
         """
         config = judge_config or {}
+        allow_continue = config.get("allow_continue", True) is not False
         explainer_config = config.get("explainer", {})
+        # The explainer is asked the same questions, so it follows the same rule.
         explainer = (
-            None if explainer_config is False else EvalJudge.from_config(explainer_config or None)
+            None
+            if explainer_config is False
+            else EvalJudge.from_config(
+                {**(explainer_config or {}), "allow_continue": allow_continue}
+            )
         )
         return cls(
             model=config.get("model") or DEFAULT_JEV_MODEL,
             base_url=config.get("endpoint") or DEFAULT_JEV_BASE_URL,
             explainer=explainer,
             explain_below=float(config.get("explain_below", 0.75)),
+            allow_continue=allow_continue,
         )
 
     async def evaluate(self, criterion: str) -> JudgeVerdict:
@@ -278,8 +307,9 @@ class JevEvalJudge(BaseEvalJudge):
             criterion: Natural-language description of what the reply should express.
 
         Returns:
-            Jev's ``yes``, ``no`` or ``continue``, cached by criterion and
-            conversation. A final verdict that needs a reason is explained.
+            Jev's ``yes``, ``no`` or, unless ``allow_continue`` is off,
+            ``continue``, cached by criterion and conversation. A final
+            verdict that needs a reason is explained.
         """
         entries = _numbered_turns(e for e in self._transcript if e["role"] != "tool")
         latest = entries.pop()["content"] if entries and entries[-1]["role"] == "bot" else ""
@@ -293,7 +323,7 @@ class JevEvalJudge(BaseEvalJudge):
                     f"`conversation`, satisfy this criterion? Criterion: {_sentence(criterion)} "
                     f"{_TRANSCRIPTION_NOTE}"
                 ),
-                "criteria": _REPLY_OUTCOMES,
+                "criteria": self._reply_outcomes,
             }
             answers = await self._ask(state, {"verdict": question})
             if answers is None:

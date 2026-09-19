@@ -81,6 +81,34 @@ JUDGE_ASK_TEMPLATE = (
     "Answer yes, no, or continue."
 )
 
+# The judge's instructions for a reply when ``continue`` isn't allowed: every
+# judged reply is a final answer, so the verdict is yes or no.
+JUDGE_FINAL_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair judge evaluating a conversation between a user and a "
+    "bot under test. The 'user' messages are the user; the 'assistant' messages are "
+    "the bot's replies. Judge only the bot's most recent reply — which may have "
+    "arrived as several consecutive 'assistant' messages — against the given "
+    "criterion, using the earlier turns only as context. The reply is the bot's final "
+    "answer. "
+    "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
+    "transcription, so it may contain homophones, misspellings, split or merged words, and "
+    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
+    "spelling. In particular, treat a number as the same value whether it is spelled out, "
+    "written as a digit, or transcribed as a homophone: 'for' and 'fore' mean 'four' (4), and "
+    "'to' and 'too' mean 'two' (2). Never answer 'no' solely because of a transcription error "
+    "when the intended spoken meaning satisfies the criterion. "
+    "Respond ONLY with a JSON object on a single line containing two fields: "
+    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
+    'Use "yes" if the reply satisfies the criterion and "no" if it does not. '
+    "Do not include any other text, explanation, or markdown."
+)
+
+JUDGE_FINAL_ASK_TEMPLATE = (
+    "Does the bot's most recent reply satisfy this criterion?\n\n"
+    "Criterion: {criterion}\n\n"
+    "Answer yes or no."
+)
+
 # The judge's instructions for an ``eval:`` on a function call. The call is
 # the subject, and the conversation is context for it, so the verdict is yes or
 # no: a call is not a partial reply, and there is nothing to wait for.
@@ -156,14 +184,18 @@ class EvalJudge(BaseEvalJudge):
             for a JSON verdict + short reason.
     """
 
-    def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
+    def __init__(
+        self, service: LLMService[Any], *, max_tokens: int = 200, allow_continue: bool = True
+    ):
         """Initialize the judge with a configured pipecat LLM service.
 
         Args:
             service: A pipecat LLM service exposing ``run_inference()``.
             max_tokens: Cap on the judge's response length.
+            allow_continue: Whether a reply may be judged ``continue``; when
+                ``False``, a reply is ``yes`` or ``no``.
         """
-        super().__init__()
+        super().__init__(allow_continue=allow_continue)
         self._service = service
         self._max_tokens = max_tokens
         self._cache: dict[str, JudgeVerdict] = {}
@@ -181,9 +213,10 @@ class EvalJudge(BaseEvalJudge):
         Args:
             judge_config: Mapping with keys ``service`` (default ``"ollama"``),
                 ``model`` (default ``"gemma4:12b"``), optional ``endpoint``
-                (service-specific default if omitted), and an optional ``extra``
-                mapping forwarded to the model as top-level request parameters.
-                ``None`` uses all defaults.
+                (service-specific default if omitted), an optional ``extra``
+                mapping forwarded to the model as top-level request parameters,
+                and an optional ``allow_continue`` (``false`` judges a reply
+                yes or no only). ``None`` uses all defaults.
 
         Returns:
             A configured EvalJudge.
@@ -199,7 +232,10 @@ class EvalJudge(BaseEvalJudge):
             def make_judge_llm(config):
                 return TogetherLLMService(...)  # any service exposing run_inference()
         """
-        return cls(llm_service_from_config(judge_config, where="judge.eval"))
+        return cls(
+            llm_service_from_config(judge_config, where="judge.eval"),
+            allow_continue=(judge_config or {}).get("allow_continue", True) is not False,
+        )
 
     async def evaluate(self, criterion: str) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
@@ -212,8 +248,17 @@ class EvalJudge(BaseEvalJudge):
             justification. Cached by ``(criterion, conversation)`` so the same
             assertion over the same conversation hits the judge only once.
         """
-        ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
-        return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+        if self._allow_continue:
+            ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
+            return await self._evaluate(criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
+        ask = JUDGE_FINAL_ASK_TEMPLATE.format(criterion=criterion)
+        verdict = await self._evaluate(criterion, JUDGE_FINAL_SYSTEM_INSTRUCTION, ask)
+        if verdict.verdict == "continue":
+            # An answer that ignored the yes/no instructions counts as a no.
+            return JudgeVerdict(
+                verdict="no", reason=verdict.reason, raw_response=verdict.raw_response
+            )
+        return verdict
 
     async def evaluate_call(self, name: str, args: dict | None, criterion: str) -> JudgeVerdict:
         """Judge whether a function call the bot made satisfies ``criterion``, in the conversation so far.

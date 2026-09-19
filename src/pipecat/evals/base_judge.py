@@ -64,10 +64,21 @@ class BaseEvalJudge(ABC):
     The base keeps the conversation; subclasses decide how a question about
     it is answered. A judge serves one scenario, so its conversation starts
     empty and the session closes it when the run ends.
+
+    Args:
+        allow_continue: Whether a reply may be judged ``continue`` (the bot is
+            still working toward its answer, so the harness waits for more of
+            it). A suite whose judged replies are all final answers turns it
+            off, and a reply is then ``yes`` or ``no``.
     """
 
-    def __init__(self):
-        """Initialize the judge with an empty conversation."""
+    def __init__(self, *, allow_continue: bool = True):
+        """Initialize the judge with an empty conversation.
+
+        Args:
+            allow_continue: Whether a reply may be judged ``continue``.
+        """
+        self._allow_continue = allow_continue
         # The conversation the judge evaluates against, grown by the harness over
         # the scenario: dicts with a ``role`` of ``user``, ``assistant`` (a
         # segment of a reply), or ``tool`` (a call the bot made, one line), and
@@ -113,9 +124,9 @@ class BaseEvalJudge(ABC):
             criterion: Natural-language description of what the reply should express.
 
         Returns:
-            A ``yes``, a ``no``, or a ``continue`` when the bot has not
-            answered yet. A failed call is a ``no`` with the failure as its
-            reason.
+            A ``yes``, a ``no``, or, when ``allow_continue`` is on, a
+            ``continue`` when the bot is still working toward its answer. A
+            failed call is a ``no`` with the failure as its reason.
         """
 
     @abstractmethod

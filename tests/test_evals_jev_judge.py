@@ -127,6 +127,16 @@ class TestJevEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(question["type"], "choice")
         self.assertEqual(set(question["criteria"]), {"yes", "no", "continue"})
 
+    async def test_without_continue_a_reply_is_judged_yes_or_no(self):
+        api = _FakeApi([_ok({"verdict": _choice("no")})])
+        judge = JevEvalJudge(api_key="k", client=api.client(), allow_continue=False)
+        judge.add_user_message("What is the capital of Germany?")
+        judge.add_assistant_message("No rush, take your time.")
+        verdict = await judge.evaluate("says the capital of Germany is Berlin")
+        self.assertEqual(verdict.verdict, "no")
+        question = api.posts[0]["body"]["questions"]["verdict"]
+        self.assertEqual(set(question["criteria"]), {"yes", "no"})
+
     async def test_a_verdict_is_cached_by_criterion_and_conversation(self):
         judge, api = _judge([_ok({"verdict": _choice("yes")})])
         judge.add_assistant_message("It rains.")
@@ -372,6 +382,20 @@ class TestJevConfig(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
             judge = judge_from_config({"service": "typesafe", "explainer": False})
         self.assertIsNone(judge._explainer)
+        await judge.close()
+
+    async def test_allow_continue_false_is_read_from_the_config(self):
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
+            judge = judge_from_config(
+                {"service": "typesafe", "explainer": False, "allow_continue": False}
+            )
+        self.assertNotIn("continue", judge._reply_outcomes)
+        await judge.close()
+
+    async def test_the_explainer_follows_allow_continue(self):
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}):
+            judge = judge_from_config({"service": "typesafe", "allow_continue": False})
+        self.assertFalse(judge._explainer._allow_continue)
         await judge.close()
 
     def test_a_missing_api_key_is_an_error(self):

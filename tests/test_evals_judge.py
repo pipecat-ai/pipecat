@@ -7,6 +7,8 @@
 import unittest
 
 from pipecat.evals.judge import (
+    JUDGE_FINAL_SYSTEM_INSTRUCTION,
+    JUDGE_SYSTEM_INSTRUCTION,
     EvalJudge,
     JudgeVerdict,
     _parse_run_verdicts,
@@ -225,6 +227,36 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge.add_assistant_message("anything")
         v = await judge.evaluate("anything")
         self.assertFalse(v.passed)
+
+
+class TestJudgeWithoutContinue(unittest.IsolatedAsyncioTestCase):
+    async def test_a_reply_is_asked_as_yes_or_no(self):
+        svc = _FakeLLMService(['{"verdict": "no", "reason": "never names Berlin"}'])
+        judge = EvalJudge(svc, allow_continue=False)
+        judge.add_assistant_message("No rush, take your time.")
+        verdict = await judge.evaluate("says the capital of Germany is Berlin")
+        self.assertEqual(verdict.verdict, "no")
+        self.assertEqual(svc.calls[0]["system_instruction"], JUDGE_FINAL_SYSTEM_INSTRUCTION)
+        self.assertIn("Answer yes or no.", svc.calls[0]["messages"][-1]["content"])
+
+    async def test_a_continue_answer_counts_as_no(self):
+        svc = _FakeLLMService(['{"verdict": "continue", "reason": "still going"}'])
+        judge = EvalJudge(svc, allow_continue=False)
+        judge.add_assistant_message("Let me think.")
+        verdict = await judge.evaluate("gives an answer")
+        self.assertEqual(verdict.verdict, "no")
+
+    async def test_continue_is_allowed_by_default(self):
+        svc = _FakeLLMService(['{"verdict": "continue", "reason": "still going"}'])
+        judge = EvalJudge(svc)
+        judge.add_assistant_message("Let me check.")
+        verdict = await judge.evaluate("gives the weather")
+        self.assertEqual(verdict.verdict, "continue")
+        self.assertEqual(svc.calls[0]["system_instruction"], JUDGE_SYSTEM_INSTRUCTION)
+
+    def test_allow_continue_false_is_read_from_the_config(self):
+        judge = EvalJudge.from_config({"service": "ollama", "allow_continue": False})
+        self.assertFalse(judge._allow_continue)
 
 
 class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
